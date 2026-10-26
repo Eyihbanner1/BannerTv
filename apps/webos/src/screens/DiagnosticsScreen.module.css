@@ -1,0 +1,42 @@
+.columns {
+  display: flex;
+  margin-top: 8px;
+}
+
+.column {
+  width: 500px;
+  margin-right: 32px;
+}
+
+.section {
+  margin-bottom: 28px;
+}
+
+.heading {
+  margin-bottom: 8px;
+  font: var(--bt-text-label);
+  color: var(--bt-accent);
+}
+
+.row {
+  display: flex;
+  font: 500 24px/1.3 var(--bt-font);
+}
+
+.label {
+  flex: none;
+  width: 220px;
+  color: var(--bt-text-subtle);
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.actions {
+  position: absolute;
+  top: 96px;
+  right: var(--bt-safe-x);
+}

@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+# These install scripts are not needed: ssh2 builds an optional native speed-up,
+# and the ares CLI keeps device settings in ~/.webos.
+ignoredBuiltDependencies:
+  - '@webos-tools/cli'
+  - cpu-features
+  - ssh2

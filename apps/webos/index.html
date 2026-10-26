@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BannerTV</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0b0815;
+      }
+      #unsupported {
+        display: none;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1920px;
+        height: 1080px;
+        padding: 240px 192px 0;
+        box-sizing: border-box;
+        color: #f1edff;
+        font: 500 36px/1.4 sans-serif;
+      }
+      #unsupported h1 {
+        font-size: 64px;
+        margin: 0 0 32px;
+      }
+    </style>
+    <script>
+      // Runs before the app bundle and must stay ES5. TVs older than webOS 5.0
+      // (Chromium 68) cannot parse the bundle, so they get this screen instead.
+      (function () {
+        var ua = navigator.userAgent;
+        if (ua.indexOf('Web0S') === -1) return;
+        var match = /Chr[o0]me\/(\d+)/.exec(ua);
+        var major = match ? parseInt(match[1], 10) : 0;
+        if (major >= 68) return;
+        window.__BANNERTV_UNSUPPORTED__ = true;
+        document.addEventListener('DOMContentLoaded', function () {
+          document.getElementById('unsupported').style.display = 'block';
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="unsupported" role="alert">
+      <h1>This TV is not supported</h1>
+      <p>BannerTV needs an LG TV with webOS 5.0 or newer, which means most LG TVs from 2020 on.</p>
+      <p>Press the Home button on your remote to leave.</p>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
