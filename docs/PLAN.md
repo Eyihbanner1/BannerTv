@@ -32,7 +32,7 @@ BannerTV is a webOS-native media center that plays content from Stremio-compatib
 | Content model | Stremio addon protocol v3 (manifest, catalog, meta, stream, subtitles) |
 | Player | Native HTML5 video on the webOS media pipeline first, hls.js or Shaka only as fallbacks |
 | Accounts and sync | Local-first storage, optional Trakt, optional BannerTV sync backend in a later phase |
-| Minimum platform | webOS 5.0 (2020 TVs) for the store build, best effort on webOS 4.x |
+| Minimum platform | webOS 5.0 (2020 TVs) and newer. 2018 to 2019 TVs (webOS 4.x) are not supported |
 | Repository | `Eyihbanner1/BannerTv` (private), a pnpm monorepo |
 | App ID | com.bannertv.app (confirmed, permanent once uploaded) |
 | Launch market | United Kingdom, English only |
@@ -139,7 +139,7 @@ BannerTV ships as a packaged webOS web app (.ipk): the UI runs in the TV's Chrom
 | 22 | 2022 | Chromium 87 | Full |
 | 6.x | 2021 | Chromium 79 | Full |
 | 5.x | 2020 | Chromium 68 | Full, the build target |
-| 4.x | 2018 to 2019 | Chromium 53 | Best effort: legacy bundle, reduced animation |
+| 4.x | 2018 to 2019 | Chromium 53 | Not supported (dropped) |
 | 3.x and older | 2016 to 2017 | Chromium 38 or WebKit | Not supported, show a compatibility screen |
 
 Source: [LG Web API and Web Engine](https://webostv.developer.lge.com/develop/specifications/web-api-and-web-engine). Chromium 68 rules out several modern features without transpiling or fallbacks: optional chaining (Chrome 80), flexbox `gap` (84), `aspect-ratio` (88), `:focus-visible` (86) and `backdrop-filter` (76). The build transpiles to ES2017 and the design system avoids those CSS features.
@@ -259,7 +259,7 @@ Use TypeScript, React 18 and Vite, with Norigin Spatial Navigation for the remot
 | Layer | Choice | Why |
 | --- | --- | --- |
 | Language | TypeScript, strict mode | One type model shared by core, UI and the later sync service |
-| UI | React 18.3 | Large ecosystem, works on Chromium 68 with transpiling; React 19 can follow once webOS 4.x is dropped |
+| UI | React 18.3 | Large ecosystem, works on Chromium 68 with transpiling; React 19 can follow later, since webOS 4.x is dropped |
 | Remote navigation | `@noriginmedia/norigin-spatial-navigation` | Proven on Smart TVs, focus trees per screen, works with the Magic Remote pointer |
 | State | Zustand for UI and session state, plain TypeScript stores in core | Small, no provider tree, easy to persist |
 | Data validation | Zod, lenient schemas | Addon responses vary wildly in quality |
@@ -269,7 +269,7 @@ Use TypeScript, React 18 and Vite, with Norigin Spatial Navigation for the remot
 | Player | Native `<video>` first, Shaka Player for DASH, hls.js as an HLS fallback | Hardware decoding through the webOS pipeline wherever possible |
 | Subtitles | Own SRT and VTT parser and renderer, JASSUB (libass in WebAssembly) later for ASS | Native support is WebVTT only |
 | i18n | i18next | Strings externalized from day one |
-| Build | Vite with a classic (non-module) script bundle, ES2017 target, plus a legacy bundle for webOS 4.x | Module scripts loaded from `file://` can be blocked by CORS in Chromium; verify in Phase 0 |
+| Build | Vite with a classic (non-module) script bundle, ES2017 target. One bundle only, since webOS 4.x is dropped | Module scripts loaded from `file://` can be blocked by CORS in Chromium; verify in Phase 0 |
 | Tests | Vitest, Testing Library, Playwright with arrow-key journeys, MSW for addon mocks | Most bugs are focus and data bugs, which these catch off-device |
 | Monorepo | pnpm workspaces | Shared core, app and tools packages |
 | CI | GitHub Actions: lint, test, build, `ares-package`, attach .ipk to releases | Every merge yields an installable build |
@@ -323,7 +323,7 @@ Every screen is designed for a 5-way remote first and a pointer second, viewed f
 - Dark theme by default, near-black background rather than pure black for LCD panels, with a true-black option for OLED. Text contrast at least 4.5:1.
 - Tiles: poster 2:3 at 220x330, landscape 16:9 at 384x216, square at 240x240. Image requests sized to the tile, never full-size artwork.
 - Focus: 1.08 scale plus a 4 px accent ring. The ring is not colour-only, so it works for colour-blind users.
-- Motion: transform and opacity only, 150 to 200 ms. A low-power mode (auto-enabled on webOS 4.x and 5.x) drops the hero video, blur and scaling.
+- Motion: transform and opacity only, 150 to 200 ms. A low-power mode (auto-enabled on webOS 5.x) drops the hero video, blur and scaling.
 
 **Accessibility**
 
@@ -493,7 +493,6 @@ Most bugs are caught off-device in CI, but no release ships until it passes a re
 - webOS 5.x, a 2020 entry-level LG UHD LCD. This is the performance floor. Not owned yet; buy a used one before the end of Phase 1.
 - webOS 22: Eyitayo's LG 65NANO766QA (webOS 22, 7.6.0, Chromium 87). This is the primary development TV from day one.
 - webOS 24 or newer, ideally an OLED for Dolby Vision and Atmos checks.
-- Optional: one webOS 4.x TV if the legacy bundle stays in scope.
 
 **Playback matrix**
 
@@ -542,7 +541,7 @@ BannerTV ships through two channels: the LG Content Store for everyone, and GitH
 
 **Store submission steps**
 
-1. Create an LG account and register in [LG Seller Lounge](https://webostv.developer.lge.com/distribute/app-ecosystem) as an individual seller (personal name shown as Seller ID) or a corporate seller (company name shown). Corporate is better if BannerTV will ever take payments.
+1. Create an LG account and register in [LG Seller Lounge](https://webostv.developer.lge.com/distribute/app-ecosystem) as an individual seller (decided). Your personal name is shown as the Seller ID. A corporate account is only worth it if BannerTV ever takes payments.
 2. Register the App ID. It is permanent and must equal `id` in appinfo.json.
 3. Upload the production .ipk built by `release.yml`. The version must be new; a version number can be uploaded only once.
 4. Upload store assets: icon 400x400 or larger, tile colour as an exact hex, a primary screenshot at 1280x720, 2 to 5 more screenshots, launcher and splash backgrounds at 1920x1080, plus name and description for each language ([Brightcove's LG submission guide](https://beacon-help.support.brightcove.com/publishing-apps/lg/submitting-to-lg.html)).
@@ -607,12 +606,12 @@ The two risks that could sink the project are LG rejecting the app in its conten
 
 - [x] Repository: created as `Eyihbanner1/BannerTv`, private. No licence is needed while it stays private.
 - [x] App ID: `com.bannertv.app` confirmed. No domain yet, which is fine for the ID (see the Store section).
-- [ ] LG Seller Lounge: an individual account looks enough, since there are no in-app payments. Confirm?
+- [x] LG Seller Lounge: register as an individual seller.
 - [x] Test TVs: LG 65NANO766QA on webOS 22. A used 2020 webOS 5 TV is still needed as the performance floor.
-- [ ] Drop webOS 4.x completely, or keep the best-effort legacy build?
+- [x] 2018 to 2019 TVs (webOS 4.x): dropped. The minimum is webOS 5.0 (2020 TVs).
 - [x] Business model: free, with optional donations.
 - [x] Launch: United Kingdom, English only.
-- [ ] Is there a logo and colour palette yet, or should Phase 0 include a simple brand kit?
+- [ ] Logo: 20 concepts are on the [logo concepts canvas](https://claude.ai/artifact/44B7TcVyefmheVMSe1E8JX) (overview in [brand/logo-concepts.md](brand/logo-concepts.md)). Pick one, and Phase 0 builds the brand kit (icons, colours, type) from it.
 
 ## Sources
 
