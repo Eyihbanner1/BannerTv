@@ -38,6 +38,8 @@ BannerTV is a webOS-native media center that plays content from Stremio-compatib
 | Launch market | United Kingdom, English only |
 | Business model | Free, with optional donations; no in-app payments |
 | Primary test TV | LG 65NANO766QA, webOS 22 (7.6.0) |
+| LG seller account | Individual seller in LG Seller Lounge |
+| Logo | Prism Play: a play button cut into three violet facets, with an Urbanist wordmark. Files and colour tokens live in `brand/` in the repo |
 
 ## Product scope and feature parity
 
@@ -416,6 +418,7 @@ bannertv/
 │       │   └── styles/        design tokens, global CSS
 │       ├── index.html
 │       └── vite.config.ts
+├── brand/                     logo, webOS icons, store images, colour tokens
 ├── packages/
 │   ├── protocol/              Stremio addon types and Zod schemas
 │   ├── core/                  addon client, cache, library, progress, settings, profiles (no DOM, no React)
@@ -611,7 +614,7 @@ The two risks that could sink the project are LG rejecting the app in its conten
 - [x] 2018 to 2019 TVs (webOS 4.x): dropped. The minimum is webOS 5.0 (2020 TVs).
 - [x] Business model: free, with optional donations.
 - [x] Launch: United Kingdom, English only.
-- [ ] Logo: 20 concepts are on the [logo concepts canvas](https://claude.ai/artifact/44B7TcVyefmheVMSe1E8JX) (overview in [brand/logo-concepts.md](brand/logo-concepts.md)). Pick one, and Phase 0 builds the brand kit (icons, colours, type) from it.
+- [x] Logo: Prism Play (concept 10 on the [logo concepts canvas](https://claude.ai/artifact/44B7TcVyefmheVMSe1E8JX)). The brand kit (logo files, webOS icons, splash, store images, colour and type tokens) is in [`brand/`](../brand/README.md) in the repo.
 
 ## Sources
 

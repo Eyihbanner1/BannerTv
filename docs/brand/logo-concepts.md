@@ -1,6 +1,6 @@
 # BannerTV logo concepts
 
-Twenty logo directions for BannerTV, drawn on 26 October 2026. Each concept is shown three ways: the main lockup on its dark ground, the TV launcher tile, and the lockup on a light background.
+Twenty logo directions for BannerTV, drawn on 26 October 2026. **Eyitayo picked 10 Prism Play.** The finished brand kit is in [`brand/`](../../brand/README.md). Each concept is shown three ways: the main lockup on its dark ground, the TV launcher tile, and the lockup on a light background.
 
 - Live canvas (private, share it from its Share menu): https://claude.ai/artifact/44B7TcVyefmheVMSe1E8JX
 - Static overview: [logo-concepts.png](logo-concepts.png)
