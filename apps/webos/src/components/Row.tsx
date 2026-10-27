@@ -2,6 +2,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import {
   type FocusableComponent,
   FocusContext,
+  getCurrentFocusKey,
   setFocus,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
@@ -14,6 +15,7 @@ import {
   rememberScroll,
 } from '../navigation/focus-memory';
 import { canSlide } from '../platform/input-mode';
+import { tuning } from '../platform/tuning';
 import { Button } from './Button';
 import { MoreTile, Tile, type TileShape } from './Tile';
 import styles from './Row.module.css';
@@ -25,7 +27,7 @@ export const ROW_GEOMETRY = {
 } as const;
 
 // Tiles drawn either side of the visible ones, so the next arrow press always has a target.
-const OVERSCAN = 2;
+const OVERSCAN = Math.max(1, tuning.overscan);
 
 /**
  * Left and Right move to the next tile by its index, so spatial navigation
@@ -57,7 +59,8 @@ interface RowProps {
   /** Shown instead of tiles, with a Try again button, when nothing could be loaded. */
   error?: string;
   onRetry?: () => void;
-  onItemFocus: (item: MetaPreview, row: HTMLElement) => void;
+  /** Any focus in the row. The item is undefined on a placeholder, See all or Try again. */
+  onItemFocus: (item: MetaPreview | undefined, row: HTMLElement) => void;
   onItemPress: (item: MetaPreview) => void;
   /** Adds a last tile that opens the whole catalog. */
   onSeeAll?: () => void;
@@ -84,7 +87,8 @@ export const Row = memo(function Row(props: RowProps) {
   const { ref } = useFocusable<object, HTMLElement>({
     focusKey,
     saveLastFocusedChild: true,
-    preferredChildFocusKey: recallFocus(focusKey),
+    // Naming the tile spares spatial navigation measuring every tile on a first visit.
+    preferredChildFocusKey: recallFocus(focusKey) ?? `${focusKey}-tile-${anchor}`,
     measureChildrenLayout: false,
     nextFocusResolver: nextTile,
   });
@@ -109,10 +113,19 @@ export const Row = memo(function Row(props: RowProps) {
       rememberFocus(focusKey, `${focusKey}-tile-${index}`);
       if (canSlide() && index !== current.anchor) scrollTo(index);
       const item = current.items ? current.items[index] : undefined;
-      if (item && ref.current) current.onItemFocus(item, ref.current);
+      if (ref.current) current.onItemFocus(item, ref.current);
     },
     [focusKey, scrollTo, ref],
   );
+  // Focus can rest on a placeholder while the row loads: once the titles
+  // arrive, report the one under it, so the hero catches up.
+  useEffect(() => {
+    const prefix = `${focusKey}-tile-`;
+    const focused = getCurrentFocusKey();
+    if (!items || focused.indexOf(prefix) !== 0) return;
+    const item = items[Number(focused.slice(prefix.length))];
+    if (item && ref.current) latest.current.onItemFocus(item, ref.current);
+  }, [items, focusKey, ref]);
   const onTilePress = useCallback((index: number) => {
     const { items: list, onItemPress: press } = latest.current;
     const item = list ? list[index] : undefined;
@@ -148,10 +161,7 @@ export const Row = memo(function Row(props: RowProps) {
           label={t('home.seeAll')}
           style={{ left: index * step }}
           onPress={onSeeAll}
-          onFocus={() => {
-            rememberFocus(focusKey, tileKey);
-            if (canSlide() && index !== anchor) scrollTo(index);
-          }}
+          onFocus={() => onTileFocus(index)}
         />,
       );
       continue;
@@ -186,6 +196,7 @@ export const Row = memo(function Row(props: RowProps) {
                 focusKey={`${focusKey}-tile-0`}
                 label={t('common.tryAgain')}
                 onPress={onRetry}
+                onFocus={() => onTileFocus(0)}
               />
             </div>
           ) : (

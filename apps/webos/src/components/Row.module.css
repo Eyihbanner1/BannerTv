@@ -37,6 +37,15 @@
   transition: transform var(--bt-motion) ease-out;
 }
 
+/* Tuning switches, see src/platform/tuning.ts. */
+:global(.tune-motion-layer) .track {
+  will-change: transform;
+}
+
+:global(.tune-motion-jump) .track {
+  transition: none;
+}
+
 .message {
   padding-top: 24px;
   color: var(--bt-text-muted);

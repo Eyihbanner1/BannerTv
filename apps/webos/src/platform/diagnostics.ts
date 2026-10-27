@@ -7,6 +7,7 @@ import {
   webOSReleaseForChromium,
   webOSReleaseForSdkVersion,
 } from './engine';
+import { changedTuning } from './tuning';
 import { isWebOS, lunaCall, readDeviceInfo } from './webos';
 
 export type DiagnosticRow = readonly [label: string, value: string];
@@ -155,6 +156,11 @@ async function tvRows(): Promise<DiagnosticRow[]> {
   return rows;
 }
 
+function tuningText(): string {
+  const changed = changedTuning();
+  return Object.keys(changed).length > 0 ? JSON.stringify(changed) : 'defaults';
+}
+
 function backTimes(): string {
   const times = recentBackTimes();
   return times.length > 0 ? `${times.join(', ')} ms` : 'press Back on another screen first';
@@ -177,6 +183,7 @@ export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
         ['localStorage', checkLocalStorage()],
         ['IndexedDB', indexedDBResult],
         ['Back response', backTimes()],
+        ['Tuning', tuningText()],
       ],
     },
     {

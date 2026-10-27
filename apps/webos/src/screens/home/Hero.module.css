@@ -46,7 +46,8 @@
   }
 }
 
-:global(.low-power) .loaded {
+:global(.low-power) .loaded,
+:global(.tune-no-pan) .loaded {
   animation: none;
 }
 

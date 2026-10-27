@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { APP_URL, expectFocus, press, pressBack, watchErrors } from './tv';
+import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
 
 test.beforeEach(async ({ page }) => {
   await mockAddons(page);
@@ -134,6 +134,107 @@ test('Back from far down Home returns to the first row', async ({ page }) => {
 
   await pressBack(page);
   await expectFocus(page, `${FIRST_ROW}-tile-1`);
+});
+
+/** Every row Home makes from Cinemeta, top to bottom. */
+const HOME_ROWS = [
+  FIRST_ROW,
+  SERIES_ROW,
+  'home-0-movie-imdbrating',
+  'home-0-series-imdbrating',
+  'home-0-movie-top-genre-action',
+  'home-0-series-top-genre-crime',
+  'home-0-movie-top-genre-comedy',
+  'home-0-series-top-genre-drama',
+  'home-0-movie-top-genre-sci-fi',
+  'home-0-series-top-genre-animation',
+];
+const CATALOGS = /^https:\/\/v3-cinemeta\.strem\.io\/catalog\//;
+
+/** The rows slide so the focused one sits in view under the hero. */
+async function expectFocusInView(page: Page): Promise<void> {
+  await expect(page.locator('[data-focused="true"]')).toBeInViewport({ ratio: 0.9 });
+}
+
+test('Down reaches the last row while rows are still loading', async ({ page }) => {
+  // Each catalog answers well after focus reaches its row, as on a cold start.
+  await page.route(CATALOGS, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await expectFocusInView(page);
+
+  // Once the row loads, the hero catches up with the title under focus.
+  await expectFocusLabel(page, 'Blender Today, 2021–');
+  await expect(page.locator('section[aria-label="Blender Today"]:visible')).toBeVisible();
+});
+
+test('a row that turns out empty under focus hands focus to the row below', async ({ page }) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/catalog\/series\/imdbRating\.json$/, async (route) => {
+    await held;
+    await route.fulfill({
+      json: { metas: [] },
+      headers: { 'access-control-allow-origin': '*' },
+    });
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (const row of HOME_ROWS.slice(1, 4)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  release();
+  await expectFocus(page, `${HOME_ROWS[4]}-tile-0`);
+  await expectFocusInView(page);
+});
+
+test('Down crosses rows whose catalogs failed', async ({ page }) => {
+  await page.route(CATALOGS, (route) =>
+    route.fulfill({ status: 500, headers: { 'access-control-allow-origin': '*' } }),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.getByText('Cinemeta answered with an error (500).').first()).toBeVisible();
+  // Each row's Try again takes focus.
+  for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await expectFocusInView(page);
+});
+
+test('a row slides into view when focus comes back to its See all tile', async ({ page }) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  for (let n = 1; n <= 5; n++) await press(page, 'ArrowRight', `${SERIES_ROW}-tile-${n}`);
+  await press(page, 'ArrowDown', `${HOME_ROWS[2]}-tile-0`);
+  await press(page, 'ArrowUp', `${SERIES_ROW}-tile-5`);
+  await expectFocusInView(page);
+});
+
+test('Home still works with every tuning switch at its leanest', async ({ page }) => {
+  const lean = {
+    motion: 'jump',
+    zoom: 'off',
+    heroPan: false,
+    heroDelayMs: 0,
+    rowsAround: 0,
+    overscan: 1,
+  };
+  await page.addInitScript(
+    (value) => localStorage.setItem('bannertv.tuning', value),
+    JSON.stringify(lean),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('html')).toHaveClass(/tune-motion-jump tune-zoom-off tune-no-pan/);
+
+  for (let n = 1; n <= 3; n++) await press(page, 'ArrowRight', `${FIRST_ROW}-tile-${n}`);
+  for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await expectFocusInView(page);
+  await expect(page.locator('section[aria-label="Blender Today"]:visible')).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-3`);
 });
 
 test('on a TV, Back on the root screen calls platformBack', async ({ page }) => {
