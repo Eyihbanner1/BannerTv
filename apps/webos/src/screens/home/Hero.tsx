@@ -18,64 +18,90 @@ export function openDetails(item: MetaPreview): void {
 const FADE_MS = 400;
 
 interface Layer {
+  /** Each change of backdrop is a new layer, even back to an earlier one. */
+  id: number;
   src: string;
   /** The addon's own address, tried if the sized one fails. */
   retrySrc: string | undefined;
-  shown: boolean;
+  /** Decoding, fading in or on show, or fading out (the next one failed). */
+  state: 'loading' | 'shown' | 'gone';
 }
+
+const LAYER_CLASS = {
+  loading: styles.backdrop,
+  shown: `${styles.backdrop} ${styles.loaded}`,
+  // Still drifting while it fades: a new animation would make it jump.
+  gone: `${styles.backdrop} ${styles.loaded} ${styles.gone}`,
+};
 
 /**
  * The backdrop. A new one is decoded before it fades in over the old one, so
  * the hero never goes dark between titles and the fade never waits on a
- * decode. Once it is in, the old one goes, and the new one drifts slowly.
+ * decode. Once it is in, the old one goes, and the new one drifts slowly. A
+ * title whose backdrop fails to load fades the old one out.
  */
 function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string | undefined }) {
+  const [wanted, setWanted] = useState({ id: 0, src });
   const [layers, setLayers] = useState<readonly Layer[]>(() =>
-    src ? [{ src, retrySrc, shown: false }] : [],
+    src ? [{ id: 0, src, retrySrc, state: 'loading' }] : [],
   );
-  const [shownSrc, setShownSrc] = useState(src);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const wanted = useRef(src);
+  const wantedId = useRef(wanted.id);
   useLayoutEffect(() => {
-    wanted.current = src;
+    wantedId.current = wanted.id;
   });
 
-  if (src !== shownSrc) {
-    setShownSrc(src);
-    // Keep only the last backdrop on show under the new one.
-    const below = layers.filter((layer) => layer.shown).slice(-1);
-    setLayers(src ? below.concat({ src, retrySrc, shown: false }) : []);
+  if (src !== wanted.src) {
+    const id = wanted.id + 1;
+    setWanted({ id, src });
+    // Keep only the last backdrop on show under the new one. Back to that
+    // same backdrop before the new one is in: keep it, and nothing waits.
+    const below = layers.filter((layer) => layer.state === 'shown').slice(-1);
+    if (src && below[0]?.src === src) setLayers(below);
+    else setLayers(src ? below.concat({ id, src, retrySrc, state: 'loading' }) : []);
   }
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const show = (layer: string, image: HTMLImageElement) => {
+  // Once the fade is over, drop what it covered or faded out.
+  const settle = (keep: (layers: readonly Layer[]) => readonly Layer[]) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setLayers(keep), FADE_MS);
+  };
+
+  const show = (id: number, image: HTMLImageElement) => {
     const reveal = () => {
       // A backdrop that was passed over while it decoded never shows.
-      if (layer !== wanted.current) return;
+      if (id !== wantedId.current) return;
       setLayers((current) =>
-        current.map((entry) => (entry.src === layer ? { ...entry, shown: true } : entry)),
+        current.map((entry) => (entry.id === id ? { ...entry, state: 'shown' } : entry)),
       );
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        setLayers((current) => {
-          const index = current.findIndex((entry) => entry.src === layer && entry.shown);
-          return index > 0 ? current.slice(index) : current;
-        });
-      }, FADE_MS);
+      settle((current) => {
+        const index = current.findIndex((entry) => entry.id === id && entry.state === 'shown');
+        return index > 0 ? current.slice(index) : current;
+      });
     };
     if (typeof image.decode === 'function') image.decode().then(reveal, reveal);
     else reveal();
+  };
+
+  const fail = (id: number) => {
+    if (id !== wantedId.current) return;
+    setLayers((current) =>
+      current.filter((entry) => entry.id !== id).map((entry) => ({ ...entry, state: 'gone' })),
+    );
+    settle((current) => current.filter((entry) => entry.state !== 'gone'));
   };
 
   return (
     <>
       {layers.map((layer) => (
         <Artwork
-          key={layer.src}
+          key={layer.id}
           src={layer.src}
           retrySrc={layer.retrySrc}
-          className={layer.shown ? `${styles.backdrop} ${styles.loaded}` : styles.backdrop}
-          onLoad={(image) => show(layer.src, image)}
+          className={LAYER_CLASS[layer.state]}
+          onLoad={(image) => show(layer.id, image)}
+          onFail={() => fail(layer.id)}
         />
       ))}
     </>

@@ -127,7 +127,8 @@ export function HomeScreen() {
     rows.findIndex((row) => row.key === focusedRow),
   );
   // Rows coming into the drawn window mount after the focus move has painted,
-  // in a render React can interrupt, so a press never waits on a new row.
+  // in a render React can interrupt, so a press rarely waits on a new row. The
+  // rows next to focus are drawn at once, so the next press has a row to go to.
   const nearIndex = useDeferredValue(focusedIndex);
 
   useScreenFocus(firstRowKey, collection.ready);
@@ -186,7 +187,9 @@ export function HomeScreen() {
               key={row.key}
               row={row}
               first={index === 0}
-              near={Math.abs(index - nearIndex) <= ROWS_AROUND}
+              near={
+                Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
+              }
               onEmpty={onEmpty}
               onItemFocus={onItemFocus}
             />

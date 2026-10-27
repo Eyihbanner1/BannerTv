@@ -49,6 +49,8 @@ export function TextField({
   const input = useRef<HTMLInputElement>(null);
   const editAfterFocus = useRef(false);
   const [editing, setEditing] = useState(false);
+  /** The TV keyboard said it closed, and the box is waiting to stop typing. */
+  const keyboardGone = useRef(false);
   const slot = useScreenSlot();
   const { ref, focused, focusSelf } = useFocusable<object, HTMLDivElement>({
     focusKey,
@@ -68,11 +70,13 @@ export function TextField({
 
   const stopEditing = () => input.current?.blur();
 
+  // With the TV keyboard already closed, Back goes on to the screen or dialog.
   useBack(
     'overlay',
     () => {
+      const gone = keyboardGone.current;
       stopEditing();
-      return true;
+      return !gone;
     },
     editing,
   );
@@ -87,9 +91,11 @@ export function TextField({
     const cancel = () => {
       clearTimeout(timer);
       timer = undefined;
+      keyboardGone.current = false;
     };
     const wait = () => {
       cancel();
+      keyboardGone.current = true;
       timer = setTimeout(() => {
         timer = undefined;
         if (document.activeElement === node) node.blur();
@@ -148,10 +154,20 @@ export function TextField({
         onBlur={() => setEditing(false)}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
+          const key = event.keyCode;
+          // The TV keyboard has closed: a remote key stops typing and then does
+          // what it does on the box. OK opens the keyboard again.
+          if (
+            keyboardGone.current &&
+            (key === KeyCode.Left || key === KeyCode.Right || key === KeyCode.Ok)
+          ) {
+            stopEditing();
+            return;
+          }
           // Stopping the event here keeps it from spatial navigation, which listens on window.
-          if (event.keyCode === KeyCode.Left || event.keyCode === KeyCode.Right) {
+          if (key === KeyCode.Left || key === KeyCode.Right) {
             event.stopPropagation();
-          } else if (event.keyCode === KeyCode.Ok) {
+          } else if (key === KeyCode.Ok) {
             event.stopPropagation();
             event.preventDefault();
             stopEditing();

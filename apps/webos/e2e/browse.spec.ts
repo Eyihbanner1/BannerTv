@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { APP_URL, expectFocus, press, pressBack } from './tv';
 
@@ -37,6 +37,50 @@ test('Home builds Netflix-style rows from Cinemeta', async ({ page }) => {
   await press(page, 'ArrowDown', 'home-0-movie-top-genre-action-tile-0');
   await expect.poll(() => requests.catalogs).toContain('movie/top/genre=Action');
   await expect(titles.filter({ hasText: 'Action' })).toHaveText('ActionMovies');
+});
+
+/** The titles whose backdrop the hero is showing, by the id in each image's address. */
+const heroBackdrops = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLImageElement>('img[src*="/background/"]'))
+      // The hero's backdrop is far wider than any tile.
+      .filter(
+        (img) =>
+          img.getBoundingClientRect().width > 1000 && Number(getComputedStyle(img).opacity) > 0.5,
+      )
+      .map((img) => /tt\d+/.exec(img.src)?.[0]),
+  );
+
+test('the hero follows focus back to a title whose backdrop just faded out', async ({ page }) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
+  // Back just as the next title's backdrop has faded in, before the old one is dropped.
+  // The keys go straight in, since waiting to see focus move would blur the timing.
+  for (const rest of [300, 350, 400, 300, 350, 400]) {
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(rest);
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(1000);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
+  }
+});
+
+test('a title with no backdrop clears the last one from the hero', async ({ page }) => {
+  await mockAddons(page);
+  await page.route('https://images.metahub.space/background/medium/tt1254207/img', (route) =>
+    route.fulfill({ status: 404 }),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
+  await press(page, 'ArrowRight', `${FIRST_ROW}-tile-1`);
+  await expect(page.locator('section[aria-label="Big Buck Bunny"]')).toBeVisible();
+  await expect.poll(() => heroBackdrops(page)).toEqual([]);
+  await press(page, 'ArrowRight', `${FIRST_ROW}-tile-2`);
+  await expect.poll(() => heroBackdrops(page)).toEqual(['tt1727587']);
 });
 
 test('a series opens on season 1, and seasons switch as focus moves', async ({ page }) => {

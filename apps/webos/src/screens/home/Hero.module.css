@@ -31,6 +31,10 @@
   animation: drift 24s ease-in-out infinite alternate;
 }
 
+.gone {
+  opacity: 0;
+}
+
 /* A slow pan that costs one composited transform: no layout, no repaint. */
 @keyframes drift {
   from {
