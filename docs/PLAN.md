@@ -361,7 +361,7 @@ One playback controller in the core drives three interchangeable engines, and th
 
 Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classic-bundle.md)): `audioTracks` lists both audio tracks of an MKV, `textTracks` lists none of its 8 subtitle tracks, and native HLS lists one audio track and no subtitles for a stream that has alternates.
 
-- Audio tracks, direct play: `HTMLMediaElement.audioTracks`, exposed on webOS 22. An audible switch still needs confirming, and the webOS 5 floor TV gets the same check. Where it is missing, show the default track and point users to a stream with their language.
+- Audio tracks, direct play: `HTMLMediaElement.audioTracks`, exposed on webOS 22, and switching is audible. The webOS 5 floor TV gets the same check. Where it is missing, show the default track and point users to a stream with their language.
 - Audio and subtitle renditions, HLS: hls.js, which reads the renditions from the playlist itself, whenever the master playlist declares alternates.
 - Embedded subtitles, direct play: not exposed through `textTracks` on webOS 22. A Phase 2 spike looks at the webOS media pipeline's own Luna API (`com.webos.media`, keyed by the video element's media ID), which may list and select embedded tracks; this is unverified. Until then the subtitle menu offers addon subtitles and says that embedded ones are not available on this TV.
 - Addon subtitles are the main subtitle path: they always work because BannerTV renders them itself, so OpenSubtitles v3 stays a default addon.
@@ -372,7 +372,7 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 **Progress, resume and next episode**
 
 - Save the position every 10 seconds, on pause and when the app is hidden. Mark as watched at 90% (configurable).
-- Resume with "Resume from 42:10" or "Start over". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this worked for HLS (playing began at 30.0 s, the same as seeking after `loadedmetadata`); progressive MP4 is still to confirm.
+- Resume with "Resume from 42:10" or "Start over". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this works for HLS and MP4. With `mediaOption`, `currentTime` reads 0 at the first `playing` event and the real position about 55 ms later, so progress is only saved once the clock has moved past the resume point, never from that first 0.
 - Playback health: `getVideoPlaybackQuality()` reports no frames at all on webOS 22, so dropped frames cannot be counted. Stall detection and the "try the next stream" offer use `waiting` and `stalled` events and a timer.
 - Up Next card in the last 30 seconds or at 95%, with a 10 second countdown. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the stream picker.
 - Trakt scrobble start, pause and stop events (Phase 3).
@@ -476,7 +476,7 @@ Phases 0 to 2 are the minimum product; if time runs short, Phase 3's profiles an
 - [ ] Enable Developer Mode on the LG 65NANO766QA (webOS 22) and register it with `ares-setup-device`. The first install used the rooted TV's own install service instead, so this path is untested
 - [x] Spike 1 on webOS 22: the classic script bundle loads from `file://`. webOS 5 waits for the floor TV
 - [x] Spike 2: `audioTracks` lists MKV audio tracks; `textTracks` lists no embedded subtitles; native HLS hides alternate renditions
-- [ ] Spike 3: `mediaOption` start position works for HLS; MP4 to repeat, HDR10 file not tested yet. This TV has no Dolby Vision, so profile 8 waits for a TV that has it
+- [ ] Spike 3: `mediaOption` start position works for HLS and MP4; HDR10 file not tested yet. This TV has no Dolby Vision, so profile 8 waits for a TV that has it
 - [x] Spatial navigation skeleton: rail, two rows of tiles, Back key handling
 - [x] Record the spike results in ADR 0001 and adjust this plan where they differ
 - [ ] Buy a used 2020 LG TV on webOS 5 as the performance floor, before the end of Phase 1
