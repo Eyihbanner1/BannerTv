@@ -22,7 +22,7 @@ import { KeyCode } from '../../navigation/keys';
 import { useBack } from '../../navigation/use-back';
 import { resolutionLabel, streamBadges } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
-import { entryKey, stopProbing, streamFinder } from '../../player/finder';
+import { entryKey, holdProbing, streamFinder } from '../../player/finder';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -140,7 +140,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const element = videoRef.current;
     if (!element) return;
     setVideo(element);
-    stopProbing();
+    const releaseProbing = holdProbing();
     const created = createPlaybackSession({
       video: element,
       type,
@@ -168,6 +168,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     return () => {
       cancelled = true;
       created.destroy();
+      releaseProbing();
     };
     // One session per video: the screen remounts for another episode.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -16,7 +16,7 @@ import { addonClient } from '../data/addons';
 import { preferences } from '../data/preferences';
 import { sourceMemory } from '../data/playback';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
-import { cancelProbes, probeStream, type ProbeResult } from './probe';
+import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 
 /** Once one stream could play, slower addons get this much longer to offer a better one. */
 export const SETTLE_AFTER_FIRST_MS = 2000;
@@ -294,9 +294,14 @@ export function streamFinder(type: string, videoId: string): StreamFinder {
   return finder;
 }
 
-/** Stops any link test, before the player takes the TV's video decoder. */
+/** Stops any link test, as focus moves on. */
 export function stopProbing(): void {
   cancelProbes();
+}
+
+/** Stops any link test and allows none until released: the player has the TV's video decoder. */
+export function holdProbing(): () => void {
+  return holdProbes();
 }
 
 /** All streams, in the order the viewer picked for that list. */
