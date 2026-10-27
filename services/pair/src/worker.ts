@@ -3,14 +3,22 @@
  *
  * The TV opens a session and shows its code in a QR code. The phone opens the
  * page in that QR code and sends an addon address; the TV collects it with the
- * session's secret, which deletes the session. A session lasts ten minutes and
- * takes one address. Nothing here logs: addon addresses can carry account keys.
+ * session's secret, which ends the session. A session lasts ten minutes and
+ * takes one address. Addon addresses can carry account keys, so nothing here
+ * logs, and the address is held in memory only, never in storage.
  *
  * A Worker module may export only its handler and Durable Object classes (and
  * types), so the rules the tests check live in rules.ts.
  */
 import { PAGE_FILES } from './page';
-import { CODE_ALPHABET, CODE_LENGTH, readAddonUrl, readCode, SESSION_TTL_MS } from './rules';
+import {
+  CODE_ALPHABET,
+  CODE_LENGTH,
+  readAddonUrl,
+  readCode,
+  REDELIVER_MS,
+  SESSION_TTL_MS,
+} from './rules';
 
 // The few Workers runtime types this file uses, so it needs no type package.
 export interface SessionStorage {
@@ -37,7 +45,12 @@ export interface Env {
 interface Session {
   secretHash: string;
   expiresAt: number;
-  url?: string;
+}
+
+interface Delivery {
+  secretHash: string;
+  url: string;
+  until: number;
 }
 
 const API_HEADERS = {
@@ -173,8 +186,21 @@ export default {
   },
 };
 
-/** One pairing session, stored under the name of its code. */
+/**
+ * One pairing session, stored under the name of its code. Storage holds only
+ * the secret's hash and the expiry time. The address stays in this object's
+ * memory: SQLite-backed storage can be restored to any point in the last 30
+ * days, so anything written there outlives deleteAll(). The TV asks every
+ * three seconds, which keeps the object in memory between the phone's send
+ * and the TV's collect. If the object is evicted anyway, the address is lost
+ * and the phone can send it again.
+ */
 export class PairSession {
+  /** The address the phone sent, until the TV collects it. */
+  private url: string | undefined;
+  /** The address just collected, kept briefly in case the answer never reached the TV. */
+  private delivered: Delivery | undefined;
+
   constructor(private readonly state: SessionState) {}
 
   private async live(): Promise<Session | undefined> {
@@ -183,6 +209,8 @@ export class PairSession {
   }
 
   private async end(): Promise<void> {
+    this.url = undefined;
+    this.delivered = undefined;
     await this.state.storage.deleteAlarm();
     await this.state.storage.deleteAll();
   }
@@ -190,10 +218,19 @@ export class PairSession {
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     const body = (await request.json()) as { secretHash?: string; url?: string };
+
+    if (this.delivered && this.delivered.until <= Date.now()) this.delivered = undefined;
+    if (pathname === '/collect' && this.delivered) {
+      // The TV asks again only when it did not get the first answer.
+      if (body.secretHash !== this.delivered.secretHash) return json({ error: 'forbidden' }, 403);
+      return json({ status: 'sent', url: this.delivered.url });
+    }
+
     const current = await this.live();
 
     if (pathname === '/open') {
-      if (current) return json({ error: 'in-use' }, 409);
+      if (current || this.delivered) return json({ error: 'in-use' }, 409);
+      this.url = undefined;
       const expiresAt = Date.now() + SESSION_TTL_MS;
       await this.state.storage.put<Session>('session', {
         secretHash: body.secretHash ?? '',
@@ -206,8 +243,8 @@ export class PairSession {
     if (!current) return json({ error: 'expired' }, 404);
 
     if (pathname === '/submit') {
-      if (current.url !== undefined) return json({ error: 'already-sent' }, 409);
-      await this.state.storage.put<Session>('session', { ...current, url: body.url });
+      if (this.url !== undefined) return json({ error: 'already-sent' }, 409);
+      this.url = body.url;
       return json({ ok: true });
     }
 
@@ -215,14 +252,20 @@ export class PairSession {
       if (!body.secretHash || body.secretHash !== current.secretHash) {
         return json({ error: 'forbidden' }, 403);
       }
-      if (current.url === undefined) {
+      const url = this.url;
+      if (url === undefined) {
         return json({
           status: 'waiting',
           expiresIn: Math.round((current.expiresAt - Date.now()) / 1000),
         });
       }
-      await this.end();
-      return json({ status: 'sent', url: current.url });
+      // The session ends now: the phone can send nothing more, and only a
+      // repeat collect inside the short window gets the address again.
+      this.url = undefined;
+      this.delivered = { secretHash: current.secretHash, url, until: Date.now() + REDELIVER_MS };
+      await this.state.storage.deleteAll();
+      await this.state.storage.setAlarm(this.delivered.until);
+      return json({ status: 'sent', url });
     }
 
     return json({ error: 'not-found' }, 404);

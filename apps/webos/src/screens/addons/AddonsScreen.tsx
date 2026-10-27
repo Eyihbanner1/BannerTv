@@ -1,6 +1,6 @@
 import type { InstalledAddon } from '@bannertv/core';
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
@@ -13,7 +13,7 @@ import { PAIR_SERVICE } from '../../data/pairing';
 import { canSlide } from '../../platform/input-mode';
 import { ConfigureDialog } from './ConfigureDialog';
 import { InstallDialog } from './InstallDialog';
-import { takeInstallRequest } from './install-request';
+import { clearInstallRequest, installRequested } from './install-request';
 import styles from './AddonsScreen.module.css';
 
 const CARD_STEP = 176;
@@ -31,6 +31,9 @@ const RESOURCE_LABELS: ReadonlyArray<readonly [resource: string, key: string]> =
 const upKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-up`;
 const removeKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-remove`;
 const settingsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-settings`;
+// Settings come through the phone, so they need the pairing relay too.
+const hasSettings = (addon: InstalledAddon) =>
+  Boolean(PAIR_SERVICE) && addon.manifest.behaviorHints.configurable;
 
 interface AddonCardProps {
   addon: InstalledAddon;
@@ -127,7 +130,7 @@ export function AddonsScreen() {
   const { t } = useTranslation();
   const { ready, addons } = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const [focusedUrl, setFocusedUrl] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(takeInstallRequest);
+  const [installing, setInstalling] = useState(installRequested);
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
   const [configuring, setConfiguring] = useState<InstalledAddon | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -139,6 +142,7 @@ export function AddonsScreen() {
 
   // Opened from the first-run screen, the dialog places focus itself.
   const [openedWithDialog] = useState(installing);
+  useEffect(clearInstallRequest, []);
   useScreenFocus(
     openedWithDialog ? undefined : addons.length > 0 ? upKey(addons[0]!) : ADD_BUTTON,
     ready,
@@ -204,11 +208,7 @@ export function AddonsScreen() {
                       `${addonFocusId(addon.transportUrl)}-${offset < 0 ? 'up' : 'down'}`,
                     );
                   }}
-                  onSettings={
-                    PAIR_SERVICE && addon.manifest.behaviorHints.configurable
-                      ? () => setConfiguring(addon)
-                      : undefined
-                  }
+                  onSettings={hasSettings(addon) ? () => setConfiguring(addon) : undefined}
                   onRemove={() => setRemoving(addon)}
                 />
               ))}
@@ -234,7 +234,8 @@ export function AddonsScreen() {
         <ConfigureDialog
           addon={configuring}
           returnFocusKey={settingsKey(configuring)}
-          focusAfterUpdate={settingsKey}
+          // The new settings may come without a settings page, and so without the button.
+          focusAfterUpdate={(addon) => (hasSettings(addon) ? settingsKey(addon) : upKey(addon))}
           onUpdated={(addon) => {
             setFocusedUrl(addon.transportUrl);
             setNotice(t('addons.configure.updated', { name: addon.manifest.name }));

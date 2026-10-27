@@ -30,7 +30,7 @@ export interface CollectionState {
   addons: readonly InstalledAddon[];
 }
 
-export type InstallErrorKind = 'invalid-url' | 'unreachable' | 'not-an-addon';
+export type InstallErrorKind = 'invalid-url' | 'unreachable' | 'not-an-addon' | 'different-addon';
 
 export class InstallError extends Error {
   readonly kind: InstallErrorKind;
@@ -152,8 +152,13 @@ export function createAddonCollection(options: {
       const url = normalizeManifestUrl(input);
       if (url === undefined) throw new InstallError('invalid-url', 'This is not an addon address');
       const { manifest, json } = await fetchManifest(url);
-      raw.set(url, json);
       const current = state.get().addons;
+      // New settings must be for the same addon, or a wrong link would quietly swap it out.
+      const target = current.find((a) => a.transportUrl === options.replaces);
+      if (target && target.manifest.id !== manifest.id) {
+        throw new InstallError('different-addon', 'That link is for a different addon');
+      }
+      raw.set(url, json);
       const existing = current.find((a) => a.transportUrl === url);
       const addon: InstalledAddon = {
         transportUrl: url,

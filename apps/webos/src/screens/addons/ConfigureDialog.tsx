@@ -32,9 +32,14 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const updated = useRef<string | null>(null);
+  // An address that arrives during an update: the relay has already let it go.
+  const pending = useRef<string | null>(null);
 
   const receive = (url: string) => {
-    if (working) return;
+    if (working) {
+      pending.current = url;
+      return;
+    }
     setReceived(url);
     setError(null);
   };
@@ -55,9 +60,18 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
       },
       (failure: unknown) => {
         setWorking(false);
-        setError(describeInstallError(t, failure));
+        const next = pending.current;
+        pending.current = null;
+        if (next === null) setError(describeInstallError(t, failure));
+        else setReceived(next);
       },
     );
+  };
+
+  // The update finishes once it has started: closing then would leave focus
+  // on a card that is about to be replaced.
+  const close = () => {
+    if (!working) onClose();
   };
 
   let status: string | null = null;
@@ -71,7 +85,7 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
       label={t('addons.configure.title', { name })}
       defaultFocusKey="configure-cancel"
       returnFocusKey={() => updated.current ?? returnFocusKey}
-      onClose={onClose}
+      onClose={close}
       placement="center"
     >
       <h2 className={styles.dialogTitle}>{t('addons.configure.title', { name })}</h2>
@@ -90,7 +104,7 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
                 onPress={update}
               />
             )}
-            <Button focusKey="configure-cancel" label={t('common.cancel')} onPress={onClose} />
+            <Button focusKey="configure-cancel" label={t('common.cancel')} onPress={close} />
           </div>
         </div>
         <PhonePanel

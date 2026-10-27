@@ -31,6 +31,10 @@ const EXTRA_ADDON = {
 };
 /** Open Shorts with settings chosen on its settings page. */
 export const CONFIGURED_ADDON_URL = 'https://addon.example.com/bannertv/lang=en/manifest.json';
+/** Open Shorts set up so that it no longer has a settings page. */
+export const PLAIN_ADDON_URL = 'https://addon.example.com/bannertv/plain/manifest.json';
+/** Open Shorts with settings too long to fit in a QR code with the pairing page. */
+export const LONG_ADDON_URL = `https://addon.example.com/bannertv/k=${'x'.repeat(600)}/manifest.json`;
 /** Pages that `skip` reaches beyond the first: the catalogs end after this many titles. */
 const PAGED_TOTAL = 42;
 
@@ -250,9 +254,14 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   );
   await page.route(/^https:\/\/addon\.example\.com\/bannertv\//, (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/bannertv/manifest.json') return json(route, EXTRA_ADDON);
+    if (path === '/bannertv/manifest.json' || path === new URL(LONG_ADDON_URL).pathname) {
+      return json(route, EXTRA_ADDON);
+    }
     if (path === '/bannertv/lang=en/manifest.json') {
       return json(route, { ...EXTRA_ADDON, version: '1.3.0' });
+    }
+    if (path === '/bannertv/plain/manifest.json') {
+      return json(route, { ...EXTRA_ADDON, version: '1.4.0', behaviorHints: {} });
     }
     if (/^\/bannertv\/(lang=en\/)?catalog\/movie\/trending\.json$/.test(path)) {
       return json(route, { metas: MOVIES.slice(0, 3).map((entry) => preview('movie', entry)) });

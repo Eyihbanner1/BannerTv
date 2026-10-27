@@ -1,5 +1,10 @@
 /** How long a pairing session waits for the phone. */
 export const SESSION_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a collected address can be collected again, for a TV whose first
+ * answer was lost. The TV gives up on a request after 10 s and asks again 3 s later.
+ */
+export const REDELIVER_MS = 30 * 1000;
 export const MAX_URL_LENGTH = 2048;
 
 /** Pairing codes: six characters with no 0/O, 1/I/L lookalikes, easy to read off a TV. */
@@ -14,13 +19,18 @@ export function readCode(value: string): string | undefined {
   return code;
 }
 
-/** An addon address the phone sent, with stremio:// links turned into https://. */
+/**
+ * An addon address the phone sent, with stremio:// links turned into https://.
+ * The rules match the TV's normalizeManifestUrl (packages/protocol), so the
+ * phone hears at once about an address the TV would refuse.
+ */
 export function readAddonUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   let text = value.trim();
   if (text.length === 0 || text.length > MAX_URL_LENGTH) return undefined;
   if (/^stremio:\/\//i.test(text)) text = 'https://' + text.slice('stremio://'.length);
-  else if (!/^[a-z][a-z0-9+.-]*:/i.test(text)) text = 'https://' + text;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = 'https://' + text;
+  if (!/^https?:\/\/[^\s/?#]+/i.test(text) || /\s/.test(text)) return undefined;
   try {
     const url = new URL(text);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;

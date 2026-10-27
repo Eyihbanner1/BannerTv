@@ -99,6 +99,8 @@
       "title": "Settings for {{name}}",
       "lead": "Scan the QR code to open the addon's settings page on your phone. Choose what you want, copy the install link it gives you, and paste it on the BannerTV page. The new settings then replace the old ones here.",
       "scanTitle": "Scan with your phone",
+      "scan": "Scan with your phone's camera: the QR code also opens the addon's settings. If you already have the new install link, go to this address and enter the code:",
+      "tooLong": "This addon's settings address is too long for a QR code, so open its settings on your phone yourself. Then scan, or go to this address and enter the code, to send the new install link:",
       "received": "New settings for {{name}} arrived. Press Update to use them.",
       "update": "Update",
       "updated": "Updated {{name}} with its new settings."
@@ -107,6 +109,7 @@
       "invalid-url": "That doesn't look like an addon address. It starts with https:// and usually ends in manifest.json.",
       "unreachable": "BannerTV couldn't reach that address. Check it, and that the TV is online.",
       "not-an-addon": "That address answered, but not with an addon.",
+      "different-addon": "That link is for a different addon. Add it with Add an addon instead.",
       "other": "That addon couldn't be added."
     }
   },

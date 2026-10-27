@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readAddonUrl, readCode, SESSION_TTL_MS } from './rules';
+import { normalizeManifestUrl } from '@bannertv/protocol';
+import { readAddonUrl, readCode, REDELIVER_MS, SESSION_TTL_MS } from './rules';
 import worker, {
   type Env,
   PairSession,
@@ -7,9 +8,13 @@ import worker, {
   type SessionStorage,
 } from './worker';
 
-/** Durable Objects in memory: one PairSession per name, each with its own storage and alarm. */
+/**
+ * Durable Objects in memory: one PairSession per name, each with its own
+ * storage and alarm. Every value written to storage is kept in `written`.
+ */
 function fakeEnv() {
   const objects = new Map<string, { session: PairSession; alarm: () => number | undefined }>();
+  const written: unknown[] = [];
   const namespace: SessionNamespace = {
     idFromName: (name) => name,
     get(id) {
@@ -20,7 +25,10 @@ function fakeEnv() {
         let alarm: number | undefined;
         const storage: SessionStorage = {
           get: async <T>(key: string) => values.get(key) as T | undefined,
-          put: async (key, value) => void values.set(key, value),
+          put: async (key, value) => {
+            written.push(value);
+            values.set(key, value);
+          },
           deleteAll: async () => values.clear(),
           setAlarm: async (time) => void (alarm = time),
           deleteAlarm: async () => void (alarm = undefined),
@@ -32,7 +40,7 @@ function fakeEnv() {
       return { fetch: (url, init) => session.fetch(new Request(url, init)) };
     },
   };
-  return { env: { SESSIONS: namespace } satisfies Env, objects };
+  return { env: { SESSIONS: namespace } satisfies Env, objects, written };
 }
 
 const ORIGIN = 'https://bannertv-pair.example.workers.dev';
@@ -65,7 +73,7 @@ describe('pairing relay', () => {
   afterEach(() => vi.useRealTimers());
 
   it('passes one address from the phone to the TV, then forgets it', async () => {
-    const { env } = fakeEnv();
+    const { env, objects, written } = fakeEnv();
     const session = await open(env);
     expect(readCode(session.code)).toBe(session.code);
     expect(session.secret.length).toBeGreaterThanOrEqual(43);
@@ -88,8 +96,32 @@ describe('pairing relay', () => {
       status: 'sent',
       url: 'https://addon.example.com/k/manifest.json',
     });
-    expect((await collect(env, session.code, session.secret)).status).toBe(404);
+    // The phone can send nothing more, and the address never reached storage.
     expect((await send(env, session.code, 'https://addon.example.com')).status).toBe(404);
+    expect(JSON.stringify(written)).not.toContain('addon.example.com');
+
+    // A TV whose answer was lost asks again and gets the address once more, for a short while.
+    vi.setSystemTime(Date.now() + REDELIVER_MS - 1000);
+    expect((await collect(env, session.code, 'not-the-secret')).status).toBe(403);
+    expect(await (await collect(env, session.code, session.secret)).json()).toEqual({
+      status: 'sent',
+      url: 'https://addon.example.com/k/manifest.json',
+    });
+    expect(objects.get(session.code)!.alarm()).toBe(Date.now() + 1000);
+    vi.setSystemTime(Date.now() + 1000);
+    expect((await collect(env, session.code, session.secret)).status).toBe(404);
+  });
+
+  it('forgets a collected address when the alarm fires', async () => {
+    const { env, objects } = fakeEnv();
+    const session = await open(env);
+    await send(env, session.code, 'https://addon.example.com/manifest.json');
+    expect((await collect(env, session.code, session.secret)).status).toBe(200);
+    const entry = objects.get(session.code)!;
+    expect(entry.alarm()).toBe(Date.now() + REDELIVER_MS);
+    await entry.session.alarm();
+    expect(entry.alarm()).toBeUndefined();
+    expect((await collect(env, session.code, session.secret)).status).toBe(404);
   });
 
   it('gives the address only to the holder of the secret', async () => {
@@ -122,6 +154,7 @@ describe('pairing relay', () => {
       '',
       'javascript:alert(1)',
       'ftp://x.example.com',
+      'https://a.example.com/x y/manifest.json',
       42,
       'https://' + 'a'.repeat(2048),
     ]) {
@@ -160,7 +193,34 @@ describe('readAddonUrl', () => {
     expect(readAddonUrl('http://192.168.1.20:7000/manifest.json')).toBe(
       'http://192.168.1.20:7000/manifest.json',
     );
+    expect(readAddonUrl('nas.local:7000/manifest.json')).toBe(
+      'https://nas.local:7000/manifest.json',
+    );
     expect(readAddonUrl('data:text/plain,hi')).toBeUndefined();
+  });
+
+  it('accepts the addresses the TV accepts, and refuses the ones it refuses', () => {
+    for (const input of [
+      'https://a.example.com/manifest.json',
+      ' stremio://a.example.com/k=1/manifest.json ',
+      'a.example.com/conf',
+      'nas.local:7000/manifest.json',
+      'mediaserver:7000/manifest.json',
+      'addon.example.com:8443/k/manifest.json',
+      'http://192.168.1.20:7000/manifest.json?x=1',
+      'HTTPS://A.EXAMPLE.COM/manifest.json',
+      'https://a.example.com/x y/manifest.json',
+      'ftp://a.example.com/manifest.json',
+      'not a url',
+      'https:///manifest.json',
+      '',
+    ]) {
+      const relayed = readAddonUrl(input);
+      expect(relayed === undefined, input).toBe(normalizeManifestUrl(input) === undefined);
+      if (relayed !== undefined) {
+        expect(normalizeManifestUrl(relayed), input).toBe(normalizeManifestUrl(input));
+      }
+    }
   });
 });
 

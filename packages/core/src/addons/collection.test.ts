@@ -95,10 +95,36 @@ describe('createAddonCollection', () => {
     // Settings that match an addon already in the list update that one instead.
     await collection.install(CINEMETA_URL, { replaces: configured });
     expect(urls(collection)).toEqual(DEFAULT_ADDONS.map((a) => a.transportUrl));
-    // Replacing an addon with itself, or one that is gone, is a plain install.
+
+    // Replacing an addon with itself updates it where it is.
+    await collection.install(EXTRA_URL);
+    collection.move(EXTRA_URL, -5);
     await collection.install(EXTRA_URL, { replaces: EXTRA_URL });
+    const order = [EXTRA_URL, ...DEFAULT_ADDONS.map((a) => a.transportUrl)];
+    expect(urls(collection)).toEqual(order);
+    // Replacing one that is gone is a plain install.
     await collection.install(configured, { replaces: 'https://gone.example.com/manifest.json' });
-    expect(urls(collection)).toHaveLength(4);
+    expect(urls(collection)).toEqual([...order, configured]);
+    const stored = (await storage.get('addons')) as StoredAddon[];
+    expect(stored.map((a) => a.transportUrl)).toEqual(urls(collection));
+    expect(stored.every((a) => a.manifest !== undefined)).toBe(true);
+  });
+
+  it('refuses settings that are for a different addon', async () => {
+    const other = { ...EXTRA_MANIFEST, id: 'org.other', name: 'Other' };
+    const fetchJson = vi.fn((url: string): Promise<unknown> =>
+      Promise.resolve(url.includes('/other/') ? other : EXTRA_MANIFEST),
+    );
+    const { collection, storage } = setup(fetchJson);
+    await collection.load();
+    await collection.install(EXTRA_URL);
+    const before = urls(collection);
+    await expect(
+      collection.install('https://addon.example.com/other/manifest.json', { replaces: EXTRA_URL }),
+    ).rejects.toMatchObject({ kind: 'different-addon' });
+    expect(urls(collection)).toEqual(before);
+    const stored = (await storage.get('addons')) as StoredAddon[];
+    expect(stored.map((a) => a.transportUrl)).toEqual(before);
   });
 
   it('explains why an install failed', async () => {

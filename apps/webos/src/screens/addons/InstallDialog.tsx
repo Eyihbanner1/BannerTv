@@ -31,6 +31,16 @@ export function InstallDialog(props: InstallDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [received, setReceived] = useState(false);
   const installed = useRef<string | null>(null);
+  // An address that arrives during an install: the relay has already let it go.
+  const pending = useRef<string | null>(null);
+
+  // The address arrives while the user holds a phone: fill it in and wait on Add.
+  const fill = (url: string) => {
+    setAddress(url);
+    setError(null);
+    setReceived(true);
+    setFocus('install-confirm');
+  };
 
   const install = () => {
     if (working) return;
@@ -45,18 +55,17 @@ export function InstallDialog(props: InstallDialogProps) {
       },
       (failure: unknown) => {
         setWorking(false);
-        setError(describeInstallError(t, failure));
+        const next = pending.current;
+        pending.current = null;
+        if (next === null) setError(describeInstallError(t, failure));
+        else fill(next);
       },
     );
   };
 
-  // The address arrives while the user holds a phone: fill it in and wait on Add.
   const receive = (url: string) => {
-    if (working) return;
-    setAddress(url);
-    setError(null);
-    setReceived(true);
-    setFocus('install-confirm');
+    if (working) pending.current = url;
+    else fill(url);
   };
 
   let status = error;

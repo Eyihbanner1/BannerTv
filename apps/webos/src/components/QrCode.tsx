@@ -13,12 +13,17 @@ const QUIET_ZONE = 4;
 /**
  * A QR code as one SVG path: dark modules on white, which phone cameras read
  * best, with each run of dark modules in a row drawn as a single rectangle.
+ * Draws nothing for text too long for any QR code, rather than throwing.
  */
 export function QrCode({ text, size, className }: QrCodeProps) {
-  const { view, path } = useMemo(() => {
+  const code = useMemo(() => {
     const qr = qrcode(0, 'M');
-    qr.addData(text);
-    qr.make();
+    try {
+      qr.addData(text);
+      qr.make();
+    } catch {
+      return null;
+    }
     const count = qr.getModuleCount();
     let d = '';
     for (let row = 0; row < count; row++) {
@@ -36,6 +41,8 @@ export function QrCode({ text, size, className }: QrCodeProps) {
     return { view: count + QUIET_ZONE * 2, path: d };
   }, [text]);
 
+  if (!code) return null;
+  const { view, path } = code;
   return (
     <svg
       className={className}

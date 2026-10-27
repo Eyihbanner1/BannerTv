@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { PAIR_SERVICE } from '../src/data/pairing';
-import { CONFIGURED_ADDON_URL, EXTRA_ADDON_URL, FIRST_ROW, mockAddons } from './addons';
+import {
+  CONFIGURED_ADDON_URL,
+  EXTRA_ADDON_URL,
+  FIRST_ROW,
+  LONG_ADDON_URL,
+  mockAddons,
+  PLAIN_ADDON_URL,
+} from './addons';
 import {
   APP_URL,
   expectFocus,
@@ -141,10 +148,19 @@ test("an addon's settings can be changed on a phone", async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Settings for Open Shorts' });
   // A new code: the one from Add an addon went with that dialog.
   await expect(dialog.getByText('K7P 3QZ')).toBeVisible();
+  await expect(dialog.getByText(/the QR code also opens the addon's settings/)).toBeVisible();
+
+  // A link for another addon does not replace this one.
+  phone.send('https://v3-cinemeta.strem.io/manifest.json');
+  await expectFocus(page, 'configure-confirm');
+  await settle(page);
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByText('That link is for a different addon.')).toBeVisible();
+  await expect(cards).toHaveCount(3);
 
   phone.send(CONFIGURED_ADDON_URL);
-  await expectFocus(page, 'configure-confirm');
   await expect(dialog.getByText('New settings for Open Shorts arrived.')).toBeVisible();
+  await expectFocus(page, 'configure-confirm');
   await settle(page);
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -152,4 +168,38 @@ test("an addon's settings can be changed on a phone", async ({ page }) => {
   await expectFocusLabel(page, 'Settings for Open Shorts');
   await expect(cards).toHaveCount(3);
   await expect(cards.last()).toContainText('v1.3.0');
+
+  // Settings that take the settings page away leave focus on the card.
+  await settle(page);
+  await press(page, 'Enter', 'configure-cancel');
+  phone.send(PLAIN_ADDON_URL);
+  await expectFocus(page, 'configure-confirm');
+  await settle(page);
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Updated Open Shorts with its new settings.')).toBeVisible();
+  await expectFocusLabel(page, 'Move Open Shorts up');
+  await expect(page.getByRole('button', { name: /^Settings for/ })).toHaveCount(0);
+  await expect(cards.last()).toContainText('v1.4.0');
+});
+
+test('a settings address too long for a QR code is left out of it', async ({ page }) => {
+  test.skip(!PAIR_SERVICE, 'The pairing relay is not deployed yet');
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await press(page, 'ArrowUp', 'addons-add');
+  await press(page, 'Enter', 'install-field');
+  await page.locator('input[aria-label="Addon address"]').fill(LONG_ADDON_URL);
+  await pressTo(page, 'ArrowDown', 'Add');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Move Open Shorts up');
+  await settle(page);
+  await pressTo(page, 'ArrowRight', 'Move Open Shorts down');
+  await pressTo(page, 'ArrowRight', 'Settings for Open Shorts');
+  await press(page, 'Enter', 'configure-cancel');
+  const dialog = page.getByRole('dialog', { name: 'Settings for Open Shorts' });
+  await expect(dialog.getByText(/too long for a QR code/)).toBeVisible();
+  await expect(dialog.getByText('K7P 3QZ')).toBeVisible();
 });

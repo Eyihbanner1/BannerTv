@@ -19,6 +19,12 @@ interface PhonePanelProps {
   focusAfterRetry: string;
 }
 
+/**
+ * The longest QR text that still scans from a step or two back at the size the
+ * panel draws it. A longer settings address is left out of the QR code.
+ */
+const QR_TEXT_BUDGET = 600;
+
 /** Spaced in threes, which is easier to read across a room. */
 function spaced(code: string): string {
   return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
@@ -54,17 +60,25 @@ export function PhonePanel({ onAddress, configureUrl, title, focusAfterRetry }: 
   let body;
   if (state.status === 'waiting') {
     const { code, pageUrl } = state.session;
-    const qrText = configureUrl
+    const withSettings = configureUrl
       ? `${pageUrl}&configure=${encodeURIComponent(configureUrl)}`
-      : pageUrl;
+      : '';
+    const settingsInQr = withSettings !== '' && withSettings.length <= QR_TEXT_BUDGET;
+    let help = t('addons.phone.scan');
+    if (settingsInQr) help = t('addons.configure.scan');
+    else if (configureUrl) help = t('addons.configure.tooLong');
     body = (
       <>
-        <QrCode className={styles.qr} text={qrText} size={configureUrl ? 280 : 240} />
+        <QrCode
+          className={styles.qr}
+          text={settingsInQr ? withSettings : pageUrl}
+          size={settingsInQr ? 280 : 240}
+        />
         <p className={styles.pairCode}>
           {t('addons.phone.code')}
           <strong>{spaced(code)}</strong>
         </p>
-        <p className={styles.phoneHelp}>{t('addons.phone.scan')}</p>
+        <p className={styles.phoneHelp}>{help}</p>
         <p className={styles.pairHost}>{breakable(new URL(pageUrl).host)}</p>
       </>
     );
