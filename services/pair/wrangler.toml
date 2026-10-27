@@ -1,0 +1,17 @@
+# The phone pairing relay. Deploy with `npx wrangler@4 deploy` from this folder.
+name = "bannertv-pair"
+main = "src/worker.ts"
+compatibility_date = "2026-06-01"
+workers_dev = true
+
+# No request logs or traces: addon addresses can carry account keys.
+[observability]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "SESSIONS"
+class_name = "PairSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PairSession"]

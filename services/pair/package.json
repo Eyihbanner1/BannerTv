@@ -1,0 +1,15 @@
+{
+  "name": "@bannertv/pair",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The phone pairing relay: a Cloudflare Worker that passes an addon address from a phone to the TV",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.5"
+  }
+}
