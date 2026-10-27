@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { PAIR_SERVICE } from '../src/data/pairing';
 import { EXTRA_ADDON_URL, FIRST_ROW, mockAddons } from './addons';
 import {
   APP_URL,
@@ -76,4 +77,41 @@ test('an addon can be added by its address', async ({ page }) => {
   await pressBack(page);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await expect(page.locator('h2', { hasText: 'Trending shorts' })).toHaveCount(1);
+});
+
+test('an addon can be sent from a phone', async ({ page }) => {
+  test.skip(!PAIR_SERVICE, 'The pairing relay is not deployed yet');
+  const { phone } = await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await press(page, 'ArrowUp', 'addons-add');
+  await press(page, 'Enter', 'install-field');
+
+  const dialog = page.getByRole('dialog', { name: 'Add an addon' });
+  await expect(dialog.getByText('Or send it from your phone')).toBeVisible();
+  await expect(dialog.locator('svg path')).toHaveCount(1);
+  await expect(dialog.getByText('K7P 2QZ')).toBeVisible();
+  await expect(dialog.getByText(new URL(PAIR_SERVICE).host)).toBeVisible();
+
+  // The code runs out: a new one is a button press away.
+  phone.expire();
+  await expect(dialog.getByText('This code has run out.')).toBeVisible();
+  await press(page, 'ArrowRight', 'install-phone-retry');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'install-field');
+  await expect(dialog.getByText('K7P 3QZ')).toBeVisible();
+
+  // The phone sends the address: it fills the box, and Add is one press away.
+  phone.send(EXTRA_ADDON_URL);
+  await expectFocus(page, 'install-confirm');
+  await expect(page.locator('input[aria-label="Addon address"]')).toHaveValue(EXTRA_ADDON_URL);
+  await expect(dialog.getByText('Received from your phone. Press Add to add it.')).toBeVisible();
+  await expect(dialog.getByText('K7P 4QZ')).toBeVisible();
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Added Open Shorts. Its catalogs are on Home now.')).toBeVisible();
+  expect(phone.codes).toEqual(['K7P2QZ', 'K7P3QZ', 'K7P4QZ']);
 });

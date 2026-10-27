@@ -1,4 +1,5 @@
 import type { InstalledAddon } from '@bannertv/core';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
@@ -6,7 +7,9 @@ import { Overlay } from '../../components/Overlay';
 import { TextField } from '../../components/TextField';
 import { addonCollection } from '../../data/addons';
 import { describeInstallError } from '../../data/describe';
+import { PAIR_SERVICE } from '../../data/pairing';
 import styles from './AddonsScreen.module.css';
+import { PhonePanel } from './PhonePanel';
 
 interface InstallDialogProps {
   returnFocusKey: string;
@@ -16,13 +19,17 @@ interface InstallDialogProps {
   onClose: () => void;
 }
 
-/** Adds an addon from its address, typed or spoken on the TV keyboard. */
+/**
+ * Adds an addon from its address: typed or spoken on the TV keyboard, or sent
+ * from a phone through the pairing relay once one is deployed.
+ */
 export function InstallDialog(props: InstallDialogProps) {
   const { returnFocusKey, focusAfterInstall, onInstalled, onClose } = props;
   const { t } = useTranslation();
   const [address, setAddress] = useState('');
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [received, setReceived] = useState(false);
   const installed = useRef<string | null>(null);
 
   const install = () => {
@@ -30,6 +37,7 @@ export function InstallDialog(props: InstallDialogProps) {
     const before = addonCollection.get().addons.map((a) => a.transportUrl);
     setWorking(true);
     setError(null);
+    setReceived(false);
     addonCollection.install(address).then(
       (addon) => {
         installed.current = focusAfterInstall(addon);
@@ -42,6 +50,19 @@ export function InstallDialog(props: InstallDialogProps) {
     );
   };
 
+  // The address arrives while the user holds a phone: fill it in and wait on Add.
+  const receive = (url: string) => {
+    if (working) return;
+    setAddress(url);
+    setError(null);
+    setReceived(true);
+    setFocus('install-confirm');
+  };
+
+  let status = error;
+  if (working) status = t('addons.installing');
+  else if (received) status = t('addons.phone.received');
+
   return (
     <Overlay
       focusKey="install"
@@ -53,26 +74,34 @@ export function InstallDialog(props: InstallDialogProps) {
     >
       <h2 className={styles.dialogTitle}>{t('addons.installTitle')}</h2>
       <p className={styles.dialogLead}>{t('addons.installLead')}</p>
-      <TextField
-        focusKey="install-field"
-        type="url"
-        label={t('addons.addressLabel')}
-        placeholder={t('addons.addressPlaceholder')}
-        value={address}
-        onChange={setAddress}
-        onSubmit={install}
-      />
-      <p className={error ? styles.error : styles.status} role="status">
-        {working ? t('addons.installing') : error}
-      </p>
-      <div className={styles.dialogActions}>
-        <Button
-          variant="primary"
-          focusKey="install-confirm"
-          label={t('addons.install')}
-          onPress={install}
-        />
-        <Button focusKey="install-cancel" label={t('common.cancel')} onPress={onClose} />
+      <div className={styles.installBody}>
+        <div className={styles.installMain}>
+          <TextField
+            focusKey="install-field"
+            type="url"
+            label={t('addons.addressLabel')}
+            placeholder={t('addons.addressPlaceholder')}
+            value={address}
+            onChange={(value) => {
+              setAddress(value);
+              setReceived(false);
+            }}
+            onSubmit={install}
+          />
+          <p className={error && !working ? styles.error : styles.status} role="status">
+            {status}
+          </p>
+          <div className={styles.dialogActions}>
+            <Button
+              variant="primary"
+              focusKey="install-confirm"
+              label={t('addons.install')}
+              onPress={install}
+            />
+            <Button focusKey="install-cancel" label={t('common.cancel')} onPress={onClose} />
+          </div>
+        </div>
+        {PAIR_SERVICE ? <PhonePanel onAddress={receive} focusAfterRetry="install-field" /> : null}
       </div>
     </Overlay>
   );

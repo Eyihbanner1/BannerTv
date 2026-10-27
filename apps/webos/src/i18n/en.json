@@ -82,6 +82,17 @@
     "addressPlaceholder": "https://…/manifest.json",
     "install": "Add",
     "installing": "Checking the addon…",
+    "phone": {
+      "title": "Or send it from your phone",
+      "opening": "Getting a code…",
+      "code": "Code",
+      "scan": "Scan with your phone's camera, or go to this address and enter the code:",
+      "expired": "This code has run out.",
+      "newCode": "New code",
+      "unavailable": "BannerTV can't reach its pairing service right now.",
+      "retry": "Try again",
+      "received": "Received from your phone. Press Add to add it."
+    },
     "installError": {
       "invalid-url": "That doesn't look like an addon address. It starts with https:// and usually ends in manifest.json.",
       "unreachable": "BannerTV couldn't reach that address. Check it, and that the TV is online.",

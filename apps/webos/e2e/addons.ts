@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import type { Page, Route } from '@playwright/test';
+import { PAIR_SERVICE } from '../src/data/pairing';
 
 /**
  * A fake Cinemeta and OpenSubtitles for the journeys, so they never touch the
@@ -171,16 +172,62 @@ export interface MockOptions {
   catalogs?: Record<string, (route: Route) => Promise<void> | undefined>;
 }
 
+/** The pairing relay, played by the test: it plays the phone too. */
+export interface PhoneRelay {
+  /** Codes the TV has been given, in order. */
+  codes: string[];
+  /** Sends an address to the TV's latest code, as the phone page would. */
+  send(url: string): void;
+  /** The latest code runs out. */
+  expire(): void;
+}
+
 /** Every catalog request the page made, as `type/id` or `type/id/extra`. */
 export interface AddonRequests {
   catalogs: string[];
+  phone: PhoneRelay;
+}
+
+function fakeRelay(): { relay: PhoneRelay; answer: (route: Route) => Promise<void> } {
+  let pending: string | undefined;
+  let expired = false;
+  const relay: PhoneRelay = {
+    codes: [],
+    send: (url) => void (pending = url),
+    expire: () => void (expired = true),
+  };
+  const answer = (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/sessions') {
+      const code = `K7P${relay.codes.length + 2}QZ`.slice(0, 6);
+      relay.codes.push(code);
+      expired = false;
+      return json(
+        route,
+        { code, secret: 'test-secret', expiresIn: 600, pageUrl: `${PAIR_SERVICE}/#code=${code}` },
+        201,
+      );
+    }
+    const latest = relay.codes[relay.codes.length - 1];
+    if (path !== `/api/sessions/${latest}/collect` || expired) {
+      return json(route, { error: 'expired' }, 404);
+    }
+    if (pending === undefined) return json(route, { status: 'waiting', expiresIn: 500 });
+    const url = pending;
+    pending = undefined;
+    expired = true;
+    return json(route, { status: 'sent', url });
+  };
+  return { relay, answer };
 }
 
 export async function mockAddons(page: Page, options: MockOptions = {}): Promise<AddonRequests> {
-  const requests: AddonRequests = { catalogs: [] };
+  const { relay, answer } = fakeRelay();
+  const requests: AddonRequests = { catalogs: [], phone: relay };
 
   // Anything not mocked below fails, so a stray request shows up as an error.
   await page.route(/^https?:\/\//, (route) => route.abort());
+  if (PAIR_SERVICE) await page.route(`${PAIR_SERVICE}/api/**`, answer);
   await page.route(/^https:\/\/(images|episodes)\.metahub\.space\//, (route) =>
     route.fulfill({
       status: 200,
