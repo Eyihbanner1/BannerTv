@@ -1,12 +1,13 @@
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { Artwork } from '../../components/Artwork';
 import { artworkUrl } from '../../components/artwork-size';
 import { Button } from '../../components/Button';
 import { metaFacts } from '../../data/describe';
+import { backdrops, firstBackdrops } from './backdrops';
 import { heroItem } from './hero-item';
 import styles from './Hero.module.css';
 
@@ -16,16 +17,6 @@ export function openDetails(item: MetaPreview): void {
 
 /** How long a new backdrop takes to fade in over the old one (Hero.module.css). */
 const FADE_MS = 400;
-
-interface Layer {
-  /** Each change of backdrop is a new layer, even back to an earlier one. */
-  id: number;
-  src: string;
-  /** The addon's own address, tried if the sized one fails. */
-  retrySrc: string | undefined;
-  /** Decoding, fading in or on show, or fading out (the next one failed). */
-  state: 'loading' | 'shown' | 'gone';
-}
 
 const LAYER_CLASS = {
   loading: styles.backdrop,
@@ -41,55 +32,27 @@ const LAYER_CLASS = {
  * title whose backdrop fails to load fades the old one out.
  */
 function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string | undefined }) {
-  const [wanted, setWanted] = useState({ id: 0, src });
-  const [layers, setLayers] = useState<readonly Layer[]>(() =>
-    src ? [{ id: 0, src, retrySrc, state: 'loading' }] : [],
+  const [{ layers }, dispatch] = useReducer(backdrops, undefined, () =>
+    firstBackdrops(src, retrySrc),
   );
+  // Before paint, so the new layer starts loading in the same frame.
+  useLayoutEffect(() => dispatch({ type: 'want', src, retrySrc }), [src, retrySrc]);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const wantedId = useRef(wanted.id);
-  useLayoutEffect(() => {
-    wantedId.current = wanted.id;
-  });
-
-  if (src !== wanted.src) {
-    const id = wanted.id + 1;
-    setWanted({ id, src });
-    // Keep only the last backdrop on show under the new one. Back to that
-    // same backdrop before the new one is in: keep it, and nothing waits.
-    const below = layers.filter((layer) => layer.state === 'shown').slice(-1);
-    if (src && below[0]?.src === src) setLayers(below);
-    else setLayers(src ? below.concat({ id, src, retrySrc, state: 'loading' }) : []);
-  }
   useEffect(() => () => clearTimeout(timer.current), []);
 
   // Once the fade is over, drop what it covered or faded out.
-  const settle = (keep: (layers: readonly Layer[]) => readonly Layer[]) => {
+  const settle = () => {
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setLayers(keep), FADE_MS);
+    timer.current = setTimeout(() => dispatch({ type: 'settled' }), FADE_MS);
   };
 
   const show = (id: number, image: HTMLImageElement) => {
     const reveal = () => {
-      // A backdrop that was passed over while it decoded never shows.
-      if (id !== wantedId.current) return;
-      setLayers((current) =>
-        current.map((entry) => (entry.id === id ? { ...entry, state: 'shown' } : entry)),
-      );
-      settle((current) => {
-        const index = current.findIndex((entry) => entry.id === id && entry.state === 'shown');
-        return index > 0 ? current.slice(index) : current;
-      });
+      dispatch({ type: 'shown', id });
+      settle();
     };
     if (typeof image.decode === 'function') image.decode().then(reveal, reveal);
     else reveal();
-  };
-
-  const fail = (id: number) => {
-    if (id !== wantedId.current) return;
-    setLayers((current) =>
-      current.filter((entry) => entry.id !== id).map((entry) => ({ ...entry, state: 'gone' })),
-    );
-    settle((current) => current.filter((entry) => entry.state !== 'gone'));
   };
 
   return (
@@ -101,7 +64,10 @@ function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string
           retrySrc={layer.retrySrc}
           className={LAYER_CLASS[layer.state]}
           onLoad={(image) => show(layer.id, image)}
-          onFail={() => fail(layer.id)}
+          onFail={() => {
+            dispatch({ type: 'failed', id: layer.id });
+            settle();
+          }}
         />
       ))}
     </>

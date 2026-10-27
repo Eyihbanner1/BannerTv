@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 
 interface ArtworkProps {
   src: string | undefined;
@@ -26,22 +26,49 @@ export function Artwork({
   onFail,
 }: ArtworkProps) {
   const [failures, setFailures] = useState(0);
+  const image = useRef<HTMLImageElement>(null);
+  // The address whose load or error has been handled, so each is handled once.
+  const handled = useRef<string>(undefined);
   const sources = retrySrc && retrySrc !== src ? [src, retrySrc] : [src];
   const current = sources[failures];
+
+  const loaded = (node: HTMLImageElement) => {
+    if (handled.current === current) return;
+    handled.current = current;
+    onLoad?.(node);
+  };
+  const failed = () => {
+    if (handled.current === current) return;
+    handled.current = current;
+    setFailures(failures + 1);
+    if (failures + 1 === sources.length) onFail?.();
+  };
+
+  // React drops a load or error event that fires before it has added the
+  // image to the page, which a cached image can do while a long render (a Home
+  // row) pauses. So look again once it is there. A finished image with no size
+  // failed, unless it is an SVG that has none, which decoding tells apart.
+  useLayoutEffect(() => {
+    const node = image.current;
+    if (!node?.complete) return;
+    if (node.naturalWidth > 0) loaded(node);
+    else if (typeof node.decode === 'function') node.decode().then(() => loaded(node), failed);
+    // Checked once, when the image for this address is first on the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
+
   if (!current) return <>{fallback}</>;
   return (
     <img
       key={current}
+      ref={image}
       className={className}
       src={current}
       alt=""
       decoding="async"
       draggable={false}
-      onLoad={onLoad && ((event) => onLoad(event.currentTarget))}
-      onError={() => {
-        setFailures(failures + 1);
-        if (failures + 1 === sources.length) onFail?.();
-      }}
+      onLoad={(event) => loaded(event.currentTarget)}
+      onError={failed}
     />
   );
 }
