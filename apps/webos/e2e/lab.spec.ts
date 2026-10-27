@@ -56,7 +56,9 @@ test('a seek left over from a failed load does not move the next one', async ({ 
   await expect(page.getByText('Start: from the beginning')).toBeVisible();
   await press(page, 'ArrowDown', 'lab-source-0');
   await press(page, 'Enter', 'lab-source-0');
-  await expect(page.getByText(/playing at: \d/)).toHaveText('Started playing at: 0.0 s');
+  await expect(page.getByText(/^Clock at start: \d/)).toHaveText(
+    /^Clock at start: 0\.0 s at the playing event, 0\.\d s at the first timeupdate/,
+  );
   // An engine that counts no frames says so instead of claiming zero drops.
   await expect(page.getByText(/^Video:/)).not.toContainText('0 dropped of 0');
 });

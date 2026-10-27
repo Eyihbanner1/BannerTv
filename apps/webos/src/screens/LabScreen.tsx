@@ -1,5 +1,6 @@
 import { pause, resume } from '@noriginmedia/norigin-spatial-navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
@@ -43,6 +44,24 @@ type TrackedVideo = HTMLVideoElement & {
   audioTracks?: MediaTrackListLike;
   videoTracks?: MediaTrackListLike;
 };
+
+/** The media clock around the start of playback, as the engine reported it. */
+interface StartClock {
+  atPlaying: number;
+  atUpdate?: number;
+  delayMs?: number;
+}
+
+function describeStartClock(clock: StartClock | null, t: TFunction): string {
+  if (!clock) return t('lab.startClock.none');
+  const playing = `${clock.atPlaying.toFixed(1)} s`;
+  if (clock.atUpdate === undefined) return t('lab.startClock.playing', { playing });
+  return t('lab.startClock.both', {
+    playing,
+    update: `${clock.atUpdate.toFixed(1)} s`,
+    delay: clock.delayMs,
+  });
+}
 
 interface Snapshot {
   state: string;
@@ -104,7 +123,7 @@ export function LabScreen() {
   const seekOnLoad = useRef<number | null>(null);
   const [current, setCurrent] = useState<LabSource | null>(null);
   const [startMode, setStartMode] = useState<StartMode>('beginning');
-  const [startedAt, setStartedAt] = useState('');
+  const [startClock, setStartClock] = useState<StartClock | null>(null);
   const [info, setInfo] = useState<Snapshot>(EMPTY);
   const [log, setLog] = useState<string[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
@@ -123,25 +142,41 @@ export function LabScreen() {
     const video = videoRef.current;
     if (!video) return;
     let firstPlaying = true;
+    // When the first "playing" event fired, until the first timeupdate after it.
+    let playingAt: number | null = null;
     const refresh = () => setInfo(snapshot(video));
     const onEvent = (event: Event) => {
-      if (event.type === 'loadstart') firstPlaying = true;
+      if (event.type === 'loadstart') {
+        firstPlaying = true;
+        playingAt = null;
+      }
       if (event.type === 'loadedmetadata' && seekOnLoad.current !== null) {
         video.currentTime = seekOnLoad.current;
         seekOnLoad.current = null;
       }
       if (event.type === 'playing' && firstPlaying) {
         firstPlaying = false;
-        setStartedAt(`${video.currentTime.toFixed(1)} s`);
+        playingAt = performance.now();
+        setStartClock({ atPlaying: video.currentTime });
       }
       note(event.type === 'error' ? `error: ${snapshot(video).error}` : event.type);
       refresh();
+    };
+    // webOS can report 0 s at the first "playing" event of a mediaOption start
+    // and publish the real position only a little later, so both are shown.
+    const onTimeUpdate = () => {
+      if (playingAt === null) return;
+      const delayMs = Math.round(performance.now() - playingAt);
+      playingAt = null;
+      setStartClock((clock) => clock && { ...clock, atUpdate: video.currentTime, delayMs });
+      note(`first timeupdate: ${video.currentTime.toFixed(2)} s, ${delayMs} ms after playing`);
     };
     const onTracks = (event: Event) => {
       note(`tracks: ${event.type}`);
       refresh();
     };
     MEDIA_EVENTS.forEach((type) => video.addEventListener(type, onEvent));
+    video.addEventListener('timeupdate', onTimeUpdate);
     const trackLists = [video.audioTracks, video.textTracks];
     trackLists.forEach((list) => {
       list?.addEventListener?.('addtrack', onTracks);
@@ -151,6 +186,7 @@ export function LabScreen() {
     return () => {
       window.clearInterval(timer);
       MEDIA_EVENTS.forEach((type) => video.removeEventListener(type, onEvent));
+      video.removeEventListener('timeupdate', onTimeUpdate);
       trackLists.forEach((list) => {
         list?.removeEventListener?.('addtrack', onTracks);
         list?.removeEventListener?.('change', onTracks);
@@ -186,7 +222,7 @@ export function LabScreen() {
     const video = videoRef.current;
     if (!video) return;
     setCurrent(source);
-    setStartedAt('');
+    setStartClock(null);
     setLog([]);
     seekOnLoad.current = startMode === 'seek' ? START_SECONDS : null;
     video.pause();
@@ -335,7 +371,7 @@ export function LabScreen() {
                     : t('lab.framesNotReported'),
               })}
             </div>
-            <div>{t('lab.startedAt', { at: startedAt || '—' })}</div>
+            <div>{describeStartClock(startClock, t)}</div>
             <div>
               {t('lab.trackCounts', {
                 audio: info.audio === null ? t('common.notAvailable') : info.audio.length,

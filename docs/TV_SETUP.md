@@ -97,7 +97,7 @@ Repeat with **HLS, alternate audio and subtitles**.
 
 ### Spike 3: start position and HDR
 
-1. Press **Start** until it reads "30 s via mediaOption", then play **MP4, H.264 360p, 1 minute**. **Started playing at** should read about 30 s.
+1. Press **Start** until it reads "30 s via mediaOption", then play **MP4, H.264 360p, 1 minute**. **Clock at start** shows the position at the first `playing` event and at the first `timeupdate` after it. On webOS 22 the first reads 0.0 s and the second about 29.3 s, 55 ms later: the clock catches up late, but playback really starts near 30 s.
 2. Switch to "30 s by seeking" and play it again, for comparison.
 3. For 4K HEVC HDR10 and Dolby Vision profile 8, add your own files (next section), play them, and note whether the TV shows its HDR or Dolby Vision badge and whether the picture stutters. The 65NANO766QA has no Dolby Vision, and it does not report frame counts, so the **Video** line says "frame counts not reported" there.
 

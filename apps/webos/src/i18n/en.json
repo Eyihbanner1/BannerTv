@@ -89,7 +89,11 @@
     "video": "Video: {{size}} · {{frames}}",
     "frames": "{{dropped}} dropped of {{total}} frames",
     "framesNotReported": "frame counts not reported",
-    "startedAt": "Started playing at: {{at}}",
+    "startClock": {
+      "none": "Clock at start: —",
+      "playing": "Clock at start: {{playing}} at the playing event",
+      "both": "Clock at start: {{playing}} at the playing event, {{update}} at the first timeupdate ({{delay}} ms later)"
+    },
     "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
     "error": "Error: {{error}}"
   }
