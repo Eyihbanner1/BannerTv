@@ -54,6 +54,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Addons | Scraper plugins outside the addon protocol | No | Yes | Not planned. Addon protocol only, which keeps the store review simple |
 | Browse | Home board, one row per catalog | Yes | Yes, plus Modern, Grid and Classic layouts | Phase 1 rows with a hero banner. Phase 3 reorder and hide rows |
 | Browse | Discover with type, catalog and genre filters | Yes | Yes | Phase 1 |
+| Browse | Sports addons by competition: Live now, Today, fixtures, team search | No, one flat list per catalog | No, one flat list per catalog | Phase 3, see Sports addons |
 | Browse | Search across all addons | Yes | Yes | Phase 1, on-screen keyboard plus webOS voice input |
 | Browse | Details page, seasons and episodes, trailers | Yes | Yes, plus TMDB cast, networks, countdowns | Phase 1. TMDB enrichment in Phase 3 |
 | Streams | Stream list grouped by addon | Yes | Yes, plus regex and first-source modes | Phase 2, with parsed quality, size and codec badges |
@@ -125,6 +126,160 @@ The base URL is the manifest URL with `/manifest.json` removed. Extra arguments 
 
 - Addons return data only. Never evaluate addon content, strip HTML from descriptions, and allow only `https:` and `http:` URLs for media and images.
 - Store addon URLs carefully: configured addon URLs often embed the user's debrid API key, so they are never logged or sent to analytics.
+
+## Sports addons
+
+Sports addons show up in Stremio and Nuvio as one flat list per catalog. In Phase 3, BannerTV turns them into a Sports screen with Live now, Today, a row per competition and search by team. The plan below comes from the catalogs of five sports addons, including the one Eyitayo uses, plus the manifests or source code of seven more, read on 27 October 2026. The full findings report is in the project files (`sports-addons/findings.md`).
+
+**What sports addons actually send**
+
+- **No common league field.** Some addons send no league at all. The rest put it in free text (a `League: X` line, a `Competition: Home vs Away` name, a second genre, a genre option, an id in an artwork URL), spelled differently from addon to addon.
+- **Teams only in the title**, mostly `Home vs Away`, sometimes `Away at Home`. Sport tags are often wrong: an EFL Trophy tie was tagged Tennis by two addons.
+- **Kick-off in many forms**: ISO `released` (sometimes a fetch time, or midnight for a date only), other ISO keys (one an hour early), `28 Oct 2026 · 20:00 UTC`, a clock time in the name, a clock time with no date in a zone set in the addon's settings, a date only, or nothing.
+- **No reliable live or finished state.** "LIVE" labels switch on early and stay on for hours after full time, and finished matches stay listed for the rest of the day or for weeks. No scores were seen, though two addons' code can append one.
+- **Custom types and paging quirks.** Types (`sport`, `sports`, `tv`, `channel`) do not say "this is sport". One addon leaves matches out when paged the Stremio way, and one caps pages at 100 without declaring `skip`.
+
+**Detection**
+
+1. A catalog is a sports catalog when its name or id names a sport (football, soccer, NBA, F1, UFC, cricket and so on), or when it names a sports view (live, today, upcoming, replays, recaps) and most of its first page are matches (`A vs B`, `A at B`) or carry live markers. Only pages already fetched for Home or Discover are checked; detection never makes a request of its own.
+2. Within it, items are events, channels or replays. Channels: ids or labels such as `leaf:`, `_ch_`, `ttv:`, `releaseInfo` "24/7", genre "NETWORKS", or a catalog named TV, Channels or 24/7. Replays: a catalog named replays or recaps, or "Recap" and "Replay" markers. Placeholder items ("no streams today", "private manifest required") are dropped.
+3. Addons settings get a per-addon "Show in Sports: automatic, yes, no", for when detection gets it wrong.
+4. Nothing about sport depends on an addon's name or URL. The rules work on what any addon sends.
+5. Sports catalogs leave Home's board and Search's addon fan-out: Home shows only the Live sport row for them, and Search answers from the local index. Discover keeps them, so every catalog stays reachable. "Show in Sports: no" puts an addon back on Home and in Search.
+
+**Grouping, in order**
+
+Each event goes through these layers and stops at the first one that names a competition. Each result records where it came from. A row is named after a competition only when an addon said so or a fixture list confirmed it; a team match on its own gives a country group, never a guessed league.
+
+1. **What the addon declares.** A catalog per sport gives the sport, unless the team dictionary says otherwise. A genre option that matches a known competition name gives a whole competition row from one request.
+2. **What the item's text says.** In this order: a `League:`, `Competition:` or `Tournament:` line in the description; a `Competition: Home vs Away` or `Country - Competition : Home vs Away` name; a ` - Competition` suffix, used only after a `vs` or `at` pair and only when the suffix is in the competition dictionary (` - 3rd T20I` is a stage); a second genre that is not the sport; a `league`, `lg` or `competition` parameter in the poster URL; a SofaScore `unique-tournament/<n>` id in `background` or `poster`, through an id column in the competition dictionary. The string is normalised through the competition dictionary (country prefixes, aliases, sponsor names such as Carabao Cup for the EFL Cup; a bare "League Cup" is the EFL Cup only when both teams are English).
+3. **The built-in team matcher and league calendars.** Both team names are looked up in the team dictionary.
+   - If the league calendar (see Matcher data) has this pair within a day of the match, it is that league.
+   - Otherwise the match goes in the teams' country group ("German football"), because a team pair alone cannot tell a league game from a cup tie: Hamburg vs Eintracht Frankfurt on 27 October was a DFB-Pokal tie, not Bundesliga.
+   - Two clubs from different countries go in "European football", unless both are in the same UEFA competition this season, which then names it (a hand-checked list of league-phase clubs ships with the dictionary).
+   - In closed leagues (NFL, NBA, NHL, MLB), two of their teams name the league.
+   - A senior side against a youth or reserve side goes in the senior side's country group; two youth sides go in "Youth football". Women's sides get their own groups.
+4. **An optional online fixtures lookup** (see Matcher data), which can name cup ties and leagues the calendars do not cover.
+5. **Other.** "Other football", "Other basketball" and so on, then "Other sport".
+
+**Event model**
+
+One normalised record per event, built in `packages/core/src/sports/`: sport, competition (with its source and confidence), country, home and away (as sent and normalised), kick-off (UTC instant or day only, with its source and whether it is sure), state, kind (event, channel, replay), and every source item it was merged from (the addon's place in the collection and manifest id, never its URL; type, id, name, poster).
+
+**Time, live and finished**
+
+- Kick-off, best first:
+  - `released` with a time (one with seconds or milliseconds set is a fetch time; midnight on a replay is a date only);
+  - dated text with UTC, GMT, an offset or a named zone (other abbreviations count as unsure);
+  - a clock time in the item's name (`⏰ 19:45 - 27/10`);
+  - other ISO keys, checked against a clock time in the same item's name or description and dropped when they disagree (one addon's `eventStart` is an hour early, and a day early after midnight);
+  - epoch numbers from a named time field;
+  - a clock time with no date, in the zone the addon's install address names. When none can be read, no zone is assumed (one addon defaults to UTC-3): the item takes a sure time from a merged copy, or shows "time unknown" and stays out of Live now. The date is the addon's current day in that zone, rolled to the next day where a list in time order wraps past midnight;
+  - a date only.
+
+  Numbers inside ids are never read as times: some are first-seen stamps, and some dates are a day off.
+- A day is a local calendar day, worked out with local dates, never by adding 24 hours, so the clock-change Sundays group correctly. Times are shown as 24-hour local time. Phase 3 checks on webOS 5 and 22 that the TV's time zone and summer time reach `Date`, and that `Intl.DateTimeFormat` knows named zones; if not, the zone comes from a Luna call found in that check.
+- A kick-off once seen is kept, because one addon replaces it with "LIVE" in the catalog. Kick-offs go into a small store of id and kick-off kept for two days, not the shared cache. Until an item's meta gives one, the kick-off is estimated from its neighbours in a catalog sorted by kick-off. Metas are read for live items on screen first, at most 20 per addon per refresh, two at a time.
+- BannerTV works out the state itself:
+  - upcoming;
+  - starting soon (within 15 minutes, listed in Live now as "Starting soon");
+  - live, from kick-off until a per-sport window ends. Windows: football and rugby 2.5 hours (stretched to 3 while an addon still marks the match live, for extra time and penalties); basketball and ice hockey 3; baseball 3.5; American football, tennis, motor racing and darts 4; boxing 5; MMA and golf 6; cricket 8; others 3;
+  - ended, when the window is over or a replay of the same match has appeared.
+
+  An addon's "LIVE" label counts only inside the window. A LIVE item whose kick-off cannot be found or estimated goes in "Live, time unknown" at the end of Live now, for at most the UTC day it was first seen. Items with no kick-off, no date and no live label never enter Live now or a day; they sit at the end of their competition's row (or Other) as "Time not given", and drop out after BannerTV has seen them for two days.
+- Ended matches leave Live now at once and drop to an "Earlier today" group at the end of Today.
+
+**Merging**
+
+- The same match is one event when it has the same two teams in either order (after normalising), and kick-offs within 15 minutes when both are sure, within 90 minutes when either is unsure, or on the same or a neighbouring date when one side has a date only. This merges copies across Live, Today and sport catalogs, across sources inside one addon, and across addons.
+- When both teams are in the team dictionary, the dictionary's sport wins over the addon's tag. Names that carry a game or day number (Game 2, Day 3) merge only with the same number.
+- A merged event shows the kick-off of its best-ranked time source, and on a tie the first addon in the collection's order. Home and away follow an `at` or `@` name first, then that same source.
+- Items with no teams (a competition name such as "Copa del Rey", or "Formula 1") do not merge, and repeats of the same name are listed once.
+
+**Play and playback**
+
+- Meta and stream requests for a sports item go to the addon that listed it, never to another addon that declares the same id prefix.
+- Play asks for streams once per distinct source (addon, type, id) of the event. One stream finder serves the whole event, keyed by the event, and its streams are keyed by source as well as by addon, then handed to Phase 2's automatic stream choice. The event page asks only after the usual focus rest on Play; tiles and rows never ask.
+- Live events and channels save no progress and offer no Resume or Start over. They always open at the live edge, and failover, Quality and Other streams restart at the live edge too. Up Next is off for them. Replays behave like any other video. Sports items never go to Trakt, which has no entry for them.
+
+**Fetching and paging**
+
+- Sports catalogs are fetched only while the Sports screen or the Live sport row is visible, and only for the day on screen. Live catalogs come first, then catalogs named Today, Upcoming or similar, then per-sport catalogs. Replay catalogs get their first page only (with `skip=0` when the addon marks it required), and replay hub metas are never opened automatically.
+- Sports catalogs page by events: the next request asks for `skip` = the events received so far (channels not counted) minus 2, and repeated ids are dropped. This also works for addons that count everything, at the cost of a few repeats. (`createCatalogPager` gets a `nextSkip` option.)
+- A catalog stops paging for the day when a page brings no event that addon has not already sent, when kick-offs pass the end of the day (only while its items come in kick-off order), or at a cap set from its page size so that one day fits. Later days are fetched when the viewer moves to them.
+- A catalog that does not declare `skip` but returns a full page (one addon caps at 100) is asked once with `skip`; if that brings new ids, it is paged. Where it offers genre options, BannerTV also asks per genre for the day on screen. A genre page that is still full shows "More may exist in this addon".
+- Sports requests use at most 2 of the 6 request slots, and queued ones are dropped when the screen closes. Pages after the first are kept for the session only, like search, so they never push Home's rows out of storage.
+- Sports catalogs without cache hints count as fresh for 2 minutes (live catalogs) or 15 minutes (the rest), and are not shown after 6 hours. While the Sports screen or the Live sport row is visible, live catalogs are asked again when their copy stops being fresh, no more often than every 2 minutes. States are worked out again once a minute from the clock, with no request.
+
+**Screens**
+
+| Screen or row | What it shows |
+| --- | --- |
+| Rail entry "Sports" | Between Discover and Library, only while an installed addon has sports catalogs. If the last one is removed, the Sports screen gives way to Home |
+| Sports screen | A day strip (Live now, Today, Tomorrow, then the next five days), then rows for the chosen day: one row per competition in priority order, the country groups, "Other", then Replays. Back first returns the day strip to Today, then goes Home |
+| Fixture tile | Drawn by BannerTV as text only: competition, home and away, local kick-off or a LIVE pill, and how many sources have it. The Sports screen shows no images |
+| Event page | Teams, competition, local kick-off, state, sources, the addon's background, and team badges when the addon sends them. Play uses the automatic stream choice across every source; All streams lists them by addon |
+| Home | One "Live sport" row, third on Home, fetched like any row near focus, shown when something is live and the viewer has not hidden it |
+| Search | Team search runs on BannerTV's own index of cached sports events, including team aliases (Man Utd, Spurs), and shows a Sports group in Search results. "Search sports addons" at the end of the group asks the addons for anything the index lacks |
+
+Competition headings show a live count ("Premier League · 2 live of 5"). A cup round is shown only when the addon sends one, as "Competition · Round". A country is added only to tell apart competitions with the same name (Premier League in England and in Wales). Sports items typed `tv` open the event page, never the series page. Channels are not shown on the Sports screen; they stay in their addon's catalogs in Discover.
+
+Priority order for competition rows starts with UK football (Premier League, Champions League, Championship, FA Cup, EFL Cup, Scottish Premiership, the EFL leagues), then the biggest European leagues and cups, then everything else by number of matches.
+
+Later, not Phase 3: a full-screen fixtures list per day (it repeats the rows), following teams and competitions (with Phase 3 profiles, or after them if profiles slip), and channel rows with a programme guide.
+
+**Matcher data**
+
+- A competition dictionary (an estimated 150 to 300 entries, generated from Wikidata and checked by hand: the English pyramid to the National League, UK cups, UEFA and FIFA competitions, the top two divisions and main cup of about 30 countries, NFL, NBA, NHL, MLB, MLS, college sports, F1 and MotoGP, UFC, cricket formats, both rugby codes) with aliases, country, sport, gender and age group, SofaScore ids, and the BannerTV priority.
+- A team dictionary with aliases and each team's country, sport and usual league: about 700 teams from 35 competitions in the core set, about 1,800 from 70 in the full set.
+- A league calendar check: openfootball's public-domain fixture lists for the top divisions of England (two tiers), Germany, Spain, Italy, France, the Netherlands and Portugal. The lists can lag behind rescheduled games, so a pair with no fixture goes to its country group rather than being called a cup tie.
+- Only public-domain (CC0) data is bundled: names, aliases and facts from Wikidata and openfootball, built by a script in CI. No club crests or logos are bundled.
+- Delivery: no server in Phase 3. The dictionaries, the UEFA club list and the calendars are one file, loaded only when the first sports catalog is detected and refreshed with each app release. Measured: 781 clubs with 1,795 aliases is 15 KB gzipped; the whole file is estimated at 70 to 90 KB gzipped. A stale calendar fails safely into a country group.
+- Name matching lowercases, folds accents (NFD plus a small table for ß, ø, æ, ł, đ and ı), removes emoji, flags and tag characters by explicit code-point ranges (not `\p{}` classes, which are ES2018 syntax), drops FC, AFC, CF and similar and a trailing sport word both teams share (`Cricket`, `Basketball`, `Rugby League`), and maps Utd, St and & before the lookup. Teams split on ` vs `, ` vs. ` or ` v `; then on ` @ ` or ` at ` (away first, only for US sports or when both sides are known teams); and on ` - ` only when none of those is present.
+- An online fixtures lookup is optional and decided after the first build, by measuring how many matches still land in a country group or Other. Of the sources BannerTV may use, only TheSportsDB named both test matches (an EFL Trophy tie with an under-21 side, and a DFB-Pokal tie between two Bundesliga clubs). Its free key may not be used in an app-store app, so this means the paid tier (about $9 a month) behind a BannerTV Worker in `services/`, crediting TheSportsDB as the source in the app. The TV would fetch one file per day from that Worker, so nothing about the viewer's addons or matches leaves the TV. ESPN's unofficial API, MLB's API, API-Football's free tier and Jolpica's F1 data are ruled out by their terms or coverage.
+
+**Performance**
+
+- All parsing, matching and merging is plain functions in `packages/core`, run once per catalog response, never on a key press, and in chunks so a refresh never blocks input for more than one frame. Target on the webOS 5 floor TV: about 3,000 items grouped in under 100 ms in total.
+- Dictionary lookups are `Map`s of normalised names, built once. Fixture tiles are text, so the Sports screen decodes no images.
+
+**Store and privacy**
+
+- The Sports screen appears only because of an addon the user installed. No sports addon is preinstalled, suggested or named in the app or its store listing; tests and the gate use a test sports addon, and store screenshots never show the Sports screen with third-party content. Whether Sports is in the LG store build or only the sideload build is decided before the Phase 3 submission.
+- Configured addon URLs often carry a personal key. Test fixtures are captured from public, unconfigured installs only, and nothing logs addon URLs. A time zone is read from an install address as one `timezone` value only; the rest of the decoded settings is never kept or logged.
+- Removing an addon, or clearing data in Settings, removes its events and kick-offs.
+- Any BannerTV Worker the TV fetches from is added to `docs/store/data-safety.md`, the privacy policy and the Seller Lounge answers before the build that uses it ships.
+
+**Phase 3 tasks**
+
+- [ ] Before building: call `/stream/` on the public free tiers (never a configured URL) for a few events and channels, and record how many answers are plain `url` links, need `proxyHeaders`, or are `externalUrl` or web pages (the shape only, not the links). If most need headers, Sports waits for the Phase 5 streaming server. Re-check the test addons' catalogs at the same time, since their data changes.
+- [ ] `packages/core/src/sports/`: detection, text parsing (teams, separators, prefixes, time formats), state, merging and grouping, with tests built from captured public catalogs
+- [ ] Competition and team dictionaries from CC0 sources, the UEFA club list, the league calendars, and the build script for the bundled file
+- [ ] Event paging, the `skip` probe and per-genre fetching, the request-slot limit and the refresh rules for sports catalogs
+- [ ] Take sports catalogs out of Home's board and Search's addon fan-out (Detection rule 5)
+- [ ] Live playback rules in the player: no progress or Resume for live events, live-edge restarts on failover and Quality
+- [ ] Sports screen, day strip, fixture tiles, event page and Replays row; the Live sport row on Home
+- [ ] Team search on the local index, and a Sports group in Search
+- [ ] "Show in Sports" per addon in Addons settings
+- [ ] Check the TV's time zone and summer time on webOS 5 and 22
+- [ ] Measure grouping time and memory on the webOS 5 floor TV, and how many matches end up in country groups or Other, then decide on the paid fixtures lookup
+
+**Gate**
+
+Part of the Phase 3 gate, but Sports may slip to Phase 5 without blocking it. On a Tuesday or Saturday evening with a test sports addon installed:
+
+- every match that kicked off at least 5 minutes ago is in Live now, and none is still there 30 minutes after its real full time, checked against a scores site;
+- a spot check of 50 matches finds none under the wrong competition;
+- at least 80% of UK and top-five-league football matches sit under their competition or country;
+- the Sports screen draws cached rows within 1 second and live rows within 3 seconds on the floor TV, with grouping under 100 ms.
+
+**Open questions**
+
+- [ ] Eyitayo: is a "Sports" rail entry right, or should sport live on Home only?
+- [ ] Eyitayo: which sports and teams to try first (football and UK teams are assumed)?
+- [ ] Eyitayo: is a paid fixtures lookup (about $9 a month) worth it, once the free layers are measured?
+- [ ] Eyitayo: Sports in the LG store build, or in the sideload build only at first? Sideload only is recommended.
+- [ ] Is one `skip` probe acceptable for catalogs that do not declare `skip` (request routing rule 2 says "never guess" for resources, not extras), so that one addon shows more than its first 100 events?
 
 ## webOS platform specifics
 
@@ -252,7 +407,7 @@ Screens send actions down to the core and subscribe to its state; only the core 
 
 **Background work**
 
-There is no background service in v1. Manifest refresh and prefetching of the first two Home rows run at launch and when the UI is idle. The only server pieces are the phone-pairing relay (Phase 1) and the optional sync API (Phase 5), which uses last-write-wins per item with timestamps.
+There is no background service in v1. Manifest refresh and prefetching of the first two Home rows run at launch and when the UI is idle. The only server pieces are the phone-pairing relay (Phase 1), the optional sports fixtures lookup (Phase 3, only if chosen) and the optional sync API (Phase 5), which uses last-write-wins per item with timestamps.
 
 ## Tech stack recommendation
 
@@ -289,7 +444,7 @@ Use TypeScript, React 18 and Vite, with Norigin Spatial Navigation for the remot
 
 ## UX and navigation
 
-Every screen is designed for a 5-way remote first and a pointer second, viewed from 3 metres away, and the Back key always closes the topmost thing on screen. A collapsed left rail (Home, Search, Discover, Library, Addons, Settings) is the only global navigation.
+Every screen is designed for a 5-way remote first and a pointer second, viewed from 3 metres away, and the Back key always closes the topmost thing on screen. A collapsed left rail (Home, Search, Discover, Sports when a sports addon is installed, Library, Addons, Settings) is the only global navigation.
 
 **Screens**
 
@@ -303,6 +458,7 @@ Every screen is designed for a 5-way remote first and a pointer second, viewed f
 | Stream picker | Choose a source | Streams grouped by addon, quality, size, codec and HDR badges, sort and filter, "remember choice" | 2 |
 | Player | Watch | Minimal overlay, seek bar with thumbnails when available, audio and subtitle menus, Up Next card at the end | 2 |
 | Library | Saved titles and history | Tabs for Movies, Series and History, sort by recently watched or added | 3 |
+| Sports | Matches from installed sports addons | Day strip, Live now, a row per competition, text fixture tiles, team search. Shown only when an addon has sports catalogs (see Sports addons) | 3 |
 | Addons | Manage addons | Installed list with reorder, configure, remove; install by URL, QR or addon catalog | 1, catalog in 3 |
 | Settings | Preferences | Playback, Subtitles, Appearance, Integrations, Profiles, About and licenses | 1 to 4 |
 | Profile picker | Multi-user households | Avatars, optional PIN, kids profile | 3 |
@@ -628,6 +784,10 @@ The two risks that could sink the project were LG rejecting the app in its conte
 - [Nuvio vs Stremio, ElfHosted](https://docs.elfhosted.com/nuvio/nuvio-vs-stremio/)
 - [Nuvio settings guide (community)](https://nuvio-wiki.duckdns.org/settings/)
 - [NuvioTVSmart 0.3.20-beta release notes](https://newreleases.io/project/github/NuvioMedia/NuvioTVSmart/release/0.3.20-beta)
+- [Stremio addon SDK, programme guide (EPG)](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/epg.md)
+- [TheSportsDB terms of use](https://www.thesportsdb.com/docs_terms_of_use.php)
+- [openfootball football.json](https://github.com/openfootball/football.json) and [openfootball clubs](https://github.com/openfootball/clubs), both CC0
+- [Wikidata licensing (CC0)](https://www.wikidata.org/wiki/Wikidata:Licensing)
 - [webOS TV Web API and Web Engine](https://webostv.developer.lge.com/develop/specifications/web-api-and-web-engine)
 - [webOS TV appinfo.json](https://webostv.developer.lge.com/develop/references/appinfo-json)
 - [webOS TV CLI developer guide](https://webostv.developer.lge.com/develop/tools/cli-dev-guide)
