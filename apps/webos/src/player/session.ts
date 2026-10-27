@@ -57,6 +57,8 @@ export interface SessionOptions {
   finder: StreamFinder;
   /** Whether the session may move to another stream by itself. False when the user chose one. */
   autoFailover: boolean;
+  /** Whether progress and the addon's record are kept. False for the Lab's test streams. */
+  remember?: boolean;
 }
 
 export interface PlaybackSession {
@@ -98,6 +100,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
 
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
   const { video, type, metaId, videoId, finder } = options;
+  const keep = options.remember !== false;
   const state = createStore<SessionState>(INITIAL_SESSION_STATE);
   const tried = new Set<string>();
   let engine: Engine | null = null;
@@ -133,7 +136,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     const position = tracker?.position();
     if (position === undefined) return;
     const duration = isFinite(video.duration) ? video.duration : 0;
-    progress.record({ metaId, type, videoId, position, duration });
+    if (keep) progress.record({ metaId, type, videoId, position, duration });
   }
 
   function fail(error: PlaybackError, current: number) {
@@ -141,7 +144,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     clearTimers();
     const entry = state.get().entry;
     if (entry) {
-      sourceMemory.record(entry.addonId, false);
+      if (keep) sourceMemory.record(entry.addonId, false);
       finder.markFailed(entry);
     }
     const resumeAt = tracker?.position() ?? lastStartAt;
@@ -201,7 +204,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         if (!reportedWorked && trusted !== undefined && trusted - lastStartAt >= WORKED_AFTER_S) {
           reportedWorked = true;
           const entry = state.get().entry;
-          if (entry) sourceMemory.record(entry.addonId, true);
+          if (entry && keep) sourceMemory.record(entry.addonId, true);
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
         patch({ position: trusted ?? lastStartAt, duration });
@@ -213,7 +216,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => {
         clearTimers();
         const duration = isFinite(video.duration) ? video.duration : 0;
-        progress.record({ metaId, type, videoId, position: duration, duration });
+        if (keep) progress.record({ metaId, type, videoId, position: duration, duration });
         patch({ status: 'ended', position: duration });
       },
     ],

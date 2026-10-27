@@ -56,8 +56,8 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Browse | Discover with type, catalog and genre filters | Yes | Yes | Phase 1 |
 | Browse | Search across all addons | Yes | Yes | Phase 1, on-screen keyboard plus webOS voice input |
 | Browse | Details page, seasons and episodes, trailers | Yes | Yes, plus TMDB cast, networks, countdowns | Phase 1. TMDB enrichment in Phase 3 |
-| Streams | Stream list grouped by addon | Yes | Yes, plus regex and first-source modes | Phase 2, with parsed quality, size and codec badges |
-| Streams | Reuse last link, auto-pick | Partial | Yes | Phase 3 |
+| Streams | Stream list grouped by addon | Yes | Yes, plus regex and first-source modes | Phase 2, as the "All streams" escape hatch, with parsed quality, size and codec badges |
+| Streams | Reuse last link, auto-pick | Partial | Yes | Phase 2: Watch picks a working stream itself and plays it (see Choosing a stream). Per-title "reuse last link" in Phase 3 |
 | Streams | Torrent streams (infoHash) | Local streaming server | P2P toggle | Phase 5, only through a streaming server the user runs on a PC or NAS |
 | Streams | Debrid (Real-Debrid, TorBox, Premiumize) | Through addons | TorBox and Premiumize built in | Through addons in v1. Built-in debrid is a Phase 5 option |
 | Player | Internal player | Yes | ExoPlayer or libmpv | Phase 2, HTML5 video on the webOS media pipeline |
@@ -73,6 +73,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Safety | Adult content and parental controls | Hides adult addons | Content warnings | Phase 3, profile PIN and adult-addon filter |
 | Polish | Themes and languages | Many languages | Accent colours, true black, many languages | Phase 4, English first with i18n wired from Phase 0 |
 | Polish | Backup and restore settings | Through account | Export and import | Phase 3, export via QR to phone |
+| Apps | Phone companion app | No | No | Phase 5 option: browse and pick on the phone with touch, play on the TV, no focus navigation |
 
 Nuvio also ships a Tizen and webOS smart-TV build ([NuvioTVSmart release notes](https://newreleases.io/project/github/NuvioMedia/NuvioTVSmart/release/0.3.20-beta)), so BannerTV needs a clear edge: native webOS feel, store availability and speed on older LG sets.
 
@@ -335,27 +336,31 @@ Every screen is designed for a 5-way remote first and a pointer second, viewed f
 
 ## Player and playback
 
-One playback controller in the core drives three interchangeable engines, and the native webOS pipeline is always tried first because it is the only path with full hardware decoding, HDR and Dolby audio. A failed or stalled stream never strands the user: the controller offers the next best stream in one press.
+One playback controller in the core drives three interchangeable engines, and the native webOS pipeline is always tried first because it is the only path with full hardware decoding, HDR and Dolby audio. A failed or stalled stream never strands the user: the controller offers the next best stream in one press. Phase 2's choices are recorded in [ADR 0003](adr/0003-playback.md).
 
 **Engine selection**
 
 | Stream type | Engine | Notes |
 | --- | --- | --- |
 | Progressive MP4, MKV, WebM, TS over HTTPS | Native `<video>` | Most debrid and direct links. Hardware HEVC, AV1, HDR10 and Dolby Vision where the TV supports them |
-| HLS (`.m3u8`) | Native `<video>` | hls.js over MSE when the master playlist has alternate audio or subtitle renditions (native lists only one audio track and no subtitles on webOS 22), or when native fails |
-| DASH (`.mpd`) | Shaka Player over MSE | Not listed for the native player |
+| HLS (`.m3u8`) | Native `<video>` | hls.js over MSE when the master playlist has alternate audio or subtitle renditions (native lists only one audio track and no subtitles on webOS 22), or when native fails. hls.js fetches every segment itself, so a host that blocks it before the first picture hands the link back to native |
+| DASH (`.mpd`) | Shaka Player 5 over MSE | Not listed for the native player |
 | YouTube (`ytId`) | Launch the YouTube app | Trailers only |
 | `externalUrl`, `webosUrl` | Launch via the application manager | Opens the target app or browser |
 | Torrent (`infoHash`) | User's streaming server, then native | Phase 5 |
 | Streams with `proxyHeaders` | User's streaming server proxy, then native | Phase 5 |
 
-**Stream picker logic**
+**Choosing a stream**
 
-1. Collect streams from all matching addons in parallel and show them as they arrive.
-2. Parse each stream's name and description for resolution, HDR type (HDR10, HDR10+, Dolby Vision), video codec (HEVC, AV1, H.264), audio (Atmos, DD+, DTS, TrueHD), size and debrid-cached markers.
-3. Check against the TV's capabilities from `webOS.deviceInfo()` and the webOS version. Warn on likely failures, for example TrueHD audio or AV1 on a TV without an AV1 decoder.
-4. Sort by the user's preferences: maximum resolution, prefer HDR when the TV supports it, preferred audio language, size cap.
-5. Phase 3 adds "auto-play best match" and "reuse last link" per title.
+Most people should never see a list of links. Watch picks a stream that will play and starts it, the way Netflix's Play button does; the list stays one press away for those who want it.
+
+1. **Ask early.** All stream addons are asked in parallel when focus rests on a title's Watch button or an episode for 1.5 seconds, never on Home and never during playback. The answers are kept, so Watch starts at once.
+2. **Read and rank.** Each stream's name and description are parsed for resolution, HDR type, codec, audio, size, seeders and debrid-cached markers. Torrents and links that need proxy headers are left out. Streams that would likely give no picture or no sound (DTS or TrueHD on TVs without them, Dolby Vision with no HDR10 base on a TV without it, HEVC or AV1 without a decoder, 4K on an HD TV, uncached debrid links) go to the back, tried only when nothing else is left. The rest are ranked by the resolution the TV can show, cached state, HDR, release source, which addons have played on this TV before (a per-addon tally of plays and failures, never the links themselves), seeders, then the addons' own order; camcorder copies go last. "Fastest start" puts cached 1080p and smaller files first.
+3. **Test the best link.** One hidden video element loads just the metadata of the top candidates, one at a time with a 2 second cap, on Details only after the focus rest, and stops when focus moves or the player opens (most LG TVs have one video decoder).
+4. **Play and fail over.** If a stream fails before or during playback, the next one starts at the same position, with a short "trying another" note. A stream picked by hand from the list does not fail over.
+5. **Choices.** The player's Quality menu switches between 4K, 1080p and 720p at the same position. "All streams" lists everything, best first, with badges and the reason any stream cannot play. Settings has "Best quality" or "Fastest start", and link testing on, off or automatic.
+6. **Lite mode.** On webOS 5, automatic means no link testing until it is measured on the floor TV.
+7. **While it starts,** the title's backdrop and logo show under a shimmer, not a spinner with text.
 
 **Tracks and subtitles**
 
@@ -363,30 +368,32 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 
 - Audio tracks, direct play: `HTMLMediaElement.audioTracks`, exposed on webOS 22, and switching is audible. The webOS 5 floor TV gets the same check. Where it is missing, show the default track and point users to a stream with their language.
 - Audio and subtitle renditions, HLS: hls.js, which reads the renditions from the playlist itself, whenever the master playlist declares alternates.
-- Embedded subtitles, direct play: not exposed through `textTracks` on webOS 22. A Phase 2 spike looks at the webOS media pipeline's own Luna API (`com.webos.media`, keyed by the video element's media ID), which may list and select embedded tracks; this is unverified. Until then the subtitle menu offers addon subtitles and says that embedded ones are not available on this TV.
+- Embedded subtitles, direct play: not exposed through `textTracks` on webOS 22. The webOS media pipeline's own Luna API (`com.webos.media`: `subscribe` for the track list, `setSubtitleEnable` and `selectTrack` keyed by the video element's `mediaId`) is used by Lampa, Stremio and Nuvio but is unofficial, and has frozen playback on webOS 25. A Lab spike tests it on the TV before the player uses it. Until then the subtitle menu offers addon subtitles.
 - Addon subtitles are the main subtitle path: they always work because BannerTV renders them itself, so OpenSubtitles v3 stays a default addon.
-- Addon subtitles (OpenSubtitles v3 and others): fetched with `fetch`, which needs CORS on the subtitle host. Detect the text encoding (many SRT files are Windows-1252, 1256 or similar) before decoding.
-- Renderer: SRT and VTT parsed into cues, drawn in an overlay above the video plane. Settings for size, colour, background, outline, vertical position and a timing offset adjustable in 100 ms steps.
+- Addon subtitles (OpenSubtitles v3 and others): asked with the stream's file name, hash and size so they match the release, fetched with `fetch` (webOS appears to relax CORS for packaged apps; checked on the TV in Phase 2), gunzipped when needed, and decoded after detecting the text encoding (byte-order mark, then strict UTF-8, then the language's code page such as Windows-1251 or 1256).
+- Subtitles are grouped by language, the last chosen language first; pressing the language already showing moves to its next version, the usual fix for subtitles out of step. A file that cannot be read is replaced by the next one in the same language.
+- Renderer: SRT, VTT and ASS/SSA (as styled text) parsed into cues, drawn in an overlay above the video plane. Settings for size, colour, background, vertical position and a timing offset adjustable in 100 ms steps. Cues from hls.js and Shaka go through the same renderer.
 - ASS and SSA styling through JASSUB is a Phase 5 item for webOS 6+; until then ASS is shown as plain text.
 
 **Progress, resume and next episode**
 
 - Save the position every 10 seconds, on pause and when the app is hidden. Mark as watched at 90% (configurable).
-- Resume with "Resume from 42:10" or "Start over". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this works for HLS and MP4. With `mediaOption`, `currentTime` reads 0 at the first `playing` event and the real position about 55 ms later, so progress is only saved once the clock has moved past the resume point, never from that first 0.
+- Resume with "Resume from 42:10" or "Start over" once 30 seconds have played, but not in the last minute. A rewatch resumes too, unless it stopped past 90%. A series offers its latest episode as "Resume S1:E3". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this works for HLS and MP4. With `mediaOption`, `currentTime` reads 0 at the first `playing` event and the real position about 55 ms later, so progress is only saved once the clock has moved past the resume point, never from that first 0.
 - Playback health: `getVideoPlaybackQuality()` reports no frames at all on webOS 22, so dropped frames cannot be counted. Stall detection and the "try the next stream" offer use `waiting` and `stalled` events and a timer.
-- Up Next card in the last 30 seconds or at 95%, with a 10 second countdown. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the stream picker.
+- Up Next card in the last 30 seconds or at 95%, with a 10 second countdown. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the automatic choice.
 - Trakt scrobble start, pause and stop events (Phase 3).
 
 **Player controls**
 
 | Input | Action |
 | --- | --- |
-| OK | Show overlay, then play or pause |
-| Left, Right | Seek 10 seconds, holding accelerates |
-| Up | Audio and subtitle menu |
-| Down | Title info and stream details |
-| Play, Pause, Stop, Fast forward, Rewind | Mapped to transport |
-| Back | Hide overlay, then leave the player (progress saved) |
+| OK | Play or pause, and show the controls |
+| Left, Right | Scrub 10 seconds; repeated presses step 30 then 60 seconds, and the seek happens when the presses stop |
+| Up, Down | Show the controls (Play, Audio and subtitles, Quality, Other streams, Start over, Next episode) |
+| Blue | Audio and subtitles |
+| Play, Pause, Stop | Mapped to transport; Stop leaves the player |
+| Fast forward, Rewind | Forward 30 seconds, back 10 seconds |
+| Back | Cancel a scrub, hide the controls, then leave the player (progress saved) |
 
 **Known limits to explain in the UI**
 

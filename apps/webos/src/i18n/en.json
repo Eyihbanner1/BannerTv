@@ -306,7 +306,9 @@
       "both": "Clock at start: {{playing}} at the playing event, {{update}} at the first timeupdate ({{delay}} ms later)"
     },
     "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
-    "error": "Error: {{error}}"
+    "error": "Error: {{error}}",
+    "embedded": "Test embedded subtitles (Luna)",
+    "inPlayer": "Open in BannerTV's player"
   },
   "welcome": {
     "title": "Welcome to BannerTV",

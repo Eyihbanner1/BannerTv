@@ -132,6 +132,34 @@ export function lunaCall<T extends Record<string, unknown>>(
 }
 
 /**
+ * A Luna subscription: every message goes to `onMessage` until the returned
+ * function cancels it. Off the TV it does nothing.
+ */
+export function lunaSubscribe(
+  uri: string,
+  params: Record<string, unknown>,
+  onMessage: (message: Record<string, unknown>) => void,
+): () => void {
+  const Bridge = window.PalmServiceBridge;
+  if (!Bridge) return () => undefined;
+  const bridge = new Bridge();
+  pending.add(bridge);
+  bridge.onservicecallback = (message) => {
+    try {
+      onMessage(JSON.parse(message) as Record<string, unknown>);
+    } catch {
+      onMessage({ unreadable: message });
+    }
+  };
+  bridge.call(uri, JSON.stringify({ ...params, subscribe: true }));
+  return () => {
+    bridge.onservicecallback = null;
+    bridge.cancel();
+    pending.delete(bridge);
+  };
+}
+
+/**
  * Wires the app lifecycle. With `handlesRelaunch: true` the TV sends
  * webOSRelaunch instead of restarting, and the app must bring itself forward.
  */

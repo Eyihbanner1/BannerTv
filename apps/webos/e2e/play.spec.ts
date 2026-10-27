@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { mockPlayback, seedStreamAddon } from './play';
+import { HLS_PATH, mockPlayback, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, press, pressBack, watchErrors } from './tv';
 
 /** Elephants Dream, the first title on Home. */
@@ -36,6 +36,22 @@ test('Watch plays the best stream at once, with no list to choose from', async (
   expect((await video(page)).src).toBe('/movie-1080p.webm');
   expect(mock.streams).toContain(`movie/${MOVIE}`);
   await expect(page.getByRole('status', { name: 'Starting' })).toHaveCount(0);
+
+  // The LG store's rule: the picture at 0,0, full size, with no transform on it or above it.
+  const layout = await page.evaluate(() => {
+    const element = document.querySelector('video:not([aria-hidden])')!;
+    const box = element.getBoundingClientRect();
+    let transformed = false;
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      if (getComputedStyle(node).transform !== 'none') transformed = true;
+    }
+    // Painted over the page's background, under the controls.
+    const stack = document.elementsFromPoint(960, 540);
+    const shown =
+      stack.indexOf(element) !== -1 && stack.indexOf(element) < stack.indexOf(document.body);
+    return { box: [box.x, box.y, box.width, box.height], transformed, shown };
+  });
+  expect(layout).toEqual({ box: [0, 0, 1920, 1080], transformed: false, shown: true });
 
   // OK pauses and brings up the controls, with what is playing.
   await press(page, 'Enter', 'player-play');
@@ -214,4 +230,43 @@ test('near the end of an episode, Up Next plays the next one from the same relea
     'data-focus-key',
     /^details-/,
   );
+});
+
+test('HLS with audio and subtitle choices plays through hls.js, and both show in the panel', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ name: 'Test Streams\nHLS', description: 'Open Movie HLS', path: HLS_PATH }],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // hls.js came from its own script, and plays through Media Source Extensions.
+  expect(await page.evaluate(() => typeof (window as { Hls?: unknown }).Hls)).toBe('function');
+  expect((await video(page)).src).toMatch(/^blob:/);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-off');
+  await expect(page.locator('[data-focus-key="player-tracks-audio-eng|English"]')).toBeVisible();
+  await press(page, 'ArrowDown', 'player-tracks-track-eng|English');
+  await expect(page.locator('[data-focus-key="player-tracks-track-eng|English"]')).toContainText(
+    'in the stream',
+  );
+  await press(page, 'Enter', 'player-tracks-track-eng|English');
+  await expect(page.getByText('Hello from the stream')).toBeVisible();
+
+  // French audio, remembered for the next stream.
+  await press(page, 'ArrowUp', 'player-tracks-off');
+  await press(page, 'ArrowUp', 'player-tracks-audio-fre|French');
+  await press(page, 'Enter', 'player-tracks-audio-fre|French');
+  await expect
+    .poll(async () =>
+      JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
+    )
+    .toMatchObject({ audioLanguage: 'fre' });
 });

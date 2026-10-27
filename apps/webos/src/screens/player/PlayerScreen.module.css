@@ -1,4 +1,4 @@
-/* The player covers the whole screen, rail included. */
+/* The player covers the whole screen, rail included. The picture shows through it. */
 .player {
   position: absolute;
   top: 0;
@@ -6,15 +6,20 @@
   width: 1920px;
   height: 1080px;
   overflow: hidden;
-  background: #000;
 }
 
+/*
+ * The video sits in the page body, outside the scaled app, at 0,0 and the
+ * window's full size with no transform: the LG store requires it, and webOS
+ * starts its screensaver over a video it does not see as full screen.
+ */
 .video {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
-  width: 1920px;
-  height: 1080px;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
   background: #000;
 }
 

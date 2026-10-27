@@ -48,10 +48,6 @@ const SKIPPED: Readonly<Record<string, Partial<Record<Field, string>>>> = {
     languages:
       'The file name says "Dual Audio", read as multi. The label leaves multi out here but has it for the same words in torrentio-p2p-720p-dual-audio.',
   },
-  'aiostreams-torrentio-style-rd-cached': {
-    languages:
-      'In "🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸" the label treats the flags after "Subs" as subtitles. Torrentio puts "Multi Subs" before its audio flags, so "Subs" cannot end the list.',
-  },
   'jackettio-ad-uncached-1080p-progress': {
     languages:
       'The label reads 🌎 as multi, but AIOStreams writes 🌎 before every language list, so it is not taken as multi.',

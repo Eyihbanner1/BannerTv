@@ -11,6 +11,19 @@ import type { Page, Route } from '@playwright/test';
 // 40 s of blank VP8 (a WebM) with byte-range support.
 const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.webm'));
 
+/**
+ * 10 s of HLS at MEDIA_HOST/hls/master.m3u8: VP9 and Opus in fMP4, audio in
+ * English and French, and English WebVTT subtitles, so BannerTV hands it to
+ * hls.js. Made with ffmpeg; see fixtures/hls/README.md.
+ */
+export const HLS_PATH = '/hls/master.m3u8';
+const HLS_TYPES: Record<string, string> = {
+  m3u8: 'application/vnd.apple.mpegurl',
+  mp4: 'video/mp4',
+  m4s: 'video/mp4',
+  vtt: 'text/vtt',
+};
+
 export const STREAM_ADDON_URL = 'https://streams.example.com/bannertv/manifest.json';
 export const MEDIA_HOST = 'https://media.example.com';
 export const SUBTITLE_HOST = 'https://subs.example.com';
@@ -221,6 +234,16 @@ export async function mockPlayback(
     const path = new URL(route.request().url()).pathname;
     mock.media.push(path);
     if (broken.has(path)) return route.fulfill({ status: 404, body: '' });
+    if (path.startsWith('/hls/')) {
+      const file = path.slice('/hls/'.length);
+      if (!/^[\w-]+\.(m3u8|mp4|m4s|vtt)$/.test(file)) return route.fulfill({ status: 404 });
+      return route.fulfill({
+        status: 200,
+        contentType: HLS_TYPES[file.replace(/^.*\./, '')],
+        headers: { 'access-control-allow-origin': '*' },
+        body: readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file)),
+      });
+    }
     return serveFixture(route);
   });
 

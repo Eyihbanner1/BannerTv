@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
 import { serveFixture } from './play';
-import { APP_URL, expectFocus, press } from './tv';
+import { APP_URL, expectFocus, press, pressBack } from './tv';
 
 test('a seek left over from a failed load does not move the next one', async ({ page }) => {
   await mockAddons(page);
@@ -44,4 +44,20 @@ test('a seek left over from a failed load does not move the next one', async ({ 
   );
   // An engine that counts no frames says so instead of claiming zero drops.
   await expect(page.getByText(/^Video:/)).not.toContainText('0 dropped of 0');
+
+  // The same source in BannerTV's own player, without asking any addon.
+  await press(page, 'ArrowDown', 'lab-source-1');
+  await press(page, 'ArrowDown', 'lab-source-2');
+  await press(page, 'ArrowDown', 'lab-fullscreen');
+  await press(page, 'ArrowDown', 'lab-player');
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(() =>
+      page
+        .locator('video:not([aria-hidden])')
+        .evaluate((video: HTMLVideoElement) => !video.paused && video.currentTime > 0),
+    )
+    .toBe(true);
+  await pressBack(page);
+  await expect(page.getByText('Start: from the beginning')).toBeVisible();
 });

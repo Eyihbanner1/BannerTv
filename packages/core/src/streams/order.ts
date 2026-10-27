@@ -56,6 +56,14 @@ function isCinema(entry: StreamEntry): boolean {
 }
 
 /**
+ * Lower is likelier to play well: no warning that matters, a cinema
+ * recording, a severe warning, then both.
+ */
+function playGroup(entry: StreamEntry): number {
+  return (isSevere(entry) ? 2 : 0) + (isCinema(entry) ? 1 : 0);
+}
+
+/**
  * Every order starts here: streams BannerTV plays, those with a severe
  * warning below them, then YouTube and web links, then streams that cannot
  * play here at all.
@@ -88,13 +96,15 @@ function resolutionRank(entry: StreamEntry, tv: TvCapabilities): number {
 
 /**
  * Higher is better. HDR only counts on a TV known to show it, and Dolby
- * Vision only on a TV known to have it; LG TVs show HDR10+ as HDR10.
+ * Vision only on a TV known to have it; LG TVs show HDR10+ as HDR10. On a TV
+ * known to lack HDR an HDR stream looks washed out, so SDR fits it better.
  */
 function hdrRank(entry: StreamEntry, tv: TvCapabilities): number {
   const hdr = entry.facts.hdr;
+  if (hdr.length === 0) return 0;
   if (hdr.indexOf('DV') >= 0 && tv.dolbyVision === true) return 2;
-  if (tv.hdr10 === true && hdr.some((format) => format !== 'DV')) return 1;
-  return 0;
+  if (tv.hdr10 === false) return -1;
+  return tv.hdr10 === true && hdr.some((format) => format !== 'DV') ? 1 : 0;
 }
 
 function sourceRank(entry: StreamEntry): number {
@@ -207,7 +217,7 @@ export function playableCandidates(
   const playable = entries.filter((entry) => entry.assessment.action.kind === 'play');
   const groups: StreamEntry[][] = [[], [], [], []];
   for (const entry of orderStreams(playable, order, tv, options)) {
-    groups[(isSevere(entry) ? 2 : 0) + (isCinema(entry) ? 1 : 0)]!.push(entry);
+    groups[playGroup(entry)]!.push(entry);
   }
   return groups[0]!.concat(groups[1]!, groups[2]!, groups[3]!);
 }
@@ -217,23 +227,29 @@ export function playableCandidates(
  * first candidate at it, highest resolution first; unknown resolutions last.
  *
  * At each resolution the first candidate without a severe warning is
- * preferred. A resolution offered only by streams with a severe warning (4K
- * on an HD TV, say) is left out while any other resolution has a stream
- * without one: picking it would most likely leave the viewer with no picture
- * or no sound. When every stream has one, all resolutions stay.
+ * preferred, and one that is not a cinema recording before one that is. A
+ * resolution offered only by streams with a severe warning (4K on an HD TV,
+ * say) is left out while any other resolution has a stream without one:
+ * picking it would most likely leave the viewer with no picture or no sound.
+ * Likewise a resolution offered only by cinema recordings is left out while
+ * another has a proper release, as the menu shows nothing but the resolution
+ * and "4K" should not lead to a camcorder copy. When every stream has such a
+ * warning, the resolutions of the likeliest to play stay.
  */
 export function qualityChoices(candidates: readonly StreamEntry[]): QualityChoice[] {
-  const best = new Map<Resolution | undefined, StreamEntry>();
-  const fallback = new Map<Resolution | undefined, StreamEntry>();
+  const best = new Map<Resolution | undefined, { entry: StreamEntry; group: number }>();
+  let floor = Infinity;
   for (const entry of candidates) {
     const resolution = entry.facts.resolution;
-    const into = isSevere(entry) ? fallback : best;
-    if (!into.has(resolution)) into.set(resolution, entry);
+    const group = playGroup(entry);
+    const known = best.get(resolution);
+    if (!known || group < known.group) best.set(resolution, { entry, group });
+    floor = Math.min(floor, group);
   }
   const choices: QualityChoice[] = [];
   for (const resolution of [...RESOLUTIONS, undefined]) {
-    const entry = best.get(resolution) ?? (best.size === 0 ? fallback.get(resolution) : undefined);
-    if (entry) choices.push({ resolution, entry });
+    const found = best.get(resolution);
+    if (found && found.group === floor) choices.push({ resolution, entry: found.entry });
   }
   return choices;
 }

@@ -28,6 +28,8 @@ export type Route =
       /** The viewer picked `stream` by hand, so the player asks before moving to another. */
       chosen?: boolean;
       startAt?: number;
+      /** A Lab test stream: no addons are asked and nothing is remembered. */
+      lab?: boolean;
     }
   /** Every stream for one video, for choosing by hand instead of auto-play. */
   | {

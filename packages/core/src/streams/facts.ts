@@ -51,6 +51,8 @@ interface Draft {
   cinema?: ReleaseSource;
   multi: boolean;
   languages: string[];
+  /** Where the description starts in the text: the file name and link before it have lost their extensions. */
+  descriptionFrom: number;
 }
 
 type Apply = (draft: Draft, text: string, start: number, end: number) => void;
@@ -61,6 +63,8 @@ interface Rule {
   apply: Apply;
   /** Audio names are often glued to their channels, as in "DDP5.1" or "AAC2.0". */
   digitsMayFollow?: boolean;
+  /** Also an everyday word, so it does not count in a title: "Cam (2018)", "The Italian Job". */
+  titleWord?: boolean;
 }
 
 function hdr(format: HdrFormat): Apply {
@@ -165,8 +169,8 @@ const RULES: readonly Rule[] = [
   { pattern: 'dolby[ ._-]?digital|ac[ ._-]?3', apply: audio('DD') },
   { pattern: 'he[ ._-]?aac|aac[ ._-]?lc', apply: audio('AAC') },
   { pattern: 'mp3', apply: audio('MP3') },
-  { pattern: 'stereo|2ch', apply: channelWord('2.0') },
-  { pattern: 'mono|1ch', apply: channelWord('1.0') },
+  { pattern: 'stereo|2ch', apply: channelWord('2.0'), titleWord: true },
+  { pattern: 'mono|1ch', apply: channelWord('1.0'), titleWord: true },
   { pattern: '6ch', apply: channelWord('5.1') },
   { pattern: '8ch', apply: channelWord('7.1') },
   {
@@ -185,7 +189,7 @@ const RULES: readonly Rule[] = [
   { pattern: 'atmos', apply: atmos, digitsMayFollow: true },
   { pattern: 'dts', apply: audio('DTS'), digitsMayFollow: true },
   { pattern: 'flac', apply: audio('FLAC'), digitsMayFollow: true },
-  { pattern: 'opus', apply: audio('Opus'), digitsMayFollow: true },
+  { pattern: 'opus', apply: audio('Opus'), digitsMayFollow: true, titleWord: true },
   { pattern: 'l?pcm', apply: audio('PCM'), digitsMayFollow: true },
 
   // Release source. Screeners first, so "WEBSCR" is not read as WEB.
@@ -197,19 +201,26 @@ const RULES: readonly Rule[] = [
   },
   { pattern: 'web[ ._-]?dl', apply: source('WEB-DL') },
   { pattern: 'web[ ._-]?rip', apply: source('WEBRip') },
-  { pattern: 'web', apply: source('WEB-DL') },
+  { pattern: 'web', apply: source('WEB-DL'), titleWord: true },
   { pattern: '[hps]dtv(?:rip)?', apply: source('HDTV') },
   { pattern: 'dvd(?:[ ._-]?rip|[59]|r)?', apply: source('DVD') },
   { pattern: 'hd[ ._-]?tc|telecine|tc', apply: source('TC') },
-  { pattern: 'hd[ ._-]?ts|tele[ ._-]?sync', apply: telesync },
+  { pattern: '(?:hd[ ._-]?)?ts[ ._-]?rip|hd[ ._-]?ts|tele[ ._-]?sync', apply: telesync },
   {
     pattern: 'ts',
     apply: (draft, text, start, end) => {
-      if (text.charAt(start - 1) === '.' && AFTER_EXTENSION.test(text.charAt(end))) return;
+      if (
+        start >= draft.descriptionFrom &&
+        text.charAt(start - 1) === '.' &&
+        AFTER_EXTENSION.test(text.charAt(end))
+      ) {
+        return;
+      }
       telesync(draft, text, start, end);
     },
   },
-  { pattern: '(?:hd|hq)[ ._-]?cam|cam(?:[ ._-]?rip)?', apply: source('CAM') },
+  { pattern: '(?:hd|hq)[ ._-]?cam(?:[ ._-]?rip)?|cam[ ._-]?rip', apply: source('CAM') },
+  { pattern: 'cam', apply: source('CAM'), titleWord: true },
 
   // "Multi Subs" is about subtitles; "Multi", "MULTi", "Dual Audio" are about sound.
   { pattern: '(?:multi|dual)[ ._-]?subs?', apply: ignore },
@@ -218,6 +229,7 @@ const RULES: readonly Rule[] = [
     apply: (draft) => {
       draft.multi = true;
     },
+    titleWord: true,
   },
   // Language names and the three-letter tags release names use. Tags that are
   // also common words ("por", "fin", "dan", "vie") are left out.
@@ -264,7 +276,9 @@ const RULES: readonly Rule[] = [
       ['fa', 'persian|farsi'],
       ['ur', 'urdu'],
     ] as const
-  ).map(([code, words]): Rule => ({ pattern: words, apply: language(code) })),
+  ).map(
+    ([code, words]): Rule => ({ pattern: words, apply: language(code), titleWord: true }),
+  ),
 ];
 
 /**
@@ -281,9 +295,30 @@ const WORDS = new RegExp(
   'g',
 );
 
-/** "1080p", "2160p60", "1920x1080", "4K", "UHD", "FHD"; "HD" only counts when nothing better is said. */
+/** A year or season number ends the title in a release name. */
+const TITLE_END = /(?:^|[^a-z0-9])(?:(?:19|20)\d\d|s\d\d?(?:e\d{1,3})?)(?![a-z0-9])/;
+
+/**
+ * True for a word on a release-name line before its year or season, where
+ * "Cam (2018)", "Charlotte's Web" and "The Italian Job" are the film's title.
+ * A word in brackets is a tag, as in "[CAM] Film 2025", so it still counts.
+ */
+function inTitle(text: string, start: number, end: number): boolean {
+  const before = text.charAt(start - 1);
+  if (before === '[' || before === '(') return false;
+  const lineStart = text.lastIndexOf('\n', start) + 1;
+  const lineEnd = text.indexOf('\n', end);
+  const anchor = TITLE_END.exec(text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd));
+  return anchor !== null && lineStart + anchor.index >= end;
+}
+
+/**
+ * "1080p", "2160p60", "1920x1080", "4K", "UHD", "FHD", "Full HD", and the
+ * "2K" AIOStreams templates write for 1440p; "HD" only counts when nothing
+ * better is said.
+ */
 const RESOLUTION =
-  /(?:^|[^a-z0-9])(?:(\d{3,4})[pi]|\d{3,4}x(\d{3,4})|(4k|uhd|qhd|fhd|hd))(?![a-z])/g;
+  /(?:^|[^a-z0-9])(?:(\d{3,4})[pi]|\d{3,4}x(\d{3,4})|(4k|2k|uhd|qhd|f(?:ull[ ._-]?)?hd|hd))(?![a-z])/g;
 const RESOLUTION_BY_LINES: Readonly<Record<string, Resolution>> = {
   '2160': '2160p',
   '1440': '1440p',
@@ -296,6 +331,7 @@ const RESOLUTION_BY_LINES: Readonly<Record<string, Resolution>> = {
 const RESOLUTION_BY_NAME: Readonly<Record<string, Resolution>> = {
   '4k': '2160p',
   uhd: '2160p',
+  '2k': '1440p',
   qhd: '1440p',
   fhd: '1080p',
 };
@@ -305,9 +341,10 @@ const AUDIO_HD = /(?:dts|true)[ ._-]?hd/;
  * "5.1", "7.1", "2.0", "1.0", glued to an audio name ("DDP5.1") or with a
  * space where a release name lost its dots ("Atmos 7 1"). Sizes ("2.0 GB"),
  * speeds and parts of longer numbers ("x265.10bit", "15.1") are not channels.
+ * Group 1 is the audio name the number is glued to.
  */
 const CHANNELS =
-  /(?:^|[^a-z0-9]|ddp?|aac|ac3|dts|ma|hd|flac|opus|pcm|atmos)([1257])[. ]([01])(?![0-9])(?!\s?(?:[kmgt]i?b|%))/g;
+  /(?:^|[^a-z0-9]|(ddp?|aac|ac3|dts|ma|hd|flac|opus|pcm|atmos))([1257])[. ]([01])(?![0-9])(?!\s?(?:[kmgt]i?b|%))/g;
 const CHANNELS_BY_DIGITS: Readonly<Record<string, Channels>> = {
   '10': '1.0',
   '20': '2.0',
@@ -315,9 +352,18 @@ const CHANNELS_BY_DIGITS: Readonly<Record<string, Channels>> = {
   '71': '7.1',
 };
 
+const SIZE_NUMBER = '(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:[.,]\\d+)?)\\s?';
+const SIZE_UNIT = '([kmgt]i?b)(?![a-z])(?!\\/s)';
 /** "💾 4.2 GB", "Size: 1,46 GB", "33.82 GiB"; never "3.1 MB/s". */
-const SIZE =
-  /(?:^|[^a-z0-9.,])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)\s?([kmgt]i?b)(?![a-z])(?!\/s)/;
+const SIZE = new RegExp('(?:^|[^a-z0-9.,])' + SIZE_NUMBER + SIZE_UNIT);
+/**
+ * A size after the addon's own mark is the file's, even when the release
+ * name above it ends in the pack's "[120 GB]". Tamtaro writes the file and
+ * pack with one unit: "◈ 3.1 / 22.4 GB".
+ */
+const MARKED_SIZE = new RegExp(
+  '(?:💾|📦|◈|❖|size\\s?:)\\s*' + SIZE_NUMBER + '(?:\\/\\s?\\d+(?:[.,]\\d+)?\\s?)?' + SIZE_UNIT,
+);
 const IEC_UNIT = /\d\s?[kmgt]ib(?![a-z])/;
 const UNIT_POWER: Readonly<Record<string, number>> = { k: 1, m: 2, g: 3, t: 4 };
 
@@ -388,7 +434,12 @@ const FLAG_LANGUAGE: Readonly<Record<string, string>> = {
  */
 const LANGUAGE_LINE = /(?:🗣|👂|🌐|🌎|🌍|languages?\s?:)([^\n]*)/g;
 const LANGUAGE_CODE = /(?:^|[^a-z])([a-z]{2})(?![a-z])/g;
-const SUBTITLE_LIST = /📝[^\n]*/g;
+/**
+ * Subtitle lists: "📝 …", TorBox's "| Subtitles: …" and AIOStreams'
+ * "🇬🇧 Subs / 🇫🇷 …". Torrentio's "Multi Subs / 🇬🇧 …" is followed by the
+ * audio languages, so group 1 keeps it.
+ */
+const SUBTITLE_LIST = /📝[^\n]*|subtitles?\s?:[^\n]*|(multi[ ._-]?)?subs\s?\/[^\n]*/g;
 const CODE_LANGUAGE: Readonly<Record<string, string>> = {
   en: 'en',
   fr: 'fr',
@@ -480,7 +531,8 @@ const NAME_SERVICE_WORD =
 const NAME_INSTANT = /(?:^|[^a-z0-9])instant(?![a-z])/;
 /** Orion marks a cached link with a rocket before its name; elsewhere 🚀 is decoration. */
 const ORION_CACHED = /🚀\s*orion/;
-const NOT_READY = /not ready(?:\s*\(([a-z.]{2,12})\))?/;
+/** AIOStreams' prism: "❌ Not Ready (RD)" uncached, "⚡Ready (RD)" cached; either names the service. */
+const READY = /(?:^|[^a-z])(not\s+)?ready(?![a-z])(?:\s*\(([a-z.]{2,12})\))?/;
 const UNCACHED_WORD = /(?:^|[^a-z0-9])uncached(?![a-z])/;
 /** ⏳ marks an uncached link, except in older MediaFusion's "P2P ⏳". */
 const HOURGLASS = /(p2p\s*)?⏳/g;
@@ -503,7 +555,8 @@ const VIDEO_EXTENSION = /\.(?:mkv|mp4|m4v|webm|ts|m2ts|mts|m3u8|mpd|avi|mov|wmv|
 
 /** The last path segment of a link, decoded. Read for its tokens only; the link is never kept. */
 function lastPathSegment(url: string): string {
-  const path = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '').replace(/[?#][\s\S]*$/, '');
+  // The host ends at a "?" or "#" too, so "https://host?file=/Film.2160p.mkv" gives no tokens.
+  const path = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '').replace(/[?#][\s\S]*$/, '');
   const segment = path.slice(path.lastIndexOf('/') + 1);
   if (segment.indexOf('%') < 0) return segment;
   try {
@@ -527,7 +580,8 @@ function readResolution(text: string, allowHd: boolean): Resolution | undefined 
     } else if (match[3] === 'hd') {
       hd = true;
     } else if (named === undefined) {
-      named = RESOLUTION_BY_NAME[match[3]!];
+      // "fhd", "full hd", "fullhd".
+      named = RESOLUTION_BY_NAME[match[3]!.charAt(0) === 'f' ? 'fhd' : match[3]!];
     }
   }
   if (named) return named;
@@ -538,16 +592,21 @@ function readChannels(text: string): Channels | undefined {
   CHANNELS.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = CHANNELS.exec(text)) !== null) {
-    const channels = CHANNELS_BY_DIGITS[match[1]! + match[2]!];
-    if (channels) return channels;
-    // "2.1" and the like: try again from the second digit.
-    CHANNELS.lastIndex = match.index + match[0].length - 1;
+    const end = match.index + match[0].length;
+    const channels = CHANNELS_BY_DIGITS[match[2]! + match[3]!];
+    if (channels) {
+      // A number in a title, as in "Ghost.in.the.Shell.2.0.2008", is not a channel count.
+      if (match[1] !== undefined || !inTitle(text, end - 3, end)) return channels;
+    } else {
+      // "2.1" and the like: try again from the second digit.
+      CHANNELS.lastIndex = end - 1;
+    }
   }
   return undefined;
 }
 
 function readSize(text: string): number | undefined {
-  const match = SIZE.exec(text);
+  const match = MARKED_SIZE.exec(text) ?? SIZE.exec(text);
   if (!match) return undefined;
   const number = match[1]!;
   const value = Number(
@@ -627,11 +686,11 @@ function readCache(name: string, description: string): CacheState {
   }
 
   const text = name + '\n' + description;
-  const notReady = NOT_READY.exec(text);
-  if (notReady) {
-    uncachedMark = true;
-    if (service === undefined && notReady[1] !== undefined) {
-      service = SERVICES[notReady[1].replace(TAG_SEPARATORS, '')];
+  const ready = READY.exec(text);
+  if (ready) {
+    if (ready[1] !== undefined) uncachedMark = true;
+    if (service === undefined && ready[2] !== undefined) {
+      service = SERVICES[ready[2].replace(TAG_SEPARATORS, '')];
     }
   }
   if (text.indexOf('⬇') >= 0 || text.indexOf('🎟') >= 0 || UNCACHED_WORD.test(text)) {
@@ -685,13 +744,24 @@ export function describeStream(stream: Stream): StreamFacts {
     stream.source.kind === 'url' ? lastPathSegment(stream.source.url).toLowerCase() : '';
 
   // Subtitle languages are not the stream's languages.
-  if (description.indexOf('📝') >= 0) description = description.replace(SUBTITLE_LIST, '');
+  if (description.indexOf('📝') >= 0 || description.indexOf('sub') >= 0) {
+    description = description.replace(SUBTITLE_LIST, (list: string, multi?: string) =>
+      multi === undefined ? '' : list,
+    );
+  }
   // Without the extension, a ".ts" file is not read as a telesync.
   const fileWords = fileName.replace(VIDEO_EXTENSION, '');
   const urlWords = urlName.replace(VIDEO_EXTENSION, '');
   const text = fileWords + '\n' + urlWords + '\n' + description + '\n' + name;
 
-  const draft: Draft = { hdr: 0, audio: 0, remux: false, multi: false, languages: [] };
+  const draft: Draft = {
+    hdr: 0,
+    audio: 0,
+    remux: false,
+    multi: false,
+    languages: [],
+    descriptionFrom: fileWords.length + urlWords.length + 2,
+  };
   WORDS.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = WORDS.exec(text)) !== null) {
@@ -699,7 +769,9 @@ export function describeStream(stream: Stream): StreamFacts {
     for (let group = 1; group < match.length; group++) {
       const token = match[group];
       if (token !== undefined) {
-        RULES[group - 1]!.apply(draft, text, end - token.length, end);
+        const rule = RULES[group - 1]!;
+        const start = end - token.length;
+        if (!rule.titleWord || !inTitle(text, start, end)) rule.apply(draft, text, start, end);
         break;
       }
     }

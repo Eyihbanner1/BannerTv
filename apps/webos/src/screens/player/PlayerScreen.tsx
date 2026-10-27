@@ -8,6 +8,7 @@ import {
 import type { MetaPreview } from '@bannertv/protocol';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { back, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -58,6 +59,7 @@ interface PlayerScreenProps {
   stream?: StreamEntry;
   chosen?: boolean;
   startAt?: number;
+  lab?: boolean;
 }
 
 const noop = () => () => undefined;
@@ -134,16 +136,17 @@ export function PlayerScreen(props: PlayerScreenProps) {
       videoId,
       finder,
       autoFailover: !props.chosen,
+      remember: !props.lab,
     });
     setSession(created);
-    finder.start();
+    if (!props.lab) finder.start();
     let cancelled = false;
     void progress
       .load()
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = props.startAt ?? progress.resumeAt(videoId) ?? 0;
+        const start = props.startAt ?? (props.lab ? 0 : progress.resumeAt(videoId)) ?? 0;
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose());
         if (cancelled) return;
@@ -392,19 +395,21 @@ export function PlayerScreen(props: PlayerScreenProps) {
       onPress: () => openPanel('quality', 'player-quality-button'),
     });
   }
-  buttons.push({
-    focusKey: 'player-streams-button',
-    label: t('player.otherStreams'),
-    onPress: () =>
-      replace({
-        name: 'streams',
-        type,
-        metaId,
-        videoId,
-        preview,
-        startAt: session?.trustedPosition() ?? state.position,
-      }),
-  });
+  if (!props.lab) {
+    buttons.push({
+      focusKey: 'player-streams-button',
+      label: t('player.otherStreams'),
+      onPress: () =>
+        replace({
+          name: 'streams',
+          type,
+          metaId,
+          videoId,
+          preview,
+          startAt: session?.trustedPosition() ?? state.position,
+        }),
+    });
+  }
   if (resumedAt > 0) {
     buttons.push({
       focusKey: 'player-restart',
@@ -427,7 +432,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   return (
     <section className={styles.player} aria-label={title} onMouseMove={onPointer}>
-      <video ref={videoRef} className={styles.video} />
+      {createPortal(<video ref={videoRef} className={styles.video} />, document.body)}
       <SubtitleLayer
         video={video}
         cues={subtitles.cues}
