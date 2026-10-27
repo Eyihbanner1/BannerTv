@@ -38,7 +38,8 @@ export const GENRE_PICKS: ReadonlyArray<readonly [type: ContentType, genre: stri
 // Catalogs with these words in their name or id get wide backdrop tiles.
 const SPOTLIGHT = /featured|trending|spotlight|new releases/i;
 
-function slug(text: string): string {
+/** Lower-case letters, digits and dashes, for keys that also become focus keys. */
+export function slug(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

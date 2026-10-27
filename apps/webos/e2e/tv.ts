@@ -38,3 +38,27 @@ export async function pressBack(page: Page): Promise<void> {
   });
   await page.waitForTimeout(KEY_GAP_MS);
 }
+
+/** Waits for focus to land on the element Audio Guidance would read as `label`. */
+export async function expectFocusLabel(page: Page, label: string): Promise<void> {
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute('aria-label', label);
+}
+
+/** Presses a remote key and waits for focus to land on the element labelled `label`. */
+export async function pressTo(page: Page, key: string, label: string): Promise<void> {
+  await page.keyboard.press(key);
+  await expectFocusLabel(page, label);
+  await page.waitForTimeout(KEY_GAP_MS);
+}
+
+const SECTIONS = ['home', 'search', 'discover', 'library', 'addons', 'settings'];
+
+/** From Home's first tile, opens a section through the rail. */
+export async function openSection(page: Page, section: string): Promise<void> {
+  await press(page, 'ArrowLeft', 'rail-home');
+  for (const item of SECTIONS.slice(1, SECTIONS.indexOf(section) + 1)) {
+    await press(page, 'ArrowDown', `rail-${item}`);
+  }
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(KEY_GAP_MS);
+}

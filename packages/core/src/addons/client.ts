@@ -54,12 +54,21 @@ export class NotFoundError extends Error {
   }
 }
 
+export interface CatalogOptions {
+  /**
+   * Keep the response across launches (the default). Searches pass false:
+   * every term typed would otherwise push Home's rows out of storage.
+   */
+  persist?: boolean;
+}
+
 export interface AddonClient {
   catalog(
     addon: InstalledAddon,
     type: ContentType,
     catalogId: string,
     extra?: readonly ExtraArg[],
+    options?: CatalogOptions,
   ): Query<MetaPreview[]>;
   /** Asks addons that declare meta for this type and ID, in priority order, until one knows it. */
   meta(type: ContentType, id: string): Query<MetaDetail>;
@@ -75,11 +84,11 @@ export function createAddonClient(options: {
   const get = (url: string) => limiter.run(() => fetchJson(url, { timeoutMs: BROWSE_TIMEOUT_MS }));
 
   return {
-    catalog(addon, type, catalogId, extra = []) {
+    catalog(addon, type, catalogId, extra = [], options = {}) {
       const url = resourceUrl(addon.transportUrl, 'catalog', type, catalogId, extra);
       return queries.query(url, {
         policy: CATALOG_POLICY,
-        persist: true,
+        persist: options.persist !== false,
         fetch: async () => {
           const response = parseCatalogResponse(await get(url), type);
           return { value: response.metas.map(withArtwork), hints: response.cache };

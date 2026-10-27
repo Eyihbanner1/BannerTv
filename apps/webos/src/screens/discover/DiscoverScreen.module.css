@@ -1,0 +1,32 @@
+.screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-content-width);
+  height: 1080px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  height: 200px;
+  padding: 40px var(--bt-safe-x) 0 var(--bt-content-inset);
+}
+
+.title {
+  flex: none;
+  margin-right: 56px;
+  font: var(--bt-text-title);
+}
+
+.pickers {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.message {
+  max-width: 1100px;
+  padding: 16px 0 0 var(--bt-content-inset);
+  color: var(--bt-text-muted);
+}

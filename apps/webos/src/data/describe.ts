@@ -1,4 +1,4 @@
-import { HttpError, NotFoundError } from '@bannertv/core';
+import { HttpError, InstallError, NotFoundError } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import type { TFunction } from 'i18next';
 
@@ -32,4 +32,22 @@ export function formatDate(iso: string): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/** Why an addon could not be added, for the user. */
+export function describeInstallError(t: TFunction, error: unknown): string {
+  if (error instanceof InstallError) return t(`addons.installError.${error.kind}`);
+  return t('addons.installError.other');
+}
+
+/**
+ * A short stable id for an installed addon, for focus keys. Addon URLs can
+ * carry account keys, so the URL itself never goes into the page.
+ */
+export function addonFocusId(transportUrl: string): string {
+  let hash = 5381;
+  for (let i = 0; i < transportUrl.length; i++) {
+    hash = ((hash << 5) + hash + transportUrl.charCodeAt(i)) | 0;
+  }
+  return `addon-${(hash >>> 0).toString(36)}`;
 }

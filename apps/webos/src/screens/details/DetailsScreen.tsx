@@ -9,6 +9,7 @@ import { Pressable } from '../../components/Pressable';
 import { addonClient } from '../../data/addons';
 import { describeAddonError, metaFacts } from '../../data/describe';
 import { useQuery } from '../../data/use-query';
+import { playTrailer } from '../../platform/youtube';
 import { EpisodeList } from './EpisodeList';
 import { defaultSeason, groupSeasons, type Season } from './seasons';
 import styles from './DetailsScreen.module.css';
@@ -121,7 +122,8 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   const state = useQuery(query);
   const meta = state.data;
   const item: MetaPreview | undefined = meta ?? preview;
-  const [note, setNote] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const trailer = item?.trailers[0];
   const isMovie = type === 'movie';
   const failed = state.status === 'error';
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
@@ -181,7 +183,17 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               focusKey="details-watch"
               label={t('details.watch')}
               variant="primary"
-              onPress={() => setNote(true)}
+              onPress={() => setNote(t('details.comingInPhase2'))}
+            />
+          )}
+          {trailer && (
+            <Button
+              focusKey="details-trailer"
+              label={t('details.trailer')}
+              onPress={() => {
+                setNote(null);
+                playTrailer(trailer).catch(() => setNote(t('details.trailerFailed')));
+              }}
             />
           )}
           {failed && (
@@ -192,12 +204,12 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
             />
           )}
         </div>
-        {note && <p className={styles.note}>{t('details.comingInPhase2')}</p>}
+        {note && <p className={styles.note}>{note}</p>}
       </div>
       {!isMovie && !canWatch && !failed && (
         <div className={styles.panel}>
           {meta && hasEpisodes ? (
-            <Episodes meta={meta} onPress={() => setNote(true)} />
+            <Episodes meta={meta} onPress={() => setNote(t('details.comingInPhase2'))} />
           ) : (
             <p className={styles.note}>{t('details.loading')}</p>
           )}

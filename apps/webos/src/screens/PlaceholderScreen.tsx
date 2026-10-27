@@ -4,7 +4,7 @@ import { useScreenFocus } from '../app/use-screen-focus';
 import styles from './Screen.module.css';
 
 /** Sections that arrive in later phases. Nothing to focus, so focus stays in the rail. */
-export function PlaceholderScreen({ section }: { section: Exclude<Section, 'home' | 'settings'> }) {
+export function PlaceholderScreen({ section }: { section: Extract<Section, 'library'> }) {
   const { t } = useTranslation();
   useScreenFocus();
   return (

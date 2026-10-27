@@ -16,6 +16,20 @@ const SUBTITLES_MANIFEST = readFileSync(resolve(CORE, 'opensubtitles-v3.manifest
 export const FIRST_ROW = 'home-0-movie-top';
 export const SERIES_ROW = 'home-0-series-top';
 
+/** An addon the journeys can install by its address. */
+export const EXTRA_ADDON_URL = 'https://addon.example.com/bannertv/manifest.json';
+const EXTRA_ADDON = {
+  id: 'com.example.shorts',
+  version: '1.2.0',
+  name: 'Open Shorts',
+  description: 'Short films from open studios.',
+  types: ['movie'],
+  resources: ['catalog'],
+  catalogs: [{ type: 'movie', id: 'trending', name: 'Trending shorts' }],
+};
+/** Pages that `skip` reaches beyond the first: the catalogs end after this many titles. */
+const PAGED_TOTAL = 42;
+
 const MOVIES: ReadonlyArray<readonly [id: string, name: string, year: string]> = [
   ['tt0807840', 'Elephants Dream', '2006'],
   ['tt1254207', 'Big Buck Bunny', '2008'],
@@ -94,6 +108,9 @@ function movieMeta(id: string) {
         runtime: '15 min',
         cast: ['Proog', 'Emo'],
         director: ['Bassam Kurdali'],
+        ...(id === 'tt1727587'
+          ? { trailerStreams: [{ title: 'Trailer', ytId: 'eRsGyueVLvQ' }] }
+          : {}),
       }
     : null;
 }
@@ -175,6 +192,14 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   await page.route('https://opensubtitles-v3.strem.io/manifest.json', (route) =>
     json(route, JSON.parse(SUBTITLES_MANIFEST)),
   );
+  await page.route(/^https:\/\/addon\.example\.com\/bannertv\//, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/bannertv/manifest.json') return json(route, EXTRA_ADDON);
+    if (path === '/bannertv/catalog/movie/trending.json') {
+      return json(route, { metas: MOVIES.slice(0, 3).map((entry) => preview('movie', entry)) });
+    }
+    return json(route, { error: 'not found' }, 404);
+  });
   await page.route(/^https:\/\/v3-cinemeta\.strem\.io\//, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/manifest.json') return json(route, JSON.parse(CINEMETA_MANIFEST));
@@ -187,6 +212,23 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
       const answered = options.catalogs?.[key]?.(route);
       if (answered) return answered;
       const list = type === 'series' ? SERIES : MOVIES;
+      const args = new URLSearchParams(extra ? decodeURIComponent(extra) : '');
+      const search = args.get('search');
+      if (search) {
+        const found = list.filter(([, name]) => name.toLowerCase().includes(search.toLowerCase()));
+        return json(route, { metas: found.map((entry) => preview(type, entry)) });
+      }
+      const skip = Number(args.get('skip') ?? 0);
+      if (skip > 0) {
+        // Later pages are made up, so Discover has something to page through.
+        const metas = [];
+        for (let n = skip; n < Math.min(skip + list.length, PAGED_TOTAL); n++) {
+          metas.push(
+            preview(type, [`tt77${String(n).padStart(5, '0')}`, `${type} ${n + 1}`, '2024']),
+          );
+        }
+        return json(route, { metas });
+      }
       // Genre rows and Featured get the same titles in a different order.
       const ordered = extra || id !== 'top' ? [...list].reverse() : list;
       return json(route, { metas: ordered.map((entry) => preview(type, entry)) });

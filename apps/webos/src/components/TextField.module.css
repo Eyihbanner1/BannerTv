@@ -1,0 +1,36 @@
+.field {
+  position: relative;
+  height: 88px;
+  padding: 0 32px;
+  border: 3px solid var(--bt-surface-3);
+  border-radius: 20px;
+  background: var(--bt-surface-1);
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.focused {
+  border-color: var(--bt-focus);
+  background: var(--bt-surface-2);
+}
+
+.editing {
+  border-color: var(--bt-accent);
+  background: var(--bt-surface-3);
+}
+
+.input {
+  display: block;
+  width: 100%;
+  height: 82px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--bt-text);
+  font: 600 32px/82px var(--bt-font);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--bt-text-subtle);
+}

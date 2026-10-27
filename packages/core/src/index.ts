@@ -3,6 +3,7 @@ export {
   type AddonClient,
   BROWSE_TIMEOUT_MS,
   CATALOG_POLICY,
+  type CatalogOptions,
   createAddonClient,
   META_POLICY,
   NotFoundError,
@@ -18,6 +19,19 @@ export {
   type StoredAddon,
 } from './addons/collection';
 export { CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './addons/defaults';
+export {
+  type CatalogPager,
+  createCatalogPager,
+  type PagerState,
+  type PagerStatus,
+} from './addons/pager';
+export {
+  type CatalogSource,
+  discoverSources,
+  type DiscoverSource,
+  orderedTypes,
+  searchSources,
+} from './addons/sources';
 export { type FetchJson, type FetchJsonOptions, HttpError, type HttpErrorKind } from './http';
 export { createLimiter, type Limiter } from './limiter';
 export {
@@ -30,6 +44,7 @@ export {
   type QueryState,
   type QueryStatus,
 } from './query';
+export { createRecentList, type RecentList } from './recent';
 export {
   type CacheRecord,
   type CacheStore,

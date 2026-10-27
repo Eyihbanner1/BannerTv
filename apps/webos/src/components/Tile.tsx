@@ -82,3 +82,29 @@ export function Tile({
     </Pressable>
   );
 }
+
+interface MoreTileProps {
+  focusKey: string;
+  shape: TileShape;
+  label: string;
+  style?: CSSProperties;
+  onFocus: () => void;
+  onPress: () => void;
+}
+
+/** The last tile of a row: opens the whole catalog. */
+export function MoreTile({ focusKey, shape, label, style, onFocus, onPress }: MoreTileProps) {
+  return (
+    <Pressable
+      focusKey={focusKey}
+      label={label}
+      className={`${styles.tile} ${styles[shape]} ${styles.more}`}
+      focusedClassName={styles.focused}
+      style={style}
+      onFocus={onFocus}
+      onPress={onPress}
+    >
+      <span className={styles.moreLabel}>{label}</span>
+    </Pressable>
+  );
+}

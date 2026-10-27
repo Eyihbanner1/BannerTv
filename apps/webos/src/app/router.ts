@@ -11,6 +11,8 @@ export type Route =
   | { name: Section }
   /** `preview` is what the tile already knew, drawn while the full meta loads. */
   | { name: 'details'; type: string; id: string; preview?: MetaPreview }
+  /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */
+  | { name: 'catalog'; transportUrl: string; type: string; catalogId: string; genre?: string }
   | { name: 'diagnostics' }
   | { name: 'lab' };
 

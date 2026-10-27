@@ -3,11 +3,14 @@ import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { Rail } from '../components/Rail';
 import { platformBack } from '../platform/webos';
 import { useBack } from '../navigation/use-back';
+import { AddonsScreen } from '../screens/addons/AddonsScreen';
 import { DetailsScreen } from '../screens/details/DetailsScreen';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
+import { DiscoverScreen } from '../screens/discover/DiscoverScreen';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
+import { SearchScreen } from '../screens/search/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { back, currentSection, openSection, type Route, router } from './router';
 import styles from './App.module.css';
@@ -18,6 +21,14 @@ function Screen({ route }: { route: Route }) {
   switch (route.name) {
     case 'home':
       return <HomeScreen />;
+    case 'search':
+      return <SearchScreen />;
+    case 'discover':
+      return <DiscoverScreen />;
+    case 'catalog':
+      return <DiscoverScreen preset={route} />;
+    case 'addons':
+      return <AddonsScreen />;
     case 'settings':
       return <SettingsScreen />;
     case 'details':

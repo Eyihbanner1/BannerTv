@@ -11,8 +11,10 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Row, RowPlaceholder } from '../../components/Row';
+import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { useQuery } from '../../data/use-query';
@@ -31,15 +33,6 @@ const HERO_DELAY_MS = 250;
 
 export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 
-/** Moves the rows so `rowKey` sits at the top of the rows area. */
-function slideTrack(track: HTMLElement | null, rowKey: string | undefined): void {
-  if (!track) return;
-  const element = rowKey
-    ? track.querySelector<HTMLElement>(`[data-row-key="home-${rowKey}"]`)
-    : null;
-  track.style.transform = element ? `translateY(${-element.offsetTop}px)` : '';
-}
-
 // Kept across visits to Home in this session, so Back lands as it was left.
 const memory = { row: undefined as string | undefined, slideRow: undefined as string | undefined };
 const emptyRows = new Set<string>();
@@ -50,6 +43,17 @@ interface HomeRowProps {
   near: boolean;
   onEmpty: (key: string) => void;
   onItemFocus: (row: BoardRow, item: MetaPreview, element: HTMLElement) => void;
+}
+
+function openCatalog(row: BoardRow): void {
+  const genre = row.extra.find(([name]) => name === 'genre');
+  push({
+    name: 'catalog',
+    transportUrl: row.addon.transportUrl,
+    type: row.type,
+    catalogId: row.catalog.id,
+    genre: genre ? genre[1] : undefined,
+  });
 }
 
 function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
@@ -91,6 +95,7 @@ function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
       onRetry={() => query.retry()}
       onItemFocus={(item, element) => onItemFocus(row, item, element)}
       onItemPress={openDetails}
+      onSeeAll={() => openCatalog(row)}
     />
   );
 }
@@ -122,7 +127,10 @@ export function HomeScreen() {
 
   // The focused row moves to the top of the rows area. This re-applies it after
   // rows above it disappear, and on return, so Home comes back as it was.
-  useLayoutEffect(() => slideTrack(trackRef.current, memory.slideRow), [rows]);
+  useLayoutEffect(
+    () => slideTrack(trackRef.current, memory.slideRow && `home-${memory.slideRow}`),
+    [rows],
+  );
 
   useEffect(() => () => clearTimeout(heroTimer.current), []);
 
@@ -136,7 +144,7 @@ export function HomeScreen() {
     setFocusedRow(row.key);
     if (canSlide()) {
       memory.slideRow = row.key;
-      slideTrack(trackRef.current, row.key);
+      slideTrack(trackRef.current, rowFocusKey(row));
     }
     clearTimeout(heroTimer.current);
     heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);

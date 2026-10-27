@@ -10,7 +10,7 @@ import {
 } from '../navigation/focus-memory';
 import { canSlide } from '../platform/input-mode';
 import { Button } from './Button';
-import { Tile, type TileShape } from './Tile';
+import { MoreTile, Tile, type TileShape } from './Tile';
 import styles from './Row.module.css';
 
 /** Tile pitch and how many fit across the 1704 px the row shows. */
@@ -35,6 +35,8 @@ interface RowProps {
   onRetry?: () => void;
   onItemFocus: (item: MetaPreview, row: HTMLElement) => void;
   onItemPress: (item: MetaPreview) => void;
+  /** Adds a last tile that opens the whole catalog. */
+  onSeeAll?: () => void;
 }
 
 /**
@@ -45,10 +47,12 @@ interface RowProps {
  * decoding and memory down on 2020 TVs.
  */
 export function Row(props: RowProps) {
-  const { focusKey, title, tag, shape, items, error, onRetry, onItemFocus, onItemPress } = props;
+  const { focusKey, title, tag, shape, items, error, onRetry, onItemFocus, onItemPress, onSeeAll } =
+    props;
   const { t } = useTranslation();
   const { step, visible } = ROW_GEOMETRY[shape];
-  const count = items ? items.length : visible;
+  const seeAll = onSeeAll !== undefined && items !== null && items.length > 0 && !error;
+  const count = items ? items.length + (seeAll ? 1 : 0) : visible;
   const [scrolled, setAnchor] = useState(() => recallScroll(focusKey));
   // A row that loaded fewer titles than it showed placeholders keeps focus on a real one.
   const anchor = Math.min(scrolled, Math.max(0, count - 1));
@@ -83,6 +87,23 @@ export function Row(props: RowProps) {
   for (let index = first; index < last; index++) {
     const item = items ? items[index] : undefined;
     const tileKey = `${focusKey}-tile-${index}`;
+    if (seeAll && index === items!.length) {
+      tiles.push(
+        <MoreTile
+          key={index}
+          focusKey={tileKey}
+          shape={shape}
+          label={t('home.seeAll')}
+          style={{ left: index * step }}
+          onPress={onSeeAll}
+          onFocus={() => {
+            rememberFocus(focusKey, tileKey);
+            if (canSlide() && index !== anchor) scrollTo(index);
+          }}
+        />,
+      );
+      continue;
+    }
     tiles.push(
       <Tile
         key={index}

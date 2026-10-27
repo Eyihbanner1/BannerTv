@@ -7,7 +7,8 @@
     "notAvailable": "n/a",
     "tryAgain": "Try again",
     "loading": "Loading",
-    "listSeparator": ", "
+    "listSeparator": ", ",
+    "cancel": "Cancel"
   },
   "rail": {
     "label": "Main menu",
@@ -31,7 +32,62 @@
     "noAddonsLead": "None of your addons has a catalog. Add one, such as Cinemeta, to fill Home.",
     "previous": "Previous titles",
     "next": "More titles",
-    "loadingTile": "Loading"
+    "loadingTile": "Loading",
+    "seeAll": "See all"
+  },
+  "search": {
+    "label": "Search",
+    "placeholder": "Search for a film or series",
+    "hint": "Press OK on the box to type. The microphone key on the TV keyboard lets you speak instead.",
+    "recent": "Recent searches",
+    "clearRecent": "Clear recent searches",
+    "nothingFound": "Nothing found for “{{term}}”.",
+    "noAddons": "None of your addons can search. Add one, such as Cinemeta, in Addons."
+  },
+  "discover": {
+    "type": "Type",
+    "catalog": "Catalog",
+    "genre": "Genre",
+    "allGenres": "All genres",
+    "empty": "This catalog has nothing to show yet.",
+    "noCatalogs": "None of your addons has a catalog to browse. Add one, such as Cinemeta, in Addons."
+  },
+  "addons": {
+    "lead": "Addons give BannerTV its catalogs and titles, and in Phase 2 its streams. Higher addons answer first, and their rows come first on Home.",
+    "add": "Add an addon",
+    "none": "You have no addons, so Home is empty. Add one, such as Cinemeta, with its address.",
+    "version": "v{{version}}",
+    "default": "Default",
+    "resources": {
+      "catalog": "Catalogs",
+      "meta": "Titles",
+      "stream": "Streams",
+      "subtitles": "Subtitles"
+    },
+    "up": "Move up",
+    "down": "Move down",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "remove": "Remove",
+    "removeLabel": "Remove {{name}}",
+    "keep": "Keep it",
+    "removeTitle": "Remove {{name}}?",
+    "removeMessage": "Its rows leave Home and it stops answering for titles. You can add it again later from its address.",
+    "removed": "Removed {{name}}.",
+    "added": "Added {{name}}. Its catalogs are on Home now.",
+    "updated": "Updated {{name}}.",
+    "installTitle": "Add an addon",
+    "installLead": "Type the addon's address: it usually ends in manifest.json. The microphone key on the TV keyboard lets you say it instead.",
+    "addressLabel": "Addon address",
+    "addressPlaceholder": "https://…/manifest.json",
+    "install": "Add",
+    "installing": "Checking the addon…",
+    "installError": {
+      "invalid-url": "That doesn't look like an addon address. It starts with https:// and usually ends in manifest.json.",
+      "unreachable": "BannerTV couldn't reach that address. Check it, and that the TV is online.",
+      "not-an-addon": "That address answered, but not with an addon.",
+      "other": "That addon couldn't be added."
+    }
   },
   "addonError": {
     "timeout": "{{addon}} took too long to answer.",
@@ -56,13 +112,12 @@
     "cast": "Starring {{names}}",
     "directors": "Directed by {{names}}",
     "loading": "Loading details",
-    "noEpisodes": "This addon lists no episodes yet."
+    "noEpisodes": "This addon lists no episodes yet.",
+    "trailer": "Trailer",
+    "trailerFailed": "The YouTube app didn't open. Check it's installed on the TV."
   },
   "placeholder": {
-    "search": "Search across all your addons arrives later in Phase 1.",
-    "discover": "Browsing by type, catalog and genre arrives later in Phase 1.",
-    "library": "Your saved titles and watch history arrive in Phase 3.",
-    "addons": "Installing addons by URL or from your phone arrives later in Phase 1."
+    "library": "Your saved titles and watch history arrive in Phase 3."
   },
   "settings": {
     "lead": "Developer tools for the Phase 0 spikes. Real settings arrive in Phase 1.",
