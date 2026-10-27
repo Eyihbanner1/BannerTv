@@ -6,15 +6,92 @@
   margin: 0 0 4px var(--bt-content-inset);
   font: var(--bt-text-heading);
   color: var(--bt-text);
+  white-space: nowrap;
 }
 
-/* Bleeds to the right edge. The padding leaves room for the focus scale. */
+.tag {
+  margin-left: 16px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+/* Bleeds to the right edge. The padding leaves room for the focus scale.
+   A fixed height keeps every row the same size whatever it holds. */
 .viewport {
+  position: relative;
   overflow: hidden;
   padding: 20px 0 20px var(--bt-content-inset);
 }
 
+.poster {
+  height: 370px;
+}
+
+.landscape {
+  height: 256px;
+}
+
 .track {
-  display: flex;
+  position: relative;
+  height: 100%;
   transition: transform var(--bt-motion) ease-out;
+}
+
+.message {
+  padding-top: 24px;
+  color: var(--bt-text-muted);
+}
+
+.message p {
+  margin-bottom: 24px;
+}
+
+/* Paging arrows: pointer mode only. */
+.arrow {
+  display: none;
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  width: 88px;
+  z-index: 2;
+  cursor: pointer;
+}
+
+:global(.pointer-mode) .arrow {
+  display: block;
+}
+
+.previous {
+  left: 0;
+  background: linear-gradient(90deg, rgba(11, 8, 21, 0.9), rgba(11, 8, 21, 0));
+}
+
+.next {
+  right: 0;
+  background: linear-gradient(270deg, rgba(11, 8, 21, 0.9), rgba(11, 8, 21, 0));
+}
+
+.arrow::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  border-top: 5px solid var(--bt-text);
+  border-right: 5px solid var(--bt-text);
+}
+
+.previous::after {
+  left: 32px;
+  transform: rotate(-135deg);
+}
+
+.next::after {
+  right: 36px;
+  transform: rotate(45deg);
+}
+
+.arrow:hover::after {
+  border-color: var(--bt-focus);
 }

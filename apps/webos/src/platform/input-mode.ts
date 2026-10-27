@@ -1,4 +1,5 @@
 import { createStore } from '@bannertv/core';
+import { movedByWheel } from '../navigation/spatial';
 
 export type InputMode = 'keys' | 'pointer';
 
@@ -10,6 +11,15 @@ interface CursorStateDetail {
 }
 
 const POINTER_CLASS = 'pointer-mode';
+
+/**
+ * Whether lists may slide to follow focus. With the arrows, yes. Under a
+ * resting pointer, no, or a new tile would slide under it and take focus;
+ * the wheel is the exception, since scrolling is what it asks for.
+ */
+export function canSlide(): boolean {
+  return inputMode.get() === 'keys' || movedByWheel();
+}
 
 /**
  * On the TV, webOS fires cursorStateChange when the Magic Remote pointer

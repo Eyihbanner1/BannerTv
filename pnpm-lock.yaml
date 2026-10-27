@@ -35,6 +35,9 @@ importers:
       '@bannertv/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@bannertv/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@noriginmedia/norigin-spatial-navigation':
         specifier: ^3.4.0
         version: 3.4.0(react@18.3.1)
@@ -80,6 +83,16 @@ importers:
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
 
   packages/core:
+    dependencies:
+      '@bannertv/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
+
+  packages/protocol:
     devDependencies:
       vitest:
         specifier: ^5.0.5

@@ -6,11 +6,12 @@ BannerTV hosts no content. Users add addon URLs, and BannerTV browses, resolves 
 
 ## Status
 
-Phase 0 (foundations). The app shell, remote navigation, packaging and CI are in place, and a diagnostics screen and playback lab answer the plan's three spikes on a real TV. The first run on the webOS 22 TV is recorded in ADR 0001. No addons yet: Home shows sample tiles.
+Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, packaging, CI and the spike screens in place; the first run on the webOS 22 TV is recorded in ADR 0001. Phase 1 so far: the Stremio addon protocol, an addon client with a two-tier cache, Cinemeta and OpenSubtitles v3 preinstalled, a Netflix-style Home built from addon catalogs, and Details with seasons and episodes (ADR 0002). Search, Discover and the Addons screen come next. Nothing plays yet: that is Phase 2.
 
 - [Project plan](docs/PLAN.md): scope, addon protocol, webOS specifics, architecture, stack, UX, player, repository layout, milestones, testing, LG Content Store submission and risks.
 - [TV setup](docs/TV_SETUP.md): Developer Mode, installing on the TV, and running the spikes.
 - [ADR 0001](docs/adr/0001-react-norigin-classic-bundle.md): why React, Norigin and one classic ES2017 script, and the spike results.
+- [ADR 0002](docs/adr/0002-addon-client-and-browse.md): how BannerTV reads addons, caches them, and builds Home and Details.
 
 ## At a glance
 
@@ -43,7 +44,8 @@ pnpm tv:install   # build, check, package, install and open on the TV
 | Path | What lives there |
 | --- | --- |
 | `apps/webos` | The webOS app: React UI, remote navigation, webOS platform calls, `appinfo.json` |
-| `packages/core` | Framework-free TypeScript shared by any future client. Addons, caching and user data arrive in Phase 1 |
+| `packages/protocol` | Stremio addon protocol v3: types, lenient parsing of addon responses, request URLs and routing rules |
+| `packages/core` | Framework-free TypeScript shared by any future client: addon collection, addon client, request limiter, cache, Home rows |
 | `brand` | Logo, icons, splash, palette and type tokens |
 | `tools/scripts` | Bundle, CSS and version checks, and the `tv:*` commands |
 | `docs` | Plan, TV setup and architecture decision records |

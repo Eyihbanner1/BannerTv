@@ -1,51 +1,171 @@
+import { type BoardRow, buildBoard } from '@bannertv/core';
+import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey, setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useRef } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useTranslation } from 'react-i18next';
-import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
-import { Row } from '../../components/Row';
+import { Row, RowPlaceholder } from '../../components/Row';
+import { addonClient, addonCollection } from '../../data/addons';
+import { describeAddonError, typeLabel } from '../../data/describe';
+import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
-import { inputMode } from '../../platform/input-mode';
-import { Hero } from './Hero';
+import { canSlide } from '../../platform/input-mode';
+import { Hero, openDetails } from './Hero';
 import { heroItem } from './hero-item';
-import { SAMPLE_ROWS } from './sample-data';
 import styles from './HomeScreen.module.css';
 
-const FIRST_ROW = 'home-row-0';
+/** Rows show the first titles of a catalog; Discover pages through the rest. */
+const MAX_ROW_ITEMS = 40;
+/** Rows this far from the focused one are drawn as empty boxes and not fetched yet. */
+const ROWS_AROUND = 2;
+/** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
+const HERO_DELAY_MS = 250;
+
+export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
+
+/** Moves the rows so `rowKey` sits at the top of the rows area. */
+function slideTrack(track: HTMLElement | null, rowKey: string | undefined): void {
+  if (!track) return;
+  const element = rowKey
+    ? track.querySelector<HTMLElement>(`[data-row-key="home-${rowKey}"]`)
+    : null;
+  track.style.transform = element ? `translateY(${-element.offsetTop}px)` : '';
+}
+
+// Kept across visits to Home in this session, so Back lands as it was left.
+const memory = { row: undefined as string | undefined, slideRow: undefined as string | undefined };
+const emptyRows = new Set<string>();
+
+interface HomeRowProps {
+  row: BoardRow;
+  first: boolean;
+  near: boolean;
+  onEmpty: (key: string) => void;
+  onItemFocus: (row: BoardRow, item: MetaPreview, element: HTMLElement) => void;
+}
+
+function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
+  const { t } = useTranslation();
+  const query = useMemo(
+    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
+    [row.addon, row.type, row.catalog.id, row.extra],
+  );
+  const state = useQuery(query, near);
+  const items = useMemo(
+    () => (state.data ? state.data.slice(0, MAX_ROW_ITEMS) : null),
+    [state.data],
+  );
+  const empty = state.status === 'success' && items !== null && items.length === 0;
+
+  useEffect(() => {
+    if (empty) onEmpty(row.key);
+  }, [empty, onEmpty, row.key]);
+  useEffect(() => {
+    if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
+  }, [first, items]);
+
+  const title = row.name;
+  const tag = typeLabel(t, row.type);
+  if (empty) return null;
+  if (!near) return <RowPlaceholder title={title} tag={tag} shape={row.style} />;
+  return (
+    <Row
+      focusKey={rowFocusKey(row)}
+      title={title}
+      tag={tag}
+      shape={row.style}
+      items={state.status === 'error' ? [] : items}
+      error={
+        state.status === 'error'
+          ? describeAddonError(t, state.error, row.addon.manifest.name)
+          : undefined
+      }
+      onRetry={() => query.retry()}
+      onItemFocus={(item, element) => onItemFocus(row, item, element)}
+      onItemPress={openDetails}
+    />
+  );
+}
 
 export function HomeScreen() {
   const { t } = useTranslation();
+  const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
+  const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
+  const [focusedRow, setFocusedRow] = useState(memory.row);
   const trackRef = useRef<HTMLDivElement>(null);
+  const heroTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useScreenFocus(FIRST_ROW);
+  const firstRowKey = rows.length > 0 ? rowFocusKey(rows[0]!) : undefined;
+  const focusedIndex = Math.max(
+    0,
+    rows.findIndex((row) => row.key === focusedRow),
+  );
+
+  useScreenFocus(firstRowKey, collection.ready);
 
   // On Home, Back first returns to the first row. Only from there does it exit.
   useBack('screen', () => {
-    if (getCurrentFocusKey().startsWith(`${FIRST_ROW}-`)) return false;
-    void setFocus(FIRST_ROW);
+    if (!firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-`) === 0) return false;
+    void setFocus(firstRowKey);
     return true;
   });
+
+  // The focused row moves to the top of the rows area. This re-applies it after
+  // rows above it disappear, and on return, so Home comes back as it was.
+  useLayoutEffect(() => slideTrack(trackRef.current, memory.slideRow), [rows]);
+
+  useEffect(() => () => clearTimeout(heroTimer.current), []);
+
+  const onEmpty = useCallback((key: string) => {
+    emptyRows.add(key);
+    setHidden(new Set(emptyRows));
+  }, []);
+
+  const onItemFocus = useCallback((row: BoardRow, item: MetaPreview) => {
+    memory.row = row.key;
+    setFocusedRow(row.key);
+    if (canSlide()) {
+      memory.slideRow = row.key;
+      slideTrack(trackRef.current, row.key);
+    }
+    clearTimeout(heroTimer.current);
+    heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);
+  }, []);
+
+  if (collection.ready && rows.length === 0) {
+    return (
+      <div className={styles.home}>
+        <div className={styles.empty}>
+          <h1 className={styles.emptyTitle}>{t('home.noAddons')}</h1>
+          <p className={styles.emptyLead}>{t('home.noAddonsLead')}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.home}>
       <Hero />
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
-          {SAMPLE_ROWS.map((row, index) => (
-            <Row
-              key={row.id}
-              focusKey={`home-row-${index}`}
-              title={t(row.titleKey)}
-              shape={row.shape}
-              items={row.items}
-              onItemFocus={(item, rowElement) => {
-                heroItem.set(item);
-                // The focused row moves to the top of the rows area (not under the pointer).
-                if (trackRef.current && inputMode.get() === 'keys') {
-                  trackRef.current.style.transform = `translateY(${-rowElement.offsetTop}px)`;
-                }
-              }}
-              onItemPress={(item) => push({ name: 'details', itemId: item.id })}
+          {rows.map((row, index) => (
+            <HomeRow
+              key={row.key}
+              row={row}
+              first={index === 0}
+              near={Math.abs(index - focusedIndex) <= ROWS_AROUND}
+              onEmpty={onEmpty}
+              onItemFocus={onItemFocus}
             />
           ))}
         </div>

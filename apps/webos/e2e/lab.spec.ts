@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, type Route, test } from '@playwright/test';
+import { FIRST_ROW, mockAddons } from './addons';
 import { APP_URL, expectFocus, press } from './tv';
 
 // 40 s of blank VP8, which test Chromium plays (it has no H.264).
@@ -23,10 +24,11 @@ function serveFixture(route: Route) {
 }
 
 test('a seek left over from a failed load does not move the next one', async ({ page }) => {
+  await mockAddons(page);
   await page.route('**/big_buck_bunny.mp4', (route) => route.fulfill({ status: 404 }));
   await page.route('**/test5.mkv', serveFixture);
   await page.goto(APP_URL);
-  await expectFocus(page, 'home-row-0-tile-0');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
 
   await press(page, 'ArrowLeft', 'rail-home');
   for (const item of ['search', 'discover', 'library', 'addons', 'settings']) {

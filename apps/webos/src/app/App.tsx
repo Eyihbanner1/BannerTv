@@ -3,7 +3,7 @@ import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { Rail } from '../components/Rail';
 import { platformBack } from '../platform/webos';
 import { useBack } from '../navigation/use-back';
-import { DetailsScreen } from '../screens/DetailsScreen';
+import { DetailsScreen } from '../screens/details/DetailsScreen';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
@@ -21,7 +21,7 @@ function Screen({ route }: { route: Route }) {
     case 'settings':
       return <SettingsScreen />;
     case 'details':
-      return <DetailsScreen itemId={route.itemId} />;
+      return <DetailsScreen type={route.type} id={route.id} preview={route.preview} />;
     case 'diagnostics':
       return <DiagnosticsScreen />;
     case 'lab':

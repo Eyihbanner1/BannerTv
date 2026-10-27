@@ -4,6 +4,7 @@ import '../../../brand/tokens/tokens.css';
 import './styles/fonts.css';
 import './styles/base.css';
 import { App } from './app/App';
+import { startAddons } from './data/addons';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { bootInfo } from './platform/boot';
@@ -34,6 +35,7 @@ function start() {
   initNavigation();
   initInputMode();
   initLifecycle();
+  startAddons();
 
   createRoot(root).render(
     <StrictMode>

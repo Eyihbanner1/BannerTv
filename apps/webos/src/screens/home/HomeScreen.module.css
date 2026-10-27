@@ -7,7 +7,7 @@
 }
 
 .rows {
-  height: 640px;
+  height: 540px;
   overflow: hidden;
 }
 
@@ -15,4 +15,18 @@
   /* Rows measure offsetTop against this box. */
   position: relative;
   transition: transform var(--bt-motion) ease-out;
+}
+
+.empty {
+  padding: 200px var(--bt-safe-x) 0 var(--bt-content-inset);
+}
+
+.emptyTitle {
+  margin-bottom: 24px;
+  font: var(--bt-text-title);
+}
+
+.emptyLead {
+  max-width: 1100px;
+  color: var(--bt-text-muted);
 }

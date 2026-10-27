@@ -4,7 +4,10 @@
     "yes": "Yes",
     "no": "No",
     "unknown": "Unknown",
-    "notAvailable": "n/a"
+    "notAvailable": "n/a",
+    "tryAgain": "Try again",
+    "loading": "Loading",
+    "listSeparator": ", "
   },
   "rail": {
     "label": "Main menu",
@@ -15,20 +18,51 @@
     "addons": "Addons",
     "settings": "Settings"
   },
+  "types": {
+    "movie": "Movies",
+    "series": "Series",
+    "channel": "Channels",
+    "tv": "TV"
+  },
   "home": {
-    "rowPosters": "Open movies",
-    "rowLandscape": "Landscape tiles",
-    "heroMeta": "{{year}} · Blender open movie · sample tile",
-    "details": "Details"
+    "details": "Details",
+    "heroLoading": "Loading your catalogs",
+    "noAddons": "Nothing to show yet",
+    "noAddonsLead": "None of your addons has a catalog. Add one, such as Cinemeta, to fill Home.",
+    "previous": "Previous titles",
+    "next": "More titles",
+    "loadingTile": "Loading"
+  },
+  "addonError": {
+    "timeout": "{{addon}} took too long to answer.",
+    "network": "{{addon}} could not be reached. Check the TV is online.",
+    "status": "{{addon}} answered with an error ({{status}}).",
+    "invalid": "{{addon}} sent something BannerTV cannot read.",
+    "notFound": "None of your addons know this title.",
+    "other": "{{addon}} did not answer."
+  },
+  "meta": {
+    "rating": "IMDb {{rating}}"
   },
   "details": {
-    "lead": "{{year}}. This is a sample details page. Seasons, episodes and the stream picker arrive in Phases 1 and 2."
+    "watch": "Watch",
+    "comingInPhase2": "Choosing a stream arrives in Phase 2, with the player.",
+    "season": "Season {{number}}",
+    "specials": "Specials",
+    "episodes": "Episodes",
+    "episodeTitle": "{{number}}. {{title}}",
+    "untitledEpisode": "Episode {{number}}",
+    "airs": "Coming {{date}}",
+    "cast": "Starring {{names}}",
+    "directors": "Directed by {{names}}",
+    "loading": "Loading details",
+    "noEpisodes": "This addon lists no episodes yet."
   },
   "placeholder": {
-    "search": "Search across all your addons arrives in Phase 1.",
-    "discover": "Browsing by type, catalog and genre arrives in Phase 1.",
+    "search": "Search across all your addons arrives later in Phase 1.",
+    "discover": "Browsing by type, catalog and genre arrives later in Phase 1.",
     "library": "Your saved titles and watch history arrive in Phase 3.",
-    "addons": "Installing addons by URL or from your phone arrives in Phase 1."
+    "addons": "Installing addons by URL or from your phone arrives later in Phase 1."
   },
   "settings": {
     "lead": "Developer tools for the Phase 0 spikes. Real settings arrive in Phase 1.",

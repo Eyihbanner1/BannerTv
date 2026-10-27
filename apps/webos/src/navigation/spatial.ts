@@ -4,6 +4,14 @@ import { timeBack } from './back-timing';
 import { isBackKey, SPATIAL_KEY_MAP } from './keys';
 
 const WHEEL_STEP_MS = 150;
+// A focus change this soon after a wheel notch came from the wheel.
+const WHEEL_INTENT_MS = 400;
+let lastWheel = 0;
+
+/** Whether the latest focus move came from the Magic Remote wheel. */
+export function movedByWheel(): boolean {
+  return Date.now() - lastWheel < WHEEL_INTENT_MS;
+}
 
 export function initNavigation(): void {
   init({
@@ -27,7 +35,6 @@ export function initNavigation(): void {
   });
 
   // The Magic Remote wheel moves one row per notch.
-  let lastWheel = 0;
   window.addEventListener(
     'wheel',
     (event) => {
