@@ -31,9 +31,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The check needs no dependencies, so skip setup-node's automatic pnpm
+      # cache (it looks for pnpm because package.json names it).
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
 
       - name: Decide whether to publish
         id: mode
