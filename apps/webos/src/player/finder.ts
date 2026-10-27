@@ -263,8 +263,10 @@ function create(type: string, videoId: string): StreamFinder {
       unsubscribe = [];
       started = false;
       dropped = true;
-      // Settled now, so a player still waiting in choose() goes on with what it has.
-      refresh();
+      // Settled now, so a player still waiting in choose() goes on with what it has. Told
+      // after the call, never during it: streamFinder() runs while a screen renders, and the
+      // screen it replaces may still be following this finder.
+      void Promise.resolve().then(refresh);
     },
   };
   return finder;

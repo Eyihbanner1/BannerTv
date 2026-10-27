@@ -42,4 +42,15 @@ describe('runEmbeddedTracksTest', () => {
     expect(notes).toHaveLength(noted);
     expect(luna.calls).toEqual([]);
   });
+
+  it('leaves the pipeline alone when stopped during its last step', async () => {
+    const stop = runEmbeddedTracksTest(video as unknown as HTMLVideoElement, () => undefined);
+    // 21.5 s in, the clock is being watched after the switch to audio 1.
+    await vi.advanceTimersByTimeAsync(21500);
+    expect(luna.calls[luna.calls.length - 1]).toBe('luna://com.webos.media/selectTrack');
+    stop();
+    const made = luna.calls.length;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(luna.calls).toHaveLength(made);
+  });
 });

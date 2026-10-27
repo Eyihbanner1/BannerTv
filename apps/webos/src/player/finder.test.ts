@@ -87,6 +87,21 @@ describe('streamFinder', () => {
     await expect(waiting).resolves.toBeUndefined();
   });
 
+  it('tells a screen still following an expired finder only after the call that replaced it', async () => {
+    addons.answering = false;
+    const old = streamFinder('movie', 'tt-held');
+    old.start();
+    const heard = vi.fn();
+    old.subscribe(heard);
+    vi.advanceTimersByTime(6 * 60 * 1000);
+    // All streams asks during its render, while the player still follows the old finder.
+    streamFinder('movie', 'tt-held');
+    expect(heard).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(heard).toHaveBeenCalled();
+    expect(old.get().settled).toBe(true);
+  });
+
   it('keeps two installs of one addon apart', () => {
     addons.installs = [
       { id: 'org.test.streams', streams: ['https://media.example.com/rd.mp4'] },

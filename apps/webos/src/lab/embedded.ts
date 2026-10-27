@@ -120,6 +120,7 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     if (stopped) return;
     await call('selectTrack', { mediaId, type: 'audio', index: 1 });
     await watch('after audio 1');
+    if (stopped) return;
     unsubscribe();
     await call('unsubscribe', { mediaId });
     say('Embedded tracks test done');

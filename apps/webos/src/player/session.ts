@@ -109,6 +109,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let attempt = 0;
   let failovers = 0;
   let startedPlaying = false;
+  // Set from pause() until resume(), so an engine starting the stream does not undo it.
+  let pausedByViewer = false;
   let reportedWorked = false;
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
@@ -184,8 +186,16 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     [
       'play',
       () => {
+        if (startedPlaying) return;
+        // hls.js, Shaka and the TV's player call play() once ready: the viewer's pause stands.
+        if (pausedByViewer) {
+          video.pause();
+          return;
+        }
         // The start clock stopped while the viewer paused before the first picture.
-        if (!startedPlaying && startTimer === undefined && state.get().status === 'loading') {
+        const { status } = state.get();
+        if (startTimer === undefined && (status === 'loading' || status === 'paused')) {
+          if (status === 'paused') patch({ status: 'loading' });
           armStart(attempt);
         }
       },
@@ -202,14 +212,18 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       'pause',
       () => {
         if (state.get().status === 'ended') return;
+        clearTimeout(stallTimer);
+        stallTimer = undefined;
         save();
-        if (startedPlaying) patch({ status: 'paused' });
+        // Before the first picture too, so the loading screen gives way to Play.
+        if (startedPlaying || pausedByViewer) patch({ status: 'paused' });
       },
     ],
     [
       'waiting',
       () => {
-        if (!startedPlaying) return;
+        // A starved stream's 'waiting' can arrive just after the viewer paused it.
+        if (!startedPlaying || video.paused) return;
         patch({ status: 'buffering' });
         armStall(attempt);
       },
@@ -281,6 +295,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       tracker = createProgressTracker({ startAt });
       lastStartAt = startAt;
       startedPlaying = false;
+      pausedByViewer = false;
       reportedWorked = false;
       patch({
         status: 'loading',
@@ -374,6 +389,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         clearTimeout(startTimer);
         startTimer = undefined;
       }
+      pausedByViewer = true;
       video.pause();
     },
 
@@ -382,6 +398,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       if (status === 'ended' && entry) {
         session.seek(0);
       }
+      pausedByViewer = false;
       video.play().catch(() => undefined);
     },
 

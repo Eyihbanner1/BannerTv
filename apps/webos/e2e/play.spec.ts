@@ -16,6 +16,14 @@ function video(page: Page) {
   }));
 }
 
+/** Tells the page it was hidden or shown, as webOS does when another app comes to the front. */
+async function setHidden(page: Page, hidden: boolean) {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+
 async function openMovie(page: Page) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
@@ -66,6 +74,40 @@ test('Watch plays the best stream at once, with no list to choose from', async (
   await pressBack(page);
   await expectFocus(page, 'details-watch');
   expect(errors).toEqual([]);
+});
+
+test('OK while a stream starts pauses it with Play ready, as does coming back from another app', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  // Media answers late, so the stream is still starting when OK is pressed.
+  await mockPlayback(page, { mediaDelayMs: 3000 });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  // The TV's player was told to play, and nothing has shown yet.
+  await expect
+    .poll(() =>
+      page
+        .locator('video:not([aria-hidden])')
+        .evaluate((element: HTMLVideoElement) => !element.paused),
+    )
+    .toBe(true);
+  await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
+
+  await press(page, 'Enter', 'player-play');
+  await expect(page.getByRole('status', { name: 'Starting' })).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
+  await press(page, 'Enter', 'player-play');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // Hidden, the stream pauses; shown again, Play is ready even with the controls hidden before.
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await expectFocus(page, 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
 });
 
 test('a title asks for its streams and tests the best one only once focus rests there', async ({
@@ -320,13 +362,45 @@ test("in the language last chosen, the stream's own subtitles come before an add
   await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
 });
 
-test('a subtitle file that fails gives way to one in its language from an addon that answers later', async ({
+test("the stream's own subtitles take over from a file picked while the TV's player had the stream", async ({
   page,
 }) => {
   await mockAddons(page);
   await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
   await mockPlayback(page, {
-    subtitlesDelayMs: 3000,
+    subtitles: false,
+    // The player's look at the playlist and the TV's own player both get 503, so the TV's
+    // player has the stream first and hls.js takes it over before the first picture.
+    refused: { [HLS_PATH]: ['fetch', 'media'] },
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\nHLS',
+          description: 'Open Movie HLS',
+          path: HLS_PATH,
+          subtitles: [{ id: '1', path: '/en1.srt', lang: 'eng' }],
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toMatch(/^blob:/);
+  await expect(page.getByText('Hello from the stream')).toBeVisible();
+  await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
+});
+
+test('a subtitle file that fails gives way to one in its language from an addon that answers later', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  // OpenSubtitles answers only once the failure has shown, however long the picture takes.
+  let answer!: () => void;
+  const subtitlesGate = new Promise<void>((resolve) => (answer = resolve));
+  await mockPlayback(page, {
+    subtitlesGate,
     streams: {
       [MOVIE]: [
         { ...DEFAULT_STREAMS[0]!, subtitles: [{ id: '1', path: '/missing.srt', lang: 'eng' }] },
@@ -337,6 +411,7 @@ test('a subtitle file that fails gives way to one in its language from an addon 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   await expect(page.getByText("Those subtitles couldn't be loaded.")).toBeVisible();
+  answer();
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible({ timeout: 10000 });
   await expect(page.getByText("Those subtitles couldn't be loaded.")).toHaveCount(0);
 });
@@ -345,7 +420,8 @@ test('Quality leaves the resolution playing alone, and another starts without it
   page,
 }) => {
   await mockAddons(page);
-  // The slow addon answers after the player has started, so the list is rebuilt under it.
+  // The slow addon answers after the player has started, so the list is rebuilt under it,
+  // with its own 1080p ranked above the one playing.
   await seedStreamAddon(page, { slowAddon: true, preferences: { subtitleLanguage: 'eng' } });
   const mock = await mockPlayback(page, {
     subtitles: false,
@@ -370,7 +446,7 @@ test('Quality leaves the resolution playing alone, and another starts without it
   await press(page, 'ArrowUp', 'player-play');
   await press(page, 'ArrowRight', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
-  // The resolution already playing: nothing reloads.
+  // The resolution already playing: nothing reloads, though another 1080p now ranks first.
   await press(page, 'Enter', 'player-quality-0');
   await expect(page.locator('[data-focused="true"]')).toHaveText('1080p');
   await press(page, 'Enter', 'player-quality-button');

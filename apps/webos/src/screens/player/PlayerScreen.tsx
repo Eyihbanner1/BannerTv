@@ -173,17 +173,24 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Saved when the TV goes to another app or the home screen.
+  // Paused and saved when the TV goes to another app or the home screen.
   useEffect(() => {
     if (!session) return;
     const onVisibility = () => {
-      if (!document.hidden) return;
+      if (!document.hidden) {
+        // Back again: the controls show, with Play ready unless a panel is open.
+        if (session.get().status === 'paused') {
+          setControls(true);
+          if (!panel) void setFocus('player-play');
+        }
+        return;
+      }
       session.pause();
       session.saveProgress();
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [session]);
+  }, [session, panel]);
 
   // The audio language chosen last time, once per stream.
   const audioDecided = useRef<string | null>(null);
@@ -524,10 +531,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
           returnFocusKey={panelFrom}
           onSelect={(value) => {
             setPanel(null);
+            // The resolution already playing stays as it is, whichever stream at it is playing.
+            if (value === currentQuality) return;
             const choice = choices.find((c) => (c.resolution ?? 'other') === value);
-            // By key: the finder rebuilds its entries as addons answer.
-            const playing = state.entry && entryKey(state.entry);
-            if (session && choice && entryKey(choice.entry) !== playing) {
+            if (session && choice) {
               session.play(choice.entry, session.trustedPosition() ?? state.position);
             }
           }}

@@ -25,7 +25,10 @@ const HLS_TYPES: Record<string, string> = {
 };
 
 export const STREAM_ADDON_URL = 'https://streams.example.com/bannertv/manifest.json';
-/** A second stream addon, which answers only after SLOW_ADDON_MS and offers just a torrent. */
+/**
+ * A second stream addon, which answers only after SLOW_ADDON_MS with a torrent
+ * and a 1080p link that ranks above DEFAULT_STREAMS' 1080p (a cached REMUX).
+ */
 export const SLOW_ADDON_URL = 'https://slow.example.com/bannertv/manifest.json';
 export const SLOW_ADDON_MS = 3000;
 export const MEDIA_HOST = 'https://media.example.com';
@@ -104,10 +107,18 @@ export interface PlaybackOptions {
   streams?: Record<string, readonly TestStream[]>;
   /** Media paths that answer 404, for failover. */
   broken?: readonly string[];
+  /**
+   * Media paths that answer 503 to some kinds of request, by Playwright's
+   * resource type: 'fetch' is the player's look at an HLS playlist, 'media'
+   * the TV's own player (and the link test), 'xhr' hls.js.
+   */
+  refused?: Readonly<Record<string, readonly string[]>>;
+  /** How long media takes to answer. Default at once. */
+  mediaDelayMs?: number;
   /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
   subtitles?: boolean;
-  /** How long OpenSubtitles takes to answer. Default at once. */
-  subtitlesDelayMs?: number;
+  /** OpenSubtitles answers once this settles, so a test decides when. Default at once. */
+  subtitlesGate?: Promise<unknown>;
 }
 
 /** Serves the fixture with byte ranges, which the media element needs to seek. */
@@ -275,14 +286,26 @@ export async function mockPlayback(
           description: 'Open Movie 1080p BluRay',
           infoHash: 'fedcba9876543210fedcba9876543210fedcba98',
         },
+        {
+          name: 'Slow Streams\n1080p',
+          description: 'Open Movie 1080p BluRay REMUX\n💾 18 GB ⚡ Cached',
+          url: `${MEDIA_HOST}/movie-1080p-remux.webm`,
+          behaviorHints: { filename: 'movie-1080p-remux.webm' },
+        },
       ],
     });
   });
 
-  await page.route(/^https:\/\/media\.example\.com\//, (route) => {
+  await page.route(/^https:\/\/media\.example\.com\//, async (route) => {
     const path = new URL(route.request().url()).pathname;
     mock.media.push(path);
+    if (options.mediaDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.mediaDelayMs));
+    }
     if (broken.has(path)) return route.fulfill({ status: 404, body: '' });
+    if (options.refused?.[path]?.includes(route.request().resourceType())) {
+      return route.fulfill({ status: 503, body: '' });
+    }
     if (path.startsWith('/hls/')) {
       const file = path.slice('/hls/'.length);
       if (!/^[\w-]+\.(m3u8|mp4|m4s|vtt)$/.test(file)) return route.fulfill({ status: 404 });
@@ -299,9 +322,7 @@ export async function mockPlayback(
   await page.route(/^https:\/\/opensubtitles-v3\.strem\.io\/subtitles\//, async (route) => {
     const path = new URL(route.request().url()).pathname.replace('/subtitles/', '');
     mock.subtitles.push(decodeURIComponent(path));
-    if (options.subtitlesDelayMs) {
-      await new Promise((resolve) => setTimeout(resolve, options.subtitlesDelayMs));
-    }
+    if (options.subtitlesGate) await options.subtitlesGate;
     if (options.subtitles === false) return json(route, { subtitles: [] });
     return json(route, {
       subtitles: [

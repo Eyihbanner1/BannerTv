@@ -85,8 +85,13 @@ export function useSubtitles(
   const [loaded, setLoaded] = useState<{ url: string; cues: Cue[] } | null>(null);
   const [failedChoice, setFailedChoice] = useState<SubtitleChoice>(null);
   const [offset, setOffset] = useState(0);
-  // The start-of-stream choice and the stream it was made for; the viewer's own choice also counts.
-  const decided = useRef<{ entry: StreamEntry | null; choice: SubtitleChoice } | null>(null);
+  // The start-of-stream choice and the stream it was made for; the viewer's own choice also
+  // counts. auto: made here, not by the viewer, so a track listed later may still take over.
+  const decided = useRef<{
+    entry: StreamEntry | null;
+    choice: SubtitleChoice;
+    auto: boolean;
+  } | null>(null);
   // Links of files that failed for this video, so a retry moves on to another.
   const broken = useRef(new Set<string>());
   const { options, pending } = listState;
@@ -97,7 +102,7 @@ export function useSubtitles(
     if (!entry || !session || !list) return;
     let stopped = false;
     const settle = (next: SubtitleChoice) => {
-      decided.current = { entry, choice: next };
+      decided.current = { entry, choice: next, auto: true };
       setChosen({ entry, choice: next });
     };
     const decide = () => {
@@ -107,6 +112,7 @@ export function useSubtitles(
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
       const made = decided.current;
+      const wanted = preferences.get().subtitleLanguage;
       if (made?.entry === entry) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
@@ -115,9 +121,15 @@ export function useSubtitles(
           chosenTrack?.kind === 'track' &&
           tracksKnown &&
           !text.some((t) => t.id === chosenTrack.id);
-        if (!lost) return;
+        // A file or Off picked while the TV's player listed no tracks gives way
+        // to the stream's own track once another engine (hls.js) lists one.
+        const better =
+          made.auto &&
+          chosenTrack?.kind !== 'track' &&
+          wanted !== null &&
+          text.some((t) => languageKey(t.lang) === languageKey(wanted));
+        if (!lost && !better) return;
       }
-      const wanted = preferences.get().subtitleLanguage;
       if (wanted === null) {
         settle(null);
         return;
@@ -216,7 +228,7 @@ export function useSubtitles(
     failed: fileFailed,
     offset,
     choose(next) {
-      decided.current = { entry, choice: next };
+      decided.current = { entry, choice: next, auto: false };
       setChosen({ entry, choice: next });
       if (next?.kind === 'file') {
         const option = options.find((o) => o.key === next.key);

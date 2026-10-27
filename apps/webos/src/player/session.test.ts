@@ -11,7 +11,8 @@ interface FakeEngine extends Engine {
   text: EngineTrack[];
 }
 
-const fake = vi.hoisted(() => ({ engines: [] as FakeEngine[] }));
+// plays: whether load() starts the video, as the TV's player does at once.
+const fake = vi.hoisted(() => ({ engines: [] as FakeEngine[], plays: false }));
 
 vi.mock('../data/playback', () => ({
   progress: { record: () => undefined },
@@ -22,13 +23,16 @@ vi.mock('../data/playback', () => ({
 vi.mock('./engines/choose', () => ({
   chooseEngine: () => Promise.resolve('hls.js'),
   fallbackEngine: () => undefined,
-  createEngine: (name: Engine['name'], _video: HTMLVideoElement, listener: EngineListener) => {
+  createEngine: (name: Engine['name'], video: HTMLVideoElement, listener: EngineListener) => {
     const engine: FakeEngine = {
       name,
       listener,
       audio: [],
       text: [],
-      load: () => Promise.resolve(),
+      load: () => {
+        if (fake.plays) void video.play();
+        return Promise.resolve();
+      },
       audioTracks: () => engine.audio,
       selectAudio: (id) => {
         engine.audio = engine.audio.map((track) => ({ ...track, active: track.id === id }));
@@ -107,6 +111,7 @@ beforeEach(() => {
   vi.stubGlobal('window', globalThis);
   vi.useFakeTimers();
   fake.engines.length = 0;
+  fake.plays = false;
 });
 
 afterEach(() => {
@@ -137,6 +142,20 @@ describe('a paused stream', () => {
     expect(session.get().entry).toBe(second);
   });
 
+  it('is not failed over by a starved stream reporting it is waiting just after the pause', async () => {
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+
+    session.pause();
+    video.fire('waiting');
+    await vi.advanceTimersByTimeAsync(STALL_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get()).toMatchObject({ status: 'paused', entry: first });
+  });
+
   it('does not run out its start time while the viewer has it paused', async () => {
     const { session, markFailed } = setup();
     session.play(first, 0);
@@ -150,6 +169,36 @@ describe('a paused stream', () => {
     await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
     expect(markFailed).toHaveBeenCalledWith(first);
     expect(session.get().entry).toBe(second);
+  });
+
+  it('shows as paused when OK pauses it before the first picture, and starts its clock again on Play', async () => {
+    fake.plays = true;
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    expect(video.paused).toBe(false);
+    expect(session.get().status).toBe('loading');
+
+    session.togglePlay();
+    expect(session.get().status).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
+
+    session.resume();
+    expect(session.get().status).toBe('loading');
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+  });
+
+  it('stays paused when the engine starts the video after the viewer paused', async () => {
+    fake.plays = true;
+    const { video, session } = setup();
+    session.play(first, 0);
+    // Hidden or paused while the engine was still being chosen.
+    session.pause();
+    await settle();
+    expect(video.paused).toBe(true);
+    expect(session.get().status).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
