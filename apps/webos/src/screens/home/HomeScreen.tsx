@@ -1,10 +1,6 @@
 import { type BoardRow, buildBoard } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
-import {
-  doesFocusableExist,
-  getCurrentFocusKey,
-  setFocus,
-} from '@noriginmedia/norigin-spatial-navigation';
+import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
   memo,
   useCallback,
@@ -25,6 +21,7 @@ import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { useQuery } from '../../data/use-query';
+import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { tuning } from '../../platform/tuning';
@@ -91,7 +88,7 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
   // Before the row's tiles unregister, while focus is still on one of them.
   useLayoutEffect(() => {
     if (!empty) return;
-    onEmpty(row.key, getCurrentFocusKey().indexOf(`${rowFocusKey(row)}-tile-`) === 0);
+    onEmpty(row.key, focusedKey().indexOf(`${rowFocusKey(row)}-tile-`) === 0);
   }, [empty, onEmpty, row]);
   useEffect(() => {
     if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
@@ -162,7 +159,7 @@ export function HomeScreen() {
   // Genre rows share the first row's key as a prefix, so match its tiles exactly.
   useBack('screen', () => {
     const first = rows[0];
-    if (!firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-tile-`) === 0) {
+    if (!firstRowKey || focusedKey().indexOf(`${firstRowKey}-tile-`) === 0) {
       return false;
     }
     // From far down, the first row is an empty box with nothing to focus: draw it first.
@@ -176,8 +173,7 @@ export function HomeScreen() {
   // so Home comes back as it was. A first focus on a row still loading has not
   // slid anything yet, so the row holding focus counts first.
   useLayoutEffect(() => {
-    // Null until anything has had focus, whatever the types say.
-    const key = getCurrentFocusKey() || '';
+    const key = focusedKey();
     const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
     if (tile > 0 && canSlide()) memory.slideRow = key.slice('home-'.length, tile);
     slideTrack(trackRef.current, memory.slideRow && `home-${memory.slideRow}`);
