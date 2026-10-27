@@ -1,6 +1,7 @@
 import {
   BaseWebAdapter,
   type FocusableComponent,
+  getCurrentFocusKey,
   init,
   navigateByDirection,
   setKeyMap,
@@ -14,6 +15,14 @@ const WHEEL_STEP_MS = 150;
 // A focus change this soon after a wheel notch came from the wheel.
 const WHEEL_INTENT_MS = 400;
 let lastWheel = 0;
+
+/**
+ * The focused key, or '' before anything has had focus: spatial navigation
+ * returns null then, whatever its type says.
+ */
+export function focusedKey(): string {
+  return getCurrentFocusKey() || '';
+}
 
 /** Whether the latest focus move came from the Magic Remote wheel. */
 export function movedByWheel(): boolean {

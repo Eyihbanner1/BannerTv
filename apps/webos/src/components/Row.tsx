@@ -2,7 +2,6 @@ import type { MetaPreview } from '@bannertv/protocol';
 import {
   type FocusableComponent,
   FocusContext,
-  getCurrentFocusKey,
   setFocus,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
@@ -14,6 +13,7 @@ import {
   rememberFocus,
   rememberScroll,
 } from '../navigation/focus-memory';
+import { focusedKey } from '../navigation/spatial';
 import { canSlide } from '../platform/input-mode';
 import { tuning } from '../platform/tuning';
 import { Button } from './Button';
@@ -121,7 +121,7 @@ export const Row = memo(function Row(props: RowProps) {
   // arrive, report the one under it, so the hero catches up.
   useEffect(() => {
     const prefix = `${focusKey}-tile-`;
-    const focused = getCurrentFocusKey();
+    const focused = focusedKey();
     if (!items || focused.indexOf(prefix) !== 0) return;
     const item = items[Number(focused.slice(prefix.length))];
     if (item && ref.current) latest.current.onItemFocus(item, ref.current);
