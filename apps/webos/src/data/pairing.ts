@@ -13,11 +13,12 @@ export const PAIR_SERVICE = 'https://pair.bannertv.workers.dev';
 export const POLL_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;
 /**
- * How long after a session's end the TV keeps asking. The relay's "expired"
- * answer normally ends it first, but the relay keeps an address that arrived
- * near the end, or whose answer was lost, for this long (REDELIVER_MS there).
+ * How long after a session's end the TV keeps asking when it gets no answer.
+ * The relay's "expired" answer normally ends it first. But an address sent
+ * near the end keeps the session open 30 s more, and a collected address can
+ * be collected again for another 30 s (REDELIVER_MS in services/pair).
  */
-const GRACE_MS = 30000;
+const GRACE_MS = 2 * 30000;
 
 export interface PairSession {
   code: string;

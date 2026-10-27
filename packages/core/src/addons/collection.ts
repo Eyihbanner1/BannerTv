@@ -159,14 +159,15 @@ export function createAddonCollection(options: {
       const { manifest, json } = await fetchManifest(url);
       const current = state.get().addons;
       // New settings must be for the same addon, or a wrong link would quietly
-      // swap it out. Some addons put a hash of their settings in the id, so an
-      // address on the same server also counts as the same addon.
+      // swap it out. Some addons put a hash of their settings in the id, so the
+      // same name on the same server also counts. One server can host several
+      // addons, so the server alone does not.
       const target = current.find((a) => a.transportUrl === options.replaces);
-      if (
-        target &&
-        target.manifest.id !== manifest.id &&
-        origin(target.transportUrl) !== origin(url)
-      ) {
+      const sameAddon =
+        !target ||
+        target.manifest.id === manifest.id ||
+        (origin(target.transportUrl) === origin(url) && target.manifest.name === manifest.name);
+      if (!sameAddon) {
         throw new InstallError('different-addon', 'That link is for a different addon');
       }
       raw.set(url, json);

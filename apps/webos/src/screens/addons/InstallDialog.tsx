@@ -36,9 +36,11 @@ export function InstallDialog(props: InstallDialogProps) {
   const busy = useRef(false);
   // An address that arrives during an install: the relay has already let it go.
   const pending = useRef<string | null>(null);
+  const dropped = useRef(false);
   // An install that fails after the dialog has closed has nowhere to put it.
   useEffect(
     () => () => {
+      if (pending.current !== null) dropped.current = true;
       pending.current = null;
     },
     [],
@@ -62,7 +64,8 @@ export function InstallDialog(props: InstallDialogProps) {
     addonCollection.install(address).then(
       (addon) => {
         installed.current = focusAfterInstall(addon);
-        onInstalled(addon, before.indexOf(addon.transportUrl) !== -1, pending.current !== null);
+        const unused = dropped.current || pending.current !== null;
+        onInstalled(addon, before.indexOf(addon.transportUrl) !== -1, unused);
       },
       (failure: unknown) => {
         busy.current = false;

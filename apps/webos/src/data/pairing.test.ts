@@ -113,6 +113,27 @@ describe('createPairing', () => {
     expect(pairing.get().status).toBe('expired');
   });
 
+  it('keeps asking past the end while the relay cannot be reached', async () => {
+    const relay = fakeRelay();
+    const received: string[] = [];
+    const pairing = createPairing({ service: SERVICE, fetch: relay.fetch });
+    pairing.onAddress((url) => received.push(url));
+    pairing.start();
+    await settle();
+    // The phone sends at the very end, which keeps the session open, and the TV's
+    // requests fail until well after the session's original end.
+    await vi.advanceTimersByTimeAsync(598000);
+    relay.send('https://addon.example.com/manifest.json');
+    relay.setDown(true);
+    await vi.advanceTimersByTimeAsync(42000);
+    expect(pairing.get().status).toBe('waiting');
+    relay.setDown(false);
+    await vi.advanceTimersByTimeAsync(3000);
+    await settle();
+    expect(received).toEqual(['https://addon.example.com/manifest.json']);
+    pairing.stop();
+  });
+
   it('keeps asking a little past the end when an answer was lost', async () => {
     const relay = fakeRelay();
     const received: string[] = [];
