@@ -253,7 +253,10 @@ export class PairSession {
       // An address sent just before the end still gives the TV time to collect it.
       const until = Date.now() + REDELIVER_MS;
       if (current.expiresAt < until) {
-        await this.state.storage.put<Session>('session', { ...current, expiresAt: until });
+        await this.state.storage.put<Session>('session', {
+          secretHash: current.secretHash,
+          expiresAt: until,
+        });
         await this.state.storage.setAlarm(until);
       }
       return json({ ok: true });

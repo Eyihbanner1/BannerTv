@@ -70,8 +70,7 @@ input:focus{outline:none;border-color:#C9B5FF}
 .steps{margin-top:20px;padding:16px;border-radius:16px;background:#1B1430}
 .steps p{margin:0 0 12px}
 .steps p:last-child{margin:12px 0 0}
-.button{overflow-wrap:anywhere}
-.button{display:block;width:100%;margin-top:24px;padding:14px;border:0;border-radius:999px;background:#6A3BF0;color:#fff;font:inherit;font-weight:700;font-size:17px;text-align:center;text-decoration:none;cursor:pointer}
+.button{display:block;width:100%;margin-top:24px;padding:14px;border:0;border-radius:999px;background:#6A3BF0;color:#fff;font:inherit;font-weight:700;font-size:17px;text-align:center;text-decoration:none;cursor:pointer;overflow-wrap:anywhere}
 .button:focus{outline:3px solid #C9B5FF;outline-offset:2px}
 .button:disabled{opacity:.6}
 .button.secondary{margin-top:0;background:#261C42}
