@@ -9,7 +9,21 @@ The privacy policy describes BannerTV v1 as planned for the LG store, including 
 1. Check every section of the policy against the build being submitted. Remove sections for features it doesn't have, and correct any that work differently.
 2. Check this file's tables against the same build, then copy the answers into Seller Lounge.
 3. If the ICO fee is paid, add the registration number under "Who is responsible" in the policy.
-4. Run `node tools/scripts/check-site.mjs --publish`. It fails while any placeholder or HTML comment is left in `site/`, and comments are visible to anyone who views the page source, so notes for maintainers live here rather than in the pages.
+4. Check that the About screen's privacy summary in the app still matches the policy.
+5. Make any "Pending policy changes" below whose app change is in the build, and no others.
+6. Run `node tools/scripts/check-site.mjs --publish`. It fails while any placeholder or HTML comment is left in `site/`, and comments are visible to anyone who views the page source, so notes for maintainers live here rather than in the pages.
+
+## Pending policy changes
+
+The Phase 1 thread's store-readiness plan changes how the app behaves in three places. The policy, this file and the UX scenario describe today's behaviour and must change only when the new behaviour reaches users, never before.
+
+| App change | When to edit | What changes |
+| --- | --- | --- |
+| Relay codes last 9 minutes (or 8.5; Eyitayo to decide) so nothing is held more than 10 | After the relay is deployed and checked, and at least 11 minutes later, since codes opened before the deploy keep their old expiry | Policy: "about 11 minutes" becomes "10 minutes" in the short version, the relay section and the retention table, and "Each code lasts 10 minutes" becomes 9 (or 8.5). The relay row below. UX scenario 7: the code's lifetime |
+| Add an addon contacts the relay only after "Show a code" | With the first store build that has it | Policy relay section: the relay is contacted only after Show a code, or in an addon's Settings window; after an address arrives, the TV takes a new code and keeps checking until that code runs out or the window closes; typing an address on the TV never contacts the relay. The relay row and the device-identifier answer below; close item 10. UX scenario 7 step 3 |
+| Removing an addon deletes its cached copies | With the build that has it | Policy: "copies BannerTV saved from it ... can stay on the TV" becomes "BannerTV deletes the copies it saved from it". The on-TV row below and item 3: cache keys start with the addon's base address; title details are keyed by title only and are cleared when an addon that provides title details is removed |
+
+Update the policy's "Last updated" date with each change.
 
 ## Data inventory
 
@@ -30,7 +44,7 @@ The privacy policy describes BannerTV v1 as planned for the LG store, including 
 
 Nothing is used for adverts, analytics, profiling or sale. There is no BannerTV account.
 
-The Diagnostics and Playback lab screens in today's builds also stream test files from `raw.githubusercontent.com` and `devstreaming-cdn.apple.com`, and the app asks for the `systemconfig.query` permission for Diagnostics. Neither is in this inventory because both must be removed from the store build (STORE.md, "App work the store needs").
+The Diagnostics and Playback lab screens in today's builds also stream test files from `raw.githubusercontent.com` and `devstreaming-cdn.apple.com`. They aren't in this inventory because they must be removed from the store build (STORE.md, "App work the store needs").
 
 ## Seller Lounge: UK data collection answers
 
@@ -49,7 +63,7 @@ Seller Lounge requires this section for any app sold in the UK ("Service Info", 
 | Financial | No. Donations happen on an external page |
 | Data shared with third parties | Cloudflare, Inc. (processor for the relay and the Demo addon, USA); Functional Software, Inc. / Sentry (crash-report processor, data in Germany); `EMAIL_PROVIDER` (support mailbox processor); Trakt, when the user links it. At BannerTV's initiative, Metahub (Stremio) and TMDB receive title IDs and the TV's IP address for artwork. At the user's request, the addons they add and YouTube receive requests straight from the TV |
 | Where data is stored and processed | On the TV. Relay: Cloudflare's global network, usually the data centre nearest the user (Cloudflare, Inc. is a US company), in memory only. Demo addon: Cloudflare. Crash reports: Germany (Sentry EU region); Sentry keeps some account metadata about the developer, not users, in the USA |
-| Requested access permissions | None in the store build (no microphone, camera or USB access). Today's builds ask for `systemconfig.query` for the Diagnostics screen, which the store build must drop |
+| Requested access permissions | `application.launcher`, to open the TV's YouTube app for trailers. If kept (Eyitayo to decide, STORE.md item 5), `systemconfig.query`, to read the TV's 4K support and webOS version on the TV; nothing it reads is sent anywhere. No microphone, camera or USB access |
 | Contact point | `SUPPORT_EMAIL` |
 | Third-party SDKs | Bundled today, none of which collect data: React and React DOM, i18next and react-i18next, Norigin Spatial Navigation, qrcode-generator. When added: Sentry browser SDK (crash reports, opt-in), hls.js and Shaka Player (playback, no data collection). No advertising, analytics or proxy SDKs. BannerTV calls the webOS platform directly and doesn't bundle webOSTV.js |
 

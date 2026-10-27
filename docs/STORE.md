@@ -59,14 +59,14 @@ Either way: tick **Enforce HTTPS**, open the address in a private window, and gi
 
 For the Phase 1 to 4 threads; the details are in [store/self-check.md](store/self-check.md) and [store/data-safety.md](store/data-safety.md).
 
-1. **Two packages.** LG's FAQ says Full HD TVs only run 1280 x 720 web apps, and some lower-spec UHD TVs only get 720p apps; it recommends submitting one package at 1920 x 1080 and one at 1280 x 720 (`resolution` in appinfo.json, with fixed-pixel root containers). Decide in Phase 2 whether to build a 720p variant; it may matter for the 2020 floor TV.
+1. **Two packages.** LG's [App resolution](https://webostv.developer.lge.com/develop/specifications/app-resolution) page says Full HD models draw apps on a 1280 x 720 plane and recommends submitting one 1920 x 1080 package and one 1280 x 720 package (`resolution` in appinfo.json). LG staff on the webOS TV developer forum add that some lower-spec UHD TVs only receive 1280 x 720 apps and that webOS doesn't resize apps (topics 26011 and 979). The Phase 1 thread recommends two packages from one build, scaled with CSS `zoom` on `<html>`, and uploading the 720p one only after it passes on a real Full HD TV or a Full HD model in the Cloud Test Lab. Without that test, submit 1920 x 1080 first and add 720p in an update, because five function-test rejections in a row lock the app out for three months. **Eyitayo to decide.**
 2. **The BannerTV Demo addon.** All-ages Blender open movies (CC BY), served as adaptive HLS with a rung well under 512 kbps (LG throttles to 512 kbps in item 43), from a host reachable over IPv6 and from Korea. Preinstalled in the store build alongside Cinemeta and OpenSubtitles v3. The privacy policy assumes it runs on Cloudflare (a Worker for the addon, R2 for the video files) with request logs off, under the same account as the relay; if it goes anywhere else, change the policy's Demo addon section and data-safety.md first.
 3. **Privacy in the app:** About screen with the policy summary, address and QR code; one-line notices on the Add an addon and addon Settings windows (the relay), Trakt sign-in and the crash-report toggle; a "clear BannerTV's data" option; removing an addon also deletes its cached copies; Trakt data deleted on unlink; Sentry in the EU region with IP addresses not stored and request breadcrumbs off. Details in data-safety.md, "What the app has to do".
 4. **No secrets in the .ipk.** No Trakt client secret; nothing named like a password or token.
-5. **No developer screens in the store build.** Remove the Diagnostics and Playback lab screens from Settings, their test streams, and `systemconfig.query` from `requiredACG` in appinfo.json. The privacy policy and the data answers don't cover them.
+5. **No developer screens in the store build.** Remove the Diagnostics and Playback lab screens from Settings and their test streams (the Phase 1 thread plans a separate "BannerTV Dev" app for them). In `requiredACG`, add `application.launcher`, which the Trailer button needs (webOS 26 enforces the list; webOS 22 doesn't, so the dev TV can't show the bug). `systemconfig.query` is used by the Phase 2 player to read the TV's 4K support and webOS version; the Phase 1 thread recommends keeping it. **Eyitayo to decide**, then update the permissions answer in data-safety.md. Keep the `requiredACG` field itself: Seller Lounge rejects apps without it from webOS 27.
 6. **Player rules:** the video at 0,0 and 1920 x 1080 with no transform (or the screensaver starts; consider `screenSaverProperties.preferredType: 2` for the controls overlay); all transport keys; subtitle settings that apply; resume; pause and save on Home, power-off and mains unplug.
 7. **Keep what's built:** Back stack ending in `webOS.platformBack()`, no Exit button, pointer and 5-way on every control, loading cues and Try again instead of blank screens, relative asset paths (absolute `/media/developer/` paths work in Developer Mode and break after store release).
-8. **Back on webOS 23 to 25.** LG's mandatory UX list says Back on the first screen shows the Home screen on webOS 23 to 25, while `webOS.platformBack()` shows an exit prompt on webOS 6 and newer. Check in the Cloud Test Lab what it does on webOS 23 and newer, and ask LG (question 8 below).
+8. **Back on webOS 23 to 25.** LG's mandatory UX list says Back on the first screen shows the Home screen on webOS 23 to 25, while `webOS.platformBack()` shows an exit prompt on webOS 6 and newer, and nothing public says what it does on 23 to 25. The Phase 1 thread plans to measure it in the Cloud Test Lab with a dev-build switch (`platformBack`, `window.close` or pass-through) before changing anything, and to ask LG (question 8 below).
 9. **About screen credits:** Demo film credits, Urbanist licence, TMDB and Trakt notices, the donation QR labelled as optional.
 
 ## Age rating
@@ -89,18 +89,29 @@ To send through Seller Lounge, 1:1 Q&A, Applications, App Submission, once regis
 > 2. The About screen will show a QR code to an optional external donation page (Ko-fi or GitHub Sponsors) that unlocks nothing in the app. Is that allowed, and should Billing / Paid Content be "Not applicable"?
 > 3. Which App Rating and Content Rating options apply in the United Kingdom, and should an app like this declare Content Rating "Yes" with PIN protection? I plan to hide addons marked as adult by default, with a PIN to show them.
 > 4. Which Category fits a media player?
-> 5. Should I submit two packages (1920x1080 and 1280x720), and which Service Platform / SDK version option means "2020 (webOS 5.0) and later"?
+> 5. Should I submit two packages (1920x1080 and 1280x720), and which Service Platform / SDK version option means "2020 (webOS 5.0) and later"? Are both files uploaded under one app and version, and does QA test each one on matching TVs? Which lower-spec UHD models receive only 1280x720 apps, and does that include 2020 webOS 5 entry-level models?
 > 6. Is the privacy policy URL entered only in the UK data collection section, or also elsewhere?
 > 7. Is there a maximum IPK file size?
-> 8. On webOS 23 to 25, should the Back key on the app's first screen show the system exit prompt from webOS.platformBack(), or go straight to the Home screen?
+> 8. The mandatory UX item says Back on the entry page must display the Home screen on webOS 23 to 25. My app calls webOS.platformBack() there, which shows the exit popup on webOS 6 and newer.
+>    - (a) Does platformBack() meet the item on webOS 23 to 25, even when it shows the popup first?
+>    - (b) If not, what should the app call on those versions: window.close() or something else?
+>    - (c) Should webOS 26 keep the popup?
+>    - (d) Is it acceptable for the first Back press on the entry page to return focus to the top, and the next to show Home?
+>    - (e) Does the item also apply to a first-run welcome screen?
+> 9. Which ACG group covers com.webos.service.config/getConfigs? The bundled Shaka Player calls it, and it isn't in the ACG table.
+> 10. My code has no credentials, but bundled libraries use standard property names that match the credential rules (the Fetch API's `credentials` option, `password` input types in React, Shaka Player's token settings). Are these acceptable if I explain them in the self-checklist?
 >
 > Thank you.
+
+When crash reports are built, ask an eleventh: does `webOSSystem.deviceInfo.modelName` fall under the same user agreement as `getSystemInfo`'s `modelName`, and is sending it after an explicit crash-report opt-in acceptable?
 
 ## Not known yet
 
 - Exact character limits, screenshot sizes, the category list and the UK age-rating options: Seller Lounge's pages can't be read without signing in, so the figures here come from third-party submission guides that agree with each other. Check them in the form and the Seller Lounge Guide.
 - The Seller Lounge terms (revised July 2025) and the Seller Agreement: not public; read at sign-up and at submit.
 - Whether TMDB treats a free app with a donation link as commercial use. Email TMDB before turning on TMDB enrichment.
+- Whether a store update wipes the app's storage. LG's FAQ and a 2024 forum reply say packaged-app storage is deleted on update or removal (not checked). Test it by installing a new version over an old one; if it's true, the policy's "until you clear it or remove BannerTV" needs to mention updates.
+- To check once signed in to Seller Lounge: the full QA checklist ZIP for the exact wording of item 37; whether the Seller Lounge FAQ covers resolution; whether the Cloud Test Lab has Full HD models, accepts a developer build and supports a long press of Back; whether Seller Lounge can exclude webOS 4.
 
 ## Sources
 
