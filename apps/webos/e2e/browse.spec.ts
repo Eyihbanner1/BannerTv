@@ -15,6 +15,11 @@ test('Home builds Netflix-style rows from Cinemeta', async ({ page }) => {
   const wide = page.locator('[data-focus-key="home-0-movie-imdbrating-tile-0"]');
   await expect(wide).toHaveCSS('width', '384px');
   await expect(wide.locator('img')).toHaveCount(2);
+  // A 1x display keeps the addon's own image sizes.
+  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"] img`)).toHaveAttribute(
+    'src',
+    /\/poster\/small\//,
+  );
   // The hero shows the first title before anything is focused away from it.
   await expect(
     page.locator(
@@ -40,7 +45,7 @@ test('a series opens on season 1, and seasons switch as focus moves', async ({ p
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await press(page, 'Enter', 'details-episodes-0');
-  await expect(page.locator('section[aria-label="Morevna Project"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Morevna Project"]:visible')).toBeVisible();
   await expect(page.getByText('1. Season 1 episode 1')).toBeVisible();
 
   for (let n = 1; n <= 6; n++) await press(page, 'ArrowDown', `details-episodes-${n}`);
@@ -127,4 +132,25 @@ test('the second launch shows Home from storage, even offline', async ({ page })
     'aria-label',
     'Elephants Dream, 2006',
   );
+});
+
+test.describe('on a 4K TV', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('artwork is asked for at the size the screen draws it', async ({ page }) => {
+    await mockAddons(page);
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"] img`)).toHaveAttribute(
+      'src',
+      /\/poster\/medium\/tt/,
+    );
+    const hero = page.locator('section[aria-label="Elephants Dream"]');
+    await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/large\/tt/);
+    await expect(hero.locator('img').last()).toHaveAttribute('src', /\/logo\/large\/tt/);
+    // Wide tiles already get enough pixels from the medium backdrop.
+    await expect(
+      page.locator('[data-focus-key="home-0-movie-imdbrating-tile-0"] img').first(),
+    ).toHaveAttribute('src', /\/background\/medium\/tt/);
+  });
 });

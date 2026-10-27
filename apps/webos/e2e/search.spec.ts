@@ -45,7 +45,7 @@ test('Search finds titles as typing pauses, and Back returns to the result', asy
     'Sintel, 2010',
   );
   await press(page, 'Enter', 'details-watch');
-  await expect(page.locator('section[aria-label="Sintel"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Sintel"]:visible')).toBeVisible();
 
   await pressBack(page);
   await expectFocus(page, `${MOVIE_RESULTS}-tile-0`);
@@ -103,4 +103,37 @@ test('the Trailer button hands the trailer to the YouTube app', async ({ page })
   await expect
     .poll(() => page.evaluate(() => (window as Window & { trailer?: string }).trailer))
     .toBe('eRsGyueVLvQ');
+});
+
+const keyboardShown = (visibility: boolean) =>
+  document.dispatchEvent(new CustomEvent('keyboardStateChange', { detail: { visibility } }));
+
+test('the TV keyboard microphone key keeps the box typing, and spoken words search', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'search');
+  await expectFocus(page, FIELD);
+  const input = page.locator('input[aria-label="Search"]');
+  await page.keyboard.press('Enter');
+  await expect(input).toBeFocused();
+
+  // The microphone key hides the keyboard for a moment, then voice input shows it again.
+  await page.evaluate(keyboardShown, false);
+  await page.waitForTimeout(400);
+  await page.evaluate(keyboardShown, true);
+  await page.waitForTimeout(2500);
+  await expect(input).toBeFocused();
+
+  // The words arrive as text with no key presses, as the TV's voice input sends them.
+  await page.keyboard.insertText('sintel');
+  await expect(input).toHaveValue('sintel');
+  await expect(page.locator(`[data-row-key="${MOVIE_RESULTS}"] h2`)).toHaveText('MoviesCinemeta');
+
+  // The keyboard closing for good still ends typing, with focus left on the box.
+  await page.evaluate(keyboardShown, false);
+  await expect(input).not.toBeFocused({ timeout: 4000 });
+  await expectFocus(page, FIELD);
 });

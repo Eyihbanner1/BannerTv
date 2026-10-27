@@ -109,3 +109,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Hidden under another screen, or while the remote is in use: hold the pan.
+   On a 4K TV each frame of it redraws most of the screen, which competes with
+   the frames a key press needs. It carries on once the remote rests. */
+:global(.screen-covered) .loaded,
+:global(.is-browsing) .loaded {
+  animation-play-state: paused;
+}

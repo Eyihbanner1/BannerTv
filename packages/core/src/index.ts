@@ -6,6 +6,8 @@ export {
   type CatalogOptions,
   createAddonClient,
   META_POLICY,
+  metahubAtSize,
+  type MetahubSize,
   NotFoundError,
   withArtwork,
 } from './addons/client';

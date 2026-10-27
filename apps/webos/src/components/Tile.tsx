@@ -1,6 +1,7 @@
 import type { MetaPreview } from '@bannertv/protocol';
-import type { CSSProperties } from 'react';
+import { type CSSProperties, memo, useMemo } from 'react';
 import { Artwork } from './Artwork';
+import { artworkUrl } from './artwork-size';
 import { Pressable } from './Pressable';
 import styles from './Tile.module.css';
 
@@ -28,9 +29,12 @@ interface TileProps {
   shape: TileShape;
   index: number;
   loadingLabel: string;
-  style?: CSSProperties;
-  onFocus: () => void;
-  onPress: () => void;
+  /** Position in the row's track or the grid, in px. */
+  left: number;
+  top?: number;
+  /** Stable handlers that take the tile's index, so moving along a row redraws two tiles, not all. */
+  onTileFocus: (index: number) => void;
+  onTilePress: (index: number) => void;
 }
 
 /**
@@ -38,18 +42,27 @@ interface TileProps {
  * backdrop with the title logo, the Netflix way. The name sits underneath as
  * text, so a missing image still leaves a readable tile.
  */
-export function Tile({
+export const Tile = memo(function Tile({
   focusKey,
   item,
   shape,
   index,
   loadingLabel,
-  style,
-  onFocus,
-  onPress,
+  left,
+  top,
+  onTileFocus,
+  onTilePress,
 }: TileProps) {
   const label = item ? [item.name, item.releaseInfo].filter(Boolean).join(', ') : loadingLabel;
   const className = `${styles.tile} ${styles[shape]}${item ? '' : ` ${styles.loading}`}`;
+  const loaded = item !== undefined;
+  const style = useMemo<CSSProperties>(
+    () => (loaded ? { left, top, backgroundImage: fallbackArt(index) } : { left, top }),
+    [left, top, index, loaded],
+  );
+  const poster = artworkUrl(item?.poster, 'posterTile');
+  const background = artworkUrl(item?.background, 'landscapeTile');
+  const logo = artworkUrl(item?.logo, 'tileLogo');
 
   return (
     <Pressable
@@ -57,23 +70,29 @@ export function Tile({
       label={label}
       className={className}
       focusedClassName={styles.focused}
-      style={item ? { ...style, backgroundImage: fallbackArt(index) } : style}
-      onFocus={onFocus}
-      onPress={onPress}
+      style={style}
+      onFocus={() => onTileFocus(index)}
+      onPress={() => onTilePress(index)}
     >
       {item && shape === 'poster' && (
         <>
           <span className={styles.caption}>{item.name}</span>
-          <Artwork key={item.poster} src={item.poster} className={styles.image} />
+          <Artwork key={poster} src={poster} retrySrc={item.poster} className={styles.image} />
         </>
       )}
       {item && shape === 'landscape' && (
         <>
-          <Artwork key={item.background} src={item.background} className={styles.image} />
+          <Artwork
+            key={background}
+            src={background}
+            retrySrc={item.background}
+            className={styles.image}
+          />
           <span className={styles.shade} />
           <Artwork
-            key={item.logo}
-            src={item.logo}
+            key={logo}
+            src={logo}
+            retrySrc={item.logo}
             className={styles.logo}
             fallback={<span className={styles.landscapeName}>{item.name}</span>}
           />
@@ -81,7 +100,7 @@ export function Tile({
       )}
     </Pressable>
   );
-}
+});
 
 interface MoreTileProps {
   focusKey: string;
