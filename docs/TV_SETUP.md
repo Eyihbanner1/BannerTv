@@ -77,11 +77,14 @@ Open **Settings → Diagnostics**. Expected on this TV:
 | localStorage, IndexedDB | works |
 | Chromium | 87 |
 | webOS release | 22 |
-| Platform | 7.x (webOS 22) |
+| SDK version | 7.6.0 (webOS 22) |
+| Firmware | 04.60.91, or newer after a TV update |
 
 Anything different is a finding. The **Media** column shows which codecs the TV's own player (left) and MSE (right) accept. The **TV** column shows whether the TV reports HDR10 and Dolby Vision support.
 
 Also try the remote on every screen: arrows, OK, Back, the Magic Remote pointer (hover and click) and its wheel. On Home, Back should first jump to the first row and then show the TV's exit prompt.
+
+To measure the Back delay: on Home, open a title with OK and press Back, five times. Then open **Settings → Diagnostics**: **Back response** lists the last five times, in milliseconds, from the key press to the screen showing the result.
 
 ### Spike 2: can we switch audio and subtitle tracks?
 
@@ -94,9 +97,9 @@ Repeat with **HLS, alternate audio and subtitles**.
 
 ### Spike 3: start position and HDR
 
-1. Press **Start** until it reads "30 s via mediaOption", then play **MP4, H.264 1080p**. **First frame at** should read about 30 s.
+1. Press **Start** until it reads "30 s via mediaOption", then play **MP4, H.264 360p, 1 minute**. **Started playing at** should read about 30 s.
 2. Switch to "30 s by seeking" and play it again, for comparison.
-3. For 4K HEVC HDR10 and Dolby Vision profile 8, add your own files (next section), play them, and note whether the TV shows its HDR or Dolby Vision badge and whether frames drop (the **Video** line counts them).
+3. For 4K HEVC HDR10 and Dolby Vision profile 8, add your own files (next section), play them, and note whether the TV shows its HDR or Dolby Vision badge and whether the picture stutters. The 65NANO766QA has no Dolby Vision, and it does not report frame counts, so the **Video** line says "frame counts not reported" there.
 
 **Full screen** shows the video at 1920x1080; Back leaves full screen. The remote's play and pause keys work in the lab.
 

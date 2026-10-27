@@ -3,7 +3,7 @@ import {
   isSupportedEngine,
   parseChromiumMajor,
   webOSReleaseForChromium,
-  webOSReleaseForPlatformVersion,
+  webOSReleaseForSdkVersion,
 } from './engine';
 
 const WEBOS_22 =
@@ -49,7 +49,7 @@ describe('webOSReleaseForChromium', () => {
   });
 });
 
-describe('webOSReleaseForPlatformVersion', () => {
+describe('webOSReleaseForSdkVersion', () => {
   it.each([
     ['5.5.0', '5'],
     ['6.3.1', '6'],
@@ -58,8 +58,8 @@ describe('webOSReleaseForPlatformVersion', () => {
     ['9.2.0', '24'],
     ['10.1.0', '25'],
     ['', null],
-  ])('platform %s is webOS %s', (platform, webos) => {
-    expect(webOSReleaseForPlatformVersion(platform)).toBe(webos);
+  ])('SDK %s is webOS %s', (sdk, webos) => {
+    expect(webOSReleaseForSdkVersion(sdk)).toBe(webos);
   });
 });
 

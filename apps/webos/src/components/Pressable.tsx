@@ -3,6 +3,7 @@ import {
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
 import type { CSSProperties, ReactNode } from 'react';
+import { whilePressing } from '../navigation/focus-memory';
 import { inputMode } from '../platform/input-mode';
 
 // In pointer mode the Magic Remote OK can arrive as a key press and a click.
@@ -40,7 +41,7 @@ export function Pressable({
     accessibilityLabel: label,
     onEnterPress: () => {
       lastEnterAt = Date.now();
-      onPress?.();
+      if (onPress) whilePressing(focusKey, onPress);
     },
     onFocus: (layout) => onFocus?.(layout),
   });
@@ -55,11 +56,15 @@ export function Pressable({
       data-focused={focused ? 'true' : undefined}
       className={focused && focusedClassName ? `${className ?? ''} ${focusedClassName}` : className}
       style={style}
-      onMouseEnter={() => {
-        if (inputMode.get() === 'pointer') focusSelf();
+      // Move rather than enter: the first move after the arrows enters the
+      // element before it switches on pointer mode.
+      onMouseMove={() => {
+        if (!focused && inputMode.get() === 'pointer') focusSelf();
       }}
       onClick={() => {
-        if (Date.now() - lastEnterAt > CLICK_AFTER_ENTER_MS) onPress?.();
+        if (Date.now() - lastEnterAt <= CLICK_AFTER_ENTER_MS) return;
+        if (!focused) focusSelf();
+        if (onPress) whilePressing(focusKey, onPress);
       }}
     >
       {children}

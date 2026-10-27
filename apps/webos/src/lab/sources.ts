@@ -24,9 +24,11 @@ const PRESETS: LabSource[] = [
     url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8',
   },
   {
-    label: 'MP4, H.264 1080p, 10 minutes',
+    // Blender's own 1080p MP4 is only offered as a ZIP. This copy streams:
+    // H.264 + AAC, 640x360, 60 s, moov before mdat, byte ranges supported.
+    label: 'MP4, H.264 360p, 1 minute',
     note: 'Spike 3 start position · Big Buck Bunny (CC BY, Blender)',
-    url: 'https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4',
+    url: 'https://raw.githubusercontent.com/mediaelement/mediaelement-files/master/big_buck_bunny.mp4',
   },
 ];
 

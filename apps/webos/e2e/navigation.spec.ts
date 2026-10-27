@@ -53,6 +53,13 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
 
   await pressBack(page);
   await expectFocus(page, 'home-row-0-tile-2');
+  // Home comes back with the row already at that tile, not sliding there.
+  const slides = await page.evaluate(
+    () =>
+      document.querySelector('[data-focus-key="home-row-0-tile-2"]')?.parentElement?.getAnimations()
+        .length,
+  );
+  expect(slides).toBe(0);
 });
 
 test('Back closes screens, goes Home, returns to the first row, then exits', async ({ page }) => {
@@ -91,7 +98,7 @@ test('on a TV, Back on the root screen calls platformBack', async ({ page }) => 
     const w = window as unknown as Record<string, unknown> & { platformBackCalls?: number };
     w.platformBackCalls = 0;
     w.PalmSystem = {
-      deviceInfo: JSON.stringify({ modelName: 'TEST', platformVersion: '7.6.0' }),
+      deviceInfo: JSON.stringify({ modelName: 'TEST', platformVersion: '04.60.91' }),
       platformBack: () => (w.platformBackCalls = (w.platformBackCalls ?? 0) + 1),
     };
   });
@@ -118,4 +125,30 @@ test('the Magic Remote pointer moves focus by hovering', async ({ page }) => {
 
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('html')).not.toHaveClass(/pointer-mode/);
+});
+
+test('one pointer move straight from 5-way mode focuses the tile under it', async ({ page }) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, 'home-row-0-tile-0');
+  await page.mouse.move(10, 10);
+  // The arrow hides the pointer, as on the TV.
+  await press(page, 'ArrowRight', 'home-row-0-tile-1');
+  await expect(page.locator('html')).not.toHaveClass(/pointer-mode/);
+  await page.waitForTimeout(300); // the row finishes sliding
+
+  const box = await page.locator('[data-focus-key="home-row-0-tile-3"]').boundingBox();
+  if (!box) throw new Error('tile 3 is not on screen');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expectFocus(page, 'home-row-0-tile-3');
+});
+
+test('a pointer click opens details, and Back returns to the clicked tile', async ({ page }) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, 'home-row-0-tile-0');
+  // A click with no hover before it, which the Magic Remote can send.
+  await page.locator('[data-focus-key="home-row-1-tile-2"]').dispatchEvent('click');
+  await expectFocus(page, 'details-back');
+
+  await pressBack(page);
+  await expectFocus(page, 'home-row-1-tile-2');
 });

@@ -1,5 +1,6 @@
 import { createStore } from '@bannertv/core';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
+import { currentlyPressed } from '../navigation/focus-memory';
 
 /** Top-level destinations in the rail. */
 export const SECTIONS = ['home', 'search', 'discover', 'library', 'addons', 'settings'] as const;
@@ -44,7 +45,10 @@ export function openSection(section: Section): void {
   router.set({ stack: [{ route: { name: section } }] });
 }
 
-export function push(route: Route, returnFocus: string = getCurrentFocusKey()): void {
+export function push(
+  route: Route,
+  returnFocus: string = currentlyPressed() ?? getCurrentFocusKey(),
+): void {
   router.set(({ stack }) => ({
     stack: [...stack.slice(0, -1), { ...stack[stack.length - 1]!, returnFocus }, { route }],
   }));

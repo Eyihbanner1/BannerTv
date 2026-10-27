@@ -1,10 +1,11 @@
 import appinfo from '../../webos-meta/appinfo.json';
+import { recentBackTimes } from '../navigation/back-timing';
 import { bootInfo } from './boot';
 import {
   isSupportedEngine,
   parseChromiumMajor,
   webOSReleaseForChromium,
-  webOSReleaseForPlatformVersion,
+  webOSReleaseForSdkVersion,
 } from './engine';
 import { isWebOS, lunaCall, readDeviceInfo } from './webos';
 
@@ -104,13 +105,8 @@ function mediaRows(): DiagnosticRow[] {
 async function tvRows(): Promise<DiagnosticRow[]> {
   if (!isWebOS()) return [['Running on webOS', 'no (laptop or test browser)']];
   const device = readDeviceInfo() ?? {};
-  const platformVersion = text(device.platformVersion);
   const rows: DiagnosticRow[] = [
     ['Model', text(device.modelName)],
-    [
-      'Platform',
-      `${platformVersion} (webOS ${webOSReleaseForPlatformVersion(platformVersion) ?? '?'})`,
-    ],
     ['Screen', `${text(device.screenWidth)} x ${text(device.screenHeight)}`],
   ];
 
@@ -138,9 +134,12 @@ async function tvRows(): Promise<DiagnosticRow[]> {
 
   if (system instanceof Error) {
     rows.push(['getSystemInfo', system.message]);
+    // deviceInfo's platformVersion is the firmware version, not the webOS release.
+    rows.push(['Firmware', text(device.platformVersion)]);
   } else {
+    const sdk = text(system.sdkVersion);
     rows.push(['Firmware', text(system.firmwareVersion)]);
-    rows.push(['SDK version', text(system.sdkVersion)]);
+    rows.push(['SDK version', `${sdk} (webOS ${webOSReleaseForSdkVersion(sdk) ?? '?'})`]);
     rows.push(['UHD panel', text(system.UHD)]);
     rows.push(['OLED', text(system.OLED)]);
   }
@@ -154,6 +153,11 @@ async function tvRows(): Promise<DiagnosticRow[]> {
     rows.push(['Memory', text(c['tv.hw.ddrSize'])]);
   }
   return rows;
+}
+
+function backTimes(): string {
+  const times = recentBackTimes();
+  return times.length > 0 ? `${times.join(', ')} ms` : 'press Back on another screen first';
 }
 
 export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
@@ -172,6 +176,7 @@ export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
         ['Font', document.fonts.check('600 24px Urbanist') ? 'Urbanist loaded' : 'fallback'],
         ['localStorage', checkLocalStorage()],
         ['IndexedDB', indexedDBResult],
+        ['Back response', backTimes()],
       ],
     },
     {

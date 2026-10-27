@@ -32,7 +32,9 @@ export function initInputMode(): void {
       // pointer. Those must not steal focus from the remote.
       if (event.movementX !== 0 || event.movementY !== 0) inputMode.set('pointer');
     },
-    { passive: true },
+    // Capture runs before any element's handler, so the first move after the
+    // arrows already counts as pointer input when it reaches a tile.
+    { capture: true, passive: true },
   );
   window.addEventListener(
     'keydown',

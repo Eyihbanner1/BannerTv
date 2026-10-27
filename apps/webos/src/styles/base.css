@@ -58,3 +58,9 @@ input:focus {
 .low-power * {
   transition: none !important;
 }
+
+/* A screen that just opened, or came back after Back, appears already in
+   place: its rows jump to the remembered tile instead of sliding there. */
+.screen-settling * {
+  transition: none !important;
+}

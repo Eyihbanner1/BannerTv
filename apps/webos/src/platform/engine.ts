@@ -36,11 +36,13 @@ export function webOSReleaseForChromium(major: number): string | null {
 }
 
 /**
- * Maps `platformVersion` from PalmSystem.deviceInfo (for example "7.6.0") to the
- * marketing name. From 2022 LG named releases by year: platform 7 is webOS 22.
+ * Maps the TV's SDK version (`sdkVersion` from getSystemInfo, for example
+ * "7.6.0") to the marketing name. From 2022 LG named releases by year: SDK 7
+ * is webOS 22. Not for deviceInfo's `platformVersion`, which on webOS 22 holds
+ * the firmware version (04.60.91 on the development TV).
  */
-export function webOSReleaseForPlatformVersion(platformVersion: string): string | null {
-  const major = Number(platformVersion.split('.')[0]);
+export function webOSReleaseForSdkVersion(sdkVersion: string): string | null {
+  const major = Number(sdkVersion.split('.')[0]);
   if (!Number.isInteger(major) || major < 1) return null;
   return major >= 7 ? String(major + 15) : String(major);
 }

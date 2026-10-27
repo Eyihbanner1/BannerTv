@@ -48,7 +48,8 @@ interface Snapshot {
   state: string;
   time: string;
   size: string;
-  frames: string;
+  /** Null when the engine reports no frames at all, which means it doesn't count them. */
+  frames: { dropped: number; total: number } | null;
   audio: TrackInfo[] | null;
   text: TrackInfo[];
   error: string;
@@ -58,7 +59,7 @@ const EMPTY: Snapshot = {
   state: 'idle',
   time: '',
   size: '',
-  frames: '',
+  frames: null,
   audio: null,
   text: [],
   error: '',
@@ -76,7 +77,10 @@ function snapshot(video: TrackedVideo): Snapshot {
         : 'playing',
     time: `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`,
     size: video.videoWidth ? `${video.videoWidth} x ${video.videoHeight}` : '',
-    frames: quality ? `${quality.droppedVideoFrames} dropped of ${quality.totalVideoFrames}` : '',
+    frames:
+      quality && quality.totalVideoFrames > 0
+        ? { dropped: quality.droppedVideoFrames, total: quality.totalVideoFrames }
+        : null,
     audio: video.audioTracks
       ? listTracks(video.audioTracks, (track) => track.enabled === true)
       : null,
@@ -95,6 +99,9 @@ function snapshot(video: TrackedVideo): Snapshot {
 export function LabScreen() {
   const { t } = useTranslation();
   const videoRef = useRef<TrackedVideo>(null);
+  // Where the current load should seek once its metadata arrives. Every load
+  // sets it, so a load that failed before seeking can't leak into the next.
+  const seekOnLoad = useRef<number | null>(null);
   const [current, setCurrent] = useState<LabSource | null>(null);
   const [startMode, setStartMode] = useState<StartMode>('beginning');
   const [startedAt, setStartedAt] = useState('');
@@ -119,6 +126,10 @@ export function LabScreen() {
     const refresh = () => setInfo(snapshot(video));
     const onEvent = (event: Event) => {
       if (event.type === 'loadstart') firstPlaying = true;
+      if (event.type === 'loadedmetadata' && seekOnLoad.current !== null) {
+        video.currentTime = seekOnLoad.current;
+        seekOnLoad.current = null;
+      }
       if (event.type === 'playing' && firstPlaying) {
         firstPlaying = false;
         setStartedAt(`${video.currentTime.toFixed(1)} s`);
@@ -177,6 +188,7 @@ export function LabScreen() {
     setCurrent(source);
     setStartedAt('');
     setLog([]);
+    seekOnLoad.current = startMode === 'seek' ? START_SECONDS : null;
     video.pause();
     video.removeAttribute('src');
     while (video.firstChild) video.removeChild(video.firstChild);
@@ -193,11 +205,6 @@ export function LabScreen() {
       video.appendChild(element);
     } else {
       video.src = source.url;
-      if (startMode === 'seek') {
-        video.addEventListener('loadedmetadata', () => (video.currentTime = START_SECONDS), {
-          once: true,
-        });
-      }
     }
     note(`load ${source.label} (${startMode})`);
     video.load();
@@ -318,7 +325,16 @@ export function LabScreen() {
         <div className={styles.panels}>
           <div className={styles.panel}>
             <div>{t('lab.state', { state: info.state, time: info.time })}</div>
-            <div>{t('lab.video', { size: info.size || '—', frames: info.frames || '—' })}</div>
+            <div>
+              {t('lab.video', {
+                size: info.size || '—',
+                frames: info.frames
+                  ? t('lab.frames', info.frames)
+                  : info.state === 'idle'
+                    ? '—'
+                    : t('lab.framesNotReported'),
+              })}
+            </div>
             <div>{t('lab.startedAt', { at: startedAt || '—' })}</div>
             <div>
               {t('lab.trackCounts', {

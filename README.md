@@ -6,7 +6,7 @@ BannerTV hosts no content. Users add addon URLs, and BannerTV browses, resolves 
 
 ## Status
 
-Phase 0 (foundations). The app shell, remote navigation, packaging and CI are in place, and a diagnostics screen and playback lab answer the plan's three spikes on a real TV. No addons yet: Home shows sample tiles.
+Phase 0 (foundations). The app shell, remote navigation, packaging and CI are in place, and a diagnostics screen and playback lab answer the plan's three spikes on a real TV. The first run on the webOS 22 TV is recorded in ADR 0001. No addons yet: Home shows sample tiles.
 
 - [Project plan](docs/PLAN.md): scope, addon protocol, webOS specifics, architecture, stack, UX, player, repository layout, milestones, testing, LG Content Store submission and risks.
 - [TV setup](docs/TV_SETUP.md): Developer Mode, installing on the TV, and running the spikes.

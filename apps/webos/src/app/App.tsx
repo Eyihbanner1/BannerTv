@@ -1,5 +1,5 @@
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useSyncExternalStore } from 'react';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { Rail } from '../components/Rail';
 import { platformBack } from '../platform/webos';
 import { useBack } from '../navigation/use-back';
@@ -11,6 +11,8 @@ import { PlaceholderScreen } from '../screens/PlaceholderScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { back, currentSection, openSection, type Route, router } from './router';
 import styles from './App.module.css';
+
+const SETTLING_CLASS = 'screen-settling';
 
 function Screen({ route }: { route: Route }) {
   switch (route.name) {
@@ -37,10 +39,26 @@ function Screen({ route }: { route: Route }) {
 export function App() {
   const { stack } = useSyncExternalStore(router.subscribe, router.get);
   const route = stack[stack.length - 1]!.route;
+  const screenKey = `${stack.length}-${route.name}`;
   const { ref, focusKey } = useFocusable<object, HTMLElement>({
     focusKey: 'content',
     saveLastFocusedChild: true,
   });
+
+  // Focus is restored after the screen mounts, which moves its rows. Hold
+  // transitions off until that has painted, so nothing slides into place.
+  useLayoutEffect(() => {
+    const main = ref.current;
+    if (!main) return;
+    main.classList.add(SETTLING_CLASS);
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => main.classList.remove(SETTLING_CLASS));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      main.classList.remove(SETTLING_CLASS);
+    };
+  }, [ref, screenKey]);
 
   useBack('router', () => {
     if (back()) return true;
@@ -57,7 +75,7 @@ export function App() {
       <Rail />
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>
-          <Screen key={`${stack.length}-${route.name}`} route={route} />
+          <Screen key={screenKey} route={route} />
         </main>
       </FocusContext.Provider>
     </div>

@@ -1,5 +1,6 @@
 import { init, navigateByDirection, setKeyMap } from '@noriginmedia/norigin-spatial-navigation';
 import { backStack } from './back';
+import { timeBack } from './back-timing';
 import { isBackKey, SPATIAL_KEY_MAP } from './keys';
 
 const WHEEL_STEP_MS = 150;
@@ -20,7 +21,9 @@ export function initNavigation(): void {
     if (!isBackKey(event)) return;
     event.preventDefault();
     // A long press is the system's: it exits to the Home launcher.
-    if (!event.repeat) backStack.handle();
+    if (event.repeat) return;
+    backStack.handle();
+    timeBack(event);
   });
 
   // The Magic Remote wheel moves one row per notch.
