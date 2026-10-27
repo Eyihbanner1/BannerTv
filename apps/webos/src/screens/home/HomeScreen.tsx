@@ -27,16 +27,17 @@ import { describeAddonError, typeLabel } from '../../data/describe';
 import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
+import { tuning } from '../../platform/tuning';
 import { Hero, openDetails } from './Hero';
 import { heroItem } from './hero-item';
 import styles from './HomeScreen.module.css';
 
 /** Rows show the first titles of a catalog; Discover pages through the rest. */
 const MAX_ROW_ITEMS = 40;
-/** Rows this far from the focused one are drawn as empty boxes and not fetched yet. */
-const ROWS_AROUND = 2;
+/** Rows further than this from the focused one are drawn as empty boxes and not fetched yet. */
+const ROWS_AROUND = tuning.rowsAround;
 /** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
-const HERO_DELAY_MS = 250;
+const HERO_DELAY_MS = tuning.heroDelayMs;
 
 export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 
@@ -49,8 +50,9 @@ interface HomeRowProps {
   row: BoardRow;
   first: boolean;
   near: boolean;
-  onEmpty: (key: string) => void;
-  onItemFocus: (row: BoardRow, item: MetaPreview, element: HTMLElement) => void;
+  /** The row's catalog came back empty; `focused` if focus was in it. */
+  onEmpty: (key: string, focused: boolean) => void;
+  onItemFocus: (row: BoardRow, item: MetaPreview | undefined, element: HTMLElement) => void;
 }
 
 function openCatalog(row: BoardRow): void {
@@ -80,14 +82,16 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
   const empty = state.status === 'success' && items !== null && items.length === 0;
   const onRetry = useCallback(() => query.retry(), [query]);
   const onRowItemFocus = useCallback(
-    (item: MetaPreview, element: HTMLElement) => onItemFocus(row, item, element),
+    (item: MetaPreview | undefined, element: HTMLElement) => onItemFocus(row, item, element),
     [row, onItemFocus],
   );
   const onSeeAll = useCallback(() => openCatalog(row), [row]);
 
-  useEffect(() => {
-    if (empty) onEmpty(row.key);
-  }, [empty, onEmpty, row.key]);
+  // Before the row's tiles unregister, while focus is still on one of them.
+  useLayoutEffect(() => {
+    if (!empty) return;
+    onEmpty(row.key, getCurrentFocusKey().indexOf(`${rowFocusKey(row)}-tile-`) === 0);
+  }, [empty, onEmpty, row]);
   useEffect(() => {
     if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
   }, [first, items]);
@@ -125,6 +129,7 @@ export function HomeScreen() {
   const [focusedRow, setFocusedRow] = useState(memory.row);
   const trackRef = useRef<HTMLDivElement>(null);
   const heroTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const slideFrame = useRef(0);
 
   const firstRowKey = rows.length > 0 ? rowFocusKey(rows[0]!) : undefined;
   const focusedIndex = Math.max(
@@ -158,23 +163,49 @@ export function HomeScreen() {
     [rows],
   );
 
-  useEffect(() => () => clearTimeout(heroTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(heroTimer.current);
+      cancelAnimationFrame(slideFrame.current);
+    },
+    [],
+  );
 
-  const onEmpty = useCallback((key: string) => {
+  const latestRows = useRef(rows);
+  useLayoutEffect(() => {
+    latestRows.current = rows;
+  });
+
+  // A row that turns out empty under focus hands it to the row below (or
+  // above, at the end), which is drawn, rather than letting it fall to the hero.
+  const onEmpty = useCallback((key: string, focused: boolean) => {
     emptyRows.add(key);
     setHidden(new Set(emptyRows));
+    const list = latestRows.current;
+    const index = list.findIndex((row) => row.key === key);
+    const next = focused ? (list[index + 1] ?? list[index - 1]) : undefined;
+    if (!next) return;
+    memory.row = next.key;
+    setFocusedRow(next.key);
+    void setFocus(rowFocusKey(next));
   }, []);
 
-  const onItemFocus = useCallback((row: BoardRow, item: MetaPreview) => {
+  // Rows that are loading or failed report focus too, so the rows under them
+  // are drawn and Down has somewhere to go. Only titles change the hero.
+  const onItemFocus = useCallback((row: BoardRow, item: MetaPreview | undefined) => {
     memory.row = row.key;
     setFocusedRow(row.key);
-    // Reading the row's position forces a layout, so only slide when the row changes.
+    // Reading the row's position forces a layout, so only slide when the row
+    // changes, and in the next frame, which lays out anyway, not in the key press.
     if (canSlide() && memory.slideRow !== row.key) {
       memory.slideRow = row.key;
-      slideTrack(trackRef.current, rowFocusKey(row));
+      cancelAnimationFrame(slideFrame.current);
+      slideFrame.current = requestAnimationFrame(() =>
+        slideTrack(trackRef.current, rowFocusKey(row)),
+      );
     }
     clearTimeout(heroTimer.current);
-    heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);
+    if (item) heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);
   }, []);
 
   if (collection.ready && rows.length === 0) {

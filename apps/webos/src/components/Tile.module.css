@@ -32,6 +32,15 @@
   transform: none;
 }
 
+/* Tuning switches, see src/platform/tuning.ts. */
+:global(.tune-zoom-instant) .tile {
+  transition: none;
+}
+
+:global(.tune-zoom-off) .focused {
+  transform: none;
+}
+
 .image {
   position: absolute;
   top: 0;

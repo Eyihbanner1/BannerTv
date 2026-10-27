@@ -17,6 +17,15 @@
   transition: transform var(--bt-motion) ease-out;
 }
 
+/* Tuning switches, see src/platform/tuning.ts. */
+:global(.tune-motion-layer) .track {
+  will-change: transform;
+}
+
+:global(.tune-motion-jump) .track {
+  transition: none;
+}
+
 .empty {
   padding: 200px var(--bt-safe-x) 0 var(--bt-content-inset);
 }

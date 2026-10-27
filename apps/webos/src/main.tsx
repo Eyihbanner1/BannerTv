@@ -11,6 +11,7 @@ import { initNavigation } from './navigation/spatial';
 import { bootInfo } from './platform/boot';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { initInputMode } from './platform/input-mode';
+import { applyTuning, changedTuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
 
 function fitToWindow(root: HTMLElement) {
@@ -27,6 +28,7 @@ function start() {
   if (chromium !== null && webOSReleaseForChromium(chromium) === '5') {
     document.documentElement.classList.add('low-power');
   }
+  applyTuning(document.documentElement);
   if (!isWebOS()) {
     fitToWindow(root);
     window.addEventListener('resize', () => fitToWindow(root));
@@ -44,7 +46,7 @@ function start() {
       <App />
     </StrictMode>,
   );
-  console.info('[BannerTV] started', bootInfo);
+  console.info('[BannerTV] started', bootInfo, 'tuning', changedTuning());
 }
 
 start();
