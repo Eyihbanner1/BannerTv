@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+coverage/
+test-results/
+playwright-report/
+*.ipk
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Personal test media for the playback lab, see docs/TV_SETUP.md
+apps/webos/lab-sources.local.json

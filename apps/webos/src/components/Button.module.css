@@ -1,0 +1,29 @@
+.button {
+  display: inline-block;
+  min-width: 240px;
+  padding: 18px 40px;
+  border-radius: 16px;
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+  font: var(--bt-text-label);
+  text-align: center;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.primary {
+  background: var(--bt-action);
+  color: #fff;
+}
+
+.focused {
+  background: var(--bt-action-focused);
+  color: #fff;
+  box-shadow: var(--bt-focus-ring);
+  transform: scale(var(--bt-focus-scale));
+}
+
+.block {
+  display: block;
+  margin-bottom: 20px;
+  text-align: left;
+}

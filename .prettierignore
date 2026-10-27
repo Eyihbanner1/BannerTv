@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+dist/
+out/
+coverage/
+test-results/
+playwright-report/
+brand/
+# Markdown is written by hand, and docs/PLAN.md is exported from the plan doc.
+*.md

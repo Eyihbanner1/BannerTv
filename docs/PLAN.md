@@ -62,7 +62,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Streams | Debrid (Real-Debrid, TorBox, Premiumize) | Through addons | TorBox and Premiumize built in | Through addons in v1. Built-in debrid is a Phase 5 option |
 | Player | Internal player | Yes | ExoPlayer or libmpv | Phase 2, HTML5 video on the webOS media pipeline |
 | Player | Subtitles from addons, styling | Yes | Yes, plus libass for ASS | Phase 2 SRT and VTT with styling. ASS in Phase 5 |
-| Player | Embedded audio and subtitle tracks | Yes | Yes, per-title memory | Phase 2, limited by what webOS exposes (see Player) |
+| Player | Embedded audio and subtitle tracks | Yes | Yes, per-title memory | Phase 2. Audio through `audioTracks`; embedded subtitles are not exposed on webOS 22 and need a spike (see Player) |
 | Player | Resume, next-episode autoplay, binge groups | Yes | Yes, plus "Still watching?" | Phase 2 |
 | Player | Skip intro and outro | No | IntroDB, AniSkip | Phase 5 |
 | Library | Save to library, continue watching | Yes | Yes | Phase 3 |
@@ -268,7 +268,7 @@ Use TypeScript, React 18 and Vite, with Norigin Spatial Navigation for the remot
 | Storage | `idb` over IndexedDB, localStorage for small settings | Survives restarts; the webOS HTTP cache does not |
 | Styling | CSS Modules plus design tokens as CSS custom properties | No CSS-in-JS runtime cost on slow CPUs |
 | Lists | Hand-rolled virtual rows and grids | Only render tiles near the viewport; posters are the main memory cost |
-| Player | Native `<video>` first, Shaka Player for DASH, hls.js as an HLS fallback | Hardware decoding through the webOS pipeline wherever possible |
+| Player | Native `<video>` first, Shaka Player for DASH, hls.js for HLS with alternate renditions or when native fails | Hardware decoding through the webOS pipeline wherever possible; webOS 22 hides HLS alternates from the native player |
 | Subtitles | Own SRT and VTT parser and renderer, JASSUB (libass in WebAssembly) later for ASS | Native support is WebVTT only |
 | i18n | i18next | Strings externalized from day one |
 | Build | Vite with a classic (non-module) script bundle, ES2017 target. One bundle only, since webOS 4.x is dropped | Module scripts loaded from `file://` can be blocked by CORS in Chromium; verify in Phase 0 |
@@ -342,7 +342,7 @@ One playback controller in the core drives three interchangeable engines, and th
 | Stream type | Engine | Notes |
 | --- | --- | --- |
 | Progressive MP4, MKV, WebM, TS over HTTPS | Native `<video>` | Most debrid and direct links. Hardware HEVC, AV1, HDR10 and Dolby Vision where the TV supports them |
-| HLS (`.m3u8`) | Native `<video>` | hls.js over MSE as fallback when native fails, for example on unusual renditions |
+| HLS (`.m3u8`) | Native `<video>` | hls.js over MSE when the master playlist has alternate audio or subtitle renditions (native lists only one audio track and no subtitles on webOS 22), or when native fails |
 | DASH (`.mpd`) | Shaka Player over MSE | Not listed for the native player |
 | YouTube (`ytId`) | Launch the YouTube app | Trailers only |
 | `externalUrl`, `webosUrl` | Launch via the application manager | Opens the target app or browser |
@@ -359,8 +359,12 @@ One playback controller in the core drives three interchangeable engines, and th
 
 **Tracks and subtitles**
 
-- Audio tracks: use `HTMLMediaElement.audioTracks` when the webOS engine exposes it. Whether it does for MKV direct play on each webOS version is the top Phase 0 spike question. If not, show the default track and point users to a stream with their language.
-- Embedded subtitle tracks: same spike, through `textTracks`. Addon subtitles always work because BannerTV renders them itself.
+Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classic-bundle.md)): `audioTracks` lists both audio tracks of an MKV, `textTracks` lists none of its 8 subtitle tracks, and native HLS lists one audio track and no subtitles for a stream that has alternates.
+
+- Audio tracks, direct play: `HTMLMediaElement.audioTracks`, exposed on webOS 22, and switching is audible. The webOS 5 floor TV gets the same check. Where it is missing, show the default track and point users to a stream with their language.
+- Audio and subtitle renditions, HLS: hls.js, which reads the renditions from the playlist itself, whenever the master playlist declares alternates.
+- Embedded subtitles, direct play: not exposed through `textTracks` on webOS 22. A Phase 2 spike looks at the webOS media pipeline's own Luna API (`com.webos.media`, keyed by the video element's media ID), which may list and select embedded tracks; this is unverified. Until then the subtitle menu offers addon subtitles and says that embedded ones are not available on this TV.
+- Addon subtitles are the main subtitle path: they always work because BannerTV renders them itself, so OpenSubtitles v3 stays a default addon.
 - Addon subtitles (OpenSubtitles v3 and others): fetched with `fetch`, which needs CORS on the subtitle host. Detect the text encoding (many SRT files are Windows-1252, 1256 or similar) before decoding.
 - Renderer: SRT and VTT parsed into cues, drawn in an overlay above the video plane. Settings for size, colour, background, outline, vertical position and a timing offset adjustable in 100 ms steps.
 - ASS and SSA styling through JASSUB is a Phase 5 item for webOS 6+; until then ASS is shown as plain text.
@@ -368,7 +372,8 @@ One playback controller in the core drives three interchangeable engines, and th
 **Progress, resume and next episode**
 
 - Save the position every 10 seconds, on pause and when the app is hidden. Mark as watched at 90% (configurable).
-- Resume with "Resume from 42:10" or "Start over". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load.
+- Resume with "Resume from 42:10" or "Start over". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this works for HLS and MP4. With `mediaOption`, `currentTime` reads 0 at the first `playing` event and the real position about 55 ms later, so progress is only saved once the clock has moved past the resume point, never from that first 0.
+- Playback health: `getVideoPlaybackQuality()` reports no frames at all on webOS 22, so dropped frames cannot be counted. Stall detection and the "try the next stream" offer use `waiting` and `stalled` events and a timer.
 - Up Next card in the last 30 seconds or at 95%, with a 10 second countdown. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the stream picker.
 - Trakt scrobble start, pause and stop events (Phase 3).
 
@@ -467,13 +472,13 @@ Phases 0 to 2 are the minimum product; if time runs short, Phase 3's profiles an
 **Phase 0 tasks to start with**
 
 - [x] Eyitayo creates the `Eyihbanner1/BannerTv` repository and confirms the app ID
-- [ ] Scaffold the monorepo: pnpm, TypeScript, Vite, ESLint, Vitest, and a CI job that outputs an .ipk
-- [ ] Enable Developer Mode on the LG 65NANO766QA (webOS 22) and register it with `ares-setup-device`
-- [ ] Spike 1: the classic script bundle loads from `file://` on webOS 22, and on webOS 5 once a floor TV is available
-- [ ] Spike 2: `audioTracks` and `textTracks` on an MKV with two audio and two subtitle tracks
-- [ ] Spike 3: `mediaOption` start position, 4K HEVC HDR10 and Dolby Vision profile 8 playback
-- [ ] Spatial navigation skeleton: rail, two rows of tiles, Back key handling
-- [ ] Record the spike results in ADR 0001 and adjust this plan where they differ
+- [x] Scaffold the monorepo: pnpm, TypeScript, Vite, ESLint, Vitest, and a CI job that outputs an .ipk
+- [ ] Enable Developer Mode on the LG 65NANO766QA (webOS 22) and register it with `ares-setup-device`. The first install used the rooted TV's own install service instead, so this path is untested
+- [x] Spike 1 on webOS 22: the classic script bundle loads from `file://`. webOS 5 waits for the floor TV
+- [x] Spike 2: `audioTracks` lists MKV audio tracks; `textTracks` lists no embedded subtitles; native HLS hides alternate renditions
+- [ ] Spike 3: `mediaOption` start position works for HLS and MP4; HDR10 file not tested yet. This TV has no Dolby Vision, so profile 8 waits for a TV that has it
+- [x] Spatial navigation skeleton: rail, two rows of tiles, Back key handling
+- [x] Record the spike results in ADR 0001 and adjust this plan where they differ
 - [ ] Buy a used 2020 LG TV on webOS 5 as the performance floor, before the end of Phase 1
 
 ## Testing, QA and performance
@@ -581,12 +586,12 @@ BannerTV has no content of its own, so a tester who opens it needs something leg
 
 ## Risks, legal and open questions
 
-The two risks that could sink the project are LG rejecting the app in its content test and webOS not exposing audio and subtitle tracks for direct-play files. The first is handled by how the store build is shaped; the second is the first thing Phase 0 tests on a real TV.
+The two risks that could sink the project were LG rejecting the app in its content test and webOS not exposing audio and subtitle tracks for direct-play files. The first is handled by how the store build is shaped. Phase 0 settled most of the second on webOS 22: audio tracks are exposed, embedded subtitles are not, and addon subtitles cover the gap.
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | LG rejects BannerTV as a piracy tool | Medium | High | Demo addon with legal content, no third-party stream addons preinstalled or promoted, first-run disclaimer, adult filter on; sideload channel as fallback |
-| Audio and embedded subtitle switching not available for MKV direct play | Medium | High | Phase 0 spike on three webOS versions; language-aware stream sorting; clear UX when a track cannot be changed |
+| Embedded subtitles not available for MKV direct play | Confirmed on webOS 22 | Medium | Addon subtitles rendered by BannerTV as the main path; Phase 2 spike on the webOS media pipeline API; clear UX when a track cannot be changed. Audio track switching is exposed on webOS 22 |
 | Slow UI on 2020 low-end TVs | Medium | High | Performance budgets, virtual lists, low-power mode, floor TV bought by the end of Phase 1, development on the webOS 22 TV meanwhile |
 | One-person team runs out of time | High | High | Strict phase gates, MVP cut at Phase 2, everything optional pushed to Phase 5 |
 | Store review takes about 3 weeks per update | High | Medium | Monthly store releases, weekly beta builds, batch fixes |

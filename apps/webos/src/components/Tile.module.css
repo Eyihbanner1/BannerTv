@@ -1,0 +1,38 @@
+.tile {
+  position: relative;
+  flex: none;
+  margin-right: var(--bt-tile-spacing);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.poster {
+  width: 220px;
+  height: 330px;
+}
+
+.landscape {
+  width: 384px;
+  height: 216px;
+}
+
+.focused {
+  box-shadow: var(--bt-focus-ring);
+  transform: scale(var(--bt-focus-scale));
+}
+
+:global(.low-power) .focused {
+  transform: none;
+}
+
+.caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 48px 16px 14px;
+  background: linear-gradient(transparent, rgba(11, 8, 21, 0.85));
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+}

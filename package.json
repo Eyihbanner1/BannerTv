@@ -1,0 +1,35 @@
+{
+  "name": "bannertv",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @bannertv/webos dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . && node tools/scripts/check-css.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
+    "e2e": "pnpm --filter @bannertv/webos e2e",
+    "check:bundle": "pnpm --filter @bannertv/webos check:bundle",
+    "check:version": "node tools/scripts/check-version.mjs",
+    "package": "pnpm --filter @bannertv/webos package",
+    "ares": "pnpm --filter @bannertv/webos exec",
+    "tv:install": "node tools/scripts/tv.mjs install",
+    "tv:launch": "node tools/scripts/tv.mjs launch",
+    "tv:inspect": "node tools/scripts/tv.mjs inspect"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0"
+  }
+}

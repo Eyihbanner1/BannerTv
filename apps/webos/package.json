@@ -1,0 +1,36 @@
+{
+  "name": "@bannertv/webos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BannerTV for LG webOS TVs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "check:bundle": "node ../../tools/scripts/check-bundle.mjs dist",
+    "package": "ares-package --no-minify --outdir ../../out dist"
+  },
+  "dependencies": {
+    "@bannertv/core": "workspace:*",
+    "@noriginmedia/norigin-spatial-navigation": "^3.4.0",
+    "i18next": "^26.5.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-i18next": "^17.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@webos-tools/cli": "^3.2.6",
+    "es-check": "^9.8.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

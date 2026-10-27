@@ -1,0 +1,20 @@
+.row {
+  padding-bottom: 40px;
+}
+
+.title {
+  margin: 0 0 4px var(--bt-content-inset);
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+}
+
+/* Bleeds to the right edge. The padding leaves room for the focus scale. */
+.viewport {
+  overflow: hidden;
+  padding: 20px 0 20px var(--bt-content-inset);
+}
+
+.track {
+  display: flex;
+  transition: transform var(--bt-motion) ease-out;
+}

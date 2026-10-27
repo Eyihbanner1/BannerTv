@@ -1,0 +1,14 @@
+.app {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+}
+
+.content {
+  position: absolute;
+  top: 0;
+  left: var(--bt-rail-collapsed);
+  width: var(--bt-content-width);
+  height: 1080px;
+}

@@ -1,0 +1,66 @@
+/* Global layout tokens and resets. Colour and type tokens come from brand/tokens/tokens.css.
+   Chromium 68 is the floor: no flex gap, aspect-ratio, :focus-visible, inset or logical
+   properties. tools/scripts/check-css.mjs enforces the list. */
+:root {
+  /* 5% safe area on the 1920x1080 canvas */
+  --bt-safe-x: 96px;
+  --bt-safe-y: 54px;
+  --bt-rail-collapsed: 184px;
+  --bt-rail-expanded: 440px;
+  /* Screens sit right of the collapsed rail; this is their left padding inside it. */
+  --bt-content-inset: 32px;
+  --bt-content-width: 1736px;
+  --bt-tile-spacing: 24px;
+  --bt-focus-ring: 0 0 0 4px var(--bt-focus);
+  --bt-focus-scale: 1.08;
+  --bt-motion: 180ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--bt-bg);
+  color: var(--bt-text);
+  font: var(--bt-text-body);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#root {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+/* Spatial navigation owns focus visuals; the browser outline would double them. */
+[role='button']:focus,
+input:focus {
+  outline: none;
+}
+
+/* Low-power mode (webOS 5.x): no focus scaling or slides. */
+.low-power * {
+  transition: none !important;
+}
+
+/* A screen that just opened, or came back after Back, appears already in
+   place: its rows jump to the remembered tile instead of sliding there. */
+.screen-settling * {
+  transition: none !important;
+}

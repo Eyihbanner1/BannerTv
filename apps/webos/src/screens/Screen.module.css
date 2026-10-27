@@ -1,0 +1,28 @@
+.screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-content-width);
+  height: 1080px;
+  padding: 96px var(--bt-safe-x) var(--bt-safe-y) var(--bt-content-inset);
+}
+
+.title {
+  margin-bottom: 24px;
+  font: var(--bt-text-title);
+}
+
+.lead {
+  max-width: 1100px;
+  margin-bottom: 48px;
+  color: var(--bt-text-muted);
+}
+
+.muted {
+  color: var(--bt-text-subtle);
+  font: var(--bt-text-label);
+}
+
+.column {
+  width: 640px;
+}

@@ -1,0 +1,19 @@
+{
+  "id": "com.bannertv.app",
+  "version": "0.1.0",
+  "vendor": "BannerTV",
+  "type": "web",
+  "main": "index.html",
+  "title": "BannerTV",
+  "icon": "icon_80.png",
+  "largeIcon": "icon_130.png",
+  "iconColor": "#1B1430",
+  "splashBackground": "splash_1920x1080.png",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": true,
+  "accessibility": {
+    "supportsAudioGuidance": true
+  },
+  "requiredACG": ["systemconfig.query"]
+}

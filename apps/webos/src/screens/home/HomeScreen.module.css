@@ -1,0 +1,18 @@
+.home {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-content-width);
+  height: 1080px;
+}
+
+.rows {
+  height: 640px;
+  overflow: hidden;
+}
+
+.track {
+  /* Rows measure offsetTop against this box. */
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}

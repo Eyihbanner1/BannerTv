@@ -1,0 +1,66 @@
+{
+  "common": {
+    "back": "Back",
+    "yes": "Yes",
+    "no": "No",
+    "unknown": "Unknown",
+    "notAvailable": "n/a"
+  },
+  "rail": {
+    "label": "Main menu",
+    "home": "Home",
+    "search": "Search",
+    "discover": "Discover",
+    "library": "Library",
+    "addons": "Addons",
+    "settings": "Settings"
+  },
+  "home": {
+    "rowPosters": "Open movies",
+    "rowLandscape": "Landscape tiles",
+    "heroMeta": "{{year}} · Blender open movie · sample tile",
+    "details": "Details"
+  },
+  "details": {
+    "lead": "{{year}}. This is a sample details page. Seasons, episodes and the stream picker arrive in Phases 1 and 2."
+  },
+  "placeholder": {
+    "search": "Search across all your addons arrives in Phase 1.",
+    "discover": "Browsing by type, catalog and genre arrives in Phase 1.",
+    "library": "Your saved titles and watch history arrive in Phase 3.",
+    "addons": "Installing addons by URL or from your phone arrives in Phase 1."
+  },
+  "settings": {
+    "lead": "Developer tools for the Phase 0 spikes. Real settings arrive in Phase 1.",
+    "diagnostics": "Diagnostics",
+    "lab": "Playback lab",
+    "about": "{{title}} {{version}} · {{id}}"
+  },
+  "diagnostics": {
+    "refresh": "Refresh",
+    "loading": "Collecting…"
+  },
+  "lab": {
+    "start": {
+      "beginning": "Start: from the beginning",
+      "mediaOption": "Start: {{seconds}} s via mediaOption",
+      "seek": "Start: {{seconds}} s by seeking"
+    },
+    "fullscreen": "Full screen (Back to leave)",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "off": "Off",
+    "noAudioTracksApi": "audioTracks is not exposed by this engine",
+    "state": "State: {{state}} {{time}}",
+    "video": "Video: {{size}} · {{frames}}",
+    "frames": "{{dropped}} dropped of {{total}} frames",
+    "framesNotReported": "frame counts not reported",
+    "startClock": {
+      "none": "Clock at start: —",
+      "playing": "Clock at start: {{playing}} at the playing event",
+      "both": "Clock at start: {{playing}} at the playing event, {{update}} at the first timeupdate ({{delay}} ms later)"
+    },
+    "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
+    "error": "Error: {{error}}"
+  }
+}

@@ -1,0 +1,77 @@
+/* The rail's layout box stays collapsed even when it opens, so spatial
+   navigation always sees the content starting to its right. Only the backdrop
+   and the items grow. */
+.rail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: var(--bt-rail-collapsed);
+  height: 1080px;
+  padding: var(--bt-safe-y) 0 0 72px;
+}
+
+.backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-rail-collapsed);
+  height: 1080px;
+  background: var(--bt-bg);
+  transition: width var(--bt-motion) ease-out;
+}
+
+.expanded .backdrop {
+  width: var(--bt-rail-expanded);
+  background: var(--bt-surface-1);
+  box-shadow: 24px 0 64px rgba(0, 0, 0, 0.6);
+}
+
+.logo {
+  position: relative;
+  display: block;
+  height: 56px;
+  margin: 0 0 64px 4px;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 12px;
+  padding: 0 16px;
+  border-radius: 16px;
+  color: var(--bt-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.expanded .item {
+  width: 336px;
+}
+
+.item svg {
+  flex: none;
+}
+
+.active {
+  color: var(--bt-accent);
+}
+
+.focused {
+  color: var(--bt-text);
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.label {
+  margin-left: 24px;
+  font: var(--bt-text-heading);
+  opacity: 0;
+}
+
+.expanded .label {
+  opacity: 1;
+}
