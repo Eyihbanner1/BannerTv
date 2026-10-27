@@ -1,0 +1,74 @@
+/* Above the rail and the screens, which wait underneath until it closes. */
+.welcome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  z-index: 50;
+  overflow: hidden;
+  background: var(--bt-bg);
+}
+
+/* The logo's violet, as light falling from the top right. */
+.glow {
+  position: absolute;
+  top: -360px;
+  right: -280px;
+  width: 1400px;
+  height: 1100px;
+  background: radial-gradient(
+    closest-side,
+    rgba(123, 77, 255, 0.32),
+    rgba(75, 35, 200, 0.12) 55%,
+    rgba(11, 8, 21, 0)
+  );
+}
+
+.body {
+  position: absolute;
+  top: 120px;
+  left: 200px;
+  width: 1160px;
+}
+
+.lockup {
+  display: block;
+  height: 88px;
+  margin-bottom: 56px;
+}
+
+.title {
+  margin-bottom: 24px;
+  font: var(--bt-text-display);
+}
+
+.lead {
+  margin-bottom: 16px;
+  font: 500 34px/1.4 var(--bt-font);
+  color: var(--bt-text);
+}
+
+.ready {
+  margin-bottom: 40px;
+  color: var(--bt-text-muted);
+}
+
+.notice {
+  margin-bottom: 56px;
+  padding: 28px 36px;
+  border-left: 6px solid var(--bt-accent);
+  border-radius: 16px;
+  background: var(--bt-surface-1);
+  color: var(--bt-text-muted);
+}
+
+.noticeTitle {
+  margin-bottom: 8px;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+}
+
+.actions > * {
+  margin-right: 24px;
+}

@@ -172,5 +172,14 @@
     },
     "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
     "error": "Error: {{error}}"
+  },
+  "welcome": {
+    "title": "Welcome to BannerTV",
+    "lead": "Films and series from the addons you choose, in one place and made for your remote.",
+    "ready": "Cinemeta is already added, so Home is ready to browse. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
+    "noticeTitle": "Good to know",
+    "notice": "BannerTV doesn't host or provide any films or series. Everything comes from the addons you add, and you're responsible for the addons you choose.",
+    "start": "Start browsing",
+    "addAddon": "Add an addon"
   }
 }

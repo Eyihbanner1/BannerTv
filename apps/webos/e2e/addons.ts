@@ -168,6 +168,8 @@ const json = (route: Route, body: unknown, status = 200) =>
   });
 
 export interface MockOptions {
+  /** Shows the first-run screen. Otherwise the journeys start on Home, as on any later launch. */
+  firstRun?: boolean;
   /**
    * Answers for particular catalog paths, e.g. `series/top`. Returning
    * undefined instead of a promise falls through to the usual list.
@@ -227,6 +229,10 @@ function fakeRelay(): { relay: PhoneRelay; answer: (route: Route) => Promise<voi
 export async function mockAddons(page: Page, options: MockOptions = {}): Promise<AddonRequests> {
   const { relay, answer } = fakeRelay();
   const requests: AddonRequests = { catalogs: [], phone: relay };
+
+  if (!options.firstRun) {
+    await page.addInitScript(() => localStorage.setItem('bannertv.welcomed', '1'));
+  }
 
   // Anything not mocked below fails, so a stray request shows up as an error.
   await page.route(/^https?:\/\//, (route) => route.abort());

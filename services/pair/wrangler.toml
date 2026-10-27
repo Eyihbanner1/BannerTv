@@ -1,5 +1,5 @@
 # The phone pairing relay. Deploy with `npx wrangler@4 deploy` from this folder.
-name = "bannertv-pair"
+name = "pair"
 main = "src/worker.ts"
 compatibility_date = "2026-06-01"
 workers_dev = true

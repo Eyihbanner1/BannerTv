@@ -13,6 +13,7 @@ import { PAIR_SERVICE } from '../../data/pairing';
 import { canSlide } from '../../platform/input-mode';
 import { ConfigureDialog } from './ConfigureDialog';
 import { InstallDialog } from './InstallDialog';
+import { takeInstallRequest } from './install-request';
 import styles from './AddonsScreen.module.css';
 
 const CARD_STEP = 176;
@@ -126,7 +127,7 @@ export function AddonsScreen() {
   const { t } = useTranslation();
   const { ready, addons } = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const [focusedUrl, setFocusedUrl] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const [installing, setInstalling] = useState(takeInstallRequest);
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
   const [configuring, setConfiguring] = useState<InstalledAddon | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -136,7 +137,12 @@ export function AddonsScreen() {
     saveLastFocusedChild: true,
   });
 
-  useScreenFocus(addons.length > 0 ? upKey(addons[0]!) : ADD_BUTTON, ready);
+  // Opened from the first-run screen, the dialog places focus itself.
+  const [openedWithDialog] = useState(installing);
+  useScreenFocus(
+    openedWithDialog ? undefined : addons.length > 0 ? upKey(addons[0]!) : ADD_BUTTON,
+    ready,
+  );
 
   // The focused card stays in view, one card below the top when it can.
   const focusedIndex = Math.max(

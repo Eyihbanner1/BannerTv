@@ -8,7 +8,7 @@
  */
 
 /** The deployed relay (services/pair). Empty hides "Send it from your phone" and addon settings. */
-export const PAIR_SERVICE = 'https://bannertv-pair.bannertv-pair.workers.dev';
+export const PAIR_SERVICE = 'https://pair.bannertv-pair.workers.dev';
 
 export const POLL_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;

@@ -17,6 +17,6 @@ npx wrangler@4 login
 npx wrangler@4 deploy
 ```
 
-Wrangler prints the address (`https://bannertv-pair.<account>.workers.dev`). Put it in `PAIR_SERVICE` in `apps/webos/src/data/pairing.ts`; the TV hides "Send from your phone" while that is empty.
+Wrangler prints the address (`https://pair.<account subdomain>.workers.dev`). Put it in `PAIR_SERVICE` in `apps/webos/src/data/pairing.ts`; the TV hides "Send from your phone" while that is empty.
 
 The free Workers plan covers a person or a household: each pairing makes one request every three seconds while the dialog is open.
