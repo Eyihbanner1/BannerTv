@@ -124,10 +124,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
     () => (meta ? nextVideo(meta, videoId, Date.now()) : undefined),
     [meta, videoId],
   );
-  // Up Next: the last 30 seconds of an episode, or its end.
+  // Up Next: the last 30 seconds of an episode, or its end. Never during a live broadcast.
+  const offersNext = !!next && !state.live;
   const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
   const showUpNext =
-    !!next &&
+    offersNext &&
     !upNextDismissed &&
     !panel &&
     (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
@@ -141,11 +142,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for
-  // the Lab. The card keeps the ids the progress is saved under.
+  // the Lab or a live broadcast. The card keeps the ids the progress is saved under.
   const playing = state.status === 'playing';
+  const live = state.live;
   const recorded = useRef<string | null>(null);
   useEffect(() => {
-    if (props.lab || !playing || !item) return;
+    if (props.lab || !playing || live || !item) return;
     const card = playedCard(item, videoId, meta, { metaId, type });
     const prior = meta ? undefined : playedVideos.get(videoId);
     if (prior && prior.metaId === metaId) {
@@ -167,7 +169,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (recorded.current === key) return;
     recorded.current = key;
     playedVideos.record(card);
-  }, [props.lab, playing, item, meta, videoId, metaId, type]);
+  }, [props.lab, playing, live, item, meta, videoId, metaId, type]);
 
   // The running time tells a heavy file from a long one, for auto-play's ranking.
   const runtime = item?.runtime;
@@ -399,10 +401,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
     replace({ name: 'player', type, metaId, videoId: next.id, preview, stream });
   }
 
-  // When a film ends, or the viewer turned Up Next away, go back to the title's page.
+  // When a film or a broadcast ends, or the viewer turned Up Next away, go back to the title's page.
   useEffect(() => {
-    if (state.status === 'ended' && (!next || upNextDismissed)) back();
-  }, [state.status, next, upNextDismissed]);
+    if (state.status === 'ended' && (!offersNext || upNextDismissed)) back();
+  }, [state.status, offersNext, upNextDismissed]);
 
   // Quality.
   const choices = useMemo(() => qualityChoices(finderState.candidates), [finderState.candidates]);
@@ -475,18 +477,20 @@ export function PlayerScreen(props: PlayerScreenProps) {
           metaId,
           videoId,
           preview,
-          startAt: session?.trustedPosition() ?? state.position,
+          // Before a stream has opened, where the viewer asked to start.
+          startAt: session && state.entry ? session.carryOn() : resumedAt,
         }),
     });
   }
-  if (resumedAt > 0) {
+  // A broadcast has no start to go back to: its clock begins wherever it was joined.
+  if (resumedAt > 0 && !state.live) {
     buttons.push({
       focusKey: 'player-restart',
       label: t('player.startOver'),
       onPress: () => session?.seek(0),
     });
   }
-  if (next) {
+  if (offersNext) {
     buttons.push({
       focusKey: 'player-next',
       label: t('player.nextEpisode'),
@@ -588,7 +592,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
             if (value === currentQuality) return;
             const choice = choices.find((c) => (c.resolution ?? 'other') === value);
             if (session && choice) {
-              session.play(choice.entry, session.trustedPosition() ?? state.position, {
+              session.play(choice.entry, session.carryOn(), {
                 chosen: true,
               });
             }
@@ -611,7 +615,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
               metaId,
               videoId,
               preview,
-              startAt: session?.trustedPosition() ?? resumedAt,
+              startAt: session && state.entry ? session.carryOn() : resumedAt,
             })
           }
           onRetry={() => {
@@ -623,7 +627,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
                 else setNothing(true);
               });
             } else if (state.entry) {
-              session?.play(state.entry, session.trustedPosition() ?? resumedAt);
+              session?.play(state.entry, session.carryOn());
             }
           }}
           onBack={back}

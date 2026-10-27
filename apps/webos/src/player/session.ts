@@ -55,7 +55,13 @@ export interface SessionState {
   engine: Engine['name'] | null;
   /** Seconds, refreshed with the media clock. */
   position: number;
+  /** Seconds; 0 while unknown, and for a live stream. */
   duration: number;
+  /**
+   * A live broadcast: nothing is saved to resume or continue, Up Next is off,
+   * and another stream of it starts at the live edge.
+   */
+  live: boolean;
   error: PlaybackError | null;
   /** Set when auto-play moved to another stream after a failure, until playback resumes. */
   failedOver: boolean;
@@ -108,6 +114,12 @@ export interface PlaybackSession {
   saveProgress(): void;
   /** The trusted position: never the 0 that webOS reads right after a resume. */
   trustedPosition(): number | undefined;
+  /**
+   * Where another stream of this video starts (Quality, Other streams, Try
+   * again): where playback is now, or the live edge (0) of a live stream,
+   * whose clock means nothing on another source's.
+   */
+  carryOn(): number;
   /** Saves progress, stops the stream and frees the decoder. */
   destroy(): void;
 }
@@ -118,6 +130,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   engine: null,
   position: 0,
   duration: 0,
+  live: false,
   error: null,
   failedOver: false,
   steppedDown: false,
@@ -160,6 +173,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   // Judges a wait still going on, once it alone would make the stream count as struggling.
   let judgeTimer: number | undefined;
   let destroyed = false;
+  // Whether this attempt's stream is live, once the engine can tell; and where its clock started.
+  let live = false;
+  let firstTrusted: number | undefined;
   // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
   let wantedAudio: string | null = null;
   let wantedText: string | null = null;
@@ -184,22 +200,73 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     judgeTimer = undefined;
   }
 
+  /**
+   * Once the engine says the stream is live, it stays live for this attempt.
+   * Only the engine can tell: a film whose file leaves its length out has
+   * none either.
+   */
+  function checkLive() {
+    if (live || engine?.isLive() !== true) return;
+    live = true;
+    patch({ live: true, duration: 0 });
+    if (!keep) return;
+    // An older build saved broadcasts like films, with a place to resume.
+    progress.clear(videoId);
+    // Opened at that place: start again at the live edge, once.
+    if (lastStartAt > 0) {
+      const current = attempt;
+      const entry = state.get().entry;
+      const chosen = viewerChose;
+      window.setTimeout(() => {
+        if (current === attempt && !destroyed && entry) session.play(entry, 0, { chosen });
+      }, 0);
+    }
+  }
+
+  const durationNow = () => (live || !isFinite(video.duration) ? 0 : video.duration);
+
+  /**
+   * The length saved with the position. A film whose file gives no length
+   * is saved against the title's running time, so it can still resume.
+   */
+  function savedLength(): number {
+    if (live) return 0;
+    if (video.duration === Infinity) return finder.runtimeSeconds();
+    return durationNow();
+  }
+
+  /**
+   * Where another stream starts: here, or the live edge of a live one. A jump
+   * made before the first picture is not a place yet: the stream may still
+   * turn out to be live, or never start.
+   */
+  function carryOn(): number {
+    if (live) return 0;
+    return startedPlaying ? (tracker?.position() ?? lastStartAt) : lastStartAt;
+  }
+
   function save() {
+    checkLive();
+    // A live broadcast has nothing to come back to. Nor has a stream whose
+    // length is not known yet, or one let go of: its element reads 0.
+    if (live || !engine) return;
     const position = tracker?.position();
-    if (position === undefined) return;
-    const duration = isFinite(video.duration) ? video.duration : 0;
+    const duration = savedLength();
+    if (position === undefined || !(duration > 0)) return;
     if (keep) progress.record({ metaId, type, videoId, position, duration });
   }
 
   function fail(error: PlaybackError, current: number) {
     if (current !== attempt || destroyed) return;
     clearTimers();
+    // While the stream still has its length: letting it go resets the element.
+    save();
     const entry = state.get().entry;
     if (entry) {
       if (keep) sourceMemory.record(entry.addonId, false);
       finder.markFailed(entry);
     }
-    const resumeAt = tracker?.position() ?? lastStartAt;
+    const resumeAt = carryOn();
     const next = options.autoFailover && failovers < MAX_FAILOVERS ? finder.next(tried) : undefined;
     if (next) {
       failovers++;
@@ -221,7 +288,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
    */
   function bitrateOf(entry: StreamEntry): number | undefined {
     const byRuntime = estimateBitrate(entry.facts, finder.runtimeSeconds());
-    const duration = isFinite(video.duration) && video.duration > 0 ? video.duration : undefined;
+    const duration = durationNow() > 0 ? durationNow() : undefined;
     const byDuration = estimateBitrate(entry.facts, duration);
     if (byRuntime === undefined || byDuration === undefined) return byRuntime ?? byDuration;
     return Math.min(byRuntime, byDuration);
@@ -265,7 +332,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       return;
     }
     stepDowns++;
-    session.play(lighter, tracker?.position() ?? lastStartAt);
+    session.play(lighter, carryOn());
     patch({ steppedDown: true });
   }
 
@@ -385,11 +452,17 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     [
       'timeupdate',
       () => {
+        // A stream let go of resets the element to 0, which is no place in the video.
+        if (!engine) return;
+        checkLive();
         const position = video.currentTime;
-        const duration = isFinite(video.duration) ? video.duration : 0;
+        const duration = durationNow();
         if (tracker?.update(position, Date.now())) save();
         const trusted = tracker?.position();
-        if (!reportedWorked && trusted !== undefined && trusted - lastStartAt >= WORKED_AFTER_S) {
+        if (trusted !== undefined && firstTrusted === undefined) firstTrusted = trusted;
+        // A live stream's clock starts wherever the broadcast is.
+        const playedFrom = live ? (firstTrusted ?? lastStartAt) : lastStartAt;
+        if (!reportedWorked && trusted !== undefined && trusted - playedFrom >= WORKED_AFTER_S) {
           reportedWorked = true;
           const entry = state.get().entry;
           if (entry && keep) sourceMemory.record(entry.addonId, true);
@@ -414,12 +487,22 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         patch({ position: trusted ?? lastStartAt, duration });
       },
     ],
-    ['durationchange', () => patch({ duration: isFinite(video.duration) ? video.duration : 0 })],
+    [
+      'durationchange',
+      () => {
+        checkLive();
+        patch({ duration: durationNow() });
+      },
+    ],
     [
       'ended',
       () => {
         clearTimers();
-        const duration = isFinite(video.duration) ? video.duration : 0;
+        if (live) {
+          patch({ status: 'ended' });
+          return;
+        }
+        const duration = savedLength();
         if (keep) progress.record({ metaId, type, videoId, position: duration, duration });
         patch({ status: 'ended', position: duration });
       },
@@ -475,11 +558,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       lastPosition = undefined;
       judgedSmooth = false;
       limitBefore = undefined;
+      live = false;
+      firstTrusted = undefined;
       patch({
         status: 'loading',
         entry,
         engine: null,
         position: startAt,
+        live: false,
         error: null,
         failedOver: false,
         steppedDown: false,
@@ -551,7 +637,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     playNext() {
       const next = finder.next(tried);
       if (!next) return false;
-      session.play(next, tracker?.position() ?? lastStartAt);
+      session.play(next, carryOn());
       return true;
     },
 
@@ -611,6 +697,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     saveProgress: save,
 
     trustedPosition: () => tracker?.position(),
+
+    carryOn,
 
     destroy() {
       if (destroyed) return;

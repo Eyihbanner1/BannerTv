@@ -18,6 +18,7 @@ vi.mock('./vendor', () => ({ loadVendorScript: () => script.loaded }));
 class FakePlayer {
   static isBrowserSupported = () => true;
   static created: FakePlayer[] = [];
+  static dynamic = false;
 
   constructor() {
     FakePlayer.created.push(this);
@@ -27,6 +28,7 @@ class FakePlayer {
   configure() {}
   addEventListener() {}
   getTextTracks = () => [];
+  isDynamic = () => FakePlayer.dynamic;
   load = () => Promise.resolve();
   destroy = () => Promise.resolve();
 }
@@ -46,6 +48,7 @@ beforeEach(() => {
     shaka: { Player: FakePlayer, polyfill: { installAll: () => undefined } },
   });
   FakePlayer.created = [];
+  FakePlayer.dynamic = false;
   video.play.mockClear();
   script.reset();
 });
@@ -72,5 +75,15 @@ describe('the Shaka engine', () => {
     await engine.load('https://media.example.com/manifest.mpd', 0);
     expect(FakePlayer.created).toHaveLength(1);
     expect(video.play).toHaveBeenCalled();
+  });
+
+  it('counts a dynamic manifest as live, whatever length Shaka gives the video', async () => {
+    script.finish();
+    const engine = createShakaEngine(video, listener);
+    expect(engine.isLive()).toBe(false);
+    await engine.load('https://media.example.com/manifest.mpd', 0);
+    expect(engine.isLive()).toBe(false);
+    FakePlayer.dynamic = true;
+    expect(engine.isLive()).toBe(true);
   });
 });

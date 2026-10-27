@@ -705,13 +705,12 @@ describe('continueWatching', () => {
     ]);
   });
 
-  it('gives no share for a video whose length is unknown', async () => {
+  it('leaves out a video whose length never became known, such as a live broadcast', async () => {
     const tv = await watching();
+    // Saved by a build that recorded live streams.
     tv.play(movie('tt1', 3000, 0), 1, filmCard());
-
-    const [item] = tv.items();
-    expect(item).toMatchObject({ videoId: 'tt1', startAt: 3000, upNext: false });
-    expect(item).not.toHaveProperty('progress');
+    tv.play(episode('tt9:1:2', 10, 0), 2, episodeCard('tt9:1:2'));
+    expect(tv.items()).toEqual([]);
   });
 
   it('offers the episode after a finished one, from the beginning', async () => {

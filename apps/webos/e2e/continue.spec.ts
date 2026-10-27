@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { mockPlayback, type SeedPlayed, type SeedProgress, seedStreamAddon } from './play';
+import { mockPlayback, readKv, type SeedPlayed, type SeedProgress, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
 
 const CONTINUE_ROW = 'home-continue';
@@ -15,27 +15,6 @@ function video(page: Page) {
     playing: !element.paused && element.currentTime > 0,
     time: element.currentTime,
   }));
-}
-
-/** A value the app keeps in its IndexedDB key-value store. */
-function readKv(page: Page, key: string): Promise<unknown> {
-  return page.evaluate(
-    (name) =>
-      new Promise((resolve, reject) => {
-        const request = indexedDB.open('bannertv');
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const db = request.result;
-          const read = db.transaction('kv').objectStore('kv').get(name);
-          read.onerror = () => reject(read.error);
-          read.onsuccess = () => {
-            db.close();
-            resolve(read.result);
-          };
-        };
-      }),
-    key,
-  );
 }
 
 /** A Continue Watching card with the artwork the fake Cinemeta gives the title. */

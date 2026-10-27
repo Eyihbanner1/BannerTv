@@ -143,6 +143,8 @@ describe('createProgressStore', () => {
     expect(progress.resumeAt('tt1')).toBe(MIN_RESUME_SECONDS);
 
     progress.record(movie(3000, 0));
+    expect(progress.resumeAt('tt1')).toBe(undefined);
+    progress.record(movie(3000));
     expect(progress.resumeAt('tt1')).toBe(3000);
 
     // A short video, so the last minute starts before the watched share.

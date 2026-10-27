@@ -49,6 +49,7 @@ export function resetVideo(video: HTMLVideoElement): void {
 export const createNativeEngine: EngineFactory = (video, listener) => {
   const tracked = video as TrackedVideo;
   let cleanup: Array<() => void> = [];
+  let mime = '';
 
   const on = <K extends keyof HTMLMediaElementEventMap>(
     type: K,
@@ -69,7 +70,7 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
     load(url, startAt) {
       detach();
       resetVideo(video);
-      const mime = guessMimeType(url);
+      mime = guessMimeType(url);
       const resume = startAt > 0 && isWebOS();
       // webOS holds adaptive streams to 1080p unless told the screen is bigger.
       const lift =
@@ -146,6 +147,11 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
       video.play().catch(() => undefined);
       return Promise.resolve();
     },
+
+    // The TV's player gives a live stream no length. So it does a Matroska or
+    // WebM file whose header leaves the length out, which is still a film.
+    isLive: () =>
+      video.duration === Infinity && mime !== 'video/x-matroska' && mime !== 'video/webm',
 
     audioTracks(): EngineTrack[] {
       return listTracks(tracked.audioTracks, (track) => track.enabled === true).map((track) => ({

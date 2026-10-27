@@ -17,6 +17,8 @@ const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.we
  * hls.js. Made with ffmpeg; see fixtures/hls/README.md.
  */
 export const HLS_PATH = '/hls/master.m3u8';
+/** The same HLS as a live broadcast: its playlists have no end, so players treat it as live. */
+export const LIVE_HLS_PATH = '/hls-live/master.m3u8';
 const HLS_TYPES: Record<string, string> = {
   m3u8: 'application/vnd.apple.mpegurl',
   mp4: 'video/mp4',
@@ -325,14 +327,19 @@ export async function mockPlayback(
     if (options.refused?.[path]?.includes(route.request().resourceType())) {
       return route.fulfill({ status: 503, body: '' });
     }
-    if (path.startsWith('/hls/')) {
-      const file = path.slice('/hls/'.length);
+    const hls = /^\/hls(-live)?\//.exec(path);
+    if (hls) {
+      const file = path.slice(hls[0].length);
       if (!/^[\w-]+\.(m3u8|mp4|m4s|vtt)$/.test(file)) return route.fulfill({ status: 404 });
+      let body: string | Buffer = readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file));
+      if (hls[1] && file.endsWith('.m3u8')) {
+        body = body.toString('utf8').replace(/^#EXT-X-(ENDLIST|PLAYLIST-TYPE:VOD)\r?\n?/gm, '');
+      }
       return route.fulfill({
         status: 200,
         contentType: HLS_TYPES[file.replace(/^.*\./, '')],
         headers: { 'access-control-allow-origin': '*' },
-        body: readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file)),
+        body,
       });
     }
     return serveFixture(route);
@@ -364,4 +371,25 @@ export async function mockPlayback(
     });
   });
   return mock;
+}
+
+/** A value the app keeps in its IndexedDB key-value store. */
+export function readKv(page: Page, key: string): Promise<unknown> {
+  return page.evaluate(
+    (name) =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('bannertv');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const read = db.transaction('kv').objectStore('kv').get(name);
+          read.onerror = () => reject(read.error);
+          read.onsuccess = () => {
+            db.close();
+            resolve(read.result);
+          };
+        };
+      }),
+    key,
+  );
 }

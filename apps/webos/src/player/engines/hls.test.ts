@@ -34,6 +34,7 @@ class FakeHls {
   handlers: Record<string, Handler> = {};
   attached: unknown = null;
   destroyed = false;
+  latestLevelDetails: { live: boolean } | null = null;
 
   constructor() {
     FakeHls.created.push(this);
@@ -100,5 +101,17 @@ describe('the hls.js engine', () => {
     expect(FakeHls.created).toHaveLength(1);
     expect(instance!.destroyed).toBe(false);
     expect(listener.fatal).not.toHaveBeenCalled();
+  });
+
+  it('counts a playlist with no end as live, though hls.js gives the video a length', async () => {
+    script.finish();
+    const engine = createHlsEngine(video, listener);
+    await engine.load('https://media.example.com/master.m3u8', 0);
+    const [instance] = FakeHls.created;
+    expect(engine.isLive()).toBe(false);
+    instance!.latestLevelDetails = { live: true };
+    expect(engine.isLive()).toBe(true);
+    instance!.latestLevelDetails = { live: false };
+    expect(engine.isLive()).toBe(false);
   });
 });

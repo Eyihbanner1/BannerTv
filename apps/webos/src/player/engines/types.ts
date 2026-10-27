@@ -45,6 +45,8 @@ export interface Engine {
   readonly name: 'native' | 'hls.js' | 'shaka';
   /** Starts loading at `startAt` seconds (0 for the beginning). Rejects when it cannot start at all. */
   load(url: string, startAt: number): Promise<void>;
+  /** A live broadcast, which has no end: nothing to resume, and another stream starts at the live edge. */
+  isLive(): boolean;
   audioTracks(): EngineTrack[];
   selectAudio(id: string): void;
   /** Subtitles carried by the stream (HLS or DASH renditions). Cues arrive through the listener. */

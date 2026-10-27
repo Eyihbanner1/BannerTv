@@ -188,6 +188,10 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
       video.play().catch(() => undefined);
     },
 
+    // A dynamic manifest is a broadcast, endless or of a set length; Shaka can
+    // give either a length where the TV takes no endless one.
+    isLive: () => player?.isDynamic() === true,
+
     audioTracks() {
       if (!player) return [];
       // Shaka leaves AudioTrack.id empty, so the position in this list is the id.

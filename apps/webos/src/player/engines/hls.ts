@@ -153,6 +153,9 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
       open(Hls, url, startAt);
     },
 
+    // hls.js gives a live playlist a length that grows, so ask it.
+    isLive: () => hls?.latestLevelDetails?.live === true,
+
     audioTracks() {
       if (!hls) return [];
       const current = hls.audioTracks[hls.audioTrack];

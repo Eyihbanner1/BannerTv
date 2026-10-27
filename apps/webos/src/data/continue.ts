@@ -40,7 +40,9 @@ function walk(): void {
     if (places >= CONTINUE_LIMIT) break;
     if (seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
-    // A film with nothing left to resume is never on the row, so needs no card.
+    // A film with nothing left to resume is never on the row, so needs no card;
+    // nor is a video of unknown length, such as a live broadcast.
+    if (entry.duration <= 0) continue;
     if (entry.type === 'movie' && progress.resumeAt(entry.videoId) === undefined) continue;
     const card = playedVideos.get(entry.videoId);
     if (card && (card.type === 'movie' || card.episode !== undefined)) {

@@ -46,14 +46,21 @@ export interface ProgressStore {
   record(update: ProgressUpdate): ProgressEntry;
   /** Forgets the position (Start over); keeps nothing about the video. */
   clear(videoId: string): void;
-  /** Where to resume in seconds, or undefined to start from the beginning. */
+  /**
+   * Where to resume in seconds, or undefined to start from the beginning:
+   * never near either end, nor in a video whose length is unknown.
+   */
   resumeAt(videoId: string): number | undefined;
   /** Bumps on every change, for screens that show progress. */
   version(): number;
   subscribe(listener: Listener): () => void;
 }
 
-/** Players report NaN before metadata and Infinity for live streams; both mean "unknown". */
+/**
+ * Players report NaN before metadata and Infinity for live streams; both mean
+ * "unknown". The player saves nothing for a live stream; an unknown length
+ * saved before it knew better is never resumed.
+ */
 function seconds(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -242,11 +249,11 @@ export function createProgressStore(options: {
     resumeAt(videoId) {
       const entry = entries.get(videoId);
       if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
-      if (entry.duration > 0 && entry.duration - entry.position < END_SECONDS) return undefined;
+      // No known length, as for a live broadcast: there is no place in it to come back to.
+      if (entry.duration <= 0) return undefined;
+      if (entry.duration - entry.position < END_SECONDS) return undefined;
       // A rewatch resumes too, but never from the credits of one already seen.
-      if (entry.duration > 0 && entry.position >= entry.duration * WATCHED_FRACTION) {
-        return undefined;
-      }
+      if (entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
       return entry.position;
     },
     version: () => changes,

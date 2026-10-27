@@ -1,6 +1,13 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { DEFAULT_STREAMS, HLS_PATH, mockPlayback, seedStreamAddon } from './play';
+import {
+  DEFAULT_STREAMS,
+  HLS_PATH,
+  LIVE_HLS_PATH,
+  mockPlayback,
+  readKv,
+  seedStreamAddon,
+} from './play';
 import { APP_URL, expectFocus, press, pressBack } from './tv';
 
 /** Elephants Dream, the first title on Home. */
@@ -248,7 +255,8 @@ test('All streams lists every stream, says which cannot play, and plays the one 
 test('a title left part way through resumes from where it stopped', async ({ page }) => {
   await mockAddons(page);
   await seedStreamAddon(page, {
-    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 0 }],
+    // Saved with a longer running time than the 40 s test file, so 35 s is not its closing minute.
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 120 }],
   });
   await mockPlayback(page);
   await page.goto(APP_URL);
@@ -257,6 +265,35 @@ test('a title left part way through resumes from where it stopped', async ({ pag
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
   await expect(page.locator('[data-focus-key="details-restart"]')).toHaveText('Start over');
 
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).time).toBeGreaterThanOrEqual(35);
+});
+
+test('a title with no stream left to try keeps its resume point through All streams', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 120 }],
+  });
+  await mockPlayback(page);
+  // Both links are down at first, so Watch is left with nothing it has not seen fail.
+  let down = true;
+  await page.route(/^https:\/\/media\.example\.com\/movie-(1080|720)p\.webm$/, (route) =>
+    down ? route.fulfill({ status: 404, body: '' }) : route.fallback(),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
+  await press(page, 'Enter', 'player-problem-streams');
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
+
+  down = false;
+  await press(page, 'Enter', 'player-problem-streams');
+  await press(page, 'Enter', 'streams-item-0');
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect((await video(page)).time).toBeGreaterThanOrEqual(35);
@@ -512,4 +549,70 @@ test('Quality leaves the resolution playing alone, and another starts without it
   await expect(page.getByText("Those subtitles couldn't be loaded.")).toBeVisible();
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
   await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
+});
+
+test('a live broadcast plays with no end shown, and saves nothing to resume or continue', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        { name: 'Test Streams\nLive', description: 'Open Movie live', path: LIVE_HLS_PATH },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toMatch(/^blob:/);
+
+  // The controls give no length to a broadcast.
+  await press(page, 'ArrowUp', 'player-play');
+  await expect(page.locator('[data-focus-key="player-seek"] > span').last()).toHaveText('');
+
+  // Hidden, shown and left: each would save the position of a film.
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
+  const saved = ((await readKv(page, 'progress')) ?? []) as Array<{ videoId: string }>;
+  expect(saved.map((entry) => entry.videoId)).not.toContain(MOVIE);
+  const cards = ((await readKv(page, 'played')) ?? []) as Array<{ videoId: string }>;
+  expect(cards.map((card) => card.videoId)).not.toContain(MOVIE);
+  expect(errors).toEqual([]);
+});
+
+test('a broadcast an older build saved to resume opens at the live edge, and offers Resume no more', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 120 }],
+  });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        { name: 'Test Streams\nLive', description: 'Open Movie live', path: LIVE_HLS_PATH },
+      ],
+    },
+  });
+  await openMovie(page);
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // A broadcast has no start to go back to.
+  await press(page, 'ArrowUp', 'player-play');
+  await expect(page.locator('[data-focus-key="player-restart"]')).toHaveCount(0);
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Watch');
+  const saved = ((await readKv(page, 'progress')) ?? []) as Array<{ videoId: string }>;
+  expect(saved.map((entry) => entry.videoId)).not.toContain(MOVIE);
 });

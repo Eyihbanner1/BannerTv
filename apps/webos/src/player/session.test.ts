@@ -1,7 +1,7 @@
 import type { Resolution, StreamEntry } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
-import type { Engine, EngineListener, EngineTrack } from './engines/types';
+import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
   createPlaybackSession,
@@ -17,6 +17,8 @@ interface FakeEngine extends Engine {
   text: EngineTrack[];
   /** Where load() was asked to start, in seconds. */
   startAt?: number;
+  /** Whether the engine says the stream is live. */
+  live?: boolean;
 }
 
 // plays: whether load() starts the video, as the TV's player does at once.
@@ -25,6 +27,7 @@ const fake = vi.hoisted(() => ({ engines: [] as FakeEngine[], plays: false }));
 // What the session keeps: where playback was, which addons worked, and how much data plays smoothly.
 const kept = vi.hoisted(() => ({
   progress: vi.fn(),
+  cleared: vi.fn(),
   sourceMemory: vi.fn(),
   bandwidth: {
     maxBitrate: () => 40e6,
@@ -35,7 +38,7 @@ const kept = vi.hoisted(() => ({
 }));
 
 vi.mock('../data/playback', () => ({
-  progress: { record: kept.progress },
+  progress: { record: kept.progress, clear: kept.cleared },
   sourceMemory: { record: kept.sourceMemory },
   bandwidth: kept.bandwidth,
 }));
@@ -55,6 +58,7 @@ vi.mock('./engines/choose', () => ({
         if (fake.plays) void video.play();
         return Promise.resolve();
       },
+      isLive: () => engine.live === true,
       audioTracks: () => engine.audio,
       selectAudio: (id) => {
         engine.audio = engine.audio.map((track) => ({ ...track, active: track.id === id }));
@@ -216,6 +220,7 @@ beforeEach(() => {
   fake.engines.length = 0;
   fake.plays = false;
   kept.progress.mockClear();
+  kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
@@ -624,5 +629,178 @@ describe('a stream that is not remembered', () => {
     expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
     expect(kept.progress).not.toHaveBeenCalled();
     expect(kept.sourceMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe('a live stream', () => {
+  /** A broadcast already two hours in, as the TV's player reports one: no length. */
+  async function live(session: Session, video: FakeVideo, entry = first) {
+    video.duration = NaN;
+    session.play(entry, 0);
+    await settle();
+    lastEngine().live = true;
+    video.currentTime = 7200;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    video.fire('timeupdate');
+  }
+
+  it('saves nothing to resume, whenever it stops or ends', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    expect(session.get()).toMatchObject({ live: true, duration: 0 });
+    playFor(video, 60);
+    video.pause();
+    void video.play();
+    video.fire('ended');
+    session.saveProgress();
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('is told apart by the engine when it gives the broadcast a length that grows', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().live = true;
+    video.currentTime = 600;
+    video.duration = 630;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    playFor(video, 30);
+    expect(session.get()).toMatchObject({ live: true, duration: 0 });
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('starts another stream at the live edge, not at its own clock', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    playFor(video, 60);
+    expect(session.carryOn()).toBe(0);
+
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: second, failedOver: true, live: false });
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+
+  it('steps down at the live edge', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await live(session, video, remux);
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+
+  it('counts its addon as having worked after half a minute of watching, wherever its clock starts', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    playFor(video, 20);
+    expect(kept.sourceMemory).not.toHaveBeenCalled();
+    playFor(video, 15);
+    expect(kept.sourceMemory).toHaveBeenCalledWith(first.addonId, true);
+  });
+  it('is opened once, at the live edge, when it was opened where an older build saved it', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 1200);
+    await settle();
+    lastEngine().live = true;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    expect(kept.cleared).toHaveBeenCalledWith('tt1');
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(2);
+    expect(lastEngine().startAt).toBe(0);
+    expect(session.get().entry).toBe(first);
+
+    // Live again on the new engine: no third start.
+    lastEngine().live = true;
+    video.fire('durationchange');
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(2);
+  });
+
+  it('is not opened again when it was opened at the live edge', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(1);
+  });
+
+  it('saves nothing when a jump comes before it is known to be live, and fails over at the live edge', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 0);
+    await settle();
+    // Fast forward on the loading screen.
+    session.seek(30);
+    expect(kept.progress).not.toHaveBeenCalled();
+    expect(session.carryOn()).toBe(0);
+    vi.advanceTimersByTime(START_TIMEOUT_MS);
+    expect(session.get().entry).toBe(second);
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+});
+
+describe('a stream with an end', () => {
+  it('carries on from where it is', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    expect(session.get().live).toBe(false);
+    expect(session.carryOn()).toBe(630);
+  });
+
+  it('keeps the place it was resumed at when the viewer jumps before the first picture and leaves', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 1800);
+    await settle();
+    session.seek(1830);
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('is a film, not a broadcast, when its file leaves the length out', async () => {
+    const { video, session } = setup();
+    video.duration = Infinity;
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    expect(session.get().live).toBe(false);
+    expect(session.carryOn()).toBe(630);
+    session.destroy();
+    // Saved against the title's running time, so it can resume.
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 630, duration: 7200 }),
+    );
+  });
+
+  it('keeps its place when it fails with nothing left to try, for Try again and for Back', async () => {
+    const { video, session } = setup({ autoFailover: false });
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get().status).toBe('failed');
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 630, duration: 7200 }),
+    );
+    kept.progress.mockClear();
+    // Letting the stream go resets the element, as Chromium does.
+    video.currentTime = 0;
+    video.duration = NaN;
+    video.fire('timeupdate');
+    expect(session.carryOn()).toBe(630);
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
   });
 });
