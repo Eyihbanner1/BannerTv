@@ -136,6 +136,23 @@ describe('createAddonCollection', () => {
       manifest: { id: 'org.other' },
     });
     expect(urls(collection)).toEqual([...before.slice(0, -1), sameServer]);
+
+    // A hash of the settings in the id, and a name taken from the settings.
+    const hashed = 'https://addon.example.com/hashed/manifest.json';
+    const rehashed = 'https://addon.example.com/rehashed/manifest.json';
+    fetchJson.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === hashed
+          ? { ...EXTRA_MANIFEST, id: 'org.example.0123456789ab', name: 'Example (home)' }
+          : { ...EXTRA_MANIFEST, id: 'org.example.ba9876543210', name: 'Example (away)' },
+      ),
+    );
+    await collection.install(hashed);
+    await expect(collection.install(rehashed, { replaces: hashed })).resolves.toMatchObject({
+      manifest: { name: 'Example (away)' },
+    });
+    expect(urls(collection)).toContain(rehashed);
+    expect(urls(collection)).not.toContain(hashed);
   });
 
   it('explains why an install failed', async () => {

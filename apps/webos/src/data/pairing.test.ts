@@ -3,22 +3,31 @@ import { createPairing, type PairingState } from './pairing';
 
 const SERVICE = 'https://pair.example.com';
 
-/** A relay in memory: answers like services/pair, and records what the TV sent. */
+/**
+ * A relay in memory that answers like services/pair, on the fake clock:
+ * sessions last ten minutes, an address sent in the last 30 s keeps the
+ * session open 30 s more, and a collected address can be collected again for
+ * 30 s. It records what the TV sent.
+ */
 function fakeRelay() {
   const calls: { path: string; body: unknown }[] = [];
   let sessions = 0;
+  let expiresAt = 0;
   let sent: string | undefined;
+  let delivered: { url: string; until: number } | undefined;
   let gone = false;
   let down = false;
+  let loseNext = false;
   const reply = (status: number, body: unknown) =>
     Promise.resolve(new Response(JSON.stringify(body), { status }));
 
-  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input).slice(SERVICE.length);
-    calls.push({ path, body: init?.body });
-    if (down) return Promise.reject(new TypeError('Failed to fetch'));
+  const answer = (path: string): Promise<Response> => {
+    const now = Date.now();
     if (path === '/api/sessions') {
       sessions++;
+      expiresAt = now + 600000;
+      sent = undefined;
+      delivered = undefined;
       gone = false;
       const code = `CODE0${sessions}`.slice(-6);
       return reply(201, {
@@ -28,22 +37,41 @@ function fakeRelay() {
         pageUrl: `${SERVICE}/#code=${code}`,
       });
     }
-    if (gone) return reply(404, { error: 'expired' });
+    if (delivered && now < delivered.until)
+      return reply(200, { status: 'sent', url: delivered.url });
+    if (gone || now >= expiresAt) return reply(404, { error: 'expired' });
     if (sent !== undefined) {
-      const url = sent;
+      delivered = { url: sent, until: now + 30000 };
       sent = undefined;
       gone = true;
-      return reply(200, { status: 'sent', url });
+      return reply(200, { status: 'sent', url: delivered.url });
     }
-    return reply(200, { status: 'waiting', expiresIn: 500 });
+    return reply(200, { status: 'waiting', expiresIn: Math.round((expiresAt - now) / 1000) });
+  };
+
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input).slice(SERVICE.length);
+    calls.push({ path, body: init?.body });
+    if (down) return Promise.reject(new TypeError('Failed to fetch'));
+    const response = answer(path);
+    if (!loseNext) return response;
+    // The relay acts on the request, but its answer never reaches the TV.
+    loseNext = false;
+    return new Promise<Response>((_, reject) =>
+      setTimeout(() => reject(new TypeError('Failed to fetch')), 10000),
+    );
   });
 
   return {
     fetch: fetch as unknown as typeof globalThis.fetch,
     calls,
-    send: (url: string) => void (sent = url),
+    send(url: string) {
+      sent = url;
+      expiresAt = Math.max(expiresAt, Date.now() + 30000);
+    },
     expire: () => void (gone = true),
     setDown: (value: boolean) => void (down = value),
+    loseNextAnswer: () => void (loseNext = true),
   };
 }
 
@@ -113,44 +141,47 @@ describe('createPairing', () => {
     expect(pairing.get().status).toBe('expired');
   });
 
-  it('keeps asking past the end while the relay cannot be reached', async () => {
+  it('collects an address sent at the very end, even when the first answer is lost', async () => {
     const relay = fakeRelay();
     const received: string[] = [];
     const pairing = createPairing({ service: SERVICE, fetch: relay.fetch });
     pairing.onAddress((url) => received.push(url));
     pairing.start();
     await settle();
-    // The phone sends at the very end, which keeps the session open, and the TV's
-    // requests fail until well after the session's original end.
-    await vi.advanceTimersByTimeAsync(598000);
+    // The phone sends just before the end, which keeps the session open 30 s more.
+    await vi.advanceTimersByTimeAsync(598500);
     relay.send('https://addon.example.com/manifest.json');
     relay.setDown(true);
-    await vi.advanceTimersByTimeAsync(42000);
-    expect(pairing.get().status).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(27500);
+    // The TV gets through at 627 s, and the relay hands over the address, but
+    // the answer is lost; the TV asks again at 640 s, past its own end + 30 s.
     relay.setDown(false);
-    await vi.advanceTimersByTimeAsync(3000);
+    relay.loseNextAnswer();
+    await vi.advanceTimersByTimeAsync(13000);
+    expect(received).toEqual([]);
+    expect(pairing.get().status).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(1000);
     await settle();
     expect(received).toEqual(['https://addon.example.com/manifest.json']);
     pairing.stop();
   });
 
-  it('keeps asking a little past the end when an answer was lost', async () => {
+  it('gives up once the relay has let the session go', async () => {
     const relay = fakeRelay();
     const received: string[] = [];
     const pairing = createPairing({ service: SERVICE, fetch: relay.fetch });
     pairing.onAddress((url) => received.push(url));
     pairing.start();
     await settle();
-    await vi.advanceTimersByTimeAsync(597000);
-    relay.setDown(true);
+    await vi.advanceTimersByTimeAsync(598500);
     relay.send('https://addon.example.com/manifest.json');
-    await vi.advanceTimersByTimeAsync(9000);
-    expect(pairing.get().status).toBe('waiting');
+    relay.setDown(true);
+    await vi.advanceTimersByTimeAsync(36500);
     relay.setDown(false);
     await vi.advanceTimersByTimeAsync(3000);
     await settle();
-    expect(received).toEqual(['https://addon.example.com/manifest.json']);
-    pairing.stop();
+    expect(pairing.get().status).toBe('expired');
+    expect(received).toEqual([]);
   });
 
   it('reports an unreachable relay, and ignores answers after stop', async () => {

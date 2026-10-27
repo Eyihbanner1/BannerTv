@@ -67,6 +67,11 @@ function origin(url: string): string {
   return (/^https?:\/\/[^/?#]+/i.exec(url)?.[0] ?? url).toLowerCase();
 }
 
+/** An addon id without a trailing settings hash, e.g. `org.example.0123456789ab` → `org.example`. */
+function idStem(id: string): string {
+  return id.replace(/[.:|-][0-9a-f]{8,}$/i, '');
+}
+
 function readStored(value: StoredAddon): InstalledAddon | undefined {
   try {
     return {
@@ -159,14 +164,18 @@ export function createAddonCollection(options: {
       const { manifest, json } = await fetchManifest(url);
       const current = state.get().addons;
       // New settings must be for the same addon, or a wrong link would quietly
-      // swap it out. Some addons put a hash of their settings in the id, so the
-      // same name on the same server also counts. One server can host several
-      // addons, so the server alone does not.
+      // swap it out. Some addons put a hash of their settings at the end of the
+      // id, and may take the name from the settings too, so on the same server
+      // the same name or the same id before the hash also counts. One server
+      // can host several addons, so the server alone does not.
       const target = current.find((a) => a.transportUrl === options.replaces);
       const sameAddon =
         !target ||
+        url === target.transportUrl ||
         target.manifest.id === manifest.id ||
-        (origin(target.transportUrl) === origin(url) && target.manifest.name === manifest.name);
+        (origin(target.transportUrl) === origin(url) &&
+          (target.manifest.name === manifest.name ||
+            idStem(target.manifest.id) === idStem(manifest.id)));
       if (!sameAddon) {
         throw new InstallError('different-addon', 'That link is for a different addon');
       }
