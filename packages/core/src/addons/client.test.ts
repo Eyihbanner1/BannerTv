@@ -4,7 +4,7 @@ import { HttpError } from '../http';
 import { createLimiter } from '../limiter';
 import { createQueryCache } from '../query';
 import { memoryKeyValueStore } from '../storage';
-import { createAddonClient, NotFoundError, withArtwork } from './client';
+import { createAddonClient, metahubAtSize, NotFoundError, withArtwork } from './client';
 import { createAddonCollection } from './collection';
 import { CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
 
@@ -136,5 +136,40 @@ describe('the bundled Cinemeta manifest', () => {
   it('still reads, and is the first default', () => {
     expect(DEFAULT_ADDONS[0]!.transportUrl).toBe(CINEMETA_URL);
     expect(parseManifest(DEFAULT_ADDONS[0]!.manifest).catalogs.length).toBeGreaterThan(0);
+  });
+});
+
+describe('metahubAtSize', () => {
+  const at = (path: string, host = 'images') => `https://${host}.metahub.space${path}`;
+
+  it('asks Metahub for the same image at another size', () => {
+    expect(metahubAtSize(at('/poster/small/tt1160419/img'), 'medium')).toBe(
+      at('/poster/medium/tt1160419/img'),
+    );
+    expect(metahubAtSize(at('/background/medium/tt1160419/img'), 'large')).toBe(
+      at('/background/large/tt1160419/img'),
+    );
+    expect(metahubAtSize(at('/logo/large/tt1160419/img'), 'medium')).toBe(
+      at('/logo/medium/tt1160419/img'),
+    );
+    expect(metahubAtSize(at('/poster/small/tt0944947/img', 'live'), 'medium')).toBe(
+      at('/poster/medium/tt0944947/img', 'live'),
+    );
+  });
+
+  it('leaves every other address as it was', () => {
+    for (const url of [
+      'https://image.tmdb.org/t/p/w500/x.jpg',
+      'https://episodes.metahub.space/tt0944947/1/1/w780.jpg',
+      at('/poster/xl/tt1/img'),
+      at('/poster/small/kitsu:1/img'),
+      at('/poster/small/tt1/img?size=2'),
+      `http://images.metahub.space/poster/small/tt1/img`,
+      'https://example.com/images.metahub.space/poster/small/tt1/img',
+      'https://images.metahub.space.example/poster/small/tt1/img',
+      'https://rpdb.example/KEY/imdb/poster-default/tt1.jpg',
+    ]) {
+      expect(metahubAtSize(url, 'large')).toBe(url);
+    }
   });
 });

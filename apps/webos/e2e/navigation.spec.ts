@@ -30,7 +30,7 @@ test('arrows move through rows, remember the tile per row, and reach the hero an
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-2`);
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-3`);
   // The hero follows focus once it rests.
-  await expect(page.locator('section[aria-label="Tears of Steel"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Tears of Steel"]:visible')).toBeVisible();
 
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await press(page, 'ArrowRight', `${SERIES_ROW}-tile-1`);
@@ -59,8 +59,16 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-1`);
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-2`);
+  // Home stays mounted under Details, so Back shows the same elements, not new ones.
+  const markRow = (key: string) => {
+    const row = document.querySelector<HTMLElement>(`[data-row-key="${key}"]`);
+    if (row) row.dataset.kept = 'yes';
+  };
+  await page.evaluate(markRow, FIRST_ROW);
   await press(page, 'Enter', 'details-watch');
-  await expect(page.locator('section[aria-label="Sintel"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Sintel"]:visible')).toBeVisible();
+  // Hidden Home is out of reach: the remote cannot move into it from Details.
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeHidden();
   await expect(page.getByText('Starring Proog, Emo')).toBeVisible();
   await expect(page.getByText('Directed by Bassam Kurdali')).toBeVisible();
 
@@ -72,6 +80,7 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
   await expectFocus(page, 'details-watch');
   await pressBack(page);
   await expectFocus(page, `${FIRST_ROW}-tile-2`);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toHaveAttribute('data-kept', 'yes');
   // Home comes back with the row already at that tile, not sliding there.
   const slides = await page.evaluate(
     (key) =>

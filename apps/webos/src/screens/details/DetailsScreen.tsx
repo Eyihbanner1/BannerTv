@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
+import { artworkUrl } from '../../components/artwork-size';
 import { Button } from '../../components/Button';
 import { Pressable } from '../../components/Pressable';
 import { addonClient } from '../../data/addons';
@@ -173,6 +174,9 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
         : 'details-watch';
   useScreenFocus(defaultFocus, isMovie || failed || state.status === 'success');
 
+  // The same sizes as the hero, so the image it already loaded is reused.
+  const backdrop = artworkUrl(item?.background, 'backdrop');
+  const logo = artworkUrl(item?.logo, 'titleLogo');
   const facts = item ? metaFacts(t, item) : [];
   const separator = t('common.listSeparator');
   const error = failed ? describeAddonError(t, state.error, t('rail.addons')) : undefined;
@@ -180,16 +184,22 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   return (
     <section className={styles.details} aria-label={item?.name}>
       <div className={styles.art}>
-        {item?.background && (
-          <Artwork key={item.background} src={item.background} className={styles.backdrop} />
+        {backdrop && (
+          <Artwork
+            key={backdrop}
+            src={backdrop}
+            retrySrc={item?.background}
+            className={styles.backdrop}
+          />
         )}
       </div>
       <div className={isMovie ? `${styles.info} ${styles.wide}` : styles.info}>
         <div className={styles.logoBox}>
           {item ? (
             <Artwork
-              key={item.logo}
-              src={item.logo}
+              key={logo}
+              src={logo}
+              retrySrc={item.logo}
               className={styles.logo}
               fallback={<h1 className={styles.title}>{item.name}</h1>}
             />

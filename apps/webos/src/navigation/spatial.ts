@@ -1,4 +1,5 @@
 import { init, navigateByDirection, setKeyMap } from '@noriginmedia/norigin-spatial-navigation';
+import { markActivity } from './activity';
 import { backStack } from './back';
 import { timeBack } from './back-timing';
 import { isBackKey, SPATIAL_KEY_MAP } from './keys';
@@ -25,6 +26,8 @@ export function initNavigation(): void {
   });
   setKeyMap(SPATIAL_KEY_MAP);
 
+  window.addEventListener('keydown', markActivity, { capture: true, passive: true });
+
   window.addEventListener('keydown', (event) => {
     if (!isBackKey(event)) return;
     event.preventDefault();
@@ -41,6 +44,7 @@ export function initNavigation(): void {
       const now = Date.now();
       if (event.deltaY === 0 || now - lastWheel < WHEEL_STEP_MS) return;
       lastWheel = now;
+      markActivity();
       void navigateByDirection(event.deltaY > 0 ? 'down' : 'up');
     },
     { passive: true },

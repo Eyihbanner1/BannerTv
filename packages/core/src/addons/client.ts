@@ -50,6 +50,23 @@ export const SUBTITLES_POLICY: CachePolicy = {
 
 const METAHUB = 'https://images.metahub.space';
 
+export type MetahubSize = 'small' | 'medium' | 'large';
+
+// <host>/<kind>/<size>/<IMDb ID>/img is the only Metahub address that names a
+// size. live.metahub.space is the same service under another name.
+const METAHUB_SIZED =
+  /^(https:\/\/(?:images|live)\.metahub\.space\/(?:poster|background|logo)\/)(?:small|medium|large)(\/tt\d+\/img)$/;
+
+/**
+ * The same Metahub image at another size, for screens that draw it bigger
+ * than the addon assumed. Every other address comes back as it was: other
+ * services name no size, and guessing one would break an image that works.
+ */
+export function metahubAtSize(url: string, size: MetahubSize): string {
+  const match = METAHUB_SIZED.exec(url);
+  return match ? `${match[1]}${size}${match[2]}` : url;
+}
+
 /**
  * Fills in a missing backdrop or title logo for IMDb titles from Metahub, the
  * public image service Cinemeta itself points to. A URL that turns out not to

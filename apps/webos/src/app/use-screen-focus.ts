@@ -1,12 +1,14 @@
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useRef } from 'react';
 import { takePendingFocus } from './router';
+import { useScreenSlot } from './screen-slot';
 
 /**
- * Puts focus on a screen when it mounts: back where it was if the user
+ * Puts focus on a screen when it is shown: back where it was if the user
  * returned with Back, otherwise on `defaultFocusKey`. Screens with nothing to
  * focus pass nothing, and focus stays in the rail. A screen whose content
- * arrives later passes `ready` false until it is drawn; focus is placed once.
+ * arrives later passes `ready` false until it is drawn; focus is placed once
+ * each time the screen is shown, whether it was just mounted or uncovered.
  *
  * Norigin queues focusable registration and setFocus in one task queue, so
  * this runs after the screen's own focusables exist even when they register
@@ -14,11 +16,20 @@ import { takePendingFocus } from './router';
  * way in is still there on the way back.
  */
 export function useScreenFocus(defaultFocusKey?: string, ready = true): void {
+  const slot = useScreenSlot();
   const placed = useRef(false);
   useEffect(() => {
-    if (!ready || placed.current) return;
-    placed.current = true;
-    const target = takePendingFocus() ?? defaultFocusKey;
-    if (target) void setFocus(target);
-  }, [defaultFocusKey, ready]);
+    const place = () => {
+      if (!slot.get()) {
+        placed.current = false;
+        return;
+      }
+      if (!ready || placed.current) return;
+      placed.current = true;
+      const target = takePendingFocus() ?? defaultFocusKey;
+      if (target) void setFocus(target);
+    };
+    place();
+    return slot.subscribe(place);
+  }, [defaultFocusKey, ready, slot]);
 }

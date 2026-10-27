@@ -28,7 +28,7 @@ async function openMovie(page: Page) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'Enter', 'details-watch');
-  await expect(page.locator('section[aria-label="Elephants Dream"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
 }
 
 test('Watch plays the best stream at once, with no list to choose from', async ({ page }) => {
@@ -295,7 +295,7 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   // Only the release's bingeGroup leads here: auto-play would pick 1080p again.
   expect((await video(page)).src).toBe('/movie-720p.webm');
-  await expect(page.locator('section[aria-label="Morevna Project"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Morevna Project"]:visible')).toBeVisible();
 
   // Back leaves the second episode for the series.
   await pressBack(page);

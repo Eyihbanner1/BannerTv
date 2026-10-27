@@ -2,7 +2,9 @@ import { type BoardRow, buildBoard } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
+  memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -36,6 +38,7 @@ export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 // Kept across visits to Home in this session, so Back lands as it was left.
 const memory = { row: undefined as string | undefined, slideRow: undefined as string | undefined };
 const emptyRows = new Set<string>();
+const NO_ITEMS: readonly MetaPreview[] = [];
 
 interface HomeRowProps {
   row: BoardRow;
@@ -56,7 +59,9 @@ function openCatalog(row: BoardRow): void {
   });
 }
 
-function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
+// Memoised with stable handlers: moving between rows redraws only the rows
+// that come into or leave the drawn window, not every row on Home.
+const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
   const { t } = useTranslation();
   const query = useMemo(
     () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
@@ -68,6 +73,12 @@ function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
     [state.data],
   );
   const empty = state.status === 'success' && items !== null && items.length === 0;
+  const onRetry = useCallback(() => query.retry(), [query]);
+  const onRowItemFocus = useCallback(
+    (item: MetaPreview, element: HTMLElement) => onItemFocus(row, item, element),
+    [row, onItemFocus],
+  );
+  const onSeeAll = useCallback(() => openCatalog(row), [row]);
 
   useEffect(() => {
     if (empty) onEmpty(row.key);
@@ -86,19 +97,19 @@ function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
       title={title}
       tag={tag}
       shape={row.style}
-      items={state.status === 'error' ? [] : items}
+      items={state.status === 'error' ? NO_ITEMS : items}
       error={
         state.status === 'error'
           ? describeAddonError(t, state.error, row.addon.manifest.name)
           : undefined
       }
-      onRetry={() => query.retry()}
-      onItemFocus={(item, element) => onItemFocus(row, item, element)}
+      onRetry={onRetry}
+      onItemFocus={onRowItemFocus}
       onItemPress={openDetails}
-      onSeeAll={() => openCatalog(row)}
+      onSeeAll={onSeeAll}
     />
   );
-}
+});
 
 export function HomeScreen() {
   const { t } = useTranslation();
@@ -115,6 +126,10 @@ export function HomeScreen() {
     0,
     rows.findIndex((row) => row.key === focusedRow),
   );
+  // Rows coming into the drawn window mount after the focus move has painted,
+  // in a render React can interrupt, so a press rarely waits on a new row. The
+  // rows next to focus are drawn at once, so the next press has a row to go to.
+  const nearIndex = useDeferredValue(focusedIndex);
 
   useScreenFocus(firstRowKey, collection.ready);
 
@@ -142,7 +157,8 @@ export function HomeScreen() {
   const onItemFocus = useCallback((row: BoardRow, item: MetaPreview) => {
     memory.row = row.key;
     setFocusedRow(row.key);
-    if (canSlide()) {
+    // Reading the row's position forces a layout, so only slide when the row changes.
+    if (canSlide() && memory.slideRow !== row.key) {
       memory.slideRow = row.key;
       slideTrack(trackRef.current, rowFocusKey(row));
     }
@@ -171,7 +187,9 @@ export function HomeScreen() {
               key={row.key}
               row={row}
               first={index === 0}
-              near={Math.abs(index - focusedIndex) <= ROWS_AROUND}
+              near={
+                Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
+              }
               onEmpty={onEmpty}
               onItemFocus={onItemFocus}
             />

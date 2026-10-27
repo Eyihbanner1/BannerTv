@@ -45,7 +45,7 @@ test('Search finds titles as typing pauses, and Back returns to the result', asy
     'Sintel, 2010',
   );
   await press(page, 'Enter', 'details-watch');
-  await expect(page.locator('section[aria-label="Sintel"]')).toBeVisible();
+  await expect(page.locator('section[aria-label="Sintel"]:visible')).toBeVisible();
 
   await pressBack(page);
   await expectFocus(page, `${MOVIE_RESULTS}-tile-0`);
@@ -103,4 +103,72 @@ test('the Trailer button hands the trailer to the YouTube app', async ({ page })
   await expect
     .poll(() => page.evaluate(() => (window as Window & { trailer?: string }).trailer))
     .toBe('eRsGyueVLvQ');
+});
+
+const keyboardShown = (visibility: boolean) =>
+  document.dispatchEvent(new CustomEvent('keyboardStateChange', { detail: { visibility } }));
+
+test('the TV keyboard microphone key keeps the box typing, and spoken words search', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'search');
+  await expectFocus(page, FIELD);
+  const input = page.locator('input[aria-label="Search"]');
+  await page.keyboard.press('Enter');
+  await expect(input).toBeFocused();
+
+  // The microphone key hides the keyboard for a moment, then voice input shows it again.
+  await page.evaluate(keyboardShown, false);
+  await page.waitForTimeout(400);
+  await page.evaluate(keyboardShown, true);
+  await page.waitForTimeout(2500);
+  await expect(input).toBeFocused();
+
+  // The words arrive as text with no key presses, as the TV's voice input sends them.
+  await page.keyboard.insertText('sintel');
+  await expect(input).toHaveValue('sintel');
+  await expect(page.locator(`[data-row-key="${MOVIE_RESULTS}"] h2`)).toHaveText('MoviesCinemeta');
+
+  // The keyboard closing for good still ends typing, with focus left on the box.
+  await page.evaluate(keyboardShown, false);
+  await expect(input).not.toBeFocused({ timeout: 4000 });
+  await expectFocus(page, FIELD);
+});
+
+test('once the TV keyboard has closed, the remote leaves the box at once', async ({ page }) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'search');
+  await expectFocus(page, FIELD);
+  const input = page.locator('input[aria-label="Search"]');
+  // Remote keys closer together than 100 ms count as one held key.
+  const pause = () => page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('sin');
+  await pause();
+
+  // The keyboard's own Back closes it, and only says so: no key reaches the app.
+  await page.evaluate(keyboardShown, false);
+  await press(page, 'ArrowLeft', 'rail-search');
+  await expect(input).not.toBeFocused();
+
+  // OK on the box opens the keyboard again rather than searching.
+  await press(page, 'ArrowRight', FIELD);
+  await pause();
+  await page.keyboard.press('Enter');
+  await expect(input).toBeFocused();
+  await pause();
+  await page.evaluate(keyboardShown, false);
+  await page.keyboard.press('Enter');
+  await pause();
+  await expect(input).toBeFocused();
+
+  // Back leaves Search in one press.
+  await page.evaluate(keyboardShown, false);
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
 });

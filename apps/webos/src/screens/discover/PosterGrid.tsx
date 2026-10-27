@@ -1,7 +1,7 @@
 import type { PagerState } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Tile } from '../../components/Tile';
@@ -44,7 +44,7 @@ interface PosterGridProps {
  * straight above or below.
  */
 export function PosterGrid(props: PosterGridProps) {
-  const { memoryKey, state, errorMessage, emptyMessage, onLoadMore, onRetry, onPress } = props;
+  const { memoryKey, state, errorMessage, emptyMessage, onRetry } = props;
   const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'discover-grid',
@@ -53,6 +53,31 @@ export function PosterGrid(props: PosterGridProps) {
   });
   const [anchorRow, setAnchorRow] = useState(() => recallScroll(memoryKey));
   const { items, status } = state;
+  // Two rows of placeholders while the first page loads, so the remote has somewhere to go.
+  const count = items.length > 0 ? items.length : GRID_COLUMNS * 2;
+  const rows = Math.ceil(count / GRID_COLUMNS);
+
+  // Tiles get handlers that never change, so focusing one redraws two tiles, not the grid.
+  const latest = useRef({ props, anchorRow, rows });
+  useLayoutEffect(() => {
+    latest.current = { props, anchorRow, rows };
+  });
+  const onTileFocus = useCallback((index: number) => {
+    const { props: current, anchorRow: anchor, rows: total } = latest.current;
+    const row = Math.floor(index / GRID_COLUMNS);
+    rememberFocus(current.memoryKey, gridTileKey(index));
+    current.onFocusTile(index);
+    if (canSlide() && row !== anchor) {
+      setAnchorRow(row);
+      rememberScroll(current.memoryKey, row);
+    }
+    if (row >= total - ROWS_BEFORE_END) current.onLoadMore();
+  }, []);
+  const onTilePress = useCallback((index: number) => {
+    const { props: current } = latest.current;
+    const item = current.state.items[index];
+    if (item) current.onPress(item);
+  }, []);
 
   if (items.length === 0 && (status === 'error' || status === 'done')) {
     return (
@@ -67,9 +92,7 @@ export function PosterGrid(props: PosterGridProps) {
     );
   }
 
-  // Two rows of placeholders while the first page loads, so the remote has somewhere to go.
-  const count = items.length > 0 ? items.length : GRID_COLUMNS * 2;
-  const rows = Math.ceil(count / GRID_COLUMNS);
+  const loadingLabel = t('home.loadingTile');
   const firstRow = Math.max(0, anchorRow - ROWS_BEFORE);
   const lastRow = Math.min(rows, anchorRow + ROWS_AFTER + 1);
   const tiles = [];
@@ -78,28 +101,18 @@ export function PosterGrid(props: PosterGridProps) {
     index < Math.min(count, lastRow * GRID_COLUMNS);
     index++
   ) {
-    const row = Math.floor(index / GRID_COLUMNS);
-    const item = items[index];
-    const tileKey = gridTileKey(index);
     tiles.push(
       <Tile
         key={index}
-        focusKey={tileKey}
-        item={item}
+        focusKey={gridTileKey(index)}
+        item={items[index]}
         shape="poster"
         index={index}
-        loadingLabel={t('home.loadingTile')}
-        style={{ left: (index % GRID_COLUMNS) * COLUMN_STEP, top: row * ROW_STEP }}
-        onPress={() => item && onPress(item)}
-        onFocus={() => {
-          rememberFocus(memoryKey, tileKey);
-          props.onFocusTile(index);
-          if (canSlide() && row !== anchorRow) {
-            setAnchorRow(row);
-            rememberScroll(memoryKey, row);
-          }
-          if (row >= rows - ROWS_BEFORE_END) onLoadMore();
-        }}
+        loadingLabel={loadingLabel}
+        left={(index % GRID_COLUMNS) * COLUMN_STEP}
+        top={Math.floor(index / GRID_COLUMNS) * ROW_STEP}
+        onTileFocus={onTileFocus}
+        onTilePress={onTilePress}
       />,
     );
   }

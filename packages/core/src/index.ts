@@ -7,6 +7,8 @@ export {
   type CatalogOptions,
   createAddonClient,
   META_POLICY,
+  metahubAtSize,
+  type MetahubSize,
   NotFoundError,
   PLAY_TIMEOUT_MS,
   STREAM_POLICY,

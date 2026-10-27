@@ -1,6 +1,11 @@
 import type { MetaPreview } from '@bannertv/protocol';
-import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useRef, useState } from 'react';
+import {
+  type FocusableComponent,
+  FocusContext,
+  setFocus,
+  useFocusable,
+} from '@noriginmedia/norigin-spatial-navigation';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   recallFocus,
@@ -21,6 +26,25 @@ export const ROW_GEOMETRY = {
 
 // Tiles drawn either side of the visible ones, so the next arrow press always has a target.
 const OVERSCAN = 2;
+
+/**
+ * Left and Right move to the next tile by its index, so spatial navigation
+ * does not measure every tile in the row on each press. Up and Down, and
+ * Left or Right past either end, leave the row as before.
+ */
+function nextTile(
+  direction: string,
+  focusKey: string,
+  siblings: FocusableComponent[],
+): FocusableComponent | null {
+  if (direction !== 'left' && direction !== 'right') return null;
+  const match = /-tile-(\d+)$/.exec(focusKey);
+  if (!match) return null;
+  const index = Number(match[1]) + (direction === 'right' ? 1 : -1);
+  const target = `${focusKey.slice(0, match.index)}-tile-${index}`;
+  for (const sibling of siblings) if (sibling.focusKey === target) return sibling;
+  return null;
+}
 
 interface RowProps {
   focusKey: string;
@@ -46,7 +70,7 @@ interface RowProps {
  * page through it. Only tiles near the view are drawn, which keeps poster
  * decoding and memory down on 2020 TVs.
  */
-export function Row(props: RowProps) {
+export const Row = memo(function Row(props: RowProps) {
   const { focusKey, title, tag, shape, items, error, onRetry, onItemFocus, onItemPress, onSeeAll } =
     props;
   const { t } = useTranslation();
@@ -61,12 +85,39 @@ export function Row(props: RowProps) {
     focusKey,
     saveLastFocusedChild: true,
     preferredChildFocusKey: recallFocus(focusKey),
+    measureChildrenLayout: false,
+    nextFocusResolver: nextTile,
   });
 
-  const scrollTo = (index: number) => {
-    setAnchor(index);
-    rememberScroll(focusKey, index);
-  };
+  const scrollTo = useCallback(
+    (index: number) => {
+      setAnchor(index);
+      rememberScroll(focusKey, index);
+    },
+    [focusKey],
+  );
+
+  // Tiles get handlers that never change, so moving along the row redraws the
+  // two tiles whose focus changed, not every tile.
+  const latest = useRef({ items, anchor, onItemFocus, onItemPress });
+  useLayoutEffect(() => {
+    latest.current = { items, anchor, onItemFocus, onItemPress };
+  });
+  const onTileFocus = useCallback(
+    (index: number) => {
+      const current = latest.current;
+      rememberFocus(focusKey, `${focusKey}-tile-${index}`);
+      if (canSlide() && index !== current.anchor) scrollTo(index);
+      const item = current.items ? current.items[index] : undefined;
+      if (item && ref.current) current.onItemFocus(item, ref.current);
+    },
+    [focusKey, scrollTo, ref],
+  );
+  const onTilePress = useCallback((index: number) => {
+    const { items: list, onItemPress: press } = latest.current;
+    const item = list ? list[index] : undefined;
+    if (item) press(item);
+  }, []);
 
   useEffect(() => {
     if (focusAfterPaging.current === null) return;
@@ -83,6 +134,7 @@ export function Row(props: RowProps) {
 
   const first = Math.max(0, anchor - OVERSCAN);
   const last = Math.min(count, anchor + visible + OVERSCAN + 1);
+  const loadingLabel = t('home.loadingTile');
   const tiles = [];
   for (let index = first; index < last; index++) {
     const item = items ? items[index] : undefined;
@@ -111,14 +163,10 @@ export function Row(props: RowProps) {
         item={item}
         shape={shape}
         index={index}
-        loadingLabel={t('home.loadingTile')}
-        style={{ left: index * step }}
-        onPress={() => item && onItemPress(item)}
-        onFocus={() => {
-          rememberFocus(focusKey, tileKey);
-          if (canSlide() && index !== anchor) scrollTo(index);
-          if (item && ref.current) onItemFocus(item, ref.current);
-        }}
+        loadingLabel={loadingLabel}
+        left={index * step}
+        onTileFocus={onTileFocus}
+        onTilePress={onTilePress}
       />,
     );
   }
@@ -165,7 +213,7 @@ export function Row(props: RowProps) {
       </section>
     </FocusContext.Provider>
   );
-}
+});
 
 /** A row far from the view: same size, no tiles, nothing to focus. */
 export function RowPlaceholder({ title, tag, shape }: Pick<RowProps, 'title' | 'tag' | 'shape'>) {
