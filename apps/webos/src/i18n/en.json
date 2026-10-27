@@ -93,11 +93,12 @@
       "newCode": "New code",
       "unavailable": "BannerTV can't reach its pairing service right now.",
       "retry": "Try again",
-      "received": "Received from your phone. Press Add to add it."
+      "received": "Received from your phone. Press Add to add it.",
+      "dropped": "Another address came from your phone while BannerTV was checking this one. Send it again to use it."
     },
     "configure": {
       "title": "Settings for {{name}}",
-      "lead": "Scan the QR code to open the addon's settings page on your phone. Choose what you want, copy the install link it gives you, and paste it on the BannerTV page. The new settings then replace the old ones here.",
+      "lead": "Open the addon's settings page on your phone, choose what you want, and send the install link it gives you to BannerTV. The new settings then replace the old ones here.",
       "scanTitle": "Scan with your phone",
       "scan": "Scan with your phone's camera: the QR code also opens the addon's settings. If you already have the new install link, go to this address and enter the code:",
       "tooLong": "This addon's settings address is too long for a QR code, so open its settings on your phone yourself. Then scan, or go to this address and enter the code, to send the new install link:",

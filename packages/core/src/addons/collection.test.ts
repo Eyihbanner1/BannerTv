@@ -115,16 +115,26 @@ describe('createAddonCollection', () => {
     const fetchJson = vi.fn((url: string): Promise<unknown> =>
       Promise.resolve(url.includes('/other/') ? other : EXTRA_MANIFEST),
     );
+    const elsewhere = 'https://other.example.com/other/manifest.json';
     const { collection, storage } = setup(fetchJson);
     await collection.load();
     await collection.install(EXTRA_URL);
     const before = urls(collection);
-    await expect(
-      collection.install('https://addon.example.com/other/manifest.json', { replaces: EXTRA_URL }),
-    ).rejects.toMatchObject({ kind: 'different-addon' });
+    await expect(collection.install(elsewhere, { replaces: EXTRA_URL })).rejects.toMatchObject({
+      kind: 'different-addon',
+    });
     expect(urls(collection)).toEqual(before);
     const stored = (await storage.get('addons')) as StoredAddon[];
     expect(stored.map((a) => a.transportUrl)).toEqual(before);
+
+    // An addon on the same server is the same addon, even when its id has changed.
+    await expect(
+      collection.install('https://ADDON.example.com/other/manifest.json', { replaces: EXTRA_URL }),
+    ).resolves.toMatchObject({ manifest: { id: 'org.other' } });
+    expect(urls(collection)).toEqual([
+      ...before.slice(0, -1),
+      'https://ADDON.example.com/other/manifest.json',
+    ]);
   });
 
   it('explains why an install failed', async () => {

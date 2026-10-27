@@ -12,6 +12,12 @@ export const PAIR_SERVICE = 'https://pair.bannertv.workers.dev';
 
 export const POLL_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;
+/**
+ * How long after a session's end the TV keeps asking. The relay's "expired"
+ * answer normally ends it first, but the relay keeps an address that arrived
+ * near the end, or whose answer was lost, for this long (REDELIVER_MS there).
+ */
+const GRACE_MS = 30000;
 
 export interface PairSession {
   code: string;
@@ -85,7 +91,7 @@ export function createPairing(options: PairingOptions): Pairing {
   const poll = (session: PairSession, current: number) => {
     timer = setTimeout(() => {
       if (current !== generation) return;
-      if (now() >= session.expiresAt) {
+      if (now() >= session.expiresAt + GRACE_MS) {
         set({ status: 'expired' });
         return;
       }

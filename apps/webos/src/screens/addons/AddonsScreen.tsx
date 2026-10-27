@@ -220,11 +220,12 @@ export function AddonsScreen() {
         <InstallDialog
           returnFocusKey={ADD_BUTTON}
           focusAfterInstall={upKey}
-          onInstalled={(addon, updated) => {
+          onInstalled={(addon, updated, dropped) => {
             setFocusedUrl(addon.transportUrl);
-            setNotice(
-              t(updated ? 'addons.updated' : 'addons.added', { name: addon.manifest.name }),
-            );
+            const done = t(updated ? 'addons.updated' : 'addons.added', {
+              name: addon.manifest.name,
+            });
+            setNotice(dropped ? `${done} ${t('addons.phone.dropped')}` : done);
             setInstalling(false);
           }}
           onClose={() => setInstalling(false)}
@@ -236,9 +237,10 @@ export function AddonsScreen() {
           returnFocusKey={settingsKey(configuring)}
           // The new settings may come without a settings page, and so without the button.
           focusAfterUpdate={(addon) => (hasSettings(addon) ? settingsKey(addon) : upKey(addon))}
-          onUpdated={(addon) => {
+          onUpdated={(addon, dropped) => {
             setFocusedUrl(addon.transportUrl);
-            setNotice(t('addons.configure.updated', { name: addon.manifest.name }));
+            const done = t('addons.configure.updated', { name: addon.manifest.name });
+            setNotice(dropped ? `${done} ${t('addons.phone.dropped')}` : done);
             setConfiguring(null);
           }}
           onClose={() => setConfiguring(null)}

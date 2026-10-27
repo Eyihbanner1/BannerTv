@@ -5,7 +5,8 @@ export const SESSION_TTL_MS = 10 * 60 * 1000;
  * answer was lost. The TV gives up on a request after 10 s and asks again 3 s later.
  */
 export const REDELIVER_MS = 30 * 1000;
-export const MAX_URL_LENGTH = 2048;
+/** Some addons keep their whole configuration in the address, so allow long ones. */
+export const MAX_URL_LENGTH = 8192;
 
 /** Pairing codes: six characters with no 0/O, 1/I/L lookalikes, easy to read off a TV. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -22,7 +23,8 @@ export function readCode(value: string): string | undefined {
 /**
  * An addon address the phone sent, with stremio:// links turned into https://.
  * The rules match the TV's normalizeManifestUrl (packages/protocol), so the
- * phone hears at once about an address the TV would refuse.
+ * phone hears at once about an address the TV would refuse. The one addition
+ * is the length cap, which bounds what a session holds in memory.
  */
 export function readAddonUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;

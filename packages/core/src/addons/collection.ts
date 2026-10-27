@@ -62,6 +62,11 @@ export interface AddonCollection extends Pick<Store<CollectionState>, 'get' | 's
   refreshManifests(maxAgeMs: number): Promise<void>;
 }
 
+/** The scheme and host of an address normalizeManifestUrl has accepted. */
+function origin(url: string): string {
+  return (/^https?:\/\/[^/?#]+/i.exec(url)?.[0] ?? url).toLowerCase();
+}
+
 function readStored(value: StoredAddon): InstalledAddon | undefined {
   try {
     return {
@@ -153,9 +158,15 @@ export function createAddonCollection(options: {
       if (url === undefined) throw new InstallError('invalid-url', 'This is not an addon address');
       const { manifest, json } = await fetchManifest(url);
       const current = state.get().addons;
-      // New settings must be for the same addon, or a wrong link would quietly swap it out.
+      // New settings must be for the same addon, or a wrong link would quietly
+      // swap it out. Some addons put a hash of their settings in the id, so an
+      // address on the same server also counts as the same addon.
       const target = current.find((a) => a.transportUrl === options.replaces);
-      if (target && target.manifest.id !== manifest.id) {
+      if (
+        target &&
+        target.manifest.id !== manifest.id &&
+        origin(target.transportUrl) !== origin(url)
+      ) {
         throw new InstallError('different-addon', 'That link is for a different addon');
       }
       raw.set(url, json);

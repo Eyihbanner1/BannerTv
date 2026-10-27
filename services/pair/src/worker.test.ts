@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { normalizeManifestUrl } from '@bannertv/protocol';
-import { readAddonUrl, readCode, REDELIVER_MS, SESSION_TTL_MS } from './rules';
+import { MAX_URL_LENGTH, readAddonUrl, readCode, REDELIVER_MS, SESSION_TTL_MS } from './rules';
 import worker, {
   type Env,
   PairSession,
@@ -147,6 +147,21 @@ describe('pairing relay', () => {
     expect(entry.alarm()).toBeUndefined();
   });
 
+  it('gives the TV time to collect an address sent just before the end', async () => {
+    const { env, objects } = fakeEnv();
+    const session = await open(env);
+    vi.setSystemTime(Date.now() + SESSION_TTL_MS - 1000);
+    expect((await send(env, session.code, 'https://addon.example.com/manifest.json')).status).toBe(
+      200,
+    );
+    expect(objects.get(session.code)!.alarm()).toBe(Date.now() + REDELIVER_MS);
+    vi.setSystemTime(Date.now() + 10000);
+    expect(await (await collect(env, session.code, session.secret)).json()).toEqual({
+      status: 'sent',
+      url: 'https://addon.example.com/manifest.json',
+    });
+  });
+
   it('refuses addresses that are not web addresses, and unknown codes', async () => {
     const { env } = fakeEnv();
     const session = await open(env);
@@ -156,12 +171,19 @@ describe('pairing relay', () => {
       'ftp://x.example.com',
       'https://a.example.com/x y/manifest.json',
       42,
-      'https://' + 'a'.repeat(2048),
     ]) {
       const response = await send(env, session.code, url);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: 'invalid-url' });
     }
+    const long = await send(
+      env,
+      session.code,
+      'https://a.example.com/' + 'a'.repeat(MAX_URL_LENGTH),
+    );
+    expect(await long.json()).toEqual({ error: 'too-long' });
+    const configured = `https://a.example.com/${'c'.repeat(4000)}/manifest.json`;
+    expect((await send(env, session.code, configured)).status).toBe(200);
     expect((await send(env, 'ABC12', 'https://addon.example.com')).status).toBe(404);
     expect((await send(env, 'ABCDE0', 'https://addon.example.com')).status).toBe(404);
     expect((await send(env, 'ABCDEF', 'https://addon.example.com')).status).toBe(404);
@@ -221,6 +243,10 @@ describe('readAddonUrl', () => {
         expect(normalizeManifestUrl(relayed), input).toBe(normalizeManifestUrl(input));
       }
     }
+    // The one deliberate difference: the relay caps the length.
+    const long = 'https://a.example.com/' + 'a'.repeat(MAX_URL_LENGTH);
+    expect(normalizeManifestUrl(long)).toBeDefined();
+    expect(readAddonUrl(long)).toBeUndefined();
   });
 });
 

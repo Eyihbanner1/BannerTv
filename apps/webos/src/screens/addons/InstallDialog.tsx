@@ -1,6 +1,6 @@
 import type { InstalledAddon } from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
@@ -15,7 +15,8 @@ interface InstallDialogProps {
   returnFocusKey: string;
   /** Where focus goes once the addon is in: usually its card. */
   focusAfterInstall: (addon: InstalledAddon) => string;
-  onInstalled: (addon: InstalledAddon, updated: boolean) => void;
+  /** `dropped`: another address came from the phone during the install and was not used. */
+  onInstalled: (addon: InstalledAddon, updated: boolean, dropped: boolean) => void;
   onClose: () => void;
 }
 
@@ -31,8 +32,17 @@ export function InstallDialog(props: InstallDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [received, setReceived] = useState(false);
   const installed = useRef<string | null>(null);
+  // Set at once on Add, so an address that comes before the next render sees it.
+  const busy = useRef(false);
   // An address that arrives during an install: the relay has already let it go.
   const pending = useRef<string | null>(null);
+  // An install that fails after the dialog has closed has nowhere to put it.
+  useEffect(
+    () => () => {
+      pending.current = null;
+    },
+    [],
+  );
 
   // The address arrives while the user holds a phone: fill it in and wait on Add.
   const fill = (url: string) => {
@@ -43,7 +53,8 @@ export function InstallDialog(props: InstallDialogProps) {
   };
 
   const install = () => {
-    if (working) return;
+    if (busy.current) return;
+    busy.current = true;
     const before = addonCollection.get().addons.map((a) => a.transportUrl);
     setWorking(true);
     setError(null);
@@ -51,9 +62,10 @@ export function InstallDialog(props: InstallDialogProps) {
     addonCollection.install(address).then(
       (addon) => {
         installed.current = focusAfterInstall(addon);
-        onInstalled(addon, before.indexOf(addon.transportUrl) !== -1);
+        onInstalled(addon, before.indexOf(addon.transportUrl) !== -1, pending.current !== null);
       },
       (failure: unknown) => {
+        busy.current = false;
         setWorking(false);
         const next = pending.current;
         pending.current = null;
@@ -64,7 +76,7 @@ export function InstallDialog(props: InstallDialogProps) {
   };
 
   const receive = (url: string) => {
-    if (working) pending.current = url;
+    if (busy.current) pending.current = url;
     else fill(url);
   };
 

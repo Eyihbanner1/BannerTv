@@ -35,7 +35,6 @@ const HTML = `<!doctype html>
     <div id="configure" class="steps" hidden>
       <p>1. Open the addon's settings, choose what you want, then copy the install link it gives you.</p>
       <a id="configure-link" class="button secondary" target="_blank" rel="noopener noreferrer">Open addon settings</a>
-      <p id="configure-host" class="host"></p>
       <p>2. Paste the link below.</p>
     </div>
     <div class="field">
@@ -71,7 +70,7 @@ input:focus{outline:none;border-color:#C9B5FF}
 .steps{margin-top:20px;padding:16px;border-radius:16px;background:#1B1430}
 .steps p{margin:0 0 12px}
 .steps p:last-child{margin:12px 0 0}
-.steps .host{margin:8px 0 0;font-size:14px;color:#9A90BD;overflow-wrap:anywhere}
+.button{overflow-wrap:anywhere}
 .button{display:block;width:100%;margin-top:24px;padding:14px;border:0;border-radius:999px;background:#6A3BF0;color:#fff;font:inherit;font-weight:700;font-size:17px;text-align:center;text-decoration:none;cursor:pointer}
 .button:focus{outline:3px solid #C9B5FF;outline-offset:2px}
 .button:disabled{opacity:.6}
@@ -87,6 +86,7 @@ const JS = `'use strict';
   var LENGTH = ${CODE_LENGTH};
   var MESSAGES = {
     'invalid-url': "That doesn't look like an addon address. It should start with https:// or stremio://.",
+    'too-long': 'That address is too long to send to the TV.',
     expired: 'That code has run out or was mistyped. Open Add an addon on your TV for a new one.',
     'already-sent': 'Your TV already has an address from this code. Scan the new code on your TV to send another.',
     offline: "Couldn't reach BannerTV. Check your connection and try again.",
@@ -117,15 +117,16 @@ const JS = `'use strict';
     $('code-value').textContent = linked;
     $('code-shown').hidden = false;
   }
-  // Anyone can link to this page with any address in the fragment, so the
-  // settings link comes only alongside a TV's code, and says where it goes.
+  // The settings step shows only with a TV's code, which keeps it off a plain
+  // visit. That is no safeguard: anyone can link here with any address in the
+  // fragment, so the button names the site it opens.
   var configureHost = '';
   if (linked && /^https?:\\/\\//i.test(configure)) {
     try { configureHost = new URL(configure).host; } catch (error) { configureHost = ''; }
   }
   if (configureHost) {
     $('configure-link').href = configure;
-    $('configure-host').textContent = 'Opens ' + configureHost;
+    $('configure-link').textContent = 'Open settings on ' + configureHost;
     $('configure').hidden = false;
   }
 

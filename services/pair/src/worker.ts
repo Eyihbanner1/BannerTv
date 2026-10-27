@@ -14,6 +14,7 @@ import { PAGE_FILES } from './page';
 import {
   CODE_ALPHABET,
   CODE_LENGTH,
+  MAX_URL_LENGTH,
   readAddonUrl,
   readCode,
   REDELIVER_MS,
@@ -133,7 +134,11 @@ async function submit(request: Request, env: Env, code: string): Promise<Respons
   } catch {
     return json({ error: 'invalid-url' }, 400);
   }
-  const url = readAddonUrl((body as { url?: unknown } | null)?.url);
+  const value = (body as { url?: unknown } | null)?.url;
+  if (typeof value === 'string' && value.trim().length > MAX_URL_LENGTH) {
+    return json({ error: 'too-long' }, 400);
+  }
+  const url = readAddonUrl(value);
   if (!url) return json({ error: 'invalid-url' }, 400);
   return session(env, code).fetch('https://session/submit', {
     method: 'POST',
@@ -245,6 +250,12 @@ export class PairSession {
     if (pathname === '/submit') {
       if (this.url !== undefined) return json({ error: 'already-sent' }, 409);
       this.url = body.url;
+      // An address sent just before the end still gives the TV time to collect it.
+      const until = Date.now() + REDELIVER_MS;
+      if (current.expiresAt < until) {
+        await this.state.storage.put<Session>('session', { ...current, expiresAt: until });
+        await this.state.storage.setAlarm(until);
+      }
       return json({ ok: true });
     }
 

@@ -15,7 +15,8 @@ interface ConfigureDialogProps {
   returnFocusKey: string;
   /** Where focus goes once the new settings are in: usually the addon's card. */
   focusAfterUpdate: (addon: InstalledAddon) => string;
-  onUpdated: (addon: InstalledAddon) => void;
+  /** `dropped`: another address came from the phone during the update and was not used. */
+  onUpdated: (addon: InstalledAddon, dropped: boolean) => void;
   onClose: () => void;
 }
 
@@ -32,11 +33,19 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const updated = useRef<string | null>(null);
+  // Set at once on Update, so an address that comes before the next render sees it.
+  const busy = useRef(false);
   // An address that arrives during an update: the relay has already let it go.
   const pending = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      pending.current = null;
+    },
+    [],
+  );
 
   const receive = (url: string) => {
-    if (working) {
+    if (busy.current) {
       pending.current = url;
       return;
     }
@@ -50,15 +59,17 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
   }, [received]);
 
   const update = () => {
-    if (working || received === null) return;
+    if (busy.current || received === null) return;
+    busy.current = true;
     setWorking(true);
     setError(null);
     addonCollection.install(received, { replaces: addon.transportUrl }).then(
       (next) => {
         updated.current = focusAfterUpdate(next);
-        onUpdated(next);
+        onUpdated(next, pending.current !== null);
       },
       (failure: unknown) => {
+        busy.current = false;
         setWorking(false);
         const next = pending.current;
         pending.current = null;
@@ -71,7 +82,7 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
   // The update finishes once it has started: closing then would leave focus
   // on a card that is about to be replaced.
   const close = () => {
-    if (!working) onClose();
+    if (!busy.current) onClose();
   };
 
   let status: string | null = null;

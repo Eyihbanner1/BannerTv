@@ -113,6 +113,25 @@ describe('createPairing', () => {
     expect(pairing.get().status).toBe('expired');
   });
 
+  it('keeps asking a little past the end when an answer was lost', async () => {
+    const relay = fakeRelay();
+    const received: string[] = [];
+    const pairing = createPairing({ service: SERVICE, fetch: relay.fetch });
+    pairing.onAddress((url) => received.push(url));
+    pairing.start();
+    await settle();
+    await vi.advanceTimersByTimeAsync(597000);
+    relay.setDown(true);
+    relay.send('https://addon.example.com/manifest.json');
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(pairing.get().status).toBe('waiting');
+    relay.setDown(false);
+    await vi.advanceTimersByTimeAsync(3000);
+    await settle();
+    expect(received).toEqual(['https://addon.example.com/manifest.json']);
+    pairing.stop();
+  });
+
   it('reports an unreachable relay, and ignores answers after stop', async () => {
     const relay = fakeRelay();
     relay.setDown(true);

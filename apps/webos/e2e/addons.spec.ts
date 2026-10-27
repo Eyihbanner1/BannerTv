@@ -176,10 +176,10 @@ test("an addon's settings can be changed on a phone", async ({ page }) => {
   await expectFocus(page, 'configure-confirm');
   await settle(page);
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Updated Open Shorts with its new settings.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(cards.last()).toContainText('v1.4.0');
   await expectFocusLabel(page, 'Move Open Shorts up');
   await expect(page.getByRole('button', { name: /^Settings for/ })).toHaveCount(0);
-  await expect(cards.last()).toContainText('v1.4.0');
 });
 
 test('a settings address too long for a QR code is left out of it', async ({ page }) => {
