@@ -150,6 +150,8 @@ const HOME_ROWS = [
   'home-0-series-top-genre-animation',
 ];
 const CATALOGS = /^https:\/\/v3-cinemeta\.strem\.io\/catalog\//;
+const LAST_CATALOG = /\/catalog\/series\/top\/genre=Animation\.json$/;
+const RAIL = ['home', 'search', 'discover', 'library', 'addons', 'settings'];
 
 /** The rows slide so the focused one sits in view under the hero. */
 async function expectFocusInView(page: Page): Promise<void> {
@@ -157,17 +159,23 @@ async function expectFocusInView(page: Page): Promise<void> {
 }
 
 test('Down reaches the last row while rows are still loading', async ({ page }) => {
-  // Each catalog answers well after focus reaches its row, as on a cold start.
+  // Each catalog answers well after focus reaches its row, as on a cold start,
+  // and the last one only once focus is resting on its placeholder.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(CATALOGS, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (LAST_CATALOG.test(route.request().url())) await held;
+    else await new Promise((resolve) => setTimeout(resolve, 1000));
     await route.fallback();
   });
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
   await expectFocusInView(page);
+  await expectFocusLabel(page, 'Loading');
 
   // Once the row loads, the hero catches up with the title under focus.
+  release();
   await expectFocusLabel(page, 'Blender Today, 2021–');
   await expect(page.locator('section[aria-label="Blender Today"]:visible')).toBeVisible();
 });
@@ -188,6 +196,44 @@ test('a row that turns out empty under focus hands focus to the row below', asyn
   release();
   await expectFocus(page, `${HOME_ROWS[4]}-tile-0`);
   await expectFocusInView(page);
+});
+
+test('an empty last row under focus hands focus to the row above', async ({ page }) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(LAST_CATALOG, async (route) => {
+    await held;
+    await route.fulfill({
+      json: { metas: [] },
+      headers: { 'access-control-allow-origin': '*' },
+    });
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  release();
+  await expectFocus(page, `${HOME_ROWS[8]}-tile-0`);
+  await expectFocusInView(page);
+  await press(page, 'ArrowUp', `${HOME_ROWS[7]}-tile-0`);
+});
+
+test('coming back to Home from another section puts focus on the first row', async ({ page }) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (const row of HOME_ROWS.slice(1, 6)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await page.keyboard.press('ArrowLeft');
+  const focused = page.locator('[data-focused="true"]');
+  await expect(focused).toHaveAttribute('data-focus-key', /^rail-/);
+  await page.waitForTimeout(150);
+  const at = (await focused.getAttribute('data-focus-key'))!.slice('rail-'.length);
+  for (const item of RAIL.slice(RAIL.indexOf(at) + 1))
+    await press(page, 'ArrowDown', `rail-${item}`);
+  await press(page, 'Enter', 'settings-diagnostics');
+
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expectFocusInView(page);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
 });
 
 test('Down crosses rows whose catalogs failed', async ({ page }) => {
@@ -218,8 +264,12 @@ test('Home still works with every tuning switch at its leanest', async ({ page }
     zoom: 'off',
     heroPan: false,
     heroDelayMs: 0,
-    rowsAround: 0,
+    heroBusyMs: 800,
+    heroArt: 'medium',
+    rowsAround: 1,
     overscan: 1,
+    decoding: 'async',
+    mips: false,
   };
   await page.addInitScript(
     (value) => localStorage.setItem('bannertv.tuning', value),
@@ -227,7 +277,13 @@ test('Home still works with every tuning switch at its leanest', async ({ page }
   );
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  await expect(page.locator('html')).toHaveClass(/tune-motion-jump tune-zoom-off tune-no-pan/);
+  await expect(page.locator('html')).toHaveClass(
+    /tune-motion-jump tune-zoom-off tune-no-pan tune-no-mips/,
+  );
+  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"] img`)).toHaveAttribute(
+    'decoding',
+    'async',
+  );
 
   for (let n = 1; n <= 3; n++) await press(page, 'ArrowRight', `${FIRST_ROW}-tile-${n}`);
   for (const row of HOME_ROWS.slice(1)) await press(page, 'ArrowDown', `${row}-tile-0`);
