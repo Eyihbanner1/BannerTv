@@ -25,7 +25,7 @@ import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { tuning } from '../../platform/tuning';
-import { CONTINUE_FOCUS_KEY, ContinueRow, useContinueItems } from './ContinueRow';
+import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
 import { heroItem } from './hero-item';
 import styles from './HomeScreen.module.css';
@@ -195,23 +195,31 @@ export function HomeScreen() {
   );
 
   const latestRows = useRef(rows);
+  const latestContinuing = useRef(continuing);
   useLayoutEffect(() => {
     latestRows.current = rows;
+    latestContinuing.current = continuing;
   });
 
   // A row that turns out empty hands its place to the row below (or above, at
-  // the end): the view and the drawn rows follow, and so does focus if it was
-  // in the row, rather than falling to the hero.
+  // the end, which is Continue Watching above the first catalog row): the view
+  // and the drawn rows follow, and so does focus if it was in the row, rather
+  // than falling to the hero.
   const onEmpty = useCallback((key: string, focused: boolean) => {
     emptyRows.add(key);
     setHidden(new Set(emptyRows));
     const list = latestRows.current;
     const index = list.findIndex((row) => row.key === key);
-    const next = index < 0 ? undefined : (list[index + 1] ?? list[index - 1]);
+    const next =
+      index < 0
+        ? undefined
+        : (list[index + 1]?.key ??
+          list[index - 1]?.key ??
+          (latestContinuing.current ? CONTINUE_ROW_KEY : undefined));
     if (!next) return;
-    if (slideRow.current === key) slideRow.current = next.key;
-    setFocusedRow((row) => (row === key ? next.key : row));
-    if (focused) void setFocus(rowFocusKey(next));
+    if (slideRow.current === key) slideRow.current = next;
+    setFocusedRow((row) => (row === key ? next : row));
+    if (focused) void setFocus(`home-${next}`);
   }, []);
 
   // Rows that are loading or failed report focus too, so the rows under them

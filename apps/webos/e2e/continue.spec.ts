@@ -232,6 +232,41 @@ test('coming back to Home from another section lands on Continue watching, and D
   await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
 });
 
+test('when the only catalog row comes back empty under focus, focus goes up to the Continue watching tile it came from', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const SINTEL = 'tt1727587';
+  await seedStreamAddon(page, {
+    progress: [MOVIE_PART_WAY, { ...MOVIE_PART_WAY, metaId: SINTEL, videoId: SINTEL }],
+    played: [
+      card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' }),
+      card('movie', SINTEL, 'Sintel', { releaseInfo: '2010' }),
+    ],
+  });
+  await mockPlayback(page);
+  // Every catalog comes back empty; the first one only when the test says.
+  let release = () => undefined as void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/^https:\/\/v3-cinemeta\.strem\.io\/catalog\//, async (route) => {
+    if (/\/catalog\/movie\/top\.json$/.test(route.request().url())) await held;
+    await route.fulfill({ json: { metas: [] }, headers: { 'access-control-allow-origin': '*' } });
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expect(page.locator('[data-row-key]')).toHaveCount(2);
+  await press(page, 'ArrowRight', `${CONTINUE_ROW}-tile-1`);
+  // Onto the loading row, which then turns out empty.
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+  release();
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toHaveCount(0);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-1`);
+  await expect(page.locator('[data-focused="true"]')).toBeInViewport({ ratio: 0.9 });
+  await press(page, 'ArrowLeft', `${CONTINUE_ROW}-tile-0`);
+  expect(errors).toEqual([]);
+});
+
 test('progress saved before cards existed gets its tile once Cinemeta answers', async ({
   page,
 }) => {
