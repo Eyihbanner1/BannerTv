@@ -448,3 +448,148 @@ describe('qualityChoices', () => {
     expect(qualityChoices([])).toEqual([]);
   });
 });
+
+describe('streams too heavy for the connection', () => {
+  const GB = 1e9;
+  /** 2 h 35 min. */
+  const RUNTIME = 9300;
+  const LIMIT = { maxBitrate: 40e6, runtimeSeconds: RUNTIME };
+
+  // The 84 GB disc remux from the TV run averages about 72 Mbit/s.
+  const remux: [string, Spec] = [
+    'remux 4K',
+    {
+      facts: {
+        resolution: '2160p',
+        hdr: ['DV', 'HDR10'],
+        releaseSource: 'REMUX',
+        cached: true,
+        sizeBytes: 84 * GB,
+      },
+    },
+  ];
+  const web: [string, Spec] = [
+    'web 4K',
+    { facts: { resolution: '2160p', hdr: ['HDR10'], releaseSource: 'WEB-DL', sizeBytes: 20 * GB } },
+  ];
+  const bluray: [string, Spec] = [
+    '1080p',
+    { facts: { resolution: '1080p', releaseSource: 'BluRay', cached: true, sizeBytes: 12 * GB } },
+  ];
+
+  it('puts the least heavy first when every stream is too heavy', () => {
+    // With the limit at 8 Mbit/s, all three are over it: the remux about 9x,
+    // the web 4K about 2x, the 1080p just over.
+    const low = { maxBitrate: 8e6, runtimeSeconds: RUNTIME };
+    const list = entries(UHD_HDR, [remux, web, bluray]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, low))).toEqual([
+      '1080p',
+      'web 4K',
+      'remux 4K',
+    ]);
+    expect(labels(orderStreams(list, 'fast', UHD_HDR, low))).toEqual([
+      '1080p',
+      'web 4K',
+      'remux 4K',
+    ]);
+  });
+
+  it("ranks them below every stream within the limit in 'quality'", () => {
+    const list = entries(UHD_HDR, [
+      remux,
+      bluray,
+      ['720p', { facts: { resolution: '720p', sizeBytes: 3 * GB } }],
+      ['unknown size 4K', { facts: { resolution: '2160p' } }],
+      // 40 Mbit/s exactly is still within it.
+      ['at the limit 4K', { facts: { resolution: '2160p', sizeBytes: 46.5 * GB } }],
+    ]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, LIMIT))).toEqual([
+      'unknown size 4K',
+      'at the limit 4K',
+      '1080p',
+      '720p',
+      'remux 4K',
+    ]);
+  });
+
+  it('keeps them above cinema recordings and streams with a severe warning', () => {
+    const list = entries(UHD_HDR, [
+      ['uncached 1080p', { facts: { resolution: '1080p', cached: false, sizeBytes: 2 * GB } }],
+      ['cam 1080p', { facts: { resolution: '1080p', releaseSource: 'CAM', sizeBytes: 2 * GB } }],
+      remux,
+      bluray,
+    ]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, LIMIT))).toEqual([
+      '1080p',
+      'remux 4K',
+      'cam 1080p',
+      'uncached 1080p',
+    ]);
+  });
+
+  it("ranks them below every stream within the limit in 'fast', cached or not", () => {
+    const list = entries(UHD_HDR, [
+      ['heavy cached 1080p', { facts: { resolution: '1080p', cached: true, sizeBytes: 50 * GB } }],
+      web,
+    ]);
+    expect(labels(orderStreams(list, 'fast', UHD_HDR))).toEqual(['heavy cached 1080p', 'web 4K']);
+    expect(labels(orderStreams(list, 'fast', UHD_HDR, LIMIT))).toEqual([
+      'web 4K',
+      'heavy cached 1080p',
+    ]);
+  });
+
+  it("leaves the addons' own order alone", () => {
+    const list = entries(UHD_HDR, [remux, web, bluray]);
+    expect(labels(orderStreams(list, 'addon', UHD_HDR, LIMIT))).toEqual(labels(list));
+  });
+
+  it('sets no limit when there is no limit or no running time to estimate with', () => {
+    const list = entries(UHD_HDR, [bluray, remux]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR))).toEqual(['remux 4K', '1080p']);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, { runtimeSeconds: RUNTIME }))).toEqual([
+      'remux 4K',
+      '1080p',
+    ]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, { maxBitrate: 40e6 }))).toEqual([
+      'remux 4K',
+      '1080p',
+    ]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, LIMIT))).toEqual(['1080p', 'remux 4K']);
+  });
+
+  it('offers the light 4K in the Quality menu when there is a heavy one too', () => {
+    const list = entries(UHD_HDR, [remux, web, bluray]);
+    const choose = (options: typeof LIMIT | undefined) =>
+      qualityChoices(playableCandidates(list, 'quality', UHD_HDR, options)).map((choice) => [
+        choice.resolution,
+        choice.entry.stream.name,
+      ]);
+    expect(choose(LIMIT)).toEqual([
+      ['2160p', 'web 4K'],
+      ['1080p', '1080p'],
+    ]);
+    // Without a limit the remux is the better 4K picture.
+    expect(choose(undefined)).toEqual([
+      ['2160p', 'remux 4K'],
+      ['1080p', '1080p'],
+    ]);
+  });
+
+  it('still offers 4K in the Quality menu when only a heavy one exists', () => {
+    const candidates = playableCandidates(
+      entries(UHD_HDR, [remux, bluray]),
+      'quality',
+      UHD_HDR,
+      LIMIT,
+    );
+    // Auto-play starts with the stream that keeps up.
+    expect(labels(candidates)).toEqual(['1080p', 'remux 4K']);
+    expect(
+      qualityChoices(candidates).map((choice) => [choice.resolution, choice.entry.stream.name]),
+    ).toEqual([
+      ['2160p', 'remux 4K'],
+      ['1080p', '1080p'],
+    ]);
+  });
+});

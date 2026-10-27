@@ -157,7 +157,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
 
   // Streams are looked for while focus rests on what would play.
   const [resting, setResting] = useState<string | null>(null);
-  usePrefetch(type, resting);
+  usePrefetch(type, resting, item?.runtime);
 
   const play = (videoId: string, startAt?: number) => {
     setNote(null);

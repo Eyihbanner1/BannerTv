@@ -3,7 +3,10 @@ import {
   assessStream,
   createStore,
   describeStream,
+  estimateBitrate,
   type InstalledAddon,
+  isLighter,
+  type OrderOptions,
   orderStreams,
   playableCandidates,
   type QueryState,
@@ -14,7 +17,7 @@ import {
 import type { Stream } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
 import { preferences } from '../data/preferences';
-import { sourceMemory } from '../data/playback';
+import { bandwidth, sourceMemory } from '../data/playback';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 
@@ -24,6 +27,9 @@ export const SETTLE_AFTER_FIRST_MS = 2000;
 const PROBE_LIMIT = 3;
 /** A finder is reused for this long, matching how long stream lists are cached. */
 const FINDER_LIFETIME_MS = 5 * 60 * 1000;
+/** Running times assumed until the title's own is known, on the long side so bitrates are not overestimated. */
+const ASSUMED_RUNTIME_S: Readonly<Record<string, number>> = { movie: 2 * 3600 };
+const ASSUMED_EPISODE_RUNTIME_S = 3600;
 
 export type ProbeState = 'testing' | ProbeResult;
 
@@ -61,6 +67,15 @@ export interface StreamFinder {
   next(tried: ReadonlySet<string>): StreamEntry | undefined;
   /** A link that failed in the player, so it is not offered again for a while. */
   markFailed(entry: StreamEntry): void;
+  /**
+   * The best candidate needing clearly less data than `current`, which kept
+   * buffering, skipping links already tried or known to fail.
+   */
+  lighter(current: StreamEntry, tried: ReadonlySet<string>): StreamEntry | undefined;
+  /** The video's running time in seconds, for judging which streams are too heavy. */
+  setRuntime(seconds: number | undefined): void;
+  /** The running time bitrates are worked out with: the video's own, or an assumed one. */
+  runtimeSeconds(): number;
   /**
    * Stops following the addons' answers, so the finder and its streams can be
    * let go. What it holds stays readable; start() follows them again.
@@ -122,6 +137,7 @@ function create(type: string, videoId: string): StreamFinder {
   let firstPlayableAt: number | null = null;
   let settleTimer: number | undefined;
   let probing = false;
+  let runtime: number | undefined;
   const failedLinks = new Set<string>();
   const probes: Record<string, ProbeState> = {};
 
@@ -134,11 +150,24 @@ function create(type: string, videoId: string): StreamFinder {
     settled: false,
   });
 
-  function rank(entries: readonly StreamEntry[]): StreamEntry[] {
+  const runtimeSeconds = () => runtime ?? ASSUMED_RUNTIME_S[type] ?? ASSUMED_EPISODE_RUNTIME_S;
+
+  function orderOptions(): OrderOptions {
     const memory = sourceMemory;
-    return playableCandidates(entries, preferences.get().streamChoice, knownCapabilities(), {
+    return {
       addonScore: (id) => memory.score(id),
-    }).filter((entry) => !failedLinks.has(entryKey(entry)));
+      maxBitrate: bandwidth.maxBitrate(),
+      runtimeSeconds: runtimeSeconds(),
+    };
+  }
+
+  function rank(entries: readonly StreamEntry[]): StreamEntry[] {
+    return playableCandidates(
+      entries,
+      preferences.get().streamChoice,
+      knownCapabilities(),
+      orderOptions(),
+    ).filter((entry) => !failedLinks.has(entryKey(entry)));
   }
 
   function refresh() {
@@ -204,6 +233,8 @@ function create(type: string, videoId: string): StreamFinder {
       dropped = false;
       answers = addonClient.streams(type, videoId);
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
+      // A lower limit after a stream kept buffering moves heavy streams down.
+      unsubscribe.push(bandwidth.subscribe(refresh));
       answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);
@@ -258,6 +289,27 @@ function create(type: string, videoId: string): StreamFinder {
       refresh();
     },
 
+    lighter(current, tried) {
+      const seconds = runtimeSeconds();
+      return state
+        .get()
+        .candidates.find(
+          (entry) =>
+            !tried.has(entryKey(entry)) &&
+            probes[entryKey(entry)] !== 'failed' &&
+            isLighter(entry.facts, current.facts, seconds),
+        );
+    },
+
+    setRuntime(seconds) {
+      const known = seconds !== undefined && isFinite(seconds) && seconds > 0 ? seconds : undefined;
+      if (known === undefined || known === runtime) return;
+      runtime = known;
+      if (started || dropped) refresh();
+    },
+
+    runtimeSeconds,
+
     destroy() {
       unsubscribe.forEach((undo) => undo());
       unsubscribe = [];
@@ -304,9 +356,21 @@ export function holdProbing(): () => void {
   return holdProbes();
 }
 
+/** Whether a stream needs more data than this TV's connection is expected to keep up with. */
+export function isHeavy(entry: StreamEntry, runtimeSeconds: number): boolean {
+  const bitrate = estimateBitrate(entry.facts, runtimeSeconds);
+  return bitrate !== undefined && bitrate > bandwidth.maxBitrate();
+}
+
 /** All streams, in the order the viewer picked for that list. */
-export function listOrder(entries: readonly StreamEntry[], order: StreamOrder): StreamEntry[] {
+export function listOrder(
+  entries: readonly StreamEntry[],
+  order: StreamOrder,
+  runtimeSeconds: number,
+): StreamEntry[] {
   return orderStreams(entries, order, knownCapabilities(), {
     addonScore: (id) => sourceMemory.score(id),
+    maxBitrate: bandwidth.maxBitrate(),
+    runtimeSeconds,
   });
 }

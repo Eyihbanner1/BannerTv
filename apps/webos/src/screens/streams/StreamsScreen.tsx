@@ -1,4 +1,4 @@
-import type { StreamEntry, StreamOrder } from '@bannertv/core';
+import { parseRuntime, SEVERE_WARNINGS, type StreamEntry, type StreamOrder } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -14,7 +14,7 @@ import { useQuery } from '../../data/use-query';
 import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
 import { streamBadges, streamTitle, warningText } from '../../player/describe';
-import { entryKey, listOrder, streamFinder } from '../../player/finder';
+import { entryKey, isHeavy, listOrder, streamFinder } from '../../player/finder';
 import styles from './StreamsScreen.module.css';
 
 const ITEM_HEIGHT = 168;
@@ -60,8 +60,14 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
   const [anchor, setAnchor] = useState(0);
 
   useEffect(() => finder.start(), [finder]);
-  // Re-sorted when the order changes or more addons answer.
-  const entries = useMemo(() => listOrder(state.entries, order), [state.entries, order]);
+  const runtime = item?.runtime;
+  useEffect(() => finder.setRuntime(parseRuntime(runtime)), [finder, runtime]);
+  // Re-sorted when the order changes or more addons answer. The finder answers
+  // again when the running time or the connection's limit changes.
+  const entries = useMemo(
+    () => listOrder(state.entries, order, finder.runtimeSeconds()),
+    [state.entries, order, finder],
+  );
   const names = addonNames();
 
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
@@ -103,12 +109,20 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
     const playable = entry.assessment.action.kind === 'play';
     const badges = streamBadges(entry.facts);
     if (entry.facts.cached === true) badges.push(t('streams.cached'));
-    const warning = entry.assessment.warnings[0];
+    // Most serious first: what stops a picture or sound, then a file too big for the connection.
+    const warnings = entry.assessment.warnings;
+    const severe = warnings.filter((w) => SEVERE_WARNINGS.has(w)).length;
+    const notes = warnings.map((w) => warningText(t, w));
+    if (playable && isHeavy(entry, finder.runtimeSeconds()))
+      notes.splice(severe, 0, t('streams.heavy'));
     const probe = state.probes[entryKey(entry)];
     const name = names.get(entry.addonId) ?? entry.addonId;
     const title = streamTitle(entry);
     const reason = playable
-      ? warning && warningText(t, warning)
+      ? notes[0] &&
+        (notes.length > 1
+          ? t('streams.moreNotes', { note: notes[0], count: notes.length - 1 })
+          : notes[0])
       : t(
           `streams.cannot.${entry.assessment.action.kind === 'unavailable' ? entry.assessment.action.reason : entry.assessment.action.kind}`,
         );
@@ -116,7 +130,9 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
       <Pressable
         key={entryKey(entry)}
         focusKey={`streams-item-${index}`}
-        label={[name, title, badges.join(', '), reason].filter(Boolean).join('. ')}
+        label={[name, title, badges.join(', '), ...(playable ? notes : [reason])]
+          .filter(Boolean)
+          .join('. ')}
         className={playable ? styles.stream : `${styles.stream} ${styles.unplayable}`}
         focusedClassName={styles.focused}
         style={{ top: index * ITEM_HEIGHT }}

@@ -1,4 +1,5 @@
 import { SEVERE_WARNINGS } from './assess';
+import { estimateBitrate } from './bitrate';
 import type {
   OrderOptions,
   QualityChoice,
@@ -127,6 +128,19 @@ function scorer(options: OrderOptions): (addonId: string) => number {
   };
 }
 
+/**
+ * Above 0 for a stream estimated to need more data than the connection is
+ * expected to give, so it would keep stopping to buffer: 1 up to twice the
+ * limit, 2 up to four times, and so on. 0 otherwise or when unknown.
+ */
+function heavy(entry: StreamEntry, options: OrderOptions): number {
+  if (options.maxBitrate === undefined) return 0;
+  const bitrate = estimateBitrate(entry.facts, options.runtimeSeconds);
+  if (bitrate === undefined || bitrate <= options.maxBitrate) return 0;
+  // Graded by how far over, so when every stream is too heavy the lightest still comes first.
+  return 1 + Math.floor(Math.log2(bitrate / options.maxBitrate));
+}
+
 /** Sort keys, compared left to right, lowest first. */
 type Key = number[];
 
@@ -135,6 +149,7 @@ function keyFor(
   order: StreamOrder,
   tv: TvCapabilities,
   score: (addonId: string) => number,
+  options: OrderOptions,
 ): Key {
   const head = tier(entry);
   if (order === 'addon') return [head, entry.addonRank, entry.rank];
@@ -142,6 +157,7 @@ function keyFor(
     const size = entry.facts.sizeBytes;
     return [
       head,
+      heavy(entry, options),
       -cacheRank(entry),
       fastResolutionRank(entry.facts.resolution),
       size === undefined ? 1 : 0,
@@ -152,10 +168,13 @@ function keyFor(
     ];
   }
   // A camcorder copy at 1080p is a worse picture than any 720p release, so
-  // cinema recordings rank below everything else that plays as well.
+  // cinema recordings rank below everything else that plays as well. A
+  // picture that keeps stopping to buffer is worse than a smaller one that
+  // plays, so streams too heavy for the connection come next.
   return [
     head,
     isCinema(entry) ? 1 : 0,
+    heavy(entry, options),
     -resolutionRank(entry, tv),
     -cacheRank(entry),
     -hdrRank(entry, tv),
@@ -191,7 +210,7 @@ export function orderStreams(
   const keyed = entries.map((entry, index) => ({
     entry,
     index,
-    key: keyFor(entry, order, tv, score),
+    key: keyFor(entry, order, tv, score, options),
   }));
   // Chromium 68 sorts more than 10 items unstably, so ties fall back to the
   // original position.

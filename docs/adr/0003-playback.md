@@ -1,6 +1,6 @@
 # ADR 0003: Playback, automatic stream choice and subtitles
 
-- Status: accepted for Phase 2; to be checked on the webOS 22 TV
+- Status: accepted for Phase 2; checked on the webOS 22 TV on 27 October 2026 (results at the end)
 - Date: 27 October 2026
 
 ## Context
@@ -20,16 +20,18 @@ Phase 2 makes BannerTV play. The plan asked for a stream picker, a remote-driven
    - Each stream is read for resolution, HDR type, video codec, audio format and channels, size, seeders, debrid service and cached state (`packages/core/src/streams/facts.ts`), then judged against the TV (`apps/webos/src/platform/capabilities.ts`): `tv.model.edidType` for DTS and TrueHD, the webOS version where that is missing, the system property `UHD`, the configs `tv.model.supportHDR` and `tv.config.supportDolbyHDRContents` for HDR10 and Dolby Vision, and Media Source checks for HEVC (at the 1080p level, so Full HD TVs that decode it pass) and AV1.
    - Torrents, links that need proxy headers (Chromium overwrites the TV's own request headers), YouTube and web links never auto-play. Streams that would likely give no picture or no sound (DTS or TrueHD the TV lacks, HEVC or AV1 without a decoder, Dolby Vision with no HDR10 base on a TV without it, 4K on an HD TV, uncached debrid links) go to the back.
    - "Best quality" ranks by the resolution the TV can show, cached state, HDR, release source, the addon's record on this TV, seeders and the addons' order; camcorder copies go last. "Fastest start" puts cached 1080p and smaller files first. Ties keep the addons' order with an explicit index, because Chromium 68 does not sort stably.
+   - In both, a stream too heavy for the connection comes after every stream within it, and the further over the limit, the later (in steps of twice the limit), so when every stream is too heavy the lightest still comes first. Its average bitrate is its size over the title's running time (two hours for a film and one for an episode when the addon gives none), against a limit of 40 Mbit/s until the TV shows otherwise (item 7). 4K web releases and Blu-ray encodes sit under that; 4K disc remuxes, at 60 to 80 Mbit/s with higher peaks, sit over it. On the test TV an 84 GB remux picked first buffered again and again, and many LG TVs have 100 Mbit/s Ethernet and less over Wi-Fi.
    - The player waits until every addon has answered, or two seconds after the first playable stream arrives.
 5. **One link test at a time.** On Details, after the rest, up to three top candidates are opened on one hidden, muted video element for their metadata only, with a two-second cap each, so a dead link is skipped before Watch is pressed. Moving focus or opening the player stops it and releases the decoder: most LG TVs have one. Settings has link testing on, off or automatic; automatic is off on webOS 5 until the floor TV is measured.
 6. **Failing over.** A stream that errors, does not start within 30 s, or stalls for 20 s mid-play is marked failed (neither clock runs while the viewer has paused), and the next candidate starts at the same position with a short "trying another" note, at most three times. A stream picked by hand from All streams does not fail over. After 30 s of playback the addon counts as having worked.
-7. **Which addons work, remembered.** `createSourceMemory` keeps a halving tally of plays and failures per addon id, at most 100 addons, in IndexedDB, and ranks with a Laplace score. It never stores a stream link, which can carry a debrid key.
-8. **Ways out.** The player's Quality menu offers the best stream at each resolution (4K, 1080p, 720p) and switches at the same position; the resolution already playing stays with the stream playing. "All streams" (from Details, the player and the problem screen) lists every stream with badges, "Tested: plays", and the reason a stream cannot play here; it can be sorted by quality, fastest start or addon. When nothing plays, the problem screen says why in plain words and offers another stream, All streams, Try again and Back.
+   - A stream that keeps buffering is too heavy rather than broken: three pauses of a second or more, or 15 s of buffering, within two minutes. It is judged as soon as the pause going on would tip it over, so one long pause steps down at 15 s, before the 20 s stall counts the link as dead. Pauses within 10 s of a jump do not count, and neither does the loading a jump causes in a pause already going on. The bitrate is the lower of size over the running time and size over the video's length. The connection's limit is lowered, and the best candidate needing at least 30% less data (or a lower resolution when sizes are unknown) starts at the same position with a "switching to a lighter one" note, at most twice. A stream the viewer chose in the Quality menu or All streams stays, with a note that points to Quality when it offers something lower, or to Other streams. The player shows one note at a time: switching, then trying another, then buffering, then subtitles.
+7. **Which addons work, and what the connection keeps up with, remembered.** `createSourceMemory` keeps a halving tally of plays and failures per addon id, at most 100 addons, in IndexedDB, and ranks with a Laplace score. It never stores a stream link, which can carry a debrid key. `createBandwidthMemory` keeps one number, the bitrate limit: a stream that kept buffering lowers it to 75% of that stream's bitrate (never under 4 Mbit/s); ten minutes of playback in a row without buffering raises it to that stream's bitrate when higher, or lifts a lowered limit by a quarter (up to 40 Mbit/s) when the stream was at least half of it. A lowered limit is also lifted by a quarter for each full day since it was saved, so one bad evening does not stick. A stream that played smoothly and then kept buffering lowers the limit to where it was before that stream raised it, at most, and one that kept buffering says nothing good about the connection afterwards. Only the limit and when it changed are stored.
+8. **Ways out.** The player's Quality menu offers the best stream at each resolution (4K, 1080p, 720p) and switches at the same position; the resolution already playing stays with the stream playing. "All streams" (from Details, the player and the problem screen) lists every stream with badges, "Tested: plays", and the reason a stream cannot play here, or its most serious note (no sound or picture first, then "a very large file", then a different look) with a count of the rest; it can be sorted by quality, fastest start or addon. When nothing plays, the problem screen says why in plain words and offers another stream, All streams, Try again and Back.
 9. **Subtitles are drawn by BannerTV.** Every source ends as cues in one renderer: addon files (SRT, VTT, ASS/SSA as styled text), hls.js cues and Shaka cues. Addons are asked with the stream's file name, hash and size so they can match the release. Files are capped at 5 MB, gunzipped where the engine can (Chromium 80 and later), and decoded after a byte-order mark, a strict UTF-8 check and the language's code page. The six most recent files stay parsed.
 10. **Choosing subtitles.** The panel (Blue, or the player's Audio and subtitles button) groups subtitles by language, the last chosen first. Pressing the language already showing moves to its next version, the usual fix for subtitles out of step; a file that cannot be read gives way to the next in its language. Each stream starts with the last chosen language: the stream's own track first, since it is always in step, then the first addon file. Timing moves in 0.1 s steps. Size, colour, background and position are in Subtitle style, also in Settings.
 11. **Audio.** The TV's `audioTracks` (direct play) or hls.js and Shaka's own lists. The language picked becomes the preference, and the next stream starts in it.
 12. **Resume and progress.** The position is saved every 10 s, on pause, when the app is hidden and on leaving. A title resumes once 30 s have played, but not in the last minute; a rewatch resumes unless it stopped past 90%. The clock is only trusted once it has moved past the resume point, never from the 0 that webOS reports first. Details offers "Resume from 42:10" and "Start over", and a series its latest episode. Episodes show a progress bar or a watched tick.
-13. **Up Next.** In the last 30 seconds, or at the end, a card offers the next aired episode with a 10 s countdown, starting the same release (`bingeGroup`) from the same addon, else the automatic choice.
+13. **Up Next.** In the last 30 seconds, or at the end, a card offers the next aired episode with a 10 s countdown, starting the same release (`bingeGroup`) from the same addon, else the automatic choice. Its streams are asked for two minutes before the end, so reading a long list does not hold up the card, and the countdown runs on the clock, not on timer ticks, which a busy TV runs late.
 14. **Remote controls.** OK plays or pauses and shows the controls. Left and Right scrub 10 s, then 30 s and 60 s as presses repeat, and seek when they stop. Up and Down show the controls. Play, Pause, Stop, Fast forward (+30 s) and Rewind (−10 s) work everywhere. Back cancels a scrub, hides the controls, then leaves.
 15. **The picture for the LG store.** The video element sits in the page body, outside the app root that `main.tsx` scales on small windows, at 0,0 and the window's full size with no transform: LG's store rule, without which webOS starts its screensaver over a playing video.
 16. **Keys stay private.** Stream links and addon addresses can carry debrid or API keys, so they never appear in focus keys, error messages, logs or stored data; streams are keyed by the addon's place in the list, its id and the stream's position, so two installs of one addon stay apart.
@@ -37,19 +39,40 @@ Phase 2 makes BannerTV play. The plan asked for a stream picker, a remote-driven
 ## Consequences
 
 - Most viewers press Watch and get a picture. When the guess is wrong, the next stream starts by itself, and All streams is one press away.
+- On a fast connection a 4K web release wins over a 4K remux until a remux the viewer picks plays ten minutes without buffering; after that the limit has risen and remuxes rank by quality again.
 - Asking addons on a focus rest costs requests the viewer may never use. The rest delay, the five-minute cache and the never-on-Home rule keep that small; the link test is the costly part and is the first thing to turn off if the floor TV struggles.
 - Embedded subtitles in direct-play files are still missing. The Lab has a test of the webOS media pipeline's Luna calls (`subscribe` for the track list, `setSubtitleEnable` and `selectTrack` by `mediaId`), which Lampa, Stremio and Nuvio use. LG does not document them, and on webOS 25 selecting a text track has frozen HLS playback, so the player uses them only if the TV run shows they are safe.
 - ASS styling, positioning and karaoke are Phase 5 (JASSUB on webOS 6+). Torrents and proxy-header streams wait for the Phase 5 streaming server.
 - The LG demo addon's adaptive HLS needs nothing special: the TV's player takes it, and hls.js takes over if it has subtitle or audio renditions.
 
-## To check on the TV
+## Checked on the TV
 
-1. hls.js and Shaka load from `vendor/` and play: the Apple bipbop HLS (alternate audio, subtitles) and a DASH stream.
-2. Subtitle fetches from `subs5.strem.io` and other hosts work from the packaged app (webOS appears to relax CORS for apps loaded from `file://`).
-3. `tv.model.edidType` names DTS and TrueHD support; a DTS or TrueHD stream ranks low when it does not.
-4. A resume with `mediaOption` starts at the right place for MP4 and HLS, and progress is not saved from the first 0.
-5. On a UHD stream, HLS reaches 2160p with the lifted `adaptiveStreaming` cap.
-6. The link test does not disturb Details (focus, scrolling) and stops when the player opens.
-7. The screensaver does not start during playback.
-8. Lab, "Test embedded subtitles (Luna)" on the test5 MKV: the track list in `sourceInfo`, whether `selectTrack` shows a subtitle, and whether the clock keeps moving after each call.
-9. On webOS 5 (floor TV, when bought): hls.js with its worker, Shaka, and whether link testing can be turned on.
+Codex ran the checks on the LG 65NANO766QA on 27 October 2026 with build e166786 (report: Agent Hub message 1253, saved as `phase2/tv-results.md` in the project files), using Torrentio with Real-Debrid and OpenSubtitles v3.
+
+- **Passed.**
+  - hls.js from `vendor/` played the Apple HLS with its English subtitle track drawn by BannerTV (the stream had no second audio track).
+  - The TV's player listed and switched the MKV's two audio tracks.
+  - Watch started a film 3.2 s after the press with focus rested, and 4.2 s when pressed at once.
+  - Addon subtitles showed, with "version 2 of 5" and timing steps.
+  - Resume started at 6:23 and stayed there.
+  - Up Next started the next episode.
+  - Quality kept the position, and Other streams listed 187 streams with badges.
+  - OK paused a stream that was starting.
+  - Fifteen minutes with no input brought no screensaver and no buffering.
+  - The TV showed its HDR notice, and the Dolby Vision, TrueHD and DTS notes appeared as written.
+  - Back returned to Details with focus kept.
+  - 45 minutes of use brought no crash, with the JS heap at about 12 MB.
+- **Failed, now changed.**
+  - The first pick was an 84 GB 4K Dolby Vision remux that buffered again and again until Eyitayo switched to 1080p by hand. Nothing switched by itself, because only a single 20 s stall counted. Items 4, 6 and 7 now rank heavy files lower, step down when a stream keeps buffering, and remember the connection's limit.
+  - The Up Next countdown ran slow; item 13 now covers it.
+  - Stream cards showed the first note, not the most serious; item 8 now covers it.
+- **Lab Luna test: not run to the end.**
+  - `setSubtitleEnable` answered "No Error", which BannerTV's Luna wrapper wrongly took for a failure. Answers with `returnValue: true` or error code 0 now count as success.
+  - `sourceInfo` never arrived. The pipeline sends it once, as it opens a file, and the test subscribed mid-play. The test now opens the video again with a subscription ready, and notes what each subscription sends.
+
+Still to check on the TV:
+
+1. The Luna embedded-subtitle test, rerun to the end: the track list in `sourceInfo`, whether `selectTrack` shows a subtitle, and whether the clock keeps moving after each call.
+2. Watch on a title with a 4K remux and a 4K web release picks the web release, and a stream that keeps buffering steps down by itself.
+3. A Shaka DASH stream, a DTS or TrueHD stream played on purpose, and 4K over HLS with the lifted `adaptiveStreaming` cap.
+4. On webOS 5 (floor TV, when bought): hls.js with its worker, Shaka, and whether link testing can be turned on.

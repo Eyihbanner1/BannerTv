@@ -1,3 +1,4 @@
+import { parseRuntime } from '@bannertv/core';
 import { useEffect } from 'react';
 import { preferences } from '../data/preferences';
 import { knownCapabilities } from '../platform/capabilities';
@@ -21,12 +22,14 @@ export function probingAllowed(): boolean {
  * and then quietly tests the best links, so Play starts at once. Moving on
  * stops the test straight away; the answers stay cached for the player.
  */
-export function usePrefetch(type: string, videoId: string | null): void {
+export function usePrefetch(type: string, videoId: string | null, runtime?: string): void {
   useEffect(() => {
     if (videoId === null) return;
     let unsubscribe: (() => void) | undefined;
     const timer = window.setTimeout(() => {
       const finder = streamFinder(type, videoId);
+      // The running time tells a heavy file from a long one.
+      finder.setRuntime(parseRuntime(runtime));
       finder.start();
       if (!probingAllowed()) return;
       const probeWhenSettled = () => {
@@ -43,5 +46,5 @@ export function usePrefetch(type: string, videoId: string | null): void {
       unsubscribe?.();
       stopProbing();
     };
-  }, [type, videoId]);
+  }, [type, videoId, runtime]);
 }

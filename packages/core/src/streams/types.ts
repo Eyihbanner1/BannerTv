@@ -144,6 +144,14 @@ export type StreamOrder = 'quality' | 'fast' | 'addon';
 export interface OrderOptions {
   /** How often streams from an addon played before, 0 to 1 (0.5 when unknown). Breaks ties. */
   addonScore?: (addonId: string) => number;
+  /**
+   * The highest average bitrate, in bits per second, this TV's connection is
+   * expected to keep up with. Streams estimated above it rank below every
+   * stream within it, in the quality and fast orders. No limit when unset.
+   */
+  maxBitrate?: number;
+  /** The video's running time in seconds, for estimating bitrates from file sizes. */
+  runtimeSeconds?: number;
 }
 
 /** One line of the player's Quality menu: the best stream at that resolution. */

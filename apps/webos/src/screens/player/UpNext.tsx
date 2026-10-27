@@ -37,7 +37,10 @@ export function UpNext({ video, returnFocusKey, onPlay, onDismiss }: UpNextProps
 
   useEffect(() => {
     void setFocus('player-upnext-play');
-    const timer = window.setInterval(() => setLeft((seconds) => Math.max(0, seconds - 1)), 1000);
+    // Counted against the clock: a busy TV runs timers late, and the countdown must not stretch.
+    const ends = Date.now() + UP_NEXT_COUNTDOWN_S * 1000;
+    const tick = () => setLeft(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+    const timer = window.setInterval(tick, 250);
     return () => {
       window.clearInterval(timer);
       void setFocus(returnTo.current);

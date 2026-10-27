@@ -2,6 +2,7 @@ import {
   findBingeStream,
   languageKey,
   nextVideo,
+  parseRuntime,
   qualityChoices,
   type StreamEntry,
 } from '@bannertv/core';
@@ -48,6 +49,8 @@ const FORWARD_S = 30;
 const REWIND_S = 10;
 /** The Up Next card shows this long before the end. */
 const UP_NEXT_BEFORE_END_S = 30;
+/** The next episode's streams are asked for this long before the end. */
+const NEXT_STREAMS_BEFORE_END_S = 120;
 
 type Panel = 'tracks' | 'style' | 'quality' | null;
 
@@ -134,6 +137,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   });
 
   const subtitles = useSubtitles(type, videoId, state.entry, session, state);
+
+  // The running time tells a heavy file from a long one, for auto-play's ranking.
+  const runtime = item?.runtime;
+  useEffect(() => finder.setRuntime(parseRuntime(runtime)), [finder, runtime]);
 
   // Open: free the decoder from any link test, then pick and start a stream.
   useEffect(() => {
@@ -336,11 +343,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
     else armHide();
   };
 
-  // Up Next.
+  // Up Next. The next episode's streams are asked for well before the card,
+  // so reading them does not slow the countdown and the episode starts at once.
+  const nearEnd = showUpNext || remaining <= NEXT_STREAMS_BEFORE_END_S;
   useEffect(() => {
-    // Ask for the next episode's streams early, so it starts at once.
-    if (showUpNext && next) streamFinder(type, next.id).start();
-  }, [showUpNext, next, type]);
+    if (nearEnd && next) streamFinder(type, next.id).start();
+  }, [nearEnd, next, type]);
 
   function playNextEpisode() {
     if (!next) return;
@@ -368,6 +376,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // Quality.
   const choices = useMemo(() => qualityChoices(finderState.candidates), [finderState.candidates]);
   const currentQuality = state.entry?.facts.resolution ?? 'other';
+  // Whether the Quality menu offers something smaller than what is playing.
+  const lowerChoice = useMemo(() => {
+    const index = choices.findIndex((c) => (c.resolution ?? 'other') === currentQuality);
+    if (index < 0) return choices.length > 1;
+    return choices.slice(index + 1).some((c) => c.resolution !== undefined);
+  }, [choices, currentQuality]);
 
   // What the screen shows.
   const title = item?.name ?? '';
@@ -386,6 +400,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
     : [];
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
+  // One note at a time, the most useful first, so they never sit on top of each other.
+  let toast: string | undefined;
+  if (state.steppedDown) toast = t('player.steppingDown');
+  else if (state.failedOver) toast = t('player.tryingAnother');
+  else if (state.struggling && state.status === 'buffering') {
+    // Only name a button that is there and would help.
+    if (lowerChoice) toast = t('player.keepsBuffering');
+    else if (!props.lab) toast = t('player.keepsBufferingStreams');
+    else toast = t('player.keepsBufferingPlain');
+  } else if (subtitles.failed && !waiting) toast = t('player.subtitlesFailed');
 
   const buttons: ControlButton[] = [
     {
@@ -481,10 +505,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         </div>
       )}
       {state.status === 'buffering' && <div className={styles.spinner} role="status" />}
-      {state.failedOver && <p className={styles.toast}>{t('player.tryingAnother')}</p>}
-      {subtitles.failed && !waiting && (
-        <p className={styles.toast}>{t('player.subtitlesFailed')}</p>
-      )}
+      {toast && <p className={styles.toast}>{toast}</p>}
 
       <PlayerControls
         visible={controls && !waiting}
@@ -536,7 +557,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
             if (value === currentQuality) return;
             const choice = choices.find((c) => (c.resolution ?? 'other') === value);
             if (session && choice) {
-              session.play(choice.entry, session.trustedPosition() ?? state.position);
+              session.play(choice.entry, session.trustedPosition() ?? state.position, {
+                chosen: true,
+              });
             }
           }}
           onClose={() => setPanel(null)}

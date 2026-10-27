@@ -133,9 +133,9 @@ describe('assessStream warnings', () => {
       'uhd-on-hd-tv',
       'hevc',
       'dolby-vision-only',
-      'hdr-on-sdr-tv',
       'truehd',
       'dts',
+      'hdr-on-sdr-tv',
       'old-container',
       'cam',
     ]);
@@ -222,11 +222,12 @@ describe('assessStream on the addon fixture', () => {
   it('warns the 2022 TV about what it cannot do', () => {
     expect(assess('torrentio-rd-cached-4k-dv-hdr', LG_2022)).toEqual({
       action: { kind: 'play' },
-      warnings: ['dolby-vision-as-hdr10', 'truehd'],
+      // No sound comes before a different look.
+      warnings: ['truehd', 'dolby-vision-as-hdr10'],
     });
     expect(assess('torrentio-ad-download-4k-dovi-dtsx', LG_2022)).toEqual({
       action: { kind: 'play' },
-      warnings: ['uncached', 'dolby-vision-as-hdr10', 'dts'],
+      warnings: ['uncached', 'dts', 'dolby-vision-as-hdr10'],
     });
     expect(assess('mediafusion-v2-rd-cached-4k-default', LG_2022).warnings).toEqual([
       'dolby-vision-as-hdr10',

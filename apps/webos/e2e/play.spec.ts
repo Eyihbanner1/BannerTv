@@ -76,6 +76,55 @@ test('Watch plays the best stream at once, with no list to choose from', async (
   expect(errors).toEqual([]);
 });
 
+test('Watch passes over a disc remux too big for the connection', async ({ page }) => {
+  await mockAddons(page);
+  // The open movies run 15 min; this one runs as long as a feature film.
+  await page.route(`https://v3-cinemeta.strem.io/meta/movie/${MOVIE}.json`, (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({
+        meta: {
+          id: MOVIE,
+          imdb_id: MOVIE,
+          type: 'movie',
+          name: 'Elephants Dream',
+          releaseInfo: '2006',
+          runtime: '2h 1min',
+          poster: `https://images.metahub.space/poster/small/${MOVIE}/img`,
+          background: `https://images.metahub.space/background/medium/${MOVIE}/img`,
+        },
+      }),
+    }),
+  );
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      // The addon lists the remux first, and it would rank first on picture alone.
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n4K',
+          description: 'Open Movie 2160p REMUX\n💾 80 GB ⚡ Cached',
+          path: '/movie-2160p-remux.webm',
+        },
+        {
+          name: 'Test Streams\n4K',
+          description: 'Open Movie 2160p WEB-DL\n💾 15 GB ⚡ Cached',
+          path: '/movie-2160p-web.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+
+  // Over 2 h the remux needs about 95 Mbit/s and the WEB-DL about 18.
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe('/movie-2160p-web.webm');
+  await press(page, 'Enter', 'player-play');
+  await expect(page.getByText('15 GB', { exact: true })).toBeVisible();
+});
+
 test('OK while a stream starts pauses it with Play ready, as does coming back from another app', async ({
   page,
 }) => {

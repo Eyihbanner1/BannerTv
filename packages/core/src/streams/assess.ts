@@ -103,5 +103,8 @@ export function assessStream(
   }
   if (facts.releaseSource && CINEMA.indexOf(facts.releaseSource) >= 0) warnings.push('cam');
 
-  return { action: actionFor(stream), warnings };
+  // What stops a picture or sound comes before what only changes the picture.
+  const severe = warnings.filter((warning) => SEVERE_WARNINGS.has(warning));
+  const mild = warnings.filter((warning) => !SEVERE_WARNINGS.has(warning));
+  return { action: actionFor(stream), warnings: severe.concat(mild) };
 }

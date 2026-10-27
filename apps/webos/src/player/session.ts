@@ -2,10 +2,11 @@ import {
   createProgressTracker,
   createStore,
   type Cue,
+  estimateBitrate,
   type ProgressTracker,
   type StreamEntry,
 } from '@bannertv/core';
-import { progress, sourceMemory } from '../data/playback';
+import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
@@ -18,6 +19,22 @@ export const START_TIMEOUT_MS = 30000;
 export const MAX_FAILOVERS = 3;
 /** After this much playback a source counts as having worked. */
 const WORKED_AFTER_S = 30;
+/**
+ * Buffering this many times, or for this long in all, within the window means
+ * the stream needs more data than the connection gives. Auto-play then steps
+ * down to a lighter stream at the same place. Only pauses of a second or more
+ * are counted towards the limit.
+ */
+export const REBUFFER_LIMIT = 3;
+export const REBUFFER_TOTAL_MS = 15000;
+export const REBUFFER_WINDOW_MS = 120000;
+const COUNTED_REBUFFER_MS = 1000;
+/** Buffering this soon after a jump is the jump's doing, not the connection's. */
+export const SEEK_GRACE_MS = 10000;
+/** Auto-play steps down to a lighter stream at most this many times. */
+const MAX_STEP_DOWNS = 2;
+/** This much playback in a row without buffering shows the connection keeps up with the stream. */
+export const SMOOTH_AFTER_S = 600;
 
 export type SessionStatus =
   /** Nothing loaded: still choosing a stream, or asking where to start. */
@@ -42,6 +59,13 @@ export interface SessionState {
   error: PlaybackError | null;
   /** Set when auto-play moved to another stream after a failure, until playback resumes. */
   failedOver: boolean;
+  /** Set when auto-play moved to a lighter stream because this one kept buffering, until playback resumes. */
+  steppedDown: boolean;
+  /**
+   * The stream keeps buffering and the session will not leave it by itself:
+   * the viewer chose it, or nothing lighter is left. Until another stream plays.
+   */
+  struggling: boolean;
   audio: EngineTrack[];
   text: EngineTrack[];
   /** Cues from the stream's own subtitle tracks, by track id. */
@@ -64,8 +88,11 @@ export interface SessionOptions {
 export interface PlaybackSession {
   get(): SessionState;
   subscribe(listener: () => void): () => void;
-  /** Opens a stream at `startAt` seconds. */
-  play(entry: StreamEntry, startAt: number): void;
+  /**
+   * Opens a stream at `startAt` seconds. `chosen`: the viewer picked this
+   * stream, so it is not swapped for a lighter one when it buffers.
+   */
+  play(entry: StreamEntry, startAt: number, options?: { chosen?: boolean }): void;
   /** Moves to the best stream not tried yet, where playback is now. False when none is left. */
   playNext(): boolean;
   /** Whether playNext has somewhere to go. */
@@ -93,6 +120,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   duration: 0,
   error: null,
   failedOver: false,
+  steppedDown: false,
+  struggling: false,
   audio: [],
   text: [],
   streamCues: {},
@@ -108,12 +137,28 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   // Each play() is one attempt; events from an older attempt are ignored.
   let attempt = 0;
   let failovers = 0;
+  let stepDowns = 0;
   let startedPlaying = false;
+  // The viewer picked the stream playing now (the Quality menu), so buffering does not replace it.
+  let viewerChose = false;
+  // Buffering of this attempt that the connection caused: when each began and how long it lasted.
+  let rebuffers: Array<{ at: number; ms: number }> = [];
+  let bufferingSince: number | undefined;
+  let lastSeekAt = -Infinity;
+  let judgedStruggling = false;
+  // Seconds played since the last buffering, and whether this attempt has been judged smooth.
+  let smoothFor = 0;
+  let lastPosition: number | undefined;
+  let judgedSmooth = false;
+  // The limit before this attempt's smooth play raised it, so a later struggle undoes the raise.
+  let limitBefore: number | undefined;
   // Set from pause() until resume(), so an engine starting the stream does not undo it.
   let pausedByViewer = false;
   let reportedWorked = false;
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
+  // Judges a wait still going on, once it alone would make the stream count as struggling.
+  let judgeTimer: number | undefined;
   let destroyed = false;
   // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
   let wantedAudio: string | null = null;
@@ -133,8 +178,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   function clearTimers() {
     clearTimeout(stallTimer);
     clearTimeout(startTimer);
+    clearTimeout(judgeTimer);
     stallTimer = undefined;
     startTimer = undefined;
+    judgeTimer = undefined;
   }
 
   function save() {
@@ -166,12 +213,96 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
   let lastStartAt = 0;
 
+  /**
+   * The stream's average bitrate: its size over the video's length, or over
+   * the title's running time when that gives less. Auto-play ranks by the
+   * running time, so a limit learnt from a higher figure could still leave
+   * the stream that struggled ranked within it.
+   */
+  function bitrateOf(entry: StreamEntry): number | undefined {
+    const byRuntime = estimateBitrate(entry.facts, finder.runtimeSeconds());
+    const duration = isFinite(video.duration) && video.duration > 0 ? video.duration : undefined;
+    const byDuration = estimateBitrate(entry.facts, duration);
+    if (byRuntime === undefined || byDuration === undefined) return byRuntime ?? byDuration;
+    return Math.min(byRuntime, byDuration);
+  }
+
+  /** Closes the buffering in progress, if the connection caused it. True when there was one. */
+  function endBuffering(): boolean {
+    if (bufferingSince === undefined) return false;
+    const last = rebuffers[rebuffers.length - 1];
+    if (last) last.ms = Date.now() - bufferingSince;
+    bufferingSince = undefined;
+    return true;
+  }
+
+  /**
+   * Called as each buffering ends. A stream that keeps buffering is too heavy
+   * for the connection: the limit is lowered for next time, and auto-play
+   * moves to a lighter stream at the same place.
+   */
+  function judgeBuffering(current: number) {
+    if (current !== attempt || destroyed || judgedStruggling) return;
+    const now = Date.now();
+    const recent = rebuffers.filter((r) => now - r.at <= REBUFFER_WINDOW_MS);
+    const counted = recent.filter((r) => r.ms >= COUNTED_REBUFFER_MS).length;
+    const total = recent.reduce((sum, r) => sum + r.ms, 0);
+    if (counted < REBUFFER_LIMIT && total < REBUFFER_TOTAL_MS) return;
+    judgedStruggling = true;
+    clearTimeout(judgeTimer);
+    judgeTimer = undefined;
+    const entry = state.get().entry;
+    if (!entry) return;
+    const bitrate = bitrateOf(entry);
+    // Never above the limit this stream started with, even if its first minutes played smoothly.
+    if (bitrate !== undefined && keep) bandwidth.struggled(bitrate, limitBefore);
+    const lighter =
+      options.autoFailover && !viewerChose && stepDowns < MAX_STEP_DOWNS
+        ? finder.lighter(entry, tried)
+        : undefined;
+    if (!lighter) {
+      patch({ struggling: true });
+      return;
+    }
+    stepDowns++;
+    session.play(lighter, tracker?.position() ?? lastStartAt);
+    patch({ steppedDown: true });
+  }
+
   function armStall(current: number) {
     clearTimeout(stallTimer);
-    stallTimer = window.setTimeout(
-      () => fail(new PlaybackError('network', 'The stream stopped loading'), current),
-      STALL_MS,
+    stallTimer = window.setTimeout(() => {
+      // A wait this long on a stream that has been buffering is the connection's: step down first.
+      if (endBuffering()) judgeBuffering(current);
+      if (current !== attempt || destroyed) return;
+      fail(new PlaybackError('network', 'The stream stopped loading'), current);
+    }, STALL_MS);
+  }
+
+  /**
+   * Arms the judgement of a wait that has just begun, for the moment it would
+   * tip the stream into struggling: when it reaches a second as the third
+   * counted wait, or when it brings the window's buffering to the limit.
+   */
+  function armJudge(current: number, now: number) {
+    const earlier = rebuffers.filter(
+      (r) => r !== rebuffers[rebuffers.length - 1] && now - r.at <= REBUFFER_WINDOW_MS,
     );
+    const counted = earlier.filter((r) => r.ms >= COUNTED_REBUFFER_MS).length;
+    const total = earlier.reduce((sum, r) => sum + r.ms, 0);
+    const delay =
+      counted >= REBUFFER_LIMIT - 1
+        ? COUNTED_REBUFFER_MS
+        : Math.max(COUNTED_REBUFFER_MS, REBUFFER_TOTAL_MS - total);
+    clearTimeout(judgeTimer);
+    judgeTimer = window.setTimeout(() => {
+      judgeTimer = undefined;
+      if (current !== attempt || bufferingSince === undefined) return;
+      // The wait stays open: 'playing' closes it with its full length.
+      const last = rebuffers[rebuffers.length - 1];
+      if (last) last.ms = Date.now() - bufferingSince;
+      judgeBuffering(current);
+    }, delay);
   }
 
   function armStart(current: number) {
@@ -205,7 +336,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => {
         clearTimers();
         startedPlaying = true;
-        patch({ status: 'playing', failedOver: false, error: null });
+        const buffered = endBuffering();
+        patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
+        if (buffered) judgeBuffering(attempt);
       },
     ],
     [
@@ -213,7 +346,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => {
         if (state.get().status === 'ended') return;
         clearTimeout(stallTimer);
+        clearTimeout(judgeTimer);
         stallTimer = undefined;
+        judgeTimer = undefined;
+        endBuffering();
         save();
         // Before the first picture too, so the loading screen gives way to Play.
         if (startedPlaying || pausedByViewer) patch({ status: 'paused' });
@@ -226,6 +362,24 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         if (!startedPlaying || video.paused) return;
         patch({ status: 'buffering' });
         armStall(attempt);
+        const now = Date.now();
+        if (bufferingSince !== undefined || video.seeking || now - lastSeekAt < SEEK_GRACE_MS) {
+          return;
+        }
+        bufferingSince = now;
+        rebuffers.push({ at: now, ms: 0 });
+        smoothFor = 0;
+        armJudge(attempt, now);
+      },
+    ],
+    [
+      'seeking',
+      () => {
+        // A wait under way ends here: what follows is the jump's.
+        endBuffering();
+        clearTimeout(judgeTimer);
+        judgeTimer = undefined;
+        lastSeekAt = Date.now();
       },
     ],
     [
@@ -239,6 +393,22 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           reportedWorked = true;
           const entry = state.get().entry;
           if (entry && keep) sourceMemory.record(entry.addonId, true);
+        }
+        // Ten minutes in a row without buffering: the connection keeps up with this stream.
+        if (trusted !== undefined && lastPosition !== undefined) {
+          const step = trusted - lastPosition;
+          if (step > 0 && step < 5) smoothFor += step;
+        }
+        lastPosition = trusted;
+        // A stream already judged struggling says nothing good about the connection.
+        if (!judgedSmooth && !judgedStruggling && smoothFor >= SMOOTH_AFTER_S) {
+          judgedSmooth = true;
+          const entry = state.get().entry;
+          const bitrate = entry && bitrateOf(entry);
+          if (bitrate && keep) {
+            limitBefore = bandwidth.maxBitrate();
+            bandwidth.smooth(bitrate);
+          }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
         patch({ position: trusted ?? lastStartAt, duration });
@@ -279,7 +449,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     get: state.get,
     subscribe: state.subscribe,
 
-    play(entry, startAt) {
+    play(entry, startAt, playOptions) {
       if (destroyed || entry.stream.source.kind !== 'url') return;
       // By key: the finder rebuilds its entries as addons answer, so Try again may get a new object.
       const previous = state.get().entry;
@@ -297,12 +467,23 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       startedPlaying = false;
       pausedByViewer = false;
       reportedWorked = false;
+      viewerChose = playOptions?.chosen === true;
+      rebuffers = [];
+      bufferingSince = undefined;
+      judgedStruggling = false;
+      smoothFor = 0;
+      lastPosition = undefined;
+      judgedSmooth = false;
+      limitBefore = undefined;
       patch({
         status: 'loading',
         entry,
         engine: null,
         position: startAt,
         error: null,
+        failedOver: false,
+        steppedDown: false,
+        struggling: false,
         audio: [],
         text: [],
         streamCues: {},
@@ -405,6 +586,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     seek(position) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const target = Math.max(0, Math.min(position, duration - 1));
+      endBuffering();
+      clearTimeout(judgeTimer);
+      judgeTimer = undefined;
+      lastSeekAt = Date.now();
       video.currentTime = target;
       tracker?.seeked(target);
       patch({ position: target });

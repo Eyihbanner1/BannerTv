@@ -51,6 +51,7 @@ export {
   type QueryState,
   type QueryStatus,
 } from './query';
+export { type BandwidthMemory, createBandwidthMemory } from './playback/bandwidth';
 export { findBingeStream, nextVideo } from './playback/next';
 export {
   createProgressStore,
@@ -72,6 +73,7 @@ export {
 } from './storage';
 export { createStore } from './store';
 export { assessStream, SEVERE_WARNINGS } from './streams/assess';
+export { DEFAULT_MAX_BITRATE, estimateBitrate, isLighter, parseRuntime } from './streams/bitrate';
 export { describeStream } from './streams/facts';
 export { orderStreams, playableCandidates, qualityChoices } from './streams/order';
 export type {
