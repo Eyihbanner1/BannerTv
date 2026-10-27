@@ -213,20 +213,24 @@ function create(type: string, videoId: string): StreamFinder {
 
     choose() {
       finder.start();
-      return new Promise((resolve) => {
-        const decide = () => {
-          const current = state.get();
-          if (!current.settled) return false;
-          const works = current.candidates.find((e) => probes[entryKey(e)] === 'works');
-          const untried = current.candidates.find((e) => probes[entryKey(e)] !== 'failed');
-          resolve(works ?? untried ?? current.candidates[0]);
-          return true;
-        };
-        if (decide()) return;
-        const unsubscribe = state.subscribe(() => {
-          if (decide()) unsubscribe();
-        });
-      });
+      // The ranking needs the TV's answer, which can come after the addons'.
+      return tvCapabilities().then(
+        () =>
+          new Promise<StreamEntry | undefined>((resolve) => {
+            const decide = () => {
+              const current = state.get();
+              if (!current.settled) return false;
+              const works = current.candidates.find((e) => probes[entryKey(e)] === 'works');
+              const untried = current.candidates.find((e) => probes[entryKey(e)] !== 'failed');
+              resolve(works ?? untried ?? current.candidates[0]);
+              return true;
+            };
+            if (decide()) return;
+            const unsubscribe = state.subscribe(() => {
+              if (decide()) unsubscribe();
+            });
+          }),
+      );
     },
 
     next(tried) {

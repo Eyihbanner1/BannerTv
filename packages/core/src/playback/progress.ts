@@ -241,7 +241,9 @@ export function createProgressStore(options: {
       if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
       if (entry.duration > 0 && entry.duration - entry.position < END_SECONDS) return undefined;
       // A rewatch resumes too, but never from the credits of one already seen.
-      if (entry.duration > 0 && entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
+      if (entry.duration > 0 && entry.position >= entry.duration * WATCHED_FRACTION) {
+        return undefined;
+      }
       return entry.position;
     },
     version: () => changes,

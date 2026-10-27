@@ -72,7 +72,8 @@ async function detect(): Promise<TvCapabilities> {
     uhd: flag(system.UHD),
     hdr10: flag(c['tv.model.supportHDR']),
     dolbyVision: flag(c['tv.config.supportDolbyHDRContents']),
-    hevc: decodes('video/mp4; codecs="hvc1.2.4.L153.B0"'),
+    // Main profile at level 4.1 (1080p): asking for 4K levels would fail on Full HD TVs that do decode HEVC.
+    hevc: decodes('video/mp4; codecs="hvc1.1.6.L123.B0"'),
     av1: decodes('video/mp4; codecs="av01.0.08M.08"'),
     dts: edid ? edid.includes('dts') : dtsByRelease(webOS),
     // TrueHD is in none of LG's format tables.

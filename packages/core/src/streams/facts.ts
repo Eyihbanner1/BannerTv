@@ -276,9 +276,7 @@ const RULES: readonly Rule[] = [
       ['fa', 'persian|farsi'],
       ['ur', 'urdu'],
     ] as const
-  ).map(
-    ([code, words]): Rule => ({ pattern: words, apply: language(code), titleWord: true }),
-  ),
+  ).map(([code, words]): Rule => ({ pattern: words, apply: language(code), titleWord: true })),
 ];
 
 /**
@@ -298,18 +296,34 @@ const WORDS = new RegExp(
 /** A year or season number ends the title in a release name. */
 const TITLE_END = /(?:^|[^a-z0-9])(?:(?:19|20)\d\d|s\d\d?(?:e\d{1,3})?)(?![a-z0-9])/;
 
+/** The line last looked at, so a long line from a careless addon is searched once, not once per word. */
+interface TitleLine {
+  start: number;
+  end: number;
+  /** Where its title ends; -1 when it names no year or season, so nothing on it is a title. */
+  titleEnd: number;
+}
+
+function titleLine(): TitleLine {
+  return { start: 0, end: -1, titleEnd: -1 };
+}
+
 /**
  * True for a word on a release-name line before its year or season, where
  * "Cam (2018)", "Charlotte's Web" and "The Italian Job" are the film's title.
  * A word in brackets is a tag, as in "[CAM] Film 2025", so it still counts.
  */
-function inTitle(text: string, start: number, end: number): boolean {
+function inTitle(text: string, start: number, end: number, line: TitleLine): boolean {
   const before = text.charAt(start - 1);
   if (before === '[' || before === '(') return false;
-  const lineStart = text.lastIndexOf('\n', start) + 1;
-  const lineEnd = text.indexOf('\n', end);
-  const anchor = TITLE_END.exec(text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd));
-  return anchor !== null && lineStart + anchor.index >= end;
+  if (start < line.start || end > line.end) {
+    line.start = text.lastIndexOf('\n', start) + 1;
+    const lineEnd = text.indexOf('\n', end);
+    line.end = lineEnd < 0 ? text.length : lineEnd;
+    const anchor = TITLE_END.exec(text.slice(line.start, line.end));
+    line.titleEnd = anchor ? line.start + anchor.index : -1;
+  }
+  return line.titleEnd >= end;
 }
 
 /**
@@ -531,8 +545,9 @@ const NAME_SERVICE_WORD =
 const NAME_INSTANT = /(?:^|[^a-z0-9])instant(?![a-z])/;
 /** Orion marks a cached link with a rocket before its name; elsewhere 🚀 is decoration. */
 const ORION_CACHED = /🚀\s*orion/;
-/** AIOStreams' prism: "❌ Not Ready (RD)" uncached, "⚡Ready (RD)" cached; either names the service. */
-const READY = /(?:^|[^a-z])(not\s+)?ready(?![a-z])(?:\s*\(([a-z.]{2,12})\))?/;
+const NOT_READY = /not ready(?:\s*\(([a-z.]{2,12})\))?/;
+/** AIOStreams' prism names the service after "⚡Ready" too, as in "⚡Ready (RD)". */
+const READY_SERVICE = /(?:^|[^a-z])ready\s*\(([a-z.]{2,12})\)/;
 const UNCACHED_WORD = /(?:^|[^a-z0-9])uncached(?![a-z])/;
 /** ⏳ marks an uncached link, except in older MediaFusion's "P2P ⏳". */
 const HOURGLASS = /(p2p\s*)?⏳/g;
@@ -589,6 +604,7 @@ function readResolution(text: string, allowHd: boolean): Resolution | undefined 
 }
 
 function readChannels(text: string): Channels | undefined {
+  const line = titleLine();
   CHANNELS.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = CHANNELS.exec(text)) !== null) {
@@ -596,7 +612,7 @@ function readChannels(text: string): Channels | undefined {
     const channels = CHANNELS_BY_DIGITS[match[2]! + match[3]!];
     if (channels) {
       // A number in a title, as in "Ghost.in.the.Shell.2.0.2008", is not a channel count.
-      if (match[1] !== undefined || !inTitle(text, end - 3, end)) return channels;
+      if (match[1] !== undefined || !inTitle(text, end - 3, end, line)) return channels;
     } else {
       // "2.1" and the like: try again from the second digit.
       CHANNELS.lastIndex = end - 1;
@@ -686,12 +702,16 @@ function readCache(name: string, description: string): CacheState {
   }
 
   const text = name + '\n' + description;
-  const ready = READY.exec(text);
-  if (ready) {
-    if (ready[1] !== undefined) uncachedMark = true;
-    if (service === undefined && ready[2] !== undefined) {
-      service = SERVICES[ready[2].replace(TAG_SEPARATORS, '')];
+  const notReady = NOT_READY.exec(text);
+  if (notReady) {
+    uncachedMark = true;
+    if (service === undefined && notReady[1] !== undefined) {
+      service = SERVICES[notReady[1].replace(TAG_SEPARATORS, '')];
     }
+  }
+  if (service === undefined) {
+    const ready = READY_SERVICE.exec(text);
+    if (ready) service = SERVICES[ready[1]!.replace(TAG_SEPARATORS, '')];
   }
   if (text.indexOf('⬇') >= 0 || text.indexOf('🎟') >= 0 || UNCACHED_WORD.test(text)) {
     uncachedMark = true;
@@ -762,6 +782,7 @@ export function describeStream(stream: Stream): StreamFacts {
     languages: [],
     descriptionFrom: fileWords.length + urlWords.length + 2,
   };
+  const line = titleLine();
   WORDS.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = WORDS.exec(text)) !== null) {
@@ -771,7 +792,9 @@ export function describeStream(stream: Stream): StreamFacts {
       if (token !== undefined) {
         const rule = RULES[group - 1]!;
         const start = end - token.length;
-        if (!rule.titleWord || !inTitle(text, start, end)) rule.apply(draft, text, start, end);
+        if (!rule.titleWord || !inTitle(text, start, end, line)) {
+          rule.apply(draft, text, start, end);
+        }
         break;
       }
     }
