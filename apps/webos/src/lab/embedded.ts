@@ -12,7 +12,11 @@ import { isWebOS, lunaCall, lunaSubscribe } from '../platform/webos';
 
 const MEDIA = 'luna://com.webos.media';
 const MEDIA_ID_WAIT_MS = 10000;
+/** How long a subscription made mid-play waits before the video is opened again. */
+const EARLY_SOURCE_INFO_WAIT_MS = 3000;
 const SOURCE_INFO_WAIT_MS = 8000;
+/** The first messages of each subscription are noted by their keys, to show what the pipeline sends. */
+const NOTED_MESSAGES = 4;
 /** How long the clock is watched after each call; a frozen picture shows up as no movement. */
 const WATCH_MS = 5000;
 
@@ -37,7 +41,11 @@ function mediaIdOf(video: HTMLVideoElement): string | null {
 /** Runs the spike on the playing video. The returned function stops it and its subscription. */
 export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () => void {
   let stopped = false;
-  let unsubscribe = () => undefined as void;
+  const subscriptions: Array<() => void> = [];
+  const unsubscribe = () => {
+    subscriptions.forEach((undo) => undo());
+    subscriptions.length = 0;
+  };
   // A stopped run says nothing more: its lines would land in the next run's log.
   const say: Note = (line) => {
     if (!stopped) note(line);
@@ -83,26 +91,75 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     say(`mediaId after ${Date.now() - started} ms`);
 
     let program: ProgramInfo | null = null;
-    unsubscribe = lunaSubscribe(`${MEDIA}/subscribe`, { mediaId }, (message) => {
-      const info = message.sourceInfo as { programInfo?: ProgramInfo[] } | undefined;
-      if (info && !program) {
-        program = info.programInfo?.[0] ?? {};
-        const subtitles = (program.subtitleTrackInfo ?? []).map((t) => t.language || '?');
-        const audio = (program.audioTrackInfo ?? []).map(
-          (t) => `${t.language || '?'} ${t.codec ?? ''}`,
-        );
-        say(
-          `sourceInfo: ${program.numSubtitleTracks ?? 0} subtitles (${program.subtitleType ?? '?'}: ${subtitles.join(', ')}), ${program.numAudioTracks ?? 0} audio (${audio.join(', ')})`,
-        );
-      }
-      if (message.trackSelected) say(`trackSelected ${JSON.stringify(message.trackSelected)}`);
-      if (message.error) say(`pipeline error ${JSON.stringify(message.error)}`);
-      if (message.returnValue === false) say(`subscribe refused: ${String(message.errorText)}`);
-    });
-    const waitedFrom = Date.now();
-    while (!program && !stopped && Date.now() - waitedFrom < SOURCE_INFO_WAIT_MS) await wait(250);
+    const listen = (id: string) => {
+      let noted = 0;
+      subscriptions.push(
+        lunaSubscribe(`${MEDIA}/subscribe`, { mediaId: id }, (message) => {
+          if (noted < NOTED_MESSAGES) {
+            noted++;
+            say(`message: ${Object.keys(message).join(', ')}`);
+          }
+          const info = message.sourceInfo as { programInfo?: ProgramInfo[] } | undefined;
+          if (info && !program) {
+            program = info.programInfo?.[0] ?? {};
+            const subtitles = (program.subtitleTrackInfo ?? []).map((t) => t.language || '?');
+            const audio = (program.audioTrackInfo ?? []).map(
+              (t) => `${t.language || '?'} ${t.codec ?? ''}`,
+            );
+            say(
+              `sourceInfo: ${program.numSubtitleTracks ?? 0} subtitles (${program.subtitleType ?? '?'}: ${subtitles.join(', ')}), ${program.numAudioTracks ?? 0} audio (${audio.join(', ')})`,
+            );
+          }
+          if (message.trackSelected) say(`trackSelected ${JSON.stringify(message.trackSelected)}`);
+          if (message.error) say(`pipeline error ${JSON.stringify(message.error)}`);
+          if (message.returnValue === false) say(`subscribe refused: ${String(message.errorText)}`);
+        }),
+      );
+    };
+    const waitForProgram = async (ms: number) => {
+      const from = Date.now();
+      while (!program && !stopped && Date.now() - from < ms) await wait(250);
+    };
+
+    listen(mediaId);
+    await waitForProgram(EARLY_SOURCE_INFO_WAIT_MS);
     if (stopped) return;
-    if (!program) say('No sourceInfo within 8 s; trying the calls anyway');
+    if (!program) {
+      // The pipeline describes a file once, as it opens it, so the video is
+      // opened again with a subscription ready for its new mediaId.
+      say('No sourceInfo yet: opening the video again to catch it');
+      const at = video.currentTime;
+      const before = mediaId;
+      const restore = () => {
+        video.currentTime = at;
+      };
+      video.addEventListener('loadedmetadata', restore, { once: true });
+      // Stopped before the video opened again: the next video must not jump to this one's time.
+      subscriptions.push(() => video.removeEventListener('loadedmetadata', restore));
+      video.load();
+      void video.play().catch(() => undefined);
+      const from = Date.now();
+      let reopened = mediaIdOf(video);
+      while (
+        (!reopened || reopened === before) &&
+        !stopped &&
+        Date.now() - from < MEDIA_ID_WAIT_MS
+      ) {
+        await wait(50);
+        reopened = mediaIdOf(video);
+      }
+      if (stopped) return;
+      if (reopened && reopened !== before) {
+        say(`new mediaId after ${Date.now() - from} ms`);
+        mediaId = reopened;
+        listen(mediaId);
+      } else {
+        say('The mediaId did not change');
+      }
+      await waitForProgram(SOURCE_INFO_WAIT_MS);
+      if (stopped) return;
+    }
+    if (!program) say('No sourceInfo; trying the calls anyway');
     await watch('after subscribe');
     if (stopped) return;
 

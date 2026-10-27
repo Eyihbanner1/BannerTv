@@ -85,6 +85,18 @@ export class LunaError extends Error {
   }
 }
 
+/**
+ * Whether a Luna answer reports a failure. returnValue is the documented
+ * flag; some services leave it out and send only an errorCode, and the media
+ * service answers success with errorCode 0 and errorText "No Error".
+ */
+export function lunaFailed(response: Record<string, unknown>): boolean {
+  if (response.returnValue === false) return true;
+  if (response.returnValue === true) return false;
+  const code = response.errorCode;
+  return code !== undefined && code !== null && code !== 0 && code !== '0';
+}
+
 // Bridges are kept here until they answer, so they are not garbage-collected mid-call.
 const pending = new Set<ServiceBridge>();
 
@@ -121,7 +133,7 @@ export function lunaCall<T extends Record<string, unknown>>(
         reject(new Error(`${uri}: unreadable answer ${message}`));
         return;
       }
-      if (response.errorCode !== undefined || response.returnValue === false) {
+      if (lunaFailed(response)) {
         reject(new LunaError(uri, response));
       } else {
         resolve(response as T);
