@@ -1,6 +1,10 @@
 import { type BoardRow, buildBoard } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
-import { getCurrentFocusKey, setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import {
+  doesFocusableExist,
+  getCurrentFocusKey,
+  setFocus,
+} from '@noriginmedia/norigin-spatial-navigation';
 import {
   memo,
   useCallback,
@@ -12,6 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -134,8 +139,14 @@ export function HomeScreen() {
   useScreenFocus(firstRowKey, collection.ready);
 
   // On Home, Back first returns to the first row. Only from there does it exit.
+  // Genre rows share the first row's key as a prefix, so match its tiles exactly.
   useBack('screen', () => {
-    if (!firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-`) === 0) return false;
+    const first = rows[0];
+    if (!first || !firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-tile-`) === 0) {
+      return false;
+    }
+    // From far down, the first row is an empty box with nothing to focus: draw it first.
+    if (!doesFocusableExist(firstRowKey)) flushSync(() => setFocusedRow(first.key));
     void setFocus(firstRowKey);
     return true;
   });

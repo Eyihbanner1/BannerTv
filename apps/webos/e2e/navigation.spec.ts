@@ -118,6 +118,24 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
     .toBe(true);
 });
 
+test('Back from far down Home returns to the first row', async ({ page }) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowRight', `${FIRST_ROW}-tile-1`);
+  const rows = [
+    SERIES_ROW,
+    'home-0-movie-imdbrating',
+    'home-0-series-imdbrating',
+    'home-0-movie-top-genre-action',
+  ];
+  for (const row of rows) await press(page, 'ArrowDown', `${row}-tile-0`);
+  // The first row is far enough up to be drawn as an empty box by now.
+  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-1"]`)).toHaveCount(0);
+
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-1`);
+});
+
 test('on a TV, Back on the root screen calls platformBack', async ({ page }) => {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown> & { platformBackCalls?: number };
