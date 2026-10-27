@@ -6,6 +6,8 @@ import { playedVideos, progress } from './playback';
 const asked = new Set<string>();
 // What the last pass saw, so showing Home again with nothing new costs nothing.
 let lastPass = '';
+// A card saved during a pass makes the pass run again once it ends, not inside itself.
+let filling = false;
 
 /**
  * Progress saved before Continue Watching existed has no card with the
@@ -16,9 +18,21 @@ let lastPass = '';
  * towards the row's limit.
  */
 export function fillPlayedCards(): void {
-  const pass = `${progress.version()}:${playedVideos.version()}`;
-  if (pass === lastPass) return;
-  lastPass = pass;
+  if (filling) return;
+  filling = true;
+  try {
+    for (;;) {
+      const pass = `${progress.version()}:${playedVideos.version()}`;
+      if (pass === lastPass) return;
+      lastPass = pass;
+      walk();
+    }
+  } finally {
+    filling = false;
+  }
+}
+
+function walk(): void {
   const now = Date.now();
   const seen = new Set<string>();
   let places = 0;
@@ -41,6 +55,8 @@ export function fillPlayedCards(): void {
     const done = () => {
       const state = query.get();
       if (state.status === 'idle' || state.status === 'loading') return;
+      // A cached copy shown while a fresh one is fetched: wait for the fresh one.
+      if (state.stale && !state.error) return;
       unsubscribe();
       // An error with nothing cached: the title stays as it is this session.
       const meta = state.data;

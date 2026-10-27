@@ -161,6 +161,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       card.season,
       card.episode,
       card.next?.videoId,
+      card.next?.name,
+      card.next?.released,
     ].join('|');
     if (recorded.current === key) return;
     recorded.current = key;

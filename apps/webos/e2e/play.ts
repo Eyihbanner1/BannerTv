@@ -168,7 +168,7 @@ export interface SeedPlayed {
   releaseInfo?: string;
   season?: number;
   episode?: number;
-  next?: { videoId: string; season?: number; episode?: number };
+  next?: { videoId: string; season?: number; episode?: number; released?: number };
 }
 
 /**

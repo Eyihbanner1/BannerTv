@@ -185,13 +185,15 @@ describe('playedCard', () => {
   });
 
   it('keeps the next episode before it airs, with its release time, and none after the last', () => {
-    // Whether it has aired is decided when the row is drawn.
-    expect(playedCard(SHOW_ITEM, 'tt9:1:3', SHOW).next).toEqual({
+    // Whether it has aired is decided when the row is drawn, not by the clock at play time.
+    const later = '2999-01-01T00:00:00Z';
+    const show = detail(SHOW_ITEM, [ep(1, 3), ep(2, 1, later)]);
+    expect(playedCard(SHOW_ITEM, 'tt9:1:3', show).next).toEqual({
       videoId: 'tt9:2:1',
       season: 2,
       episode: 1,
       name: 'S2E1',
-      released: Date.parse(AIRS),
+      released: Date.parse(later),
     });
     const last = playedCard(SHOW_ITEM, 'tt9:2:1', SHOW);
     expect(last).toMatchObject({ season: 2, episode: 1, episodeName: 'S2E1' });
@@ -820,7 +822,10 @@ describe('continueWatching', () => {
 
   it('counts an episode with no release time as aired', async () => {
     const tv = await watching();
-    const undated = detail(SHOW_ITEM, [ep(1, 1), { id: 'tt9:1:2', season: 1, episode: 2 }]);
+    const undated = detail(SHOW_ITEM, [
+      ep(1, 1),
+      { id: 'tt9:1:2', title: 'S1E2', season: 1, episode: 2 },
+    ]);
     tv.play(episode('tt9:1:1', 2300), 1, playedCard(SHOW_ITEM, 'tt9:1:1', undated));
     expect(tv.items(undefined, 0)).toMatchObject([{ videoId: 'tt9:1:2', upNext: true }]);
   });

@@ -14,19 +14,54 @@ import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 /** The row's key on Home, beside the catalog rows' keys. */
 export const CONTINUE_ROW_KEY = 'continue';
 export const CONTINUE_FOCUS_KEY = `home-${CONTINUE_ROW_KEY}`;
-const FIRST_TILE = `${CONTINUE_FOCUS_KEY}-tile-0`;
 const HOUR_MS = 60 * 60 * 1000;
+
+const sameTitles = (a: readonly ContinueItem[], b: readonly ContinueItem[]) =>
+  a.length === b.length &&
+  a.every((item, index) => {
+    const other = b[index]!;
+    return (
+      item.videoId === other.videoId &&
+      item.startAt === other.startAt &&
+      item.progress === other.progress &&
+      item.upNext === other.upNext
+    );
+  });
 
 // The list is worked out once per change of progress or cards, whoever asks,
 // and once an hour, for next episodes that air while the app is open.
-let latest: { key: string; items: ContinueItem[] } | null = null;
+let latest: { versions: string; hour: number; items: ContinueItem[] } | null = null;
 function snapshot(): ContinueItem[] {
   const now = Date.now();
-  const key = `${progress.version()}:${playedVideos.version()}:${Math.floor(now / HOUR_MS)}`;
-  if (!latest || latest.key !== key) {
-    latest = { key, items: continueWatching(progress, playedVideos.get, now) };
+  const versions = `${progress.version()}:${playedVideos.version()}`;
+  const hour = Math.floor(now / HOUR_MS);
+  if (latest && latest.versions === versions && latest.hour === hour) return latest.items;
+  let items = continueWatching(progress, playedVideos.get, now);
+  // With the same progress and cards, a new hour changes the row only when an episode aired.
+  if (latest && latest.versions === versions && sameTitles(items, latest.items)) {
+    items = latest.items;
   }
-  return latest.items;
+  latest = { versions, hour, items };
+  return items;
+}
+
+/**
+ * The tile Back lands on after playing `metaId` from tile `pressed`: that
+ * title wherever the row has it now (the first tile once playing made it the
+ * most recent, the same tile if nothing was saved), or the first tile once it
+ * has left the row. The row is scrolled to match before it draws again.
+ */
+function returnTile(metaId: string, pressed: number): string | undefined {
+  const items = snapshot();
+  if (items.length === 0) return undefined;
+  const found = items.findIndex((item) => item.preview.id === metaId);
+  const index = found < 0 ? 0 : found;
+  const tile = `${CONTINUE_FOCUS_KEY}-tile-${index}`;
+  if (index !== pressed) {
+    rememberScroll(CONTINUE_FOCUS_KEY, index);
+    rememberFocus(CONTINUE_FOCUS_KEY, tile);
+  }
+  return tile;
 }
 
 /**
@@ -42,10 +77,28 @@ export function useContinueItems(): ContinueItem[] | null {
       const whileShown = () => {
         if (slot.get()) listener();
       };
+      // On the hour while Home is on show, for a next episode that has just aired.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onTheHour = () => {
+        clearTimeout(timer);
+        if (!slot.get()) return;
+        timer = setTimeout(
+          () => {
+            listener();
+            onTheHour();
+          },
+          HOUR_MS - (Date.now() % HOUR_MS) + 1000,
+        );
+      };
+      onTheHour();
       const undo = [
-        slot.subscribe(listener),
+        slot.subscribe(() => {
+          onTheHour();
+          listener();
+        }),
         progress.subscribe(whileShown),
         playedVideos.subscribe(whileShown),
+        () => clearTimeout(timer),
       ];
       return () => undo.forEach((stop) => stop());
     },
@@ -64,14 +117,16 @@ export function useContinueItems(): ContinueItem[] | null {
       live = false;
     };
   }, []);
-  // Cards for older progress are filled in while Home is on show.
+  // Cards for older progress are filled in while Home is on show, walking
+  // further back as cards that arrive turn out to take no place on the row.
   useEffect(() => {
     if (!loaded) return;
     const fill = () => {
       if (slot.get()) fillPlayedCards();
     };
     fill();
-    return slot.subscribe(fill);
+    const undo = [slot.subscribe(fill), playedVideos.subscribe(fill)];
+    return () => undo.forEach((stop) => stop());
   }, [loaded, slot]);
   return loaded ? items : null;
 }
@@ -116,12 +171,9 @@ export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: Con
   );
   const onPress = useCallback(
     (preview: MetaPreview) => {
-      const item = items[previews.indexOf(preview)];
+      const index = previews.indexOf(preview);
+      const item = items[index];
       if (!item) return;
-      // What plays becomes the most recent, so Back finds it on the first
-      // tile, with the row scrolled back to the start.
-      rememberScroll(CONTINUE_FOCUS_KEY, 0);
-      rememberFocus(CONTINUE_FOCUS_KEY, FIRST_TILE);
       push(
         {
           name: 'player',
@@ -131,7 +183,7 @@ export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: Con
           preview,
           startAt: item.startAt,
         },
-        FIRST_TILE,
+        () => returnTile(preview.id, index),
       );
     },
     [items, previews],

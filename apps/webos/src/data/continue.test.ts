@@ -14,8 +14,21 @@ const stores = vi.hoisted(() => ({
   played: null as unknown as ReturnType<typeof createPlayedVideos>,
 }));
 
-/** Meta answers by title id; an id missing here never answers. */
-const metas = vi.hoisted(() => ({ answers: new Map<string, MetaDetail>(), asked: [] as string[] }));
+/**
+ * Meta answers by title id; an id missing here never answers. A state set in
+ * `states` wins, and `answer` changes it later, as a fetch landing would.
+ */
+const metas = vi.hoisted(() => ({
+  answers: new Map<string, MetaDetail>(),
+  states: new Map<string, QueryState<MetaDetail>>(),
+  listeners: new Map<string, Set<() => void>>(),
+  asked: [] as string[],
+}));
+
+function answer(id: string, state: QueryState<MetaDetail>) {
+  metas.states.set(id, state);
+  metas.listeners.get(id)?.forEach((listener) => listener());
+}
 
 vi.mock('./playback', () => ({
   get progress() {
@@ -30,11 +43,21 @@ vi.mock('./addons', () => ({
   addonClient: {
     meta(_type: string, id: string) {
       metas.asked.push(id);
-      const data = metas.answers.get(id);
-      const state: QueryState<MetaDetail> = data
-        ? { status: 'success', data, stale: false }
-        : { status: 'loading', stale: false };
-      return { get: () => state, subscribe: () => () => undefined, load: () => undefined };
+      const get = (): QueryState<MetaDetail> => {
+        const set = metas.states.get(id);
+        if (set) return set;
+        const data = metas.answers.get(id);
+        return data
+          ? { status: 'success', data, stale: false }
+          : { status: 'loading', stale: false };
+      };
+      const subscribe = (listener: () => void) => {
+        const listeners = metas.listeners.get(id) ?? new Set();
+        metas.listeners.set(id, listeners);
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      };
+      return { get, subscribe, load: () => undefined };
     },
   },
 }));
@@ -60,6 +83,7 @@ function meta(id: string, type: 'movie' | 'series', videos: Video[] = []): MetaD
 
 const ep = (show: string, season: number, episode: number): Video => ({
   id: `${show}:${season}:${episode}`,
+  title: `S${season}E${episode}`,
   season,
   episode,
 });
@@ -76,6 +100,8 @@ beforeEach(async () => {
   stores.played = createPlayedVideos({ storage: memoryKeyValueStore(), now });
   await Promise.all([stores.progress.load(), stores.played.load()]);
   metas.answers.clear();
+  metas.states.clear();
+  metas.listeners.clear();
   metas.asked.length = 0;
   vi.resetModules();
   ({ fillPlayedCards } = await import('./continue'));
@@ -124,10 +150,65 @@ describe('fillPlayedCards', () => {
 
   it('asks once a session, and does nothing when nothing changed', () => {
     watch('tt1', 'movie', 'tt1', 600);
+    const walks = vi.spyOn(stores.progress, 'recent');
     fillPlayedCards();
     fillPlayedCards();
+    expect(walks).toHaveBeenCalledTimes(1);
     watch('tt2', 'movie', 'tt2', 600);
     fillPlayedCards();
+    expect(walks).toHaveBeenCalledTimes(2);
     expect(metas.asked).toEqual(['tt1', 'tt2']);
+  });
+
+  it('walks further back once cards that arrive take no place on the row', () => {
+    watch('tt0', 'movie', 'tt0', 1200);
+    // Twenty series since, each finished at its last listed episode, none with a card.
+    for (let i = 1; i <= 20; i++) watch(`tt${i}`, 'series', `tt${i}:1:1`, 2990);
+    fillPlayedCards();
+    expect(metas.asked).toHaveLength(20);
+    expect(metas.asked).not.toContain('tt0');
+
+    // Their answers land later; the next pass (Home runs one on every new card) gets past them.
+    for (let i = 1; i <= 20; i++) {
+      answer(`tt${i}`, {
+        status: 'success',
+        data: meta(`tt${i}`, 'series', [ep(`tt${i}`, 1, 1)]),
+        stale: false,
+      });
+    }
+    fillPlayedCards();
+    expect(metas.asked).toContain('tt0');
+  });
+
+  it('walks again once a pass is over when answers it had cached saved cards during it', () => {
+    watch('tt0', 'movie', 'tt0', 1200);
+    for (let i = 1; i <= 20; i++) {
+      watch(`tt${i}`, 'series', `tt${i}:1:1`, 2990);
+      metas.answers.set(`tt${i}`, meta(`tt${i}`, 'series', [ep(`tt${i}`, 1, 1)]));
+    }
+    fillPlayedCards();
+    expect(metas.asked).toHaveLength(21);
+    expect(metas.asked[20]).toBe('tt0');
+  });
+
+  it('waits for the fresh answer when the cached one is old', () => {
+    watch('tt7', 'series', 'tt7:1:2', 2990);
+    const cached = meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2)]);
+    metas.states.set('tt7', { status: 'success', data: cached, stale: true });
+    fillPlayedCards();
+    expect(stores.played.get('tt7:1:2')).toBeUndefined();
+
+    const fresh = meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2), ep('tt7', 1, 3)]);
+    answer('tt7', { status: 'success', data: fresh, stale: false });
+    expect(stores.played.get('tt7:1:2')?.next).toMatchObject({ videoId: 'tt7:1:3' });
+  });
+
+  it('saves from the cached answer when the fresh one fails', () => {
+    watch('tt7', 'series', 'tt7:1:2', 2990);
+    const cached = meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2)]);
+    metas.states.set('tt7', { status: 'success', data: cached, stale: true });
+    fillPlayedCards();
+    answer('tt7', { status: 'success', data: cached, stale: true, error: new Error('offline') });
+    expect(stores.played.get('tt7:1:2')).toMatchObject({ season: 1, episode: 2 });
   });
 });

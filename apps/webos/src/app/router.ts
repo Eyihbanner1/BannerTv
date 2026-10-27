@@ -43,10 +43,16 @@ export type Route =
   | { name: 'diagnostics' }
   | { name: 'lab' };
 
+/**
+ * Where focus goes on Back. A function is asked as the screen is shown again,
+ * for a screen whose content moves about while it is covered.
+ */
+export type ReturnFocus = string | (() => string | undefined);
+
 interface Entry {
   route: Route;
   /** Where focus was when the next screen opened on top, restored on Back. */
-  returnFocus?: string;
+  returnFocus?: ReturnFocus;
 }
 
 export interface RouterState {
@@ -57,7 +63,7 @@ export interface RouterState {
 export const router = createStore<RouterState>({ stack: [{ route: { name: 'home' } }] });
 
 // Read once by the screen that mounts after Back.
-let pendingFocus: string | undefined;
+let pendingFocus: ReturnFocus | undefined;
 
 export function topRoute(state: RouterState = router.get()): Route {
   return state.stack[state.stack.length - 1]!.route;
@@ -78,7 +84,7 @@ export function openSection(section: Section): void {
 
 export function push(
   route: Route,
-  returnFocus: string = currentlyPressed() ?? getCurrentFocusKey(),
+  returnFocus: ReturnFocus = currentlyPressed() ?? getCurrentFocusKey(),
 ): void {
   router.set(({ stack }) => ({
     stack: [...stack.slice(0, -1), { ...stack[stack.length - 1]!, returnFocus }, { route }],
@@ -113,5 +119,5 @@ export function back(): boolean {
 export function takePendingFocus(): string | undefined {
   const key = pendingFocus;
   pendingFocus = undefined;
-  return key;
+  return typeof key === 'function' ? key() : key;
 }

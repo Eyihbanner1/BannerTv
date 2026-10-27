@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { FIRST_ROW, mockAddons } from './addons';
+import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { mockPlayback, type SeedPlayed, type SeedProgress, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
 
@@ -273,4 +273,328 @@ test('progress saved before cards existed gets its tile once Cinemeta answers', 
   await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
   await expectFocusLabel(page, 'Big Buck Bunny, 2008');
   expect(metas).toEqual([`/meta/movie/${MOVIE}.json`]);
+});
+
+/**
+ * Where the focused tile sits against the window Home's rows slide in (the
+ * box around the track of rows): 'inside', or both boxes when it is not.
+ */
+function focusAgainstRows(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const tile = document.querySelector('[data-focused="true"]');
+    const rows = tile?.closest('[data-row-key]')?.parentElement?.parentElement;
+    if (!tile || !rows) return 'no focused tile in a row';
+    const t = tile.getBoundingClientRect();
+    const r = rows.getBoundingClientRect();
+    if (t.top >= r.top && t.bottom <= r.bottom && t.left >= r.left && t.right <= r.right) {
+      return 'inside';
+    }
+    const box = (b: DOMRect) =>
+      `${Math.round(b.left)},${Math.round(b.top)} to ${Math.round(b.right)},${Math.round(b.bottom)}`;
+    return `tile at ${box(t)}, rows at ${box(r)}`;
+  });
+}
+
+/**
+ * How soon the rows must have slid to the focused one: a moment, not the
+ * next time Home happens to redraw, which a few seconds later puts it right.
+ */
+const SLID_WITHIN_MS = 1000;
+
+/** Notes the app's exit, which off the TV is an event instead. */
+function watchExit(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const w = window as Window & { exitRequested?: boolean };
+    window.addEventListener('bannertv:exit', () => (w.exitRequested = true));
+  });
+}
+
+function exitRequested(page: Page): Promise<boolean | undefined> {
+  return page.evaluate(() => (window as Window & { exitRequested?: boolean }).exitRequested);
+}
+
+test('a film played to the end from the only tile leaves focus on Home, where the arrows and Back still work', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  // Saved with a longer running time, so the tile resumes it: 35 s is five
+  // seconds from the end of the 40 s test file.
+  await seedStreamAddon(page, {
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 100 }],
+    played: [card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' })],
+  });
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  await watchExit(page);
+
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // At its end the player goes back by itself, and the finished film leaves the row.
+  await expect
+    .poll(
+      async () => {
+        const saved = (await readKv(page, 'progress')) as Array<{
+          videoId: string;
+          watched: boolean;
+        }>;
+        return saved.find((entry) => entry.videoId === MOVIE)?.watched;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(true);
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+
+  // Focus is not lost with the tile it was on: it goes to the first row there is now.
+  await expect(page.locator('[data-focused="true"]')).toHaveCount(1);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  // Back returns to the first row, as on any visit to Home, and does not leave the app.
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await page.waitForTimeout(500);
+  expect(await exitRequested(page)).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test('Back from the second tile lands on the first, where the title just played now is, and the hero names it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    // The film is the more recent, so the series is on the second tile.
+    progress: [...EPISODE_FINISHED.progress, MOVIE_PART_WAY],
+    played: [
+      ...EPISODE_FINISHED.played,
+      card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' }),
+    ],
+  });
+  const mock = await mockPlayback(page);
+  // Every title the hero names, from the first frame on.
+  await page.addInitScript(() => {
+    const w = window as Window & { heroNames?: string[] };
+    const names: string[] = (w.heroNames = []);
+    new MutationObserver(() => {
+      const hero = document
+        .querySelector('[data-focus-key="home-hero-details"]')
+        ?.closest('section');
+      const name = hero?.getAttribute('aria-label');
+      if (name && names[names.length - 1] !== name) names.push(name);
+    }).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['aria-label'],
+    });
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  // The hero starts on the title focus lands on, never on the first catalog title.
+  await expect(page.locator('section[aria-label="Big Buck Bunny"]:visible')).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as Window & { heroNames?: string[] }).heroNames),
+  ).toEqual(['Big Buck Bunny']);
+  await press(page, 'ArrowRight', `${CONTINUE_ROW}-tile-1`);
+  await expectFocusLabel(page, 'Morevna Project, Next: S1:E2');
+
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
+  expect(mock.streams[0]).toBe(`series/${SERIES}:1:2`);
+  await pressBack(page);
+
+  // The series is the most recent now, so it moved to the first tile, and focus went with it.
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'aria-label',
+    /^Morevna Project, /,
+  );
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-1"]`)).toHaveAttribute(
+    'aria-label',
+    'Big Buck Bunny, 2008',
+  );
+  // The row is back at its start, with the focused tile in view.
+  await expect.poll(() => focusAgainstRows(page)).toBe('inside');
+  // Past the hero's wait for focus to rest.
+  await page.waitForTimeout(500);
+  await expect(page.locator('section[aria-label="Morevna Project"]:visible')).toBeVisible();
+  await expect(page.locator('section[aria-label="Big Buck Bunny"]')).toHaveCount(0);
+});
+
+test('when the row arrives above the focused catalog row, the rows slide to keep the focused tile in view', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  // Progress with no card: the tile waits for Cinemeta's answer.
+  await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
+  await mockPlayback(page);
+  let answer!: () => void;
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await page.route(/^https:\/\/v3-cinemeta\.strem\.io\/meta\//, async (route) => {
+    await answered;
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => focusAgainstRows(page)).toBe('inside');
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+
+  answer();
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    'Big Buck Bunny, 2008',
+  );
+  await expect(page.locator('[data-row-key]').first()).toHaveAttribute(
+    'data-row-key',
+    CONTINUE_ROW,
+  );
+  // Focus stays where it was, and the rows slide at once to keep its row in view.
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');
+});
+
+test('an episode played from a catalog row brings the row in above it, and the focused tile stays in view', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+
+  // A film played for a few seconds is barely started and stays off the row; an episode joins it.
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(2);
+  await pressBack(page);
+  await expectFocus(page, 'details-episodes-0');
+  await pressBack(page);
+
+  await expectFocus(page, `${SERIES_ROW}-tile-0`);
+  await expect(page.locator('[data-row-key]').first()).toHaveAttribute(
+    'data-row-key',
+    CONTINUE_ROW,
+  );
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    /^Morevna Project, /,
+  );
+  await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');
+});
+
+/** The films the fake Cinemeta knows, oldest first. */
+const FILMS = [
+  ['tt0807840', 'Elephants Dream', '2006'],
+  ['tt1254207', 'Big Buck Bunny', '2008'],
+  ['tt1727587', 'Sintel', '2010'],
+  ['tt2285752', 'Tears of Steel', '2012'],
+  ['tt9000005', 'Caminandes', '2013'],
+  ['tt9000006', 'Cosmos Laundromat', '2015'],
+] as const;
+
+/** How far the Continue row's tiles have slid. */
+function track(page: Page): Promise<string | undefined> {
+  return page
+    .locator(`[data-row-key="${CONTINUE_ROW}"] div[style*="translateX"]`)
+    .evaluate((element: HTMLElement) => element.style.transform);
+}
+
+test('Back from a title that never started lands on that title again, and the row stays put after', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [
+      // The oldest: saved with no card, so the row fills it in once Cinemeta answers.
+      { metaId: SERIES, type: 'series', videoId: `${SERIES}:1:1`, position: 600, duration: 1500 },
+      // Every film a quarter through, Elephants Dream the most recent.
+      ...[...FILMS].reverse().map(([id]) => ({ ...MOVIE_PART_WAY, metaId: id, videoId: id })),
+    ],
+    played: FILMS.map(([id, name, year]) => card('movie', id, name, { releaseInfo: year })),
+  });
+  // The media never answers while the test runs: nothing plays, so nothing is saved.
+  await mockPlayback(page, { mediaDelayMs: 120_000 });
+  let answer!: () => void;
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await page.route(new RegExp(`/meta/series/${SERIES}\\.json`), async (route) => {
+    await answered;
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Elephants Dream, 2006');
+
+  // Tile 1, where the first tile is drawn beside it.
+  await press(page, 'ArrowRight', `${CONTINUE_ROW}-tile-1`);
+  await press(page, 'Enter', 'player-surface');
+  await page.waitForTimeout(1000);
+  await pressBack(page);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-1`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+
+  // Tile 4, where it is not.
+  for (const tile of [2, 3, 4]) await press(page, 'ArrowRight', `${CONTINUE_ROW}-tile-${tile}`);
+  const slid = await track(page);
+  await press(page, 'Enter', 'player-surface');
+  await page.waitForTimeout(1000);
+  await pressBack(page);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-4`);
+  await expectFocusLabel(page, 'Caminandes, 2013');
+  expect(await track(page)).toBe(slid);
+
+  // A card filled in now adds a tile at the end; the row does not jump away from focus.
+  answer();
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-6"]`)).toHaveAttribute(
+    'aria-label',
+    /^Morevna Project, /,
+  );
+  await page.waitForTimeout(300);
+  expect(await track(page)).toBe(slid);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-4`);
+  await expect.poll(() => focusAgainstRows(page)).toBe('inside');
+  expect(errors).toEqual([]);
+});
+
+test('a next episode that airs while Home sits untouched joins the row on the hour', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  // Ten past an hour, with the next episode out twenty minutes later.
+  const start = Math.floor(Date.now() / hour) * hour + 10 * minute;
+  await page.clock.install({ time: start });
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: EPISODE_FINISHED.progress,
+    played: [
+      {
+        ...EPISODE_FINISHED.played[0]!,
+        next: { videoId: `${SERIES}:1:2`, season: 1, episode: 2, released: start + 20 * minute },
+      },
+    ],
+  });
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+  // Past the addons' refresh a few seconds in, which redraws Home once anyway.
+  await page.clock.fastForward(30 * 1000);
+  await page.waitForTimeout(500);
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+
+  // Past the release and the next hour, with no key pressed.
+  await page.clock.fastForward(50 * minute);
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    'Morevna Project, Next: S1:E2',
+  );
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');
+  expect(errors).toEqual([]);
 });

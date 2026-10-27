@@ -61,6 +61,22 @@ describe('router', () => {
     expect(takePendingFocus()).toBe('details-episodes-0');
   });
 
+  it('asks a return-focus function only as the screen below is shown again', () => {
+    let target = 'home-continue-tile-2';
+    let asked = 0;
+    push({ name: 'player', type: 'movie', metaId: 'tt3', videoId: 'tt3' }, () => {
+      asked += 1;
+      return target;
+    });
+    target = 'home-continue-tile-0';
+    expect(asked).toBe(0);
+
+    expect(back()).toBe(true);
+    expect(takePendingFocus()).toBe('home-continue-tile-0');
+    expect(asked).toBe(1);
+    expect(takePendingFocus()).toBeUndefined();
+  });
+
   it('opens on top when asked to replace a section root', () => {
     replace({ name: 'streams', type: 'movie', metaId: 'tt2', videoId: 'tt2' });
     expect(router.get().stack).toHaveLength(2);
