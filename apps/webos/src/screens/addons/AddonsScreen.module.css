@@ -235,7 +235,4 @@
   margin-top: 4px;
   font: 600 22px/1.4 var(--bt-font);
   color: var(--bt-accent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }

@@ -81,6 +81,26 @@ describe('createAddonCollection', () => {
     });
   });
 
+  it("puts a reconfigured addon in the old one's place", async () => {
+    const { collection, storage } = setup();
+    await collection.load();
+    await collection.install(EXTRA_URL);
+    collection.move(EXTRA_URL, -5);
+    const configured = 'https://addon.example.com/new-settings/manifest.json';
+    await collection.install(configured, { replaces: EXTRA_URL });
+    expect(urls(collection)).toEqual([configured, ...DEFAULT_ADDONS.map((a) => a.transportUrl)]);
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((a) => a.transportUrl)).toEqual(urls(collection));
+
+    // Settings that match an addon already in the list update that one instead.
+    await collection.install(CINEMETA_URL, { replaces: configured });
+    expect(urls(collection)).toEqual(DEFAULT_ADDONS.map((a) => a.transportUrl));
+    // Replacing an addon with itself, or one that is gone, is a plain install.
+    await collection.install(EXTRA_URL, { replaces: EXTRA_URL });
+    await collection.install(configured, { replaces: 'https://gone.example.com/manifest.json' });
+    expect(urls(collection)).toHaveLength(4);
+  });
+
   it('explains why an install failed', async () => {
     const failing = setup(vi.fn(() => Promise.reject(new HttpError('network', 'offline'))));
     await expect(failing.collection.install('not a url')).rejects.toMatchObject({

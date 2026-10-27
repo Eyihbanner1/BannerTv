@@ -27,7 +27,10 @@ const EXTRA_ADDON = {
   types: ['movie'],
   resources: ['catalog'],
   catalogs: [{ type: 'movie', id: 'trending', name: 'Trending shorts' }],
+  behaviorHints: { configurable: true },
 };
+/** Open Shorts with settings chosen on its settings page. */
+export const CONFIGURED_ADDON_URL = 'https://addon.example.com/bannertv/lang=en/manifest.json';
 /** Pages that `skip` reaches beyond the first: the catalogs end after this many titles. */
 const PAGED_TOTAL = 42;
 
@@ -242,7 +245,10 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   await page.route(/^https:\/\/addon\.example\.com\/bannertv\//, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/bannertv/manifest.json') return json(route, EXTRA_ADDON);
-    if (path === '/bannertv/catalog/movie/trending.json') {
+    if (path === '/bannertv/lang=en/manifest.json') {
+      return json(route, { ...EXTRA_ADDON, version: '1.3.0' });
+    }
+    if (/^\/bannertv\/(lang=en\/)?catalog\/movie\/trending\.json$/.test(path)) {
       return json(route, { metas: MOVIES.slice(0, 3).map((entry) => preview('movie', entry)) });
     }
     return json(route, { error: 'not found' }, 404);

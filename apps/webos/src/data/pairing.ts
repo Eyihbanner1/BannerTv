@@ -7,8 +7,8 @@
  * the TV never sends a preflight. The secret goes in the body, never the URL.
  */
 
-/** The deployed relay. Empty hides "Send it from your phone". */
-export const PAIR_SERVICE = '';
+/** The deployed relay (services/pair). Empty hides "Send it from your phone" and addon settings. */
+export const PAIR_SERVICE = 'https://bannertv-pair.bannertv-pair.workers.dev';
 
 export const POLL_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;

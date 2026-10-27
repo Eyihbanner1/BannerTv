@@ -70,6 +70,8 @@
     "moveDown": "Move {{name}} down",
     "remove": "Remove",
     "removeLabel": "Remove {{name}}",
+    "settings": "Settings",
+    "settingsLabel": "Settings for {{name}}",
     "keep": "Keep it",
     "removeTitle": "Remove {{name}}?",
     "removeMessage": "Its rows leave Home and it stops answering for titles. You can add it again later from its address.",
@@ -92,6 +94,14 @@
       "unavailable": "BannerTV can't reach its pairing service right now.",
       "retry": "Try again",
       "received": "Received from your phone. Press Add to add it."
+    },
+    "configure": {
+      "title": "Settings for {{name}}",
+      "lead": "Scan the QR code to open the addon's settings page on your phone. Choose what you want, copy the install link it gives you, and paste it on the BannerTV page. The new settings then replace the old ones here.",
+      "scanTitle": "Scan with your phone",
+      "received": "New settings for {{name}} arrived. Press Update to use them.",
+      "update": "Update",
+      "updated": "Updated {{name}} with its new settings."
     },
     "installError": {
       "invalid-url": "That doesn't look like an addon address. It starts with https:// and usually ends in manifest.json.",

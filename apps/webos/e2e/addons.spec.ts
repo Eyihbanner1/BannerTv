@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { PAIR_SERVICE } from '../src/data/pairing';
-import { EXTRA_ADDON_URL, FIRST_ROW, mockAddons } from './addons';
+import { CONFIGURED_ADDON_URL, EXTRA_ADDON_URL, FIRST_ROW, mockAddons } from './addons';
 import {
   APP_URL,
   expectFocus,
@@ -109,9 +109,47 @@ test('an addon can be sent from a phone', async ({ page }) => {
   await expect(page.locator('input[aria-label="Addon address"]')).toHaveValue(EXTRA_ADDON_URL);
   await expect(dialog.getByText('Received from your phone. Press Add to add it.')).toBeVisible();
   await expect(dialog.getByText('K7P 4QZ')).toBeVisible();
-  await page.waitForTimeout(150);
+  await settle(page);
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('Added Open Shorts. Its catalogs are on Home now.')).toBeVisible();
   expect(phone.codes).toEqual(['K7P2QZ', 'K7P3QZ', 'K7P4QZ']);
+});
+
+test("an addon's settings can be changed on a phone", async ({ page }) => {
+  test.skip(!PAIR_SERVICE, 'The pairing relay is not deployed yet');
+  const { phone } = await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await press(page, 'ArrowUp', 'addons-add');
+  await press(page, 'Enter', 'install-field');
+  await page.locator('input[aria-label="Addon address"]').fill(EXTRA_ADDON_URL);
+  await pressTo(page, 'ArrowDown', 'Add');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Move Open Shorts up');
+  await settle(page);
+
+  // Only addons with a settings page get the button.
+  const cards = page.locator('main p:has(> span)');
+  await expect(page.getByRole('button', { name: 'Settings for Open Shorts' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^Settings for/ })).toHaveCount(1);
+  await pressTo(page, 'ArrowRight', 'Move Open Shorts down');
+  await pressTo(page, 'ArrowRight', 'Settings for Open Shorts');
+  await press(page, 'Enter', 'configure-cancel');
+  const dialog = page.getByRole('dialog', { name: 'Settings for Open Shorts' });
+  // A new code: the one from Add an addon went with that dialog.
+  await expect(dialog.getByText('K7P 3QZ')).toBeVisible();
+
+  phone.send(CONFIGURED_ADDON_URL);
+  await expectFocus(page, 'configure-confirm');
+  await expect(dialog.getByText('New settings for Open Shorts arrived.')).toBeVisible();
+  await settle(page);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Updated Open Shorts with its new settings.')).toBeVisible();
+  await expectFocusLabel(page, 'Settings for Open Shorts');
+  await expect(cards).toHaveCount(3);
+  await expect(cards.last()).toContainText('v1.3.0');
 });

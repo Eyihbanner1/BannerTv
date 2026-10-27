@@ -42,11 +42,19 @@ export class InstallError extends Error {
   }
 }
 
+export interface InstallOptions {
+  /**
+   * The addon this one replaces, for an addon set up again on its settings
+   * page: the new address takes the old one's place in the list.
+   */
+  replaces?: string;
+}
+
 export interface AddonCollection extends Pick<Store<CollectionState>, 'get' | 'subscribe'> {
   /** Reads the saved collection, or installs the defaults on first launch. */
   load(): Promise<void>;
   /** Installs from a typed or scanned URL. Reinstalling an addon updates it in place. */
-  install(input: string): Promise<InstalledAddon>;
+  install(input: string, options?: InstallOptions): Promise<InstalledAddon>;
   remove(transportUrl: string): void;
   /** Moves an addon up (negative) or down (positive) in priority. */
   move(transportUrl: string, offset: number): void;
@@ -140,7 +148,7 @@ export function createAddonCollection(options: {
       if (!Array.isArray(saved)) save(addons);
     },
 
-    async install(input) {
+    async install(input, options = {}) {
       const url = normalizeManifestUrl(input);
       if (url === undefined) throw new InstallError('invalid-url', 'This is not an addon address');
       const { manifest, json } = await fetchManifest(url);
@@ -153,7 +161,17 @@ export function createAddonCollection(options: {
         official: existing?.official ?? false,
         fetchedAt: now(),
       };
-      update(existing ? current.map((a) => (a === existing ? addon : a)) : current.concat(addon));
+      const replaced = current.find((a) => a !== existing && a.transportUrl === options.replaces);
+      let next: InstalledAddon[];
+      if (existing) {
+        next = current.map((a) => (a === existing ? addon : a)).filter((a) => a !== replaced);
+      } else if (replaced) {
+        next = current.map((a) => (a === replaced ? addon : a));
+      } else {
+        next = current.concat(addon);
+      }
+      if (replaced) raw.delete(replaced.transportUrl);
+      update(next);
       return addon;
     },
 

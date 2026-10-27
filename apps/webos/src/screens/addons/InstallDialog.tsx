@@ -101,7 +101,13 @@ export function InstallDialog(props: InstallDialogProps) {
             <Button focusKey="install-cancel" label={t('common.cancel')} onPress={onClose} />
           </div>
         </div>
-        {PAIR_SERVICE ? <PhonePanel onAddress={receive} focusAfterRetry="install-field" /> : null}
+        {PAIR_SERVICE ? (
+          <PhonePanel
+            title={t('addons.phone.title')}
+            onAddress={receive}
+            focusAfterRetry="install-field"
+          />
+        ) : null}
       </div>
     </Overlay>
   );

@@ -9,7 +9,9 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { fallbackArt } from '../../components/Tile';
 import { addonCollection } from '../../data/addons';
 import { addonFocusId, typeLabel } from '../../data/describe';
+import { PAIR_SERVICE } from '../../data/pairing';
 import { canSlide } from '../../platform/input-mode';
+import { ConfigureDialog } from './ConfigureDialog';
 import { InstallDialog } from './InstallDialog';
 import styles from './AddonsScreen.module.css';
 
@@ -27,6 +29,7 @@ const RESOURCE_LABELS: ReadonlyArray<readonly [resource: string, key: string]> =
 
 const upKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-up`;
 const removeKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-remove`;
+const settingsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-settings`;
 
 interface AddonCardProps {
   addon: InstalledAddon;
@@ -34,10 +37,13 @@ interface AddonCardProps {
   count: number;
   onFocus: () => void;
   onMove: (offset: number) => void;
+  /** Absent when the addon has no settings page, or no phone can reach the TV. */
+  onSettings?: () => void;
   onRemove: () => void;
 }
 
-function AddonCard({ addon, index, count, onFocus, onMove, onRemove }: AddonCardProps) {
+function AddonCard(props: AddonCardProps) {
+  const { addon, index, count, onFocus, onMove, onSettings, onRemove } = props;
   const { t } = useTranslation();
   const { manifest } = addon;
   const id = addonFocusId(addon.transportUrl);
@@ -89,6 +95,16 @@ function AddonCard({ addon, index, count, onFocus, onMove, onRemove }: AddonCard
             {t('addons.down')}
           </span>
         </Button>
+        {onSettings && (
+          <Button
+            focusKey={`${id}-settings`}
+            label={t('addons.settingsLabel', { name: manifest.name })}
+            onFocus={onFocus}
+            onPress={onSettings}
+          >
+            {t('addons.settings')}
+          </Button>
+        )}
         <Button
           focusKey={`${id}-remove`}
           label={t('addons.removeLabel', { name: manifest.name })}
@@ -112,6 +128,7 @@ export function AddonsScreen() {
   const [focusedUrl, setFocusedUrl] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
+  const [configuring, setConfiguring] = useState<InstalledAddon | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const afterRemove = useRef<string | null>(null);
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
@@ -181,6 +198,11 @@ export function AddonsScreen() {
                       `${addonFocusId(addon.transportUrl)}-${offset < 0 ? 'up' : 'down'}`,
                     );
                   }}
+                  onSettings={
+                    PAIR_SERVICE && addon.manifest.behaviorHints.configurable
+                      ? () => setConfiguring(addon)
+                      : undefined
+                  }
                   onRemove={() => setRemoving(addon)}
                 />
               ))}
@@ -200,6 +222,19 @@ export function AddonsScreen() {
             setInstalling(false);
           }}
           onClose={() => setInstalling(false)}
+        />
+      )}
+      {configuring && (
+        <ConfigureDialog
+          addon={configuring}
+          returnFocusKey={settingsKey(configuring)}
+          focusAfterUpdate={settingsKey}
+          onUpdated={(addon) => {
+            setFocusedUrl(addon.transportUrl);
+            setNotice(t('addons.configure.updated', { name: addon.manifest.name }));
+            setConfiguring(null);
+          }}
+          onClose={() => setConfiguring(null)}
         />
       )}
       {removing && (
