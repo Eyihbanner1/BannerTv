@@ -27,7 +27,20 @@ export const ROW_GEOMETRY = {
 } as const;
 
 // Tiles drawn either side of the visible ones, so the next arrow press always has a target.
-const OVERSCAN = Math.max(1, tuning.overscan);
+const OVERSCAN = tuning.overscan;
+
+/** The remembered tile, if it is among those drawn. */
+function drawnTile(
+  focusKey: string,
+  remembered: string | undefined,
+  first: number,
+  last: number,
+): string | undefined {
+  const prefix = `${focusKey}-tile-`;
+  if (!remembered || remembered.indexOf(prefix) !== 0) return undefined;
+  const index = Number(remembered.slice(prefix.length));
+  return index >= first && index < last ? remembered : undefined;
+}
 
 /**
  * Left and Right move to the next tile by its index, so spatial navigation
@@ -103,11 +116,15 @@ export const Row = memo(function Row(props: RowProps) {
   // A row that loaded fewer titles than it showed placeholders keeps focus on a real one.
   const anchor = Math.min(scrolled, Math.max(0, count - 1));
   const focusAfterPaging = useRef<number | null>(null);
+  const first = Math.max(0, anchor - OVERSCAN);
+  const last = Math.min(count, anchor + visible + OVERSCAN + 1);
   const { ref } = useFocusable<object, HTMLElement>({
     focusKey,
     saveLastFocusedChild: true,
-    // Naming the tile spares spatial navigation measuring every tile on a first visit.
-    preferredChildFocusKey: recallFocus(focusKey) ?? `${focusKey}-tile-${anchor}`,
+    // Always naming a drawn tile spares spatial navigation searching the
+    // tiles by position, which it cannot do: they are not measured.
+    preferredChildFocusKey:
+      drawnTile(focusKey, recallFocus(focusKey), first, last) ?? `${focusKey}-tile-${anchor}`,
     measureChildrenLayout: false,
     nextFocusResolver: nextTile,
   });
@@ -130,9 +147,9 @@ export const Row = memo(function Row(props: RowProps) {
 
   // Tiles get handlers that never change, so moving along the row redraws the
   // two tiles whose focus changed, not every tile.
-  const latest = useRef({ items, anchor, onItemFocus, onItemPress });
+  const latest = useRef({ items, anchor, count, onItemFocus, onItemPress });
   useLayoutEffect(() => {
-    latest.current = { items, anchor, onItemFocus, onItemPress };
+    latest.current = { items, anchor, count, onItemFocus, onItemPress };
   });
   const onTileFocus = useCallback(
     (index: number) => {
@@ -144,14 +161,19 @@ export const Row = memo(function Row(props: RowProps) {
     },
     [focusKey, scrollTo, ref],
   );
-  // Focus can rest on a placeholder while the row loads: once the titles
-  // arrive, report the one under it, so the hero catches up.
+  // Focus can rest on a placeholder while the row loads. Once the titles
+  // arrive, report the one under it, so the hero catches up. If the row loaded
+  // fewer titles than that, or failed, move focus to what is drawn at once
+  // rather than leave it on nothing.
   useEffect(() => {
     const prefix = `${focusKey}-tile-`;
     const focused = focusedKey();
     if (!items || focused.indexOf(prefix) !== 0) return;
-    const item = items[Number(focused.slice(prefix.length))];
-    if (item && ref.current) latest.current.onItemFocus(item, ref.current);
+    const index = Number(focused.slice(prefix.length));
+    const current = latest.current;
+    const item = items[index];
+    if (item && ref.current) current.onItemFocus(item, ref.current);
+    else if (index >= current.count) void setFocus(`${prefix}${current.anchor}`);
   }, [items, focusKey, ref]);
   const onTilePress = useCallback((index: number) => {
     const { items: list, onItemPress: press } = latest.current;
@@ -172,8 +194,6 @@ export const Row = memo(function Row(props: RowProps) {
     scrollTo(target);
   };
 
-  const first = Math.max(0, anchor - OVERSCAN);
-  const last = Math.min(count, anchor + visible + OVERSCAN + 1);
   const loadingLabel = t('home.loadingTile');
   const tiles = [];
   for (let index = first; index < last; index++) {

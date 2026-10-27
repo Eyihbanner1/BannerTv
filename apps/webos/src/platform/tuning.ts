@@ -15,12 +15,20 @@ export interface Tuning {
   zoom: 'animate' | 'instant' | 'off';
   /** How long focus rests on a title before the hero shows it. */
   heroDelayMs: number;
+  /** The same, while presses come quickly; never shorter than `heroDelayMs`. */
+  heroBusyMs: number;
+  /** Size of the hero's backdrop, which Details shares. */
+  heroArt: 'large' | 'medium';
   /** The hero backdrop's slow pan. */
   heroPan: boolean;
-  /** Rows either side of the focused one that are drawn and fetched. */
+  /** Rows either side of the focused one that are drawn and fetched, at least 1. */
   rowsAround: number;
-  /** Tiles drawn past each edge of a row. */
+  /** Tiles drawn past each edge of a row, at least 1 so the next press has a target. */
   overscan: number;
+  /** Artwork decodes as part of its first draw, or is drawn blank and filled in once decoded. */
+  decoding: 'auto' | 'async';
+  /** Smaller copies of tile artwork for smoother downscaling; off saves graphics memory. */
+  mips: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -29,17 +37,25 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   motion: 'slide',
   zoom: 'animate',
   heroDelayMs: 250,
+  heroBusyMs: 250,
+  heroArt: 'large',
   heroPan: true,
   rowsAround: 2,
   overscan: 2,
+  decoding: 'auto',
+  mips: true,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
   return options.indexOf(value as T) >= 0 ? (value as T) : fallback;
 }
 
-function count(value: unknown, max: number, fallback: number): number {
-  return typeof value === 'number' && value >= 0 && value <= max ? Math.round(value) : fallback;
+function count(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && value >= min && value <= max ? Math.round(value) : fallback;
+}
+
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 /** Reads the stored switches, keeping the default for any that are missing or wrong. */
@@ -55,10 +71,14 @@ export function parseTuning(raw: string | null): Tuning {
   return {
     motion: oneOf(stored.motion, ['slide', 'layer', 'jump'], d.motion),
     zoom: oneOf(stored.zoom, ['animate', 'instant', 'off'], d.zoom),
-    heroDelayMs: count(stored.heroDelayMs, 5000, d.heroDelayMs),
-    heroPan: typeof stored.heroPan === 'boolean' ? stored.heroPan : d.heroPan,
-    rowsAround: count(stored.rowsAround, 10, d.rowsAround),
-    overscan: count(stored.overscan, 10, d.overscan),
+    heroDelayMs: count(stored.heroDelayMs, 0, 5000, d.heroDelayMs),
+    heroBusyMs: count(stored.heroBusyMs, 0, 5000, d.heroBusyMs),
+    heroArt: oneOf(stored.heroArt, ['large', 'medium'], d.heroArt),
+    heroPan: flag(stored.heroPan, d.heroPan),
+    rowsAround: count(stored.rowsAround, 1, 10, d.rowsAround),
+    overscan: count(stored.overscan, 1, 10, d.overscan),
+    decoding: oneOf(stored.decoding, ['auto', 'async'], d.decoding),
+    mips: flag(stored.mips, d.mips),
   };
 }
 
@@ -87,4 +107,5 @@ export function applyTuning(root: HTMLElement, value: Tuning = tuning): void {
   if (value.motion !== 'slide') root.classList.add(`tune-motion-${value.motion}`);
   if (value.zoom !== 'animate') root.classList.add(`tune-zoom-${value.zoom}`);
   if (!value.heroPan) root.classList.add('tune-no-pan');
+  if (!value.mips) root.classList.add('tune-no-mips');
 }

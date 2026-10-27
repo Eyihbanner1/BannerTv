@@ -199,6 +199,39 @@ test('Back from the player lands on the tile, and Back moves to the row only fro
   await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
 });
 
+test('coming back to Home from another section lands on Continue watching, and Down goes on to the catalogs', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, EPISODE_FINISHED);
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  for (const row of [
+    FIRST_ROW,
+    SERIES_ROW,
+    'home-0-movie-imdbrating',
+    'home-0-series-imdbrating',
+  ]) {
+    await press(page, 'ArrowDown', `${row}-tile-0`);
+  }
+  await page.keyboard.press('ArrowLeft');
+  const focused = page.locator('[data-focused="true"]');
+  await expect(focused).toHaveAttribute('data-focus-key', /^rail-/);
+  await page.waitForTimeout(150);
+  const rail = ['home', 'search', 'discover', 'library', 'addons', 'settings'];
+  const at = (await focused.getAttribute('data-focus-key'))!.slice('rail-'.length);
+  for (const item of rail.slice(rail.indexOf(at) + 1)) {
+    await press(page, 'ArrowDown', `rail-${item}`);
+  }
+  await press(page, 'Enter', 'settings-stream-choice');
+
+  await pressBack(page);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expect(focused).toBeInViewport({ ratio: 0.9 });
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+});
+
 test('progress saved before cards existed gets its tile once Cinemeta answers', async ({
   page,
 }) => {

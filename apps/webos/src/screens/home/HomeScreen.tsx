@@ -36,11 +36,13 @@ const MAX_ROW_ITEMS = 40;
 const ROWS_AROUND = tuning.rowsAround;
 /** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
 const HERO_DELAY_MS = tuning.heroDelayMs;
+/** Presses closer together than this count as browsing quickly... */
+const BUSY_GAP_MS = 800;
+/** ...and then the hero waits this long, so its picture does not land on the next press. */
+const HERO_BUSY_MS = Math.max(HERO_DELAY_MS, tuning.heroBusyMs);
 
 export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 
-// Kept across visits to Home in this session, so Back lands as it was left.
-const memory = { row: undefined as string | undefined, slideRow: undefined as string | undefined };
 const emptyRows = new Set<string>();
 const NO_ITEMS: readonly MetaPreview[] = [];
 
@@ -124,10 +126,15 @@ export function HomeScreen() {
   const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
-  const [focusedRow, setFocusedRow] = useState(memory.row);
+  // Home opens on its first row: it only mounts when the section is opened,
+  // and Back from a screen on top of it finds it still mounted.
+  const [focusedRow, setFocusedRow] = useState<string>();
+  // The row the rows area has slid to.
+  const slideRow = useRef<string>(undefined);
   const trackRef = useRef<HTMLDivElement>(null);
   const heroTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const slideFrame = useRef(0);
+  const lastFocusAt = useRef(0);
 
   // Continue Watching comes first when there is something to continue.
   const continueItems = useContinueItems();
@@ -175,8 +182,8 @@ export function HomeScreen() {
   useLayoutEffect(() => {
     const key = focusedKey();
     const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
-    if (tile > 0 && canSlide()) memory.slideRow = key.slice('home-'.length, tile);
-    slideTrack(trackRef.current, memory.slideRow && `home-${memory.slideRow}`);
+    if (tile > 0 && canSlide()) slideRow.current = key.slice('home-'.length, tile);
+    slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, [rows, continuing]);
 
   useEffect(
@@ -192,36 +199,39 @@ export function HomeScreen() {
     latestRows.current = rows;
   });
 
-  // A row that turns out empty under focus hands it to the row below (or
-  // above, at the end), which is drawn, rather than letting it fall to the hero.
+  // A row that turns out empty hands its place to the row below (or above, at
+  // the end): the view and the drawn rows follow, and so does focus if it was
+  // in the row, rather than falling to the hero.
   const onEmpty = useCallback((key: string, focused: boolean) => {
     emptyRows.add(key);
     setHidden(new Set(emptyRows));
     const list = latestRows.current;
     const index = list.findIndex((row) => row.key === key);
-    const next = focused ? (list[index + 1] ?? list[index - 1]) : undefined;
+    const next = index < 0 ? undefined : (list[index + 1] ?? list[index - 1]);
     if (!next) return;
-    memory.row = next.key;
-    setFocusedRow(next.key);
-    void setFocus(rowFocusKey(next));
+    if (slideRow.current === key) slideRow.current = next.key;
+    setFocusedRow((row) => (row === key ? next.key : row));
+    if (focused) void setFocus(rowFocusKey(next));
   }, []);
 
   // Rows that are loading or failed report focus too, so the rows under them
   // are drawn and Down has somewhere to go. Only titles change the hero.
   const onItemFocus = useCallback((rowKey: string, item: MetaPreview | undefined) => {
-    memory.row = rowKey;
     setFocusedRow(rowKey);
     // Reading the row's position forces a layout, so only slide when the row
     // changes, and in the next frame, which lays out anyway, not in the key press.
-    if (canSlide() && memory.slideRow !== rowKey) {
-      memory.slideRow = rowKey;
+    if (canSlide() && slideRow.current !== rowKey) {
+      slideRow.current = rowKey;
       cancelAnimationFrame(slideFrame.current);
       slideFrame.current = requestAnimationFrame(() =>
         slideTrack(trackRef.current, `home-${rowKey}`),
       );
     }
+    const now = Date.now();
+    const delay = now - lastFocusAt.current < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS;
+    lastFocusAt.current = now;
     clearTimeout(heroTimer.current);
-    if (item) heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);
+    if (item) heroTimer.current = setTimeout(() => heroItem.set(item), delay);
   }, []);
 
   if (collection.ready && rows.length === 0 && !continuing) {

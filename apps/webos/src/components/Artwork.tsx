@@ -1,4 +1,5 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { tuning } from '../platform/tuning';
 
 interface ArtworkProps {
   src: string | undefined;
@@ -12,6 +13,8 @@ interface ArtworkProps {
   onFail?: () => void;
 }
 
+const DECODING = tuning.decoding === 'async' ? 'async' : undefined;
+
 /**
  * An addon image. Addons often point at artwork that does not exist, so a
  * failed load quietly shows the fallback (usually the title as text). Give it
@@ -19,7 +22,8 @@ interface ArtworkProps {
  *
  * No `decoding="async"`: on the TV's Chromium 87 that draws each big image
  * blank first and then redraws it once decoded, and every redraw holds up the
- * next frame. Without it the image arrives with the first draw.
+ * next frame. Without it the image arrives with the first draw. The
+ * `decoding` tuning switch brings it back, to compare the two on the TV.
  */
 export function Artwork({
   src,
@@ -69,6 +73,7 @@ export function Artwork({
       className={className}
       src={current}
       alt=""
+      decoding={DECODING}
       draggable={false}
       onLoad={(event) => loaded(event.currentTarget)}
       onError={failed}

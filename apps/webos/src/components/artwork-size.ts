@@ -1,4 +1,5 @@
 import { metahubAtSize, type MetahubSize } from '@bannertv/core';
+import { tuning } from '../platform/tuning';
 
 /**
  * Where an image is drawn, and how many device pixels that takes on a 4K TV,
@@ -22,7 +23,7 @@ const SHARP_SIZE: Record<ArtworkSurface, MetahubSize> = {
   posterTile: 'medium',
   landscapeTile: 'medium',
   tileLogo: 'medium',
-  backdrop: 'large',
+  backdrop: tuning.heroArt,
   titleLogo: 'large',
 };
 

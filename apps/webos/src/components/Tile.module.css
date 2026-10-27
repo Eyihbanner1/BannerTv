@@ -50,6 +50,12 @@
   object-fit: cover;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: no mipmaps for tile artwork. */
+:global(.tune-no-mips) .image,
+:global(.tune-no-mips) .logo {
+  image-rendering: -webkit-optimize-contrast;
+}
+
 /* Under the poster: only seen while it loads or when it is missing. */
 .caption {
   position: absolute;
