@@ -7,7 +7,7 @@ export const WATCHED_FRACTION = 0.9;
 /** Closer to the start than this, playback simply starts over. */
 export const MIN_RESUME_SECONDS = 30;
 /** Resuming this close to the end would only show the credits, so it starts over instead. */
-const END_SECONDS = 60;
+export const END_SECONDS = 60;
 const KEY = 'progress';
 
 export interface ProgressEntry {
@@ -36,6 +36,8 @@ export interface ProgressStore {
   get(videoId: string): ProgressEntry | undefined;
   /** Every entry of one title, most recent first. */
   forMeta(metaId: string): ProgressEntry[];
+  /** Every entry, most recent first. */
+  recent(): ProgressEntry[];
   /**
    * Saves where playback is. Marks the video watched once the position
    * passes WATCHED_FRACTION of a known duration; a watched video stays
@@ -211,6 +213,7 @@ export function createProgressStore(options: {
       const ofMeta = Array.from(entries.values()).filter((entry) => entry.metaId === metaId);
       return newestFirst(ofMeta.reverse());
     },
+    recent: () => newestFirst(Array.from(entries.values()).reverse()),
     record(update) {
       const position = seconds(update.position);
       const duration = seconds(update.duration);

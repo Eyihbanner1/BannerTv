@@ -33,7 +33,11 @@
     "previous": "Previous titles",
     "next": "More titles",
     "loadingTile": "Loading",
-    "seeAll": "See all"
+    "seeAll": "See all",
+    "continueWatching": "Continue watching",
+    "episodeNote": "S{{season}}:E{{episode}}",
+    "nextEpisodeNote": "Next: S{{season}}:E{{episode}}",
+    "nextNote": "Next episode"
   },
   "search": {
     "label": "Search",

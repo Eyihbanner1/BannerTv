@@ -121,3 +121,35 @@
   border-right: 4px solid var(--bt-accent);
   transform: rotate(45deg);
 }
+
+/* Continue Watching: which episode, in the corner. */
+.note {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: rgba(11, 8, 21, 0.75);
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+}
+
+/* Continue Watching: how far through, under the title. */
+.progress {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 8px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.progressDone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bt-accent);
+}

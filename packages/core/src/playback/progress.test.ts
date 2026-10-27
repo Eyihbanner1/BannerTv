@@ -183,6 +183,47 @@ describe('createProgressStore', () => {
     expect(progress.forMeta('tt404')).toEqual([]);
   });
 
+  it('lists every entry, most recently updated first', async () => {
+    let time = 0;
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => time });
+    await progress.load();
+    expect(progress.recent()).toEqual([]);
+
+    time = 10;
+    progress.record(episode('tt9:1:1', 100));
+    time = 30;
+    progress.record(movie(100));
+    time = 20;
+    progress.record(episode('tt9:1:2', 100));
+    // Recorded at the same time: the later record is the more recent.
+    progress.record(episode('tt9:1:3', 100));
+    time = 40;
+    progress.record(episode('tt9:1:1', 200));
+
+    expect(progress.recent().map((entry) => entry.videoId)).toEqual([
+      'tt9:1:1',
+      'tt1',
+      'tt9:1:3',
+      'tt9:1:2',
+    ]);
+    expect(progress.recent()[0]).toBe(progress.get('tt9:1:1'));
+  });
+
+  it('lists saved entries with the ones recorded since, most recent first', async () => {
+    const storage = memoryKeyValueStore();
+    // Saved least recent first, so of two with the same time the later one is the more recent.
+    await storage.set('progress', [
+      saved({ videoId: 'b', updatedAt: 5 }),
+      saved({ videoId: 'c', updatedAt: 5 }),
+      saved({ videoId: 'a', updatedAt: 1 }),
+    ]);
+    const progress = createProgressStore({ storage, now: () => 3 });
+    await progress.load();
+    progress.record(episode('tt9:1:1', 100));
+
+    expect(progress.recent().map((entry) => entry.videoId)).toEqual(['c', 'b', 'tt9:1:1', 'a']);
+  });
+
   it('starts over by forgetting the entry, in storage too', async () => {
     const storage = memoryKeyValueStore();
     const progress = createProgressStore({ storage, now: () => 0 });

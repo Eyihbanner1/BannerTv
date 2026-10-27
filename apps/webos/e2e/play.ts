@@ -156,15 +156,32 @@ export interface SeedProgress {
   watched?: boolean;
 }
 
+/** What Continue Watching shows of a video that played, as the player saves it. */
+export interface SeedPlayed {
+  videoId: string;
+  metaId: string;
+  type: 'movie' | 'series';
+  name: string;
+  poster?: string;
+  background?: string;
+  logo?: string;
+  releaseInfo?: string;
+  season?: number;
+  episode?: number;
+  next?: { videoId: string; season?: number; episode?: number };
+}
+
 /**
  * Installs the test stream addon before the app starts, by writing the addon
- * collection (and any watch progress) into IndexedDB the way the app stores
- * it. Call before page.goto, after mockAddons.
+ * collection (and any watch progress and Continue Watching cards) into
+ * IndexedDB the way the app stores it. Call before page.goto, after mockAddons.
  */
 export async function seedStreamAddon(
   page: Page,
   options: {
     progress?: readonly SeedProgress[];
+    /** Continue Watching cards, as if those videos had played. */
+    played?: readonly SeedPlayed[];
     /** Also installs the slow stream addon. */
     slowAddon?: boolean;
     /** Stored preferences, as if chosen before. */
@@ -209,8 +226,9 @@ export async function seedStreamAddon(
     ...entry,
     updatedAt: 1000 + i,
   }));
+  const cards = (options.played ?? []).map((card, i) => ({ ...card, updatedAt: 1000 + i }));
   await page.addInitScript(
-    ({ stored, saved, chosen }) => {
+    ({ stored, saved, played, chosen }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');
       if (chosen) localStorage.setItem('bannertv.preferences', JSON.stringify(chosen));
@@ -227,10 +245,11 @@ export async function seedStreamAddon(
         const tx = db.transaction('kv', 'readwrite');
         tx.objectStore('kv').put(stored, 'addons');
         if (saved.length > 0) tx.objectStore('kv').put(saved, 'progress');
+        if (played.length > 0) tx.objectStore('kv').put(played, 'played');
         tx.oncomplete = () => db.close();
       };
     },
-    { stored: addons, saved: progress, chosen: options.preferences ?? null },
+    { stored: addons, saved: progress, played: cards, chosen: options.preferences ?? null },
   );
 }
 

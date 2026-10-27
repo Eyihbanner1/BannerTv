@@ -1,5 +1,9 @@
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useRef } from 'react';
+import {
+  doesFocusableExist,
+  getCurrentFocusKey,
+  setFocus,
+} from '@noriginmedia/norigin-spatial-navigation';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { takePendingFocus } from './router';
 import { useScreenSlot } from './screen-slot';
 
@@ -13,11 +17,18 @@ import { useScreenSlot } from './screen-slot';
  * Norigin queues focusable registration and setFocus in one task queue, so
  * this runs after the screen's own focusables exist even when they register
  * during a key press. Focus keys are deterministic, so the key saved on the
- * way in is still there on the way back.
+ * way in is usually still there on the way back. A screen whose content can
+ * change while it is hidden (Home's Continue Watching) passes `fallBack`: if
+ * what was focused has gone once the screen has drawn, focus goes to the
+ * screen's `defaultFocusKey` as it is then.
  */
-export function useScreenFocus(defaultFocusKey?: string, ready = true): void {
+export function useScreenFocus(defaultFocusKey?: string, ready = true, fallBack = false): void {
   const slot = useScreenSlot();
   const placed = useRef(false);
+  const latestDefault = useRef(defaultFocusKey);
+  useLayoutEffect(() => {
+    latestDefault.current = defaultFocusKey;
+  });
   useEffect(() => {
     const place = () => {
       if (!slot.get()) {
@@ -27,9 +38,17 @@ export function useScreenFocus(defaultFocusKey?: string, ready = true): void {
       if (!ready || placed.current) return;
       placed.current = true;
       const target = takePendingFocus() ?? defaultFocusKey;
-      if (target) void setFocus(target);
+      if (!target) return;
+      const focusing = Promise.resolve(setFocus(target));
+      if (!fallBack) return;
+      // Norigin applies focus a step later, after the screen has drawn with what is new.
+      void focusing.then(() => {
+        const fallback = latestDefault.current;
+        if (!slot.get() || !fallback || doesFocusableExist(getCurrentFocusKey())) return;
+        void setFocus(fallback);
+      });
     };
     place();
     return slot.subscribe(place);
-  }, [defaultFocusKey, ready, slot]);
+  }, [defaultFocusKey, ready, fallBack, slot]);
 }

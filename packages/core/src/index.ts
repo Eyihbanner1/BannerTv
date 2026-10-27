@@ -52,6 +52,16 @@ export {
   type QueryStatus,
 } from './query';
 export { type BandwidthMemory, createBandwidthMemory } from './playback/bandwidth';
+export {
+  CONTINUE_LIMIT,
+  type ContinueItem,
+  continueItem,
+  continueWatching,
+  createPlayedVideos,
+  playedCard,
+  type PlayedVideo,
+  type PlayedVideos,
+} from './playback/continue';
 export { findBingeStream, nextVideo } from './playback/next';
 export {
   createProgressStore,

@@ -65,7 +65,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Player | Embedded audio and subtitle tracks | Yes | Yes, per-title memory | Phase 2. Audio through `audioTracks`; embedded subtitles are not exposed on webOS 22 and need a spike (see Player) |
 | Player | Resume, next-episode autoplay, binge groups | Yes | Yes, plus "Still watching?" | Phase 2 |
 | Player | Skip intro and outro | No | IntroDB, AniSkip | Phase 5 |
-| Library | Save to library, continue watching | Yes | Yes | Phase 3 |
+| Library | Save to library, continue watching | Yes | Yes | Phase 2 Continue Watching row on Home, kept on the TV (moved from Phase 3 on 27 October 2026). Phase 3 library, and Trakt sync of the same progress |
 | Library | Calendar and new-episode alerts | Yes | Release countdowns | Phase 5 |
 | Accounts | Trakt sync and scrobbling | Yes | Yes, plus Simkl and MDBList | Phase 3 Trakt. Simkl and MDBList in Phase 5 |
 | Accounts | Profiles | No free profiles | Free profiles with cloud sync | Phase 3 local profiles. Cloud sync in Phase 5 |
@@ -297,7 +297,7 @@ Every screen is designed for a 5-way remote first and a pointer second, viewed f
 | Screen | Purpose | Key elements | Phase |
 | --- | --- | --- | --- |
 | First run | Get to a playable catalog in under a minute | Welcome, default addons preinstalled, optional "add addons from your phone" QR, optional Trakt link | 1 |
-| Home | Lean-back browsing | Hero banner for the focused title, Continue Watching row, one row per addon catalog | 1 |
+| Home | Lean-back browsing | Hero banner for the focused title, Continue Watching row, one row per addon catalog | 1 (Continue Watching in 2) |
 | Discover | Filtered browsing | Type, catalog and genre pickers, poster grid with paging | 1 |
 | Search | Find a title fast | On-screen keyboard, recent searches, results grouped by type then addon | 1 |
 | Details | Decide what to watch | Backdrop, logo, synopsis, rating, cast, trailer, season tabs, episode list with watched marks, library toggle | 1 |
@@ -475,6 +475,8 @@ A private beta that browses and plays is ready at the end of week 10, and the st
 ![BannerTV roadmap: 6 phases, 5 gates](images/roadmap.png)
 
 Phases 0 to 2 are the minimum product; if time runs short, Phase 3's profiles and TMDB enrichment slip, never the Phase 2 playback gate.
+
+On 27 October 2026 the Continue Watching row moved from Phase 3 into Phase 2, since resuming from Home is part of playing. It reads the progress the player saves on the TV: the first row on Home shows what was left part-way, most recent first, with a progress bar and the episode, and OK goes straight back into the player (or into the next episode after a finished one). Phase 3 keeps the library, profiles and Trakt, which will sync the same progress.
 
 **Phase 0 tasks to start with**
 

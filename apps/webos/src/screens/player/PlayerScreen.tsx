@@ -3,6 +3,7 @@ import {
   languageKey,
   nextVideo,
   parseRuntime,
+  playedCard,
   qualityChoices,
   type StreamEntry,
 } from '@bannertv/core';
@@ -16,7 +17,7 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
 import { addonClient, addonCollection } from '../../data/addons';
-import { progress } from '../../data/playback';
+import { playedVideos, progress } from '../../data/playback';
 import { preferences, setPreference } from '../../data/preferences';
 import { useQuery } from '../../data/use-query';
 import { KeyCode } from '../../navigation/keys';
@@ -137,6 +138,34 @@ export function PlayerScreen(props: PlayerScreenProps) {
   });
 
   const subtitles = useSubtitles(type, videoId, state.entry, session, state);
+
+  // Once the video plays, Home's Continue Watching gets its name, artwork and
+  // episode: again when the series' episode list arrives or changes, never for
+  // the Lab. The card keeps the ids the progress is saved under.
+  const playing = state.status === 'playing';
+  const recorded = useRef<string | null>(null);
+  useEffect(() => {
+    if (props.lab || !playing || !item) return;
+    const card = playedCard(item, videoId, meta, { metaId, type });
+    const prior = meta ? undefined : playedVideos.get(videoId);
+    if (prior && prior.metaId === metaId) {
+      // Until the episode list arrives, keep the episode an earlier card knew.
+      if (prior.season !== undefined) card.season = prior.season;
+      if (prior.episode !== undefined) card.episode = prior.episode;
+      if (prior.episodeName !== undefined) card.episodeName = prior.episodeName;
+      if (prior.next) card.next = prior.next;
+    }
+    const key = [
+      videoId,
+      meta ? 'meta' : 'preview',
+      card.season,
+      card.episode,
+      card.next?.videoId,
+    ].join('|');
+    if (recorded.current === key) return;
+    recorded.current = key;
+    playedVideos.record(card);
+  }, [props.lab, playing, item, meta, videoId, metaId, type]);
 
   // The running time tells a heavy file from a long one, for auto-play's ranking.
   const runtime = item?.runtime;

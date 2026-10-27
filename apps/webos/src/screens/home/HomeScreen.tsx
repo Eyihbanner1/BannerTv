@@ -28,6 +28,7 @@ import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { tuning } from '../../platform/tuning';
+import { CONTINUE_FOCUS_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
 import { heroItem } from './hero-item';
 import styles from './HomeScreen.module.css';
@@ -52,7 +53,7 @@ interface HomeRowProps {
   near: boolean;
   /** The row's catalog came back empty; `focused` if focus was in it. */
   onEmpty: (key: string, focused: boolean) => void;
-  onItemFocus: (row: BoardRow, item: MetaPreview | undefined, element: HTMLElement) => void;
+  onItemFocus: (rowKey: string, item: MetaPreview | undefined, element: HTMLElement) => void;
 }
 
 function openCatalog(row: BoardRow): void {
@@ -82,8 +83,8 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
   const empty = state.status === 'success' && items !== null && items.length === 0;
   const onRetry = useCallback(() => query.retry(), [query]);
   const onRowItemFocus = useCallback(
-    (item: MetaPreview | undefined, element: HTMLElement) => onItemFocus(row, item, element),
-    [row, onItemFocus],
+    (item: MetaPreview | undefined, element: HTMLElement) => onItemFocus(row.key, item, element),
+    [row.key, onItemFocus],
   );
   const onSeeAll = useCallback(() => openCatalog(row), [row]);
 
@@ -131,7 +132,14 @@ export function HomeScreen() {
   const heroTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const slideFrame = useRef(0);
 
-  const firstRowKey = rows.length > 0 ? rowFocusKey(rows[0]!) : undefined;
+  // Continue Watching comes first when there is something to continue.
+  const continueItems = useContinueItems();
+  const continuing = continueItems !== null && continueItems.length > 0;
+  const firstRowKey = continuing
+    ? CONTINUE_FOCUS_KEY
+    : rows.length > 0
+      ? rowFocusKey(rows[0]!)
+      : undefined;
   const focusedIndex = Math.max(
     0,
     rows.findIndex((row) => row.key === focusedRow),
@@ -141,27 +149,39 @@ export function HomeScreen() {
   // rows next to focus are drawn at once, so the next press has a row to go to.
   const nearIndex = useDeferredValue(focusedIndex);
 
-  useScreenFocus(firstRowKey, collection.ready);
+  // Saved progress is read first, so the first focus lands on Continue Watching.
+  // A title can leave the row while the player is on top, so focus falls back.
+  useScreenFocus(firstRowKey, collection.ready && continueItems !== null, true);
+
+  // The hero starts on the first title focus will land on.
+  useEffect(() => {
+    if (continuing && heroItem.get() === null) heroItem.set(continueItems[0]!.preview);
+  }, [continuing, continueItems]);
 
   // On Home, Back first returns to the first row. Only from there does it exit.
   // Genre rows share the first row's key as a prefix, so match its tiles exactly.
   useBack('screen', () => {
     const first = rows[0];
-    if (!first || !firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-tile-`) === 0) {
+    if (!firstRowKey || getCurrentFocusKey().indexOf(`${firstRowKey}-tile-`) === 0) {
       return false;
     }
     // From far down, the first row is an empty box with nothing to focus: draw it first.
-    if (!doesFocusableExist(firstRowKey)) flushSync(() => setFocusedRow(first.key));
+    if (first && !doesFocusableExist(firstRowKey)) flushSync(() => setFocusedRow(first.key));
     void setFocus(firstRowKey);
     return true;
   });
 
   // The focused row moves to the top of the rows area. This re-applies it after
-  // rows above it disappear, and on return, so Home comes back as it was.
-  useLayoutEffect(
-    () => slideTrack(trackRef.current, memory.slideRow && `home-${memory.slideRow}`),
-    [rows],
-  );
+  // rows above it disappear or Continue Watching comes or goes, and on return,
+  // so Home comes back as it was. A first focus on a row still loading has not
+  // slid anything yet, so the row holding focus counts first.
+  useLayoutEffect(() => {
+    // Null until anything has had focus, whatever the types say.
+    const key = getCurrentFocusKey() || '';
+    const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
+    if (tile > 0 && canSlide()) memory.slideRow = key.slice('home-'.length, tile);
+    slideTrack(trackRef.current, memory.slideRow && `home-${memory.slideRow}`);
+  }, [rows, continuing]);
 
   useEffect(
     () => () => {
@@ -192,23 +212,23 @@ export function HomeScreen() {
 
   // Rows that are loading or failed report focus too, so the rows under them
   // are drawn and Down has somewhere to go. Only titles change the hero.
-  const onItemFocus = useCallback((row: BoardRow, item: MetaPreview | undefined) => {
-    memory.row = row.key;
-    setFocusedRow(row.key);
+  const onItemFocus = useCallback((rowKey: string, item: MetaPreview | undefined) => {
+    memory.row = rowKey;
+    setFocusedRow(rowKey);
     // Reading the row's position forces a layout, so only slide when the row
     // changes, and in the next frame, which lays out anyway, not in the key press.
-    if (canSlide() && memory.slideRow !== row.key) {
-      memory.slideRow = row.key;
+    if (canSlide() && memory.slideRow !== rowKey) {
+      memory.slideRow = rowKey;
       cancelAnimationFrame(slideFrame.current);
       slideFrame.current = requestAnimationFrame(() =>
-        slideTrack(trackRef.current, rowFocusKey(row)),
+        slideTrack(trackRef.current, `home-${rowKey}`),
       );
     }
     clearTimeout(heroTimer.current);
     if (item) heroTimer.current = setTimeout(() => heroItem.set(item), HERO_DELAY_MS);
   }, []);
 
-  if (collection.ready && rows.length === 0) {
+  if (collection.ready && rows.length === 0 && !continuing) {
     return (
       <div className={styles.home}>
         <div className={styles.empty}>
@@ -224,11 +244,12 @@ export function HomeScreen() {
       <Hero />
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
+          {continuing && <ContinueRow items={continueItems} onItemFocus={onItemFocus} />}
           {rows.map((row, index) => (
             <HomeRow
               key={row.key}
               row={row}
-              first={index === 0}
+              first={continueItems !== null && !continuing && index === 0}
               near={
                 Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
               }
