@@ -81,12 +81,13 @@ export function useSubtitles(
     choice: null,
   });
   const choice = chosen.entry === entry ? chosen.choice : null;
-  const [loaded, setLoaded] = useState<{ key: string; cues: Cue[] } | null>(null);
+  // Kept by link, not key: two streams' own files can share a key.
+  const [loaded, setLoaded] = useState<{ url: string; cues: Cue[] } | null>(null);
   const [failedChoice, setFailedChoice] = useState<SubtitleChoice>(null);
   const [offset, setOffset] = useState(0);
-  // The stream the start-of-stream choice was made for; the viewer's own choice also counts.
-  const decidedFor = useRef<StreamEntry | null>(null);
-  // Files that failed for this video, so a retry moves on to another.
+  // The start-of-stream choice and the stream it was made for; the viewer's own choice also counts.
+  const decided = useRef<{ entry: StreamEntry | null; choice: SubtitleChoice } | null>(null);
+  // Links of files that failed for this video, so a retry moves on to another.
   const broken = useRef(new Set<string>());
   const { options, pending } = listState;
   const tracks = state.text;
@@ -96,29 +97,42 @@ export function useSubtitles(
     if (!entry || !session || !list) return;
     let stopped = false;
     const settle = (next: SubtitleChoice) => {
-      decidedFor.current = entry;
+      decided.current = { entry, choice: next };
       setChosen({ entry, choice: next });
     };
     const decide = () => {
-      if (stopped || decidedFor.current === entry) return;
+      if (stopped) return;
+      const { text, status, engine } = session.get();
+      // hls.js and Shaka list the stream's tracks before its first picture; the
+      // TV's player never lists any.
+      const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
+      const made = decided.current;
+      if (made?.entry === entry) {
+        // A track that left with its engine (hls.js handing the stream to the
+        // TV's player) gives way to a file.
+        const chosenTrack = made.choice;
+        const lost =
+          chosenTrack?.kind === 'track' &&
+          tracksKnown &&
+          !text.some((t) => t.id === chosenTrack.id);
+        if (!lost) return;
+      }
       const wanted = preferences.get().subtitleLanguage;
       if (wanted === null) {
         settle(null);
         return;
       }
       const key = languageKey(wanted);
-      const { text, status } = session.get();
       const track = text.find((t) => languageKey(t.lang) === key);
       if (track) {
         settle({ kind: 'track', id: track.id });
         return;
       }
-      // Stream tracks show up when playback starts; addon files may arrive before.
-      const ready = status === 'playing' || status === 'paused';
+      // Addon files often arrive first, but the stream's own track wins once listed.
       const { options: offered, pending: waiting } = list.get();
       const file = offered.find((o) => languageKey(o.lang) === key);
-      if (file && (ready || waiting === 0)) settle({ kind: 'file', key: file.key });
-      else if (ready && waiting === 0) settle(null);
+      if (file && tracksKnown) settle({ kind: 'file', key: file.key });
+      else if (tracksKnown && waiting === 0) settle(null);
     };
     const stopList = list.subscribe(decide);
     const stopSession = session.subscribe(decide);
@@ -137,36 +151,52 @@ export function useSubtitles(
     const option = options.find((o) => o.key === choice.key);
     if (!option) return;
     let cancelled = false;
+    let stopWaiting: (() => void) | undefined;
+    // Unless the viewer has chosen something else meanwhile.
+    const moveTo = (next: SubtitleOption) =>
+      setChosen((current) =>
+        current.choice === choice
+          ? { entry: current.entry, choice: { kind: 'file', key: next.key } }
+          : current,
+      );
     loadSubtitles(option).then(
       (cues) => {
-        if (!cancelled) setLoaded({ key: option.key, cues });
+        if (!cancelled) setLoaded({ url: option.url, cues });
       },
       () => {
         if (cancelled) return;
-        broken.current.add(option.key);
+        broken.current.add(option.url);
         const key = languageKey(option.lang);
-        const next = options.find((o) => languageKey(o.lang) === key && !broken.current.has(o.key));
-        if (!next) {
-          setFailedChoice(choice);
+        const nextIn = (offered: readonly SubtitleOption[]) =>
+          offered.find((o) => languageKey(o.lang) === key && !broken.current.has(o.url));
+        // The list as it is now: more addons may have answered since the choice.
+        const next = nextIn(list ? list.get().options : options);
+        if (next) {
+          moveTo(next);
           return;
         }
-        // Unless the viewer has chosen something else meanwhile.
-        setChosen((current) =>
-          current.choice === choice
-            ? { entry: current.entry, choice: { kind: 'file', key: next.key } }
-            : current,
-        );
+        setFailedChoice(choice);
+        // An addon that answers later may still have one.
+        stopWaiting = list?.subscribe(() => {
+          const later = nextIn(list.get().options);
+          if (!later) return;
+          stopWaiting?.();
+          stopWaiting = undefined;
+          moveTo(later);
+        });
       },
     );
     return () => {
       cancelled = true;
+      stopWaiting?.();
     };
     // Only a new choice reloads; more options arriving do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choice]);
 
   const fileKey = choice?.kind === 'file' ? choice.key : null;
-  const fileCues = fileKey !== null && loaded?.key === fileKey ? loaded.cues : null;
+  const fileOption = fileKey !== null ? options.find((o) => o.key === fileKey) : undefined;
+  const fileCues = fileOption && loaded?.url === fileOption.url ? loaded.cues : null;
   const fileFailed = fileKey !== null && failedChoice === choice;
 
   // The stream's own tracks: tell the engine, and read the cues it hands over.
@@ -181,14 +211,17 @@ export function useSubtitles(
     tracks,
     pending,
     choice,
-    cues: trackId === null ? fileCues : trackCues,
+    cues: trackId === null ? (fileFailed ? null : fileCues) : trackCues,
     loading: fileKey !== null && fileCues === null && !fileFailed,
     failed: fileFailed,
     offset,
     choose(next) {
-      decidedFor.current = entry;
+      decided.current = { entry, choice: next };
       setChosen({ entry, choice: next });
-      if (next?.kind === 'file') broken.current.delete(next.key);
+      if (next?.kind === 'file') {
+        const option = options.find((o) => o.key === next.key);
+        if (option) broken.current.delete(option.url);
+      }
       setPreference('subtitleLanguage', languageOf(next, options, tracks));
     },
     setOffset,

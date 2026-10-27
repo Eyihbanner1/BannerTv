@@ -120,6 +120,18 @@ export function PlayerScreen(props: PlayerScreenProps) {
     () => (meta ? nextVideo(meta, videoId, Date.now()) : undefined),
     [meta, videoId],
   );
+  // Up Next: the last 30 seconds of an episode, or its end.
+  const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
+  const showUpNext =
+    !!next &&
+    !upNextDismissed &&
+    !panel &&
+    (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
+  // While the Up Next card is open, the controls stay and focus stays on the card.
+  const upNextOpen = useRef(showUpNext);
+  useEffect(() => {
+    upNextOpen.current = showUpNext;
+  });
 
   const subtitles = useSubtitles(type, videoId, state.entry, session, state);
 
@@ -191,7 +203,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   function armHide() {
     clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (session?.get().status === 'playing') hide();
+      if (session?.get().status === 'playing' && !upNextOpen.current) hide();
     }, CONTROLS_HIDE_MS);
   }
   function show(focusKey?: string) {
@@ -205,13 +217,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     void setFocus('player-surface');
   }
   useEffect(() => () => clearTimeout(hideTimer.current), []);
-  // Paused, buffering or failed: the controls stay up.
+  // Paused, buffering, failed or offering the next episode: the controls stay up.
   useEffect(() => {
-    if (controls && !panel && state.status === 'playing') armHide();
+    if (controls && !panel && !showUpNext && state.status === 'playing') armHide();
     else clearTimeout(hideTimer.current);
     // armHide only reads refs and the session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controls, panel, state.status]);
+  }, [controls, panel, state.status, showUpNext]);
 
   function scrubBy(direction: -1 | 1) {
     if (!session || state.duration <= 0) return;
@@ -317,12 +329,6 @@ export function PlayerScreen(props: PlayerScreenProps) {
   };
 
   // Up Next.
-  const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
-  const showUpNext =
-    !!next &&
-    !upNextDismissed &&
-    !panel &&
-    (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
   useEffect(() => {
     // Ask for the next episode's streams early, so it starts at once.
     if (showUpNext && next) streamFinder(type, next.id).start();
@@ -519,7 +525,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onSelect={(value) => {
             setPanel(null);
             const choice = choices.find((c) => (c.resolution ?? 'other') === value);
-            if (session && choice && choice.entry !== state.entry) {
+            // By key: the finder rebuilds its entries as addons answer.
+            const playing = state.entry && entryKey(state.entry);
+            if (session && choice && entryKey(choice.entry) !== playing) {
               session.play(choice.entry, session.trustedPosition() ?? state.position);
             }
           }}

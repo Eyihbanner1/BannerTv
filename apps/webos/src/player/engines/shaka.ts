@@ -138,16 +138,28 @@ function report(listener: EngineListener, error: unknown) {
  */
 export const createShakaEngine: EngineFactory = (video, listener) => {
   let player: ShakaPlayer | null = null;
+  // Set by destroy(), so a load still waiting for Shaka never starts a player afterwards.
+  let stopped = false;
+
+  async function teardown() {
+    const instance = player;
+    player = null;
+    if (instance) await instance.destroy().catch(() => undefined);
+    resetVideo(video);
+  }
 
   const engine: Engine = {
     name: 'shaka',
 
     async load(url, startAt) {
       const shaka = await loadShaka();
-      await engine.destroy();
+      if (stopped) return;
+      await teardown();
+      if (stopped) return;
       const instance = new shaka.Player();
       player = instance;
       await instance.attach(video);
+      if (player !== instance) return;
       const activeText = () => instance.getTextTracks().find((track) => track.active);
       instance.configure({
         // Shaka's forward buffer is already small; keep less behind, for TVs
@@ -209,10 +221,8 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
     },
 
     async destroy() {
-      const instance = player;
-      player = null;
-      if (instance) await instance.destroy().catch(() => undefined);
-      resetVideo(video);
+      stopped = true;
+      await teardown();
     },
   };
   return engine;

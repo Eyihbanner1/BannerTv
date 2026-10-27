@@ -44,7 +44,8 @@ const vendorDir = join(dist, 'vendor');
 const isVendor = (path) => path.startsWith(vendorDir);
 const scripts = all.filter((path) => path.endsWith('.js') && !isVendor(path));
 const vendorScripts = all.filter((path) => path.endsWith('.js') && isVendor(path));
-const gzipped = (paths) => paths.reduce((sum, path) => sum + gzipSync(readFileSync(path)).length, 0);
+const gzipped = (paths) =>
+  paths.reduce((sum, path) => sum + gzipSync(readFileSync(path)).length, 0);
 const jsGzip = gzipped(scripts);
 const vendorGzip = gzipped(vendorScripts);
 const total = all.reduce((sum, path) => sum + statSync(path).size, 0);

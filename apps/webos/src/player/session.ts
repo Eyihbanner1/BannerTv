@@ -113,6 +113,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
   let destroyed = false;
+  // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
+  let wantedAudio: string | null = null;
+  let wantedText: string | null = null;
   // Shaka lets go of the video element asynchronously; the next engine waits for it.
   let releasing: Promise<void> = Promise.resolve();
 
@@ -169,7 +172,24 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     );
   }
 
+  function armStart(current: number) {
+    clearTimeout(startTimer);
+    startTimer = window.setTimeout(
+      () => fail(new PlaybackError('network', 'The stream did not start'), current),
+      START_TIMEOUT_MS,
+    );
+  }
+
   const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
+    [
+      'play',
+      () => {
+        // The start clock stopped while the viewer paused before the first picture.
+        if (!startedPlaying && startTimer === undefined && state.get().status === 'loading') {
+          armStart(attempt);
+        }
+      },
+    ],
     [
       'playing',
       () => {
@@ -228,12 +248,31 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     patch({ audio: engine.audioTracks(), text: engine.textTracks() });
   }
 
+  /** A new engine starts on the stream's default tracks, so the viewer's are chosen again. */
+  function reapplyTracks() {
+    const text = wantedText;
+    const audio = wantedAudio;
+    if (!engine) return;
+    if (text !== null && engine.textTracks().some((t) => t.id === text && !t.active)) {
+      engine.selectText(text);
+    }
+    if (audio !== null && engine.audioTracks().some((t) => t.id === audio && !t.active)) {
+      engine.selectAudio(audio);
+    }
+  }
+
   const session: PlaybackSession = {
     get: state.get,
     subscribe: state.subscribe,
 
     play(entry, startAt) {
       if (destroyed || entry.stream.source.kind !== 'url') return;
+      // By key: the finder rebuilds its entries as addons answer, so Try again may get a new object.
+      const previous = state.get().entry;
+      if (!previous || entryKey(previous) !== entryKey(entry)) {
+        wantedAudio = null;
+        wantedText = null;
+      }
       const current = ++attempt;
       const url = entry.stream.source.url;
       tried.add(entryKey(entry));
@@ -253,10 +292,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         text: [],
         streamCues: {},
       });
-      startTimer = window.setTimeout(
-        () => fail(new PlaybackError('network', 'The stream did not start'), current),
-        START_TIMEOUT_MS,
-      );
+      armStart(current);
 
       const engines = new Set<EngineName>();
       const seenCues: Record<string, Record<string, true>> = {};
@@ -265,7 +301,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         engines.add(name);
         const listener = {
           tracks: () => {
-            if (current === attempt) refreshTracks();
+            if (current !== attempt) return;
+            reapplyTracks();
+            refreshTracks();
           },
           cues: (trackId: string, cues: Cue[]) => {
             if (current !== attempt) return;
@@ -329,6 +367,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     },
 
     pause() {
+      // Neither clock runs while the viewer pauses: a paused stream is not a stalled one.
+      clearTimeout(stallTimer);
+      stallTimer = undefined;
+      if (!startedPlaying) {
+        clearTimeout(startTimer);
+        startTimer = undefined;
+      }
       video.pause();
     },
 
@@ -350,11 +395,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     },
 
     selectAudio(id) {
+      wantedAudio = id;
       engine?.selectAudio(id);
       refreshTracks();
     },
 
     selectText(id) {
+      wantedText = id;
       engine?.selectText(id);
       refreshTracks();
     },

@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { HLS_PATH, mockPlayback, seedStreamAddon } from './play';
-import { APP_URL, expectFocus, press, pressBack, watchErrors } from './tv';
+import { DEFAULT_STREAMS, HLS_PATH, mockPlayback, seedStreamAddon } from './play';
+import { APP_URL, expectFocus, press, pressBack } from './tv';
 
 /** Elephants Dream, the first title on Home. */
 const MOVIE = 'tt0807840';
@@ -82,6 +82,9 @@ test('a title asks for its streams and tests the best one only once focus rests 
   expect(mock.media).toEqual([]);
 
   await press(page, 'Enter', 'details-watch');
+  // Not on arrival: only once focus has rested.
+  expect(mock.streams).toEqual([]);
+  expect(mock.media).toEqual([]);
   await expect.poll(() => mock.streams).toEqual([`movie/${MOVIE}`]);
   // The link test opens the best stream on a hidden player, ahead of Watch.
   await expect.poll(() => mock.media).toContain('/movie-1080p.webm');
@@ -105,7 +108,9 @@ test('a stream that will not open is swapped for the next best', async ({ page }
 });
 
 test('when nothing plays, the player says why and offers the list', async ({ page }) => {
-  watchErrors(page);
+  // Page errors only: the dead links log console errors of their own.
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await mockAddons(page);
   await seedStreamAddon(page);
   await mockPlayback(page, { broken: ['/movie-1080p.webm', '/movie-720p.webm'] });
@@ -113,10 +118,13 @@ test('when nothing plays, the player says why and offers the list', async ({ pag
 
   await press(page, 'Enter', 'player-surface');
   await expect(page.getByText("This stream won't play")).toBeVisible();
+  // A link that answers 404 is the link's fault, not a format the TV lacks.
+  await expect(page.getByText('Its source may be busy or offline.')).toBeVisible();
   // The torrent cannot play on a TV, so there is nothing left to try.
   await expect(page.locator('[data-focus-key="player-problem-another"]')).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
   await press(page, 'Enter', 'streams-item-0');
+  expect(errors).toEqual([]);
 });
 
 test('All streams lists every stream, says which cannot play, and plays the one picked', async ({
@@ -212,16 +220,39 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 
-  // Skip ahead to the last 30 seconds.
-  await press(page, 'ArrowRight', 'player-seek');
-  await press(page, 'ArrowRight', 'player-seek');
-  await expectFocus(page, 'player-upnext-play');
+  // The 720p release, picked by hand: auto-play chooses 1080p.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', 'streams-item-0');
+  await press(page, 'ArrowDown', 'streams-item-1');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+
+  // In the last 30 seconds (10 s into the 40 s file) the card takes focus.
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
   await expect(page.getByText('Up next')).toBeVisible();
+
+  // Pause closes it, and focus goes to the controls Pause brought up.
+  await page.keyboard.press('Pause');
+  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expectFocus(page, 'player-play');
+
+  // Playing again brings it back, and the controls do not hide and take focus from it.
+  await press(page, 'Enter', 'player-upnext-play');
+  await page.waitForTimeout(6000);
+  await expectFocus(page, 'player-upnext-play');
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(() => mock.streams).toContain('series/tt8000001:1:2');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).src).toBe('/movie-1080p.webm');
+  // Only the release's bingeGroup leads here: auto-play would pick 1080p again.
+  expect((await video(page)).src).toBe('/movie-720p.webm');
   await expect(page.locator('section[aria-label="Morevna Project"]')).toBeVisible();
 
   // Back leaves the second episode for the series.
@@ -269,4 +300,91 @@ test('HLS with audio and subtitle choices plays through hls.js, and both show in
       JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
     )
     .toMatchObject({ audioLanguage: 'fre' });
+});
+
+test("in the language last chosen, the stream's own subtitles come before an addon's file", async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ name: 'Test Streams\nHLS', description: 'Open Movie HLS', path: HLS_PATH }],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // OpenSubtitles answered long before hls.js listed the stream's English track.
+  await expect(page.getByText('Hello from the stream')).toBeVisible();
+  await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
+});
+
+test('a subtitle file that fails gives way to one in its language from an addon that answers later', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    subtitlesDelayMs: 3000,
+    streams: {
+      [MOVIE]: [
+        { ...DEFAULT_STREAMS[0]!, subtitles: [{ id: '1', path: '/missing.srt', lang: 'eng' }] },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect(page.getByText("Those subtitles couldn't be loaded.")).toBeVisible();
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("Those subtitles couldn't be loaded.")).toHaveCount(0);
+});
+
+test('Quality leaves the resolution playing alone, and another starts without its subtitles', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  // The slow addon answers after the player has started, so the list is rebuilt under it.
+  await seedStreamAddon(page, { slowAddon: true, preferences: { subtitleLanguage: 'eng' } });
+  const mock = await mockPlayback(page, {
+    subtitles: false,
+    streams: {
+      // Both streams name their own subtitles "1".
+      [MOVIE]: [
+        { ...DEFAULT_STREAMS[0]!, subtitles: [{ id: '1', path: '/en1.srt', lang: 'eng' }] },
+        { ...DEFAULT_STREAMS[1]!, subtitles: [{ id: '1', path: '/missing.srt', lang: 'eng' }] },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await expect.poll(() => mock.slowAnswers).toBe(1);
+  await page.evaluate(() => {
+    const element = document.querySelector('video:not([aria-hidden])')!;
+    element.addEventListener('emptied', () => element.setAttribute('data-reloaded', 'true'));
+  });
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  // The resolution already playing: nothing reloads.
+  await press(page, 'Enter', 'player-quality-0');
+  await expect(page.locator('[data-focused="true"]')).toHaveText('1080p');
+  await press(page, 'Enter', 'player-quality-button');
+  await page.waitForTimeout(500);
+  await expect(page.locator('video[data-reloaded]')).toHaveCount(0);
+  expect((await video(page)).src).toBe('/movie-1080p.webm');
+
+  await press(page, 'Enter', 'player-quality-0');
+  await press(page, 'ArrowDown', 'player-quality-1');
+  await press(page, 'Enter', 'player-quality-button');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // The 720p stream's own file is missing; the 1080p stream's lines must not stand in for it.
+  await expect(page.getByText("Those subtitles couldn't be loaded.")).toBeVisible();
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
+  await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
 });

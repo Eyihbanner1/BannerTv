@@ -39,6 +39,33 @@ function isGzip(bytes: Uint8Array): boolean {
   return bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
+/**
+ * Reads a body up to MAX_BYTES and stops there, so a file with no declared
+ * size, or a small gzip that unpacks to gigabytes, never fills the TV's memory.
+ */
+async function readCapped(body: ReadableStream<Uint8Array>): Promise<Uint8Array<ArrayBuffer>> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_BYTES) {
+      reader.cancel().catch(() => undefined);
+      throw new SubtitleLoadError('The subtitle file is too big');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return bytes;
+}
+
 async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
   // DecompressionStream arrived in Chromium 80; webOS 5 (Chromium 68) cannot open gzipped files.
   const Decompression = (window as { DecompressionStream?: new (format: string) => unknown })
@@ -47,7 +74,7 @@ async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayB
   const stream = new Blob([bytes])
     .stream()
     .pipeThrough(new Decompression('gzip') as ReadableWritablePair<Uint8Array, Uint8Array>);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  return readCapped(stream);
 }
 
 async function download(url: string, lang: string): Promise<Cue[]> {
@@ -61,12 +88,11 @@ async function download(url: string, lang: string): Promise<Cue[]> {
       throw new SubtitleLoadError(`The subtitle server answered ${response.status}`);
     const declared = Number(response.headers.get('content-length'));
     if (declared > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
-    let bytes = new Uint8Array(await response.arrayBuffer());
+    let bytes = response.body
+      ? await readCapped(response.body)
+      : new Uint8Array(await response.arrayBuffer());
     if (bytes.length > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
-    if (isGzip(bytes)) {
-      bytes = await gunzip(bytes);
-      if (bytes.length > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
-    }
+    if (isGzip(bytes)) bytes = await gunzip(bytes);
     const text = new TextDecoder(detectEncoding(bytes, lang)).decode(bytes);
     const cues = parseSubtitleText(text);
     if (cues.length === 0) throw new SubtitleLoadError('The subtitle file has no lines');

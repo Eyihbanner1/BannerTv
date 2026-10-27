@@ -61,11 +61,20 @@ export interface StreamFinder {
   next(tried: ReadonlySet<string>): StreamEntry | undefined;
   /** A link that failed in the player, so it is not offered again for a while. */
   markFailed(entry: StreamEntry): void;
+  /**
+   * Stops following the addons' answers, so the finder and its streams can be
+   * let go. What it holds stays readable; start() follows them again.
+   */
+  destroy(): void;
 }
 
-/** A stable key for a stream within its finder. Never contains the link, which can carry account keys. */
+/**
+ * A stable key for a stream within its finder. The addon's position tells apart
+ * two installs of one addon (the same id with other settings). Never contains
+ * the link, which can carry account keys.
+ */
 export function entryKey(entry: StreamEntry): string {
-  return `${entry.addonId}#${entry.rank}`;
+  return `${entry.addonRank}:${entry.addonId}#${entry.rank}`;
 }
 
 // Reading a stream's text is the costly part, and lists are rebuilt as each
@@ -106,7 +115,10 @@ function buildEntries(
 
 function create(type: string, videoId: string): StreamFinder {
   let answers: ReadonlyArray<AddonAnswer<Stream[]>> = [];
+  let unsubscribe: Array<() => void> = [];
   let started = false;
+  // Dropped: no longer following the addons, so what has arrived is all there is.
+  let dropped = false;
   let firstPlayableAt: number | null = null;
   let settleTimer: number | undefined;
   let probing = false;
@@ -140,9 +152,10 @@ function create(type: string, videoId: string): StreamFinder {
       settleTimer = window.setTimeout(refresh, SETTLE_AFTER_FIRST_MS);
     }
     const settled =
-      started &&
-      (pending === 0 ||
-        (firstPlayableAt !== null && Date.now() - firstPlayableAt >= SETTLE_AFTER_FIRST_MS));
+      dropped ||
+      (started &&
+        (pending === 0 ||
+          (firstPlayableAt !== null && Date.now() - firstPlayableAt >= SETTLE_AFTER_FIRST_MS)));
     if (settled && settleTimer !== undefined) {
       clearTimeout(settleTimer);
       settleTimer = undefined;
@@ -188,11 +201,10 @@ function create(type: string, videoId: string): StreamFinder {
         return;
       }
       started = true;
+      dropped = false;
       answers = addonClient.streams(type, videoId);
-      answers.forEach((answer) => {
-        answer.query.subscribe(refresh);
-        answer.query.load();
-      });
+      unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
+      answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);
       refresh();
@@ -245,6 +257,15 @@ function create(type: string, videoId: string): StreamFinder {
       failedLinks.add(entryKey(entry));
       refresh();
     },
+
+    destroy() {
+      unsubscribe.forEach((undo) => undo());
+      unsubscribe = [];
+      started = false;
+      dropped = true;
+      // Settled now, so a player still waiting in choose() goes on with what it has.
+      refresh();
+    },
   };
   return finder;
 }
@@ -257,10 +278,17 @@ export function streamFinder(type: string, videoId: string): StreamFinder {
   const now = Date.now();
   const existing = finders.get(key);
   if (existing && now - existing.createdAt < FINDER_LIFETIME_MS) return existing.finder;
+  existing?.finder.destroy();
+  // The new finder goes to the end, so the map stays oldest first.
+  finders.delete(key);
   const finder = create(type, videoId);
   finders.set(key, { finder, createdAt: now });
   // Only a few videos are ever in play at once; drop the oldest.
-  if (finders.size > 8) finders.delete(finders.keys().next().value!);
+  if (finders.size > 8) {
+    const oldest = finders.keys().next().value!;
+    finders.get(oldest)!.finder.destroy();
+    finders.delete(oldest);
+  }
   return finder;
 }
 

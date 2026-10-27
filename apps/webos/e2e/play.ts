@@ -25,6 +25,9 @@ const HLS_TYPES: Record<string, string> = {
 };
 
 export const STREAM_ADDON_URL = 'https://streams.example.com/bannertv/manifest.json';
+/** A second stream addon, which answers only after SLOW_ADDON_MS and offers just a torrent. */
+export const SLOW_ADDON_URL = 'https://slow.example.com/bannertv/manifest.json';
+export const SLOW_ADDON_MS = 3000;
 export const MEDIA_HOST = 'https://media.example.com';
 export const SUBTITLE_HOST = 'https://subs.example.com';
 
@@ -39,6 +42,13 @@ const STREAM_MANIFEST = {
   catalogs: [],
 };
 
+const SLOW_MANIFEST = {
+  ...STREAM_MANIFEST,
+  id: 'org.bannertv.slow-streams',
+  name: 'Slow Streams',
+  description: 'A stream addon that answers late.',
+};
+
 export interface TestStream {
   name: string;
   description: string;
@@ -46,6 +56,8 @@ export interface TestStream {
   path?: string;
   infoHash?: string;
   bingeGroup?: string;
+  /** Subtitles that come with the stream, as paths on SUBTITLE_HOST. */
+  subtitles?: ReadonlyArray<{ id: string; path: string; lang: string }>;
 }
 
 /** What the addon answers for every video, unless a test passes its own list. */
@@ -83,6 +95,8 @@ export interface PlaybackMock {
   streams: string[];
   /** Every subtitles request, as the path after /subtitles/. */
   subtitles: string[];
+  /** Stream answers the slow addon has sent. */
+  slowAnswers: number;
 }
 
 export interface PlaybackOptions {
@@ -92,6 +106,8 @@ export interface PlaybackOptions {
   broken?: readonly string[];
   /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
   subtitles?: boolean;
+  /** How long OpenSubtitles takes to answer. Default at once. */
+  subtitlesDelayMs?: number;
 }
 
 /** Serves the fixture with byte ranges, which the media element needs to seek. */
@@ -136,7 +152,13 @@ export interface SeedProgress {
  */
 export async function seedStreamAddon(
   page: Page,
-  options: { progress?: readonly SeedProgress[] } = {},
+  options: {
+    progress?: readonly SeedProgress[];
+    /** Also installs the slow stream addon. */
+    slowAddon?: boolean;
+    /** Stored preferences, as if chosen before. */
+    preferences?: Record<string, unknown>;
+  } = {},
 ): Promise<void> {
   const cinemeta = JSON.parse(
     readFileSync(
@@ -161,6 +183,9 @@ export async function seedStreamAddon(
       fetchedAt: 0,
     },
     { transportUrl: STREAM_ADDON_URL, manifest: STREAM_MANIFEST, official: false, fetchedAt: 0 },
+    ...(options.slowAddon
+      ? [{ transportUrl: SLOW_ADDON_URL, manifest: SLOW_MANIFEST, official: false, fetchedAt: 0 }]
+      : []),
     {
       transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
       manifest: subtitles,
@@ -174,9 +199,10 @@ export async function seedStreamAddon(
     updatedAt: 1000 + i,
   }));
   await page.addInitScript(
-    ({ stored, saved }) => {
+    ({ stored, saved, chosen }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');
+      if (chosen) localStorage.setItem('bannertv.preferences', JSON.stringify(chosen));
       const request = indexedDB.open('bannertv', 1);
       request.onupgradeneeded = () => {
         const db = request.result;
@@ -193,7 +219,7 @@ export async function seedStreamAddon(
         tx.oncomplete = () => db.close();
       };
     },
-    { stored: addons, saved: progress },
+    { stored: addons, saved: progress, chosen: options.preferences ?? null },
   );
 }
 
@@ -202,7 +228,7 @@ export async function mockPlayback(
   page: Page,
   options: PlaybackOptions = {},
 ): Promise<PlaybackMock> {
-  const mock: PlaybackMock = { media: [], streams: [], subtitles: [] };
+  const mock: PlaybackMock = { media: [], streams: [], subtitles: [], slowAnswers: 0 };
   const broken = new Set(options.broken ?? []);
 
   await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) => {
@@ -226,7 +252,30 @@ export async function mockPlayback(
           ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
           filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
+        ...(stream.subtitles && {
+          subtitles: stream.subtitles.map(({ id, path, lang }) => ({
+            id,
+            url: `${SUBTITLE_HOST}${path}`,
+            lang,
+          })),
+        }),
       })),
+    });
+  });
+
+  await page.route(/^https:\/\/slow\.example\.com\/bannertv\//, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/bannertv/manifest.json') return json(route, SLOW_MANIFEST);
+    await new Promise((resolve) => setTimeout(resolve, SLOW_ADDON_MS));
+    mock.slowAnswers++;
+    return json(route, {
+      streams: [
+        {
+          name: 'Slow Streams\nP2P',
+          description: 'Open Movie 1080p BluRay',
+          infoHash: 'fedcba9876543210fedcba9876543210fedcba98',
+        },
+      ],
     });
   });
 
@@ -247,9 +296,12 @@ export async function mockPlayback(
     return serveFixture(route);
   });
 
-  await page.route(/^https:\/\/opensubtitles-v3\.strem\.io\/subtitles\//, (route) => {
+  await page.route(/^https:\/\/opensubtitles-v3\.strem\.io\/subtitles\//, async (route) => {
     const path = new URL(route.request().url()).pathname.replace('/subtitles/', '');
     mock.subtitles.push(decodeURIComponent(path));
+    if (options.subtitlesDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.subtitlesDelayMs));
+    }
     if (options.subtitles === false) return json(route, { subtitles: [] });
     return json(route, {
       subtitles: [

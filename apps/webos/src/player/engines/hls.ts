@@ -66,8 +66,18 @@ function trackId(track: MediaPlaylist): string {
  */
 export const createHlsEngine: EngineFactory = (video, listener) => {
   let hls: Hls | null = null;
+  // Set by destroy(), so a load still waiting for hls.js never attaches it afterwards.
+  let stopped = false;
 
-  function open(HlsClass: typeof Hls, url: string, startAt: number, worker: boolean) {
+  function teardown() {
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
+    resetVideo(video);
+  }
+
+  function open(HlsClass: typeof Hls, url: string, startAt: number) {
     const events = HlsClass.Events;
     // Buffer limits in seconds: hls.js never caps by bytes, and when the TV's
     // buffer fills it shortens them itself. Not capLevelToPlayerSize: the
@@ -76,7 +86,6 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     // drop the 4K, HDR and 5.1 levels on its word.
     const instance = new HlsClass({
       startPosition: startAt > 0 ? startAt : -1,
-      enableWorker: worker,
       useMediaCapabilities: !isWebOS(),
       renderTextTracksNatively: false,
       maxBufferLength: 15,
@@ -105,16 +114,9 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     });
     instance.on(events.ERROR, (_event: unknown, data: ErrorData) => {
       const detail = String(data.details);
-      if (!data.fatal) {
-        // A worker that fails after starting is not replaced by hls.js, so the
-        // stream would stall: start again from here without one.
-        if (detail === 'internalException' && data.event === 'demuxerWorker' && worker) {
-          const at = video.currentTime > 0 ? video.currentTime : startAt;
-          instance.destroy();
-          if (hls === instance) open(HlsClass, url, at, false);
-        }
-        return;
-      }
+      // hls.js recovers from errors that are not fatal, a failed worker among
+      // them: it demuxes without the worker from then on.
+      if (!data.fatal) return;
       if (FORMAT_ERRORS.indexOf(detail) !== -1) {
         listener.fatal(new PlaybackError('format', 'The TV cannot decode this stream', detail));
         return;
@@ -146,8 +148,9 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
 
     async load(url, startAt) {
       const Hls = await loadHls();
-      engine.destroy();
-      open(Hls, url, startAt, true);
+      if (stopped) return;
+      teardown();
+      open(Hls, url, startAt);
     },
 
     audioTracks() {
@@ -196,11 +199,8 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     },
 
     destroy() {
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
-      resetVideo(video);
+      stopped = true;
+      teardown();
     },
   };
   return engine;

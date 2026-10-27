@@ -23,8 +23,10 @@ function describe(code: number): PlaybackError {
       return new PlaybackError('network', 'The stream stopped loading');
     case 3:
       return new PlaybackError('decode', 'The TV could not decode the stream');
+    // Before the first frame a dead or expired link reads as code 4 too, and
+    // ranking has already set aside formats this TV is known not to play.
     case 4:
-      return new PlaybackError('format', 'The TV cannot play this format');
+      return new PlaybackError('network', 'The TV could not open the stream', 'media 4');
     default:
       return new PlaybackError('other', `Media error ${code}`);
   }
@@ -84,6 +86,13 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
           maxSize: lift ? UHD : undefined,
         });
         video.appendChild(source);
+        // A <source> that fails reports it on itself: the video's own error never fires.
+        const onSourceError = () =>
+          listener.fatal(
+            new PlaybackError('network', 'The TV could not open the stream', 'source error'),
+          );
+        source.addEventListener('error', onSourceError);
+        cleanup.push(() => source.removeEventListener('error', onSourceError));
       } else {
         video.src = url;
       }
@@ -131,8 +140,9 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
       on('loadedmetadata', () => listener.tracks());
 
       video.load();
-      // Failures arrive as the element's error event. A refused play() (autoplay
-      // rules off the TV) leaves the video paused, and the player shows Play.
+      // Failures arrive as an error event on the element or its source. A refused
+      // play() (autoplay rules off the TV) leaves the video paused, and the player
+      // shows Play.
       video.play().catch(() => undefined);
       return Promise.resolve();
     },

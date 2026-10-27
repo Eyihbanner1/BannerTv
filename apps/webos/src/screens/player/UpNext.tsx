@@ -28,8 +28,11 @@ export function UpNext({ video, returnFocusKey, onPlay, onDismiss }: UpNextProps
     preferredChildFocusKey: 'player-upnext-play',
   });
   const play = useRef(onPlay);
+  // Where focus goes as the card closes, not where it would have gone when it opened.
+  const returnTo = useRef(returnFocusKey);
   useEffect(() => {
     play.current = onPlay;
+    returnTo.current = returnFocusKey;
   });
 
   useEffect(() => {
@@ -37,10 +40,9 @@ export function UpNext({ video, returnFocusKey, onPlay, onDismiss }: UpNextProps
     const timer = window.setInterval(() => setLeft((seconds) => Math.max(0, seconds - 1)), 1000);
     return () => {
       window.clearInterval(timer);
-      void setFocus(returnFocusKey);
+      void setFocus(returnTo.current);
     };
     // The countdown starts once, when the card appears.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

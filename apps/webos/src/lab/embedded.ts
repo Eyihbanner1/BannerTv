@@ -38,16 +38,20 @@ function mediaIdOf(video: HTMLVideoElement): string | null {
 export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () => void {
   let stopped = false;
   let unsubscribe = () => undefined as void;
+  // A stopped run says nothing more: its lines would land in the next run's log.
+  const say: Note = (line) => {
+    if (!stopped) note(line);
+  };
 
   const call = async (method: string, params: Record<string, unknown>) => {
     try {
       await lunaCall(`${MEDIA}/${method}`, params, 3000);
-      note(
+      say(
         `${method} ${JSON.stringify(params.type ?? params.enable ?? '')} ${params.index ?? ''}: ok`,
       );
       return true;
     } catch (error) {
-      note(`${method}: ${error instanceof Error ? error.message : String(error)}`);
+      say(`${method}: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   };
@@ -57,12 +61,12 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     await wait(WATCH_MS);
     const moved = video.currentTime - from;
     const error = video.error ? ` error ${video.error.code}` : '';
-    note(`${label}: clock moved ${moved.toFixed(1)} s${video.paused ? ' (paused)' : ''}${error}`);
+    say(`${label}: clock moved ${moved.toFixed(1)} s${video.paused ? ' (paused)' : ''}${error}`);
   };
 
   const run = async () => {
     if (!isWebOS()) {
-      note('Embedded tracks test: only runs on the TV');
+      say('Embedded tracks test: only runs on the TV');
       return;
     }
     const started = Date.now();
@@ -73,10 +77,10 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     }
     if (stopped) return;
     if (!mediaId) {
-      note('No mediaId: play the MKV first');
+      say('No mediaId: play the MKV first');
       return;
     }
-    note(`mediaId after ${Date.now() - started} ms`);
+    say(`mediaId after ${Date.now() - started} ms`);
 
     let program: ProgramInfo | null = null;
     unsubscribe = lunaSubscribe(`${MEDIA}/subscribe`, { mediaId }, (message) => {
@@ -87,25 +91,27 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
         const audio = (program.audioTrackInfo ?? []).map(
           (t) => `${t.language || '?'} ${t.codec ?? ''}`,
         );
-        note(
+        say(
           `sourceInfo: ${program.numSubtitleTracks ?? 0} subtitles (${program.subtitleType ?? '?'}: ${subtitles.join(', ')}), ${program.numAudioTracks ?? 0} audio (${audio.join(', ')})`,
         );
       }
-      if (message.trackSelected) note(`trackSelected ${JSON.stringify(message.trackSelected)}`);
-      if (message.error) note(`pipeline error ${JSON.stringify(message.error)}`);
-      if (message.returnValue === false) note(`subscribe refused: ${String(message.errorText)}`);
+      if (message.trackSelected) say(`trackSelected ${JSON.stringify(message.trackSelected)}`);
+      if (message.error) say(`pipeline error ${JSON.stringify(message.error)}`);
+      if (message.returnValue === false) say(`subscribe refused: ${String(message.errorText)}`);
     });
     const waitedFrom = Date.now();
     while (!program && !stopped && Date.now() - waitedFrom < SOURCE_INFO_WAIT_MS) await wait(250);
     if (stopped) return;
-    if (!program) note('No sourceInfo within 8 s; trying the calls anyway');
+    if (!program) say('No sourceInfo within 8 s; trying the calls anyway');
     await watch('after subscribe');
+    if (stopped) return;
 
     const count = Math.min((program as ProgramInfo | null)?.numSubtitleTracks ?? 2, 2);
     if (!(await call('setSubtitleEnable', { mediaId, enable: true }))) return;
     await wait(500);
     for (let index = 0; index < count && !stopped; index++) {
       await call('selectTrack', { mediaId, type: 'text', index });
+      if (stopped) return;
       await watch(`after text ${index}`);
     }
     if (stopped) return;
@@ -116,10 +122,10 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     await watch('after audio 1');
     unsubscribe();
     await call('unsubscribe', { mediaId });
-    note('Embedded tracks test done');
+    say('Embedded tracks test done');
   };
 
-  void run().catch((error: unknown) => note(`Embedded tracks test failed: ${String(error)}`));
+  void run().catch((error: unknown) => say(`Embedded tracks test failed: ${String(error)}`));
   return () => {
     stopped = true;
     unsubscribe();
