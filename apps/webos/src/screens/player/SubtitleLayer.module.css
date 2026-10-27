@@ -1,0 +1,110 @@
+/* Subtitles sit in the title-safe area: 5% from each edge of the 1920x1080 picture. */
+.area {
+  position: absolute;
+  left: 96px;
+  width: 1728px;
+  text-align: center;
+  transition: bottom var(--bt-motion) ease-out;
+}
+
+.at-bottom {
+  bottom: 72px;
+}
+
+.at-raised {
+  bottom: 200px;
+}
+
+.at-top {
+  top: 64px;
+}
+
+/* Above the seek bar and buttons while they show. */
+.raised {
+  bottom: 300px;
+}
+
+.cue {
+  margin-top: 8px;
+}
+
+.line {
+  line-height: 1.25;
+}
+
+.text {
+  font-family: var(--bt-font);
+  font-weight: 600;
+}
+
+.size-small {
+  font-size: 40px;
+}
+
+.size-medium {
+  font-size: 52px;
+}
+
+.size-large {
+  font-size: 64px;
+}
+
+.size-huge {
+  font-size: 80px;
+}
+
+.colour-white {
+  color: #ffffff;
+}
+
+.colour-yellow {
+  color: #ffe45c;
+}
+
+.colour-cyan {
+  color: #6ae4ff;
+}
+
+.colour-green {
+  color: #8cf59a;
+}
+
+.box {
+  padding: 0 0.3em;
+  /* Each wrapped line gets its own padding and box, like broadcast subtitles. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.back-outline {
+  text-shadow:
+    -2px -2px 0 #000,
+    2px -2px 0 #000,
+    -2px 2px 0 #000,
+    2px 2px 0 #000,
+    0 0 6px #000;
+}
+
+.back-shadow {
+  text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.9);
+}
+
+.back-box {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.back-solid {
+  background: #000;
+}
+
+.italic {
+  font-style: italic;
+}
+
+.bold {
+  font-weight: 800;
+}
+
+.underline {
+  text-decoration: underline;
+}

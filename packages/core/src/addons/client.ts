@@ -5,7 +5,11 @@ import {
   type MetaPreview,
   parseCatalogResponse,
   parseMetaResponse,
+  parseStreamResponse,
+  parseSubtitlesResponse,
   resourceUrl,
+  type Stream,
+  type Subtitle,
   supportsResource,
 } from '@bannertv/protocol';
 import type { FetchJson } from '../http';
@@ -15,6 +19,8 @@ import type { AddonCollection, InstalledAddon } from './collection';
 
 /** Catalog and meta requests give up after this long. */
 export const BROWSE_TIMEOUT_MS = 10000;
+/** Stream and subtitle requests fan out to every addon at once, each with this long. */
+export const PLAY_TIMEOUT_MS = 15000;
 
 const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
@@ -29,6 +35,17 @@ export const META_POLICY: CachePolicy = {
   freshFor: 12 * 60 * MINUTE,
   revalidateFor: 14 * DAY,
   errorFor: 60 * DAY,
+};
+
+/**
+ * Stream links expire (debrid links especially), so a stream list is reused
+ * for a few minutes at most and never kept across launches.
+ */
+export const STREAM_POLICY: CachePolicy = { freshFor: 5 * MINUTE, revalidateFor: 0, errorFor: 0 };
+export const SUBTITLES_POLICY: CachePolicy = {
+  freshFor: 60 * MINUTE,
+  revalidateFor: 0,
+  errorFor: 0,
 };
 
 const METAHUB = 'https://images.metahub.space';
@@ -62,6 +79,20 @@ export interface CatalogOptions {
   persist?: boolean;
 }
 
+/** One addon's answer to a fan-out request. */
+export interface AddonAnswer<T> {
+  addon: InstalledAddon;
+  query: Query<T>;
+}
+
+/** What the subtitles request can say about the file, so addons can match it exactly. */
+export interface SubtitleHints {
+  videoHash?: string;
+  /** Bytes. */
+  videoSize?: number;
+  filename?: string;
+}
+
 export interface AddonClient {
   catalog(
     addon: InstalledAddon,
@@ -72,6 +103,25 @@ export interface AddonClient {
   ): Query<MetaPreview[]>;
   /** Asks addons that declare meta for this type and ID, in priority order, until one knows it. */
   meta(type: ContentType, id: string): Query<MetaDetail>;
+  /**
+   * One query per addon that declares streams for this type and video ID, in
+   * priority order. They all run at once, so the picker fills as they answer.
+   */
+  streams(type: ContentType, videoId: string): Array<AddonAnswer<Stream[]>>;
+  /** The same for subtitles. */
+  subtitles(
+    type: ContentType,
+    videoId: string,
+    hints?: SubtitleHints,
+  ): Array<AddonAnswer<Subtitle[]>>;
+}
+
+function subtitleExtra(hints: SubtitleHints): ExtraArg[] {
+  const extra: ExtraArg[] = [];
+  if (hints.videoHash) extra.push(['videoHash', hints.videoHash]);
+  if (hints.videoSize) extra.push(['videoSize', String(hints.videoSize)]);
+  if (hints.filename) extra.push(['filename', hints.filename]);
+  return extra;
 }
 
 export function createAddonClient(options: {
@@ -82,6 +132,8 @@ export function createAddonClient(options: {
 }): AddonClient {
   const { collection, queries, limiter, fetchJson } = options;
   const get = (url: string) => limiter.run(() => fetchJson(url, { timeoutMs: BROWSE_TIMEOUT_MS }));
+  const getForPlay = (url: string) =>
+    limiter.run(() => fetchJson(url, { timeoutMs: PLAY_TIMEOUT_MS }));
 
   return {
     catalog(addon, type, catalogId, extra = [], options = {}) {
@@ -119,6 +171,48 @@ export function createAddonClient(options: {
           throw failure ?? new NotFoundError();
         },
       });
+    },
+
+    streams(type, videoId) {
+      return collection
+        .get()
+        .addons.filter((addon) => supportsResource(addon.manifest, 'stream', type, videoId))
+        .map((addon) => {
+          const url = resourceUrl(addon.transportUrl, 'stream', type, videoId);
+          return {
+            addon,
+            query: queries.query(url, {
+              policy: STREAM_POLICY,
+              persist: false,
+              fetch: async () => {
+                const response = parseStreamResponse(await getForPlay(url));
+                // The addon's own cache hints are ignored: links can expire long before them.
+                return { value: response.streams, hints: {} };
+              },
+            }),
+          };
+        });
+    },
+
+    subtitles(type, videoId, hints = {}) {
+      const extra = subtitleExtra(hints);
+      return collection
+        .get()
+        .addons.filter((addon) => supportsResource(addon.manifest, 'subtitles', type, videoId))
+        .map((addon) => {
+          const url = resourceUrl(addon.transportUrl, 'subtitles', type, videoId, extra);
+          return {
+            addon,
+            query: queries.query(url, {
+              policy: SUBTITLES_POLICY,
+              persist: false,
+              fetch: async () => {
+                const response = parseSubtitlesResponse(await getForPlay(url));
+                return { value: response.subtitles, hints: {} };
+              },
+            }),
+          };
+        });
     },
   };
 }

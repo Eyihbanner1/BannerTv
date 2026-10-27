@@ -1,0 +1,230 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Page, Route } from '@playwright/test';
+
+/**
+ * A fake stream addon, subtitle files and media for the playback journeys.
+ * Every media link serves the same 40 s of blank VP8, which the test
+ * Chromium plays (it has no H.264), unless a test makes it fail.
+ */
+
+// 40 s of blank VP8 (a WebM) with byte-range support.
+const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.webm'));
+
+export const STREAM_ADDON_URL = 'https://streams.example.com/bannertv/manifest.json';
+export const MEDIA_HOST = 'https://media.example.com';
+export const SUBTITLE_HOST = 'https://subs.example.com';
+
+const STREAM_MANIFEST = {
+  id: 'org.bannertv.test-streams',
+  version: '1.0.0',
+  name: 'Test Streams',
+  description: 'Streams for the playback journeys.',
+  types: ['movie', 'series'],
+  resources: ['stream'],
+  idPrefixes: ['tt'],
+  catalogs: [],
+};
+
+export interface TestStream {
+  name: string;
+  description: string;
+  /** A path on MEDIA_HOST, or a full URL. */
+  path?: string;
+  infoHash?: string;
+  bingeGroup?: string;
+}
+
+/** What the addon answers for every video, unless a test passes its own list. */
+export const DEFAULT_STREAMS: readonly TestStream[] = [
+  {
+    name: 'Test Streams\n1080p',
+    description: 'Open Movie 1080p WEB-DL x264\n💾 1.4 GB ⚡ Cached',
+    path: '/movie-1080p.webm',
+    bingeGroup: 'test-1080p',
+  },
+  {
+    name: 'Test Streams\n720p',
+    description: 'Open Movie 720p WEBRip\n💾 700 MB',
+    path: '/movie-720p.webm',
+    bingeGroup: 'test-720p',
+  },
+  {
+    name: 'Test Streams\nP2P',
+    description: 'Open Movie 2160p REMUX\n👤 52',
+    infoHash: '0123456789abcdef0123456789abcdef01234567',
+  },
+];
+
+/** SRT text served at SUBTITLE_HOST/<id>.srt. */
+export const SUBTITLE_FILES: Record<string, string> = {
+  en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
+  en2: '1\n00:00:00,500 --> 00:00:40,000\nThe second English file\n',
+  fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
+};
+
+export interface PlaybackMock {
+  /** Every media URL requested, as a path, in order. */
+  media: string[];
+  /** Every stream request, as type/videoId. */
+  streams: string[];
+  /** Every subtitles request, as the path after /subtitles/. */
+  subtitles: string[];
+}
+
+export interface PlaybackOptions {
+  /** The streams per video id; videos not listed get DEFAULT_STREAMS. */
+  streams?: Record<string, readonly TestStream[]>;
+  /** Media paths that answer 404, for failover. */
+  broken?: readonly string[];
+  /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
+  subtitles?: boolean;
+}
+
+/** Serves the fixture with byte ranges, which the media element needs to seek. */
+export function serveFixture(route: Route) {
+  const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers()['range'] ?? '');
+  const start = range ? Number(range[1]) : 0;
+  const end = range?.[2] ? Number(range[2]) : FIXTURE.length - 1;
+  return route.fulfill({
+    status: range ? 206 : 200,
+    contentType: 'video/webm',
+    headers: {
+      'accept-ranges': 'bytes',
+      'access-control-allow-origin': '*',
+      ...(range && { 'content-range': `bytes ${start}-${end}/${FIXTURE.length}` }),
+    },
+    body: FIXTURE.subarray(start, end + 1),
+  });
+}
+
+const json = (route: Route, body: unknown, status = 200) =>
+  route.fulfill({
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  });
+
+/**
+ * Installs the test stream addon before the app starts, by writing the addon
+ * collection into IndexedDB the way the app stores it. Call before page.goto,
+ * after mockAddons.
+ */
+export async function seedStreamAddon(page: Page): Promise<void> {
+  const cinemeta = JSON.parse(
+    readFileSync(
+      resolve(import.meta.dirname, '../../../packages/core/src/addons/cinemeta.manifest.json'),
+      'utf8',
+    ),
+  ) as unknown;
+  const subtitles = JSON.parse(
+    readFileSync(
+      resolve(
+        import.meta.dirname,
+        '../../../packages/core/src/addons/opensubtitles-v3.manifest.json',
+      ),
+      'utf8',
+    ),
+  ) as unknown;
+  const addons = [
+    {
+      transportUrl: 'https://v3-cinemeta.strem.io/manifest.json',
+      manifest: cinemeta,
+      official: true,
+      fetchedAt: 0,
+    },
+    { transportUrl: STREAM_ADDON_URL, manifest: STREAM_MANIFEST, official: false, fetchedAt: 0 },
+    {
+      transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
+      manifest: subtitles,
+      official: true,
+      fetchedAt: 0,
+    },
+  ];
+  await page.addInitScript((stored) => {
+    if (sessionStorage.getItem('bannertv.test.seeded')) return;
+    sessionStorage.setItem('bannertv.test.seeded', '1');
+    const request = indexedDB.open('bannertv', 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('cache')) {
+        db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(stored, 'addons');
+      tx.oncomplete = () => db.close();
+    };
+  }, addons);
+}
+
+/** Routes the stream addon, OpenSubtitles' subtitle answers and all media. Call after mockAddons. */
+export async function mockPlayback(
+  page: Page,
+  options: PlaybackOptions = {},
+): Promise<PlaybackMock> {
+  const mock: PlaybackMock = { media: [], streams: [], subtitles: [] };
+  const broken = new Set(options.broken ?? []);
+
+  await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/bannertv/manifest.json') return json(route, STREAM_MANIFEST);
+    const match = /^\/bannertv\/stream\/([^/]+)\/([^/]+)\.json$/.exec(path);
+    if (!match) return json(route, { error: 'not found' }, 404);
+    const type = match[1]!;
+    const videoId = decodeURIComponent(match[2]!);
+    mock.streams.push(`${type}/${videoId}`);
+    const list = options.streams?.[videoId] ?? DEFAULT_STREAMS;
+    return json(route, {
+      streams: list.map((stream) => ({
+        name: stream.name,
+        description: stream.description,
+        ...(stream.path && {
+          url: stream.path.startsWith('http') ? stream.path : `${MEDIA_HOST}${stream.path}`,
+        }),
+        ...(stream.infoHash && { infoHash: stream.infoHash }),
+        behaviorHints: {
+          ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
+          filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
+        },
+      })),
+    });
+  });
+
+  await page.route(/^https:\/\/media\.example\.com\//, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    mock.media.push(path);
+    if (broken.has(path)) return route.fulfill({ status: 404, body: '' });
+    return serveFixture(route);
+  });
+
+  await page.route(/^https:\/\/opensubtitles-v3\.strem\.io\/subtitles\//, (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/subtitles/', '');
+    mock.subtitles.push(decodeURIComponent(path));
+    if (options.subtitles === false) return json(route, { subtitles: [] });
+    return json(route, {
+      subtitles: [
+        { id: 'en1', url: `${SUBTITLE_HOST}/en1.srt`, lang: 'eng' },
+        { id: 'fr1', url: `${SUBTITLE_HOST}/fr1.srt`, lang: 'fre' },
+        { id: 'en2', url: `${SUBTITLE_HOST}/en2.srt`, lang: 'eng' },
+      ],
+    });
+  });
+
+  await page.route(/^https:\/\/subs\.example\.com\//, (route) => {
+    const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
+    const text = SUBTITLE_FILES[id];
+    if (text === undefined) return route.fulfill({ status: 404, body: '' });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/x-subrip',
+      headers: { 'access-control-allow-origin': '*' },
+      body: text,
+    });
+  });
+  return mock;
+}

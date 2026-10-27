@@ -16,7 +16,7 @@ import {
   selectTextTrack,
   type TrackInfo,
   trackName,
-} from '../lab/media';
+} from '../player/media';
 import { LAB_SOURCES, type LabSource } from '../lab/sources';
 import { KeyCode } from '../navigation/keys';
 import { useBack } from '../navigation/use-back';
@@ -237,7 +237,7 @@ export function LabScreen() {
       }
       const element = document.createElement('source');
       element.src = source.url;
-      element.type = buildMediaOptionType(mime, START_SECONDS * 1000);
+      element.type = buildMediaOptionType(mime, { startMs: START_SECONDS * 1000 });
       video.appendChild(element);
     } else {
       video.src = source.url;

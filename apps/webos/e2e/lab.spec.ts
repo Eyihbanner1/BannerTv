@@ -1,27 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { expect, type Route, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
+import { serveFixture } from './play';
 import { APP_URL, expectFocus, press } from './tv';
-
-// 40 s of blank VP8, which test Chromium plays (it has no H.264).
-const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.webm'));
-
-/** Serves the fixture with byte ranges, which the media element needs to seek. */
-function serveFixture(route: Route) {
-  const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers()['range'] ?? '');
-  const start = range ? Number(range[1]) : 0;
-  const end = range?.[2] ? Number(range[2]) : FIXTURE.length - 1;
-  return route.fulfill({
-    status: range ? 206 : 200,
-    contentType: 'video/webm',
-    headers: {
-      'accept-ranges': 'bytes',
-      ...(range && { 'content-range': `bytes ${start}-${end}/${FIXTURE.length}` }),
-    },
-    body: FIXTURE.subarray(start, end + 1),
-  });
-}
 
 test('a seek left over from a failed load does not move the next one', async ({ page }) => {
   await mockAddons(page);

@@ -11,8 +11,10 @@ import { DiscoverScreen } from '../screens/discover/DiscoverScreen';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
+import { PlayerScreen } from '../screens/player/PlayerScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
 import { back, currentSection, openSection, type Route, router } from './router';
 import styles from './App.module.css';
@@ -39,6 +41,11 @@ function Screen({ route }: { route: Route }) {
       return <DiagnosticsScreen />;
     case 'lab':
       return <LabScreen />;
+    case 'streams':
+      return <StreamsScreen {...route} />;
+    case 'player':
+      // A new episode is a new player, so its session and subtitles start afresh.
+      return <PlayerScreen key={route.videoId} {...route} />;
     default:
       return <PlaceholderScreen section={route.name} />;
   }
@@ -84,11 +91,13 @@ export function App() {
     return true;
   });
 
+  // The player takes the whole screen; the rail would only be in the way.
+  const fullScreen = route.name === 'player';
   return (
     <div className={styles.app}>
-      <Rail />
+      {!fullScreen && <Rail />}
       <FocusContext.Provider value={focusKey}>
-        <main ref={ref} className={styles.content}>
+        <main ref={ref} className={fullScreen ? styles.fullScreen : styles.content}>
           {/* On first run the screen waits, so it cannot take focus from the welcome. */}
           {welcomeDone && <Screen key={screenKey} route={route} />}
         </main>

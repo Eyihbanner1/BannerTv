@@ -1,0 +1,94 @@
+.list {
+  position: relative;
+  height: 880px;
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.header {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 76px;
+  margin: 0;
+  padding: 0 28px;
+  font: var(--bt-text-label);
+  line-height: 96px;
+  color: var(--bt-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.item {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 76px;
+  padding: 0 64px 0 28px;
+  border-radius: 16px;
+  font: var(--bt-text-body);
+  line-height: 76px;
+  color: var(--bt-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.label {
+  margin-right: 16px;
+}
+
+.detail {
+  color: var(--bt-text-subtle);
+}
+
+.selected {
+  color: var(--bt-text);
+}
+
+/* A tick on the chosen option, as in Menu. */
+.selected::after {
+  content: '';
+  position: absolute;
+  top: 24px;
+  right: 32px;
+  width: 12px;
+  height: 22px;
+  border-right: 4px solid var(--bt-accent);
+  border-bottom: 4px solid var(--bt-accent);
+  transform: rotate(45deg);
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+  color: var(--bt-text);
+}
+
+.stepper {
+  position: absolute;
+  top: 0;
+  right: 28px;
+  color: var(--bt-text);
+}
+
+.arrow {
+  display: inline-block;
+  width: 32px;
+  text-align: center;
+  color: var(--bt-text-subtle);
+}
+
+.focused .arrow {
+  color: var(--bt-accent);
+}
+
+.value {
+  display: inline-block;
+  min-width: 120px;
+  text-align: center;
+}

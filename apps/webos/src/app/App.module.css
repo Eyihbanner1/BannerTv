@@ -12,3 +12,11 @@
   width: var(--bt-content-width);
   height: 1080px;
 }
+
+.fullScreen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+}

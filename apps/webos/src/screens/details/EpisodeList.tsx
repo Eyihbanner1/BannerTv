@@ -6,6 +6,7 @@ import { Artwork } from '../../components/Artwork';
 import { Pressable } from '../../components/Pressable';
 import { fallbackArt } from '../../components/Tile';
 import { formatDate } from '../../data/describe';
+import { progress } from '../../data/playback';
 import {
   recallFocus,
   recallScroll,
@@ -25,6 +26,8 @@ interface EpisodeListProps {
   memoryKey: string;
   videos: readonly Video[];
   onPress: (video: Video) => void;
+  /** Focus moved to an episode, so its streams can be looked for. */
+  onFocusVideo?: (video: Video) => void;
 }
 
 /**
@@ -32,7 +35,13 @@ interface EpisodeListProps {
  * focused episode stays near the top, and only episodes near the view are
  * drawn: some anime seasons have hundreds.
  */
-export function EpisodeList({ focusKey, memoryKey, videos, onPress }: EpisodeListProps) {
+export function EpisodeList({
+  focusKey,
+  memoryKey,
+  videos,
+  onPress,
+  onFocusVideo,
+}: EpisodeListProps) {
   const { t } = useTranslation();
   const [anchor, setAnchor] = useState(() =>
     Math.min(recallScroll(memoryKey), Math.max(0, videos.length - 1)),
@@ -55,6 +64,9 @@ export function EpisodeList({ focusKey, memoryKey, videos, onPress }: EpisodeLis
       ? t('details.episodeTitle', { number, title: video.title })
       : t('details.untitledEpisode', { number });
     const upcoming = video.released !== undefined && Date.parse(video.released) > now;
+    const seen = progress.get(video.id);
+    const watched = seen?.watched === true;
+    const fraction = seen && seen.duration > 0 ? Math.min(1, seen.position / seen.duration) : 0;
     const date = video.released
       ? upcoming
         ? t('details.airs', { date: formatDate(video.released) })
@@ -64,12 +76,13 @@ export function EpisodeList({ focusKey, memoryKey, videos, onPress }: EpisodeLis
       <Pressable
         key={index}
         focusKey={itemKey}
-        label={[title, date].filter(Boolean).join(', ')}
+        label={[title, date, watched ? t('details.watched') : ''].filter(Boolean).join(', ')}
         className={styles.episode}
         focusedClassName={styles.focused}
         style={{ top: index * ITEM_HEIGHT }}
         onPress={() => onPress(video)}
         onFocus={() => {
+          onFocusVideo?.(video);
           rememberFocus(memoryKey, itemKey);
           const target = Math.max(0, index - 1);
           if (canSlide() && target !== anchor) {
@@ -80,6 +93,15 @@ export function EpisodeList({ focusKey, memoryKey, videos, onPress }: EpisodeLis
       >
         <div className={styles.thumb} style={{ backgroundImage: fallbackArt(index, 120) }}>
           <Artwork key={video.thumbnail} src={video.thumbnail} className={styles.image} />
+          {watched ? (
+            <span className={styles.watched} aria-hidden="true" />
+          ) : (
+            fraction > 0 && (
+              <span className={styles.progress}>
+                <span className={styles.progressFill} style={{ width: `${fraction * 100}%` }} />
+              </span>
+            )
+          )}
         </div>
         <div className={styles.text}>
           <p className={styles.title}>{title}</p>

@@ -13,6 +13,8 @@ export {
   parseMetaResponse,
   parseVideo,
 } from './meta';
+export { parseStream, parseStreamResponse } from './stream';
+export { parseSubtitle, parseSubtitlesResponse } from './subtitles';
 export {
   addonBaseUrl,
   encodeExtra,
@@ -33,6 +35,12 @@ export type {
   MetaPreview,
   MetaResponse,
   PosterShape,
+  ProxyHeaders,
   ResourceName,
+  Stream,
+  StreamResponse,
+  StreamSource,
+  Subtitle,
+  SubtitlesResponse,
   Video,
 } from './types';

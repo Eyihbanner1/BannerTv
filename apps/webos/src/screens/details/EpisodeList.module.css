@@ -76,3 +76,46 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* How far into the episode the viewer got. */
+.progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.progressFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bt-accent);
+}
+
+/* A tick in a dark disc on episodes already seen. */
+.watched {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(11, 8, 21, 0.8);
+}
+
+.watched::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 14px;
+  width: 9px;
+  height: 17px;
+  border-right: 4px solid var(--bt-accent);
+  border-bottom: 4px solid var(--bt-accent);
+  transform: rotate(45deg);
+}
