@@ -103,9 +103,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const [panel, setPanel] = useState<Panel>(null);
   const [panelFrom, setPanelFrom] = useState('player-play');
   const [scrubTo, setScrubTo] = useState<number | null>(null);
-  const scrub = useRef<{ target: number; presses: number; at: number; timer: number } | null>(
-    null,
-  );
+  const scrub = useRef<{ target: number; presses: number; at: number; timer: number } | null>(null);
   const hideTimer = useRef<number | undefined>(undefined);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
 
@@ -321,8 +319,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     !!next &&
     !upNextDismissed &&
     !panel &&
-    (state.status === 'ended' ||
-      (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
+    (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
   useEffect(() => {
     // Ask for the next episode's streams early, so it starts at once.
     if (showUpNext && next) streamFinder(type, next.id).start();
@@ -376,7 +373,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const buttons: ControlButton[] = [
     {
       focusKey: 'player-play',
-      label: state.status === 'paused' || state.status === 'ended' ? t('player.play') : t('player.pause'),
+      label:
+        state.status === 'paused' || state.status === 'ended'
+          ? t('player.play')
+          : t('player.pause'),
       onPress: () => session?.togglePlay(),
     },
     {
@@ -427,127 +427,133 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   return (
     <section className={styles.player} aria-label={title} onMouseMove={onPointer}>
-        <video ref={videoRef} className={styles.video} />
-        <SubtitleLayer
-          video={video}
-          cues={subtitles.cues}
-          offset={subtitles.offset}
-          look={look}
-          raised={controls}
-        />
-        <div ref={surface.ref} className={styles.surface} tabIndex={-1} />
+      <video ref={videoRef} className={styles.video} />
+      <SubtitleLayer
+        video={video}
+        cues={subtitles.cues}
+        offset={subtitles.offset}
+        look={look}
+        raised={controls}
+      />
+      <div
+        ref={surface.ref}
+        className={styles.surface}
+        tabIndex={-1}
+        data-focus-key="player-surface"
+        data-focused={surface.focused ? 'true' : undefined}
+      />
 
-        {waiting && (
-          <div className={styles.waiting} role="status" aria-label={t('player.starting')}>
-            {item?.background && <Artwork src={item.background} className={styles.waitingArt} />}
-            <div className={styles.shimmer} />
-            <div className={styles.waitingTitle}>
-              {item?.logo ? (
-                <Artwork
-                  src={item.logo}
-                  className={styles.waitingLogo}
-                  fallback={<p className={styles.title}>{title}</p>}
-                />
-              ) : (
-                <p className={styles.title}>{title}</p>
-              )}
-              {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
-            </div>
+      {waiting && (
+        <div className={styles.waiting} role="status" aria-label={t('player.starting')}>
+          {item?.background && <Artwork src={item.background} className={styles.waitingArt} />}
+          <div className={styles.shimmer} />
+          <div className={styles.waitingTitle}>
+            {item?.logo ? (
+              <Artwork
+                src={item.logo}
+                className={styles.waitingLogo}
+                fallback={<p className={styles.title}>{title}</p>}
+              />
+            ) : (
+              <p className={styles.title}>{title}</p>
+            )}
+            {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
           </div>
-        )}
-        {state.status === 'buffering' && <div className={styles.spinner} role="status" />}
-        {state.failedOver && <p className={styles.toast}>{t('player.tryingAnother')}</p>}
-        {subtitles.failed && !waiting && (
-          <p className={styles.toast}>{t('player.subtitlesFailed')}</p>
-        )}
+        </div>
+      )}
+      {state.status === 'buffering' && <div className={styles.spinner} role="status" />}
+      {state.failedOver && <p className={styles.toast}>{t('player.tryingAnother')}</p>}
+      {subtitles.failed && !waiting && (
+        <p className={styles.toast}>{t('player.subtitlesFailed')}</p>
+      )}
 
-        <PlayerControls
-          visible={controls && !waiting}
-          title={title}
-          subtitle={subtitle}
-          facts={facts}
-          position={state.position}
-          duration={state.duration}
-          scrubTo={scrubTo}
-          buttons={buttons}
-          onScrub={scrubBy}
+      <PlayerControls
+        visible={controls && !waiting}
+        title={title}
+        subtitle={subtitle}
+        facts={facts}
+        position={state.position}
+        duration={state.duration}
+        scrubTo={scrubTo}
+        buttons={buttons}
+        onScrub={scrubBy}
+      />
+
+      {showUpNext && next && (
+        <UpNext
+          video={next}
+          returnFocusKey={controls ? 'player-play' : 'player-surface'}
+          onPlay={playNextEpisode}
+          onDismiss={() => setUpNextDismissed(true)}
         />
+      )}
 
-        {showUpNext && next && (
-          <UpNext
-            video={next}
-            returnFocusKey={controls ? 'player-play' : 'player-surface'}
-            onPlay={playNextEpisode}
-            onDismiss={() => setUpNextDismissed(true)}
-          />
-        )}
-
-        {panel === 'tracks' && (
-          <TracksPanel
-            audio={state.audio}
-            subtitles={subtitles}
-            returnFocusKey={panelFrom}
-            onAudio={chooseAudio}
-            onStyle={() => setPanel('style')}
-            onClose={() => setPanel(null)}
-          />
-        )}
-        {panel === 'style' && (
-          <SubtitleStylePanel returnFocusKey={panelFrom} onClose={() => setPanel(null)} />
-        )}
-        {panel === 'quality' && (
-          <Menu
-            focusKey="player-quality"
-            title={t('player.quality')}
-            options={choices.map((choice) => ({
-              value: choice.resolution ?? 'other',
-              label: resolutionLabel(choice.resolution) ?? t('player.otherQuality'),
-            }))}
-            selected={currentQuality}
-            returnFocusKey={panelFrom}
-            onSelect={(value) => {
-              setPanel(null);
-              const choice = choices.find((c) => (c.resolution ?? 'other') === value);
-              if (session && choice && choice.entry !== state.entry) {
-                session.play(choice.entry, session.trustedPosition() ?? state.position);
-              }
-            }}
-            onClose={() => setPanel(null)}
-          />
-        )}
-
-        {problem && (
-          <PlayerProblem
-            nothing={nothing}
-            error={state.error}
-            failedAddons={finderState.failed.length}
-            canTryAnother={!nothing && !!session && session.hasNext()}
-            onTryAnother={() => session?.playNext()}
-            onAllStreams={() =>
-              replace({
-                name: 'streams',
-                type,
-                metaId,
-                videoId,
-                preview,
-                startAt: session?.trustedPosition() ?? resumedAt,
-              })
+      {panel === 'tracks' && (
+        <TracksPanel
+          audio={state.audio}
+          subtitles={subtitles}
+          returnFocusKey={panelFrom}
+          onAudio={chooseAudio}
+          onStyle={() => setPanel('style')}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === 'style' && (
+        <SubtitleStylePanel returnFocusKey={panelFrom} onClose={() => setPanel(null)} />
+      )}
+      {panel === 'quality' && (
+        <Menu
+          focusKey="player-quality"
+          title={t('player.quality')}
+          options={choices.map((choice) => ({
+            value: choice.resolution ?? 'other',
+            label: resolutionLabel(choice.resolution) ?? t('player.otherQuality'),
+          }))}
+          selected={currentQuality}
+          returnFocusKey={panelFrom}
+          onSelect={(value) => {
+            setPanel(null);
+            const choice = choices.find((c) => (c.resolution ?? 'other') === value);
+            if (session && choice && choice.entry !== state.entry) {
+              session.play(choice.entry, session.trustedPosition() ?? state.position);
             }
-            onRetry={() => {
-              if (nothing) {
-                setNothing(false);
-                finder.retry();
-                void finder.choose().then((entry) => {
-                  if (entry) session?.play(entry, resumedAt);
-                  else setNothing(true);
-                });
-              } else if (state.entry) {
-                session?.play(state.entry, session.trustedPosition() ?? resumedAt);
-              }
-            }}
-            onBack={back}
-          />
-        )}
+          }}
+          onClose={() => setPanel(null)}
+        />
+      )}
+
+      {problem && (
+        <PlayerProblem
+          nothing={nothing}
+          error={state.error}
+          failedAddons={finderState.failed.length}
+          canTryAnother={!nothing && !!session && session.hasNext()}
+          onTryAnother={() => session?.playNext()}
+          onAllStreams={() =>
+            replace({
+              name: 'streams',
+              type,
+              metaId,
+              videoId,
+              preview,
+              startAt: session?.trustedPosition() ?? resumedAt,
+            })
+          }
+          onRetry={() => {
+            if (nothing) {
+              setNothing(false);
+              finder.retry();
+              void finder.choose().then((entry) => {
+                if (entry) session?.play(entry, resumedAt);
+                else setNothing(true);
+              });
+            } else if (state.entry) {
+              session?.play(state.entry, session.trustedPosition() ?? resumedAt);
+            }
+          }}
+          onBack={back}
+        />
+      )}
     </section>
   );
 }

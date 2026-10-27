@@ -28,15 +28,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L21-L28",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV"
-          ],
+          "hdr": ["DV"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "40.33 GB",
@@ -113,11 +108,7 @@
           "seeders": 20,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en",
-            "ru",
-            "fi"
-          ],
+          "languages": ["en", "ru", "fi"],
           "notes": "Second line is the file inside a season/collection pack; the size is the file's size. 'Multi Subs' is about subtitles, not audio."
         }
       }
@@ -149,11 +140,7 @@
           "seeders": 3,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "dual",
-            "en",
-            "hi"
-          ],
+          "languages": ["dual", "en", "hi"],
           "notes": "No fileIdx and no filename: Stremio picks the largest file."
         }
       }
@@ -173,16 +160,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L199-L205",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "bdrip",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "22.42 GB",
@@ -225,11 +206,7 @@
           "seeders": 20,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "ru",
-            "fi"
-          ]
+          "languages": ["en", "ru", "fi"]
         }
       }
     },
@@ -260,11 +237,7 @@
           "seeders": 3,
           "availability": "uncached",
           "service": "RD",
-          "languages": [
-            "dual",
-            "en",
-            "hi"
-          ],
+          "languages": ["dual", "en", "hi"],
           "notes": "Uncached: playing it makes the debrid service start downloading; the URL plays a 'downloading' placeholder video first."
         }
       }
@@ -289,10 +262,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dts",
-            "dd"
-          ],
+          "audio": ["dts", "dd"],
           "channels": null,
           "size": {
             "text": "7.29 GB",
@@ -302,9 +272,7 @@
           "seeders": null,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "es"
-          ],
+          "languages": ["es"],
           "notes": "behaviorHints.videoSize gives exact bytes; prefer it over the text."
         }
       }
@@ -325,14 +293,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_comet_test.go#L75-L82",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "SDR"
-          ],
+          "hdr": ["SDR"],
           "videoCodec": "hevc",
           "source": "bluray",
-          "audio": [
-            "dd"
-          ],
+          "audio": ["dd"],
           "channels": "5.1",
           "size": {
             "text": "8.14 GB",
@@ -342,10 +306,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "PM",
-          "languages": [
-            "en",
-            "hi"
-          ],
+          "languages": ["en", "hi"],
           "notes": "The url contains raw spaces and brackets (not percent-encoded). 4K but SDR: do not treat 2160p as HDR."
         }
       }
@@ -366,9 +327,7 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_comet_test.go#L114-L121",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "HDR"
-          ],
+          "hdr": ["HDR"],
           "videoCodec": "hevc",
           "source": "web",
           "audio": [],
@@ -381,9 +340,7 @@
           "seeders": 0,
           "availability": "uncached",
           "service": "PM",
-          "languages": [
-            "multi"
-          ],
+          "languages": ["multi"],
           "notes": "Season pack: 27.93 GB is the whole pack, not the episode. 0 seeders."
         }
       }
@@ -405,10 +362,7 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L21-L29",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "remux",
           "audio": [],
@@ -421,10 +375,7 @@
           "seeders": null,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en",
-            "it"
-          ],
+          "languages": ["en", "it"],
           "notes": "Language names written out ('English + Italian'), not flags. '⏳' here means P2P, not an uncached debrid link."
         }
       }
@@ -458,10 +409,7 @@
           "seeders": 30,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en",
-            "hi"
-          ]
+          "languages": ["en", "hi"]
         }
       }
     },
@@ -485,9 +433,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dd"
-          ],
+          "audio": ["dd"],
           "channels": "5.1",
           "size": {
             "text": "2.43 GB",
@@ -497,9 +443,7 @@
           "seeders": null,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "'2.43 GB / 33.48 GB' is file size / pack size: take the first."
         }
       }
@@ -520,10 +464,7 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L143-L150",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "remux",
           "audio": [],
@@ -536,10 +477,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "it"
-          ],
+          "languages": ["en", "it"],
           "notes": "'⚡️' carries U+FE0F (variation selector); match both ⚡ and ⚡️."
         }
       }
@@ -563,9 +501,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dd"
-          ],
+          "audio": ["dd"],
           "channels": "5.1",
           "size": {
             "text": "2.43 GB",
@@ -575,9 +511,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en"
-          ]
+          "languages": ["en"]
         }
       }
     },
@@ -596,9 +530,7 @@
           "hdr": [],
           "videoCodec": "hevc",
           "source": null,
-          "audio": [
-            "dts"
-          ],
+          "audio": ["dts"],
           "channels": "5.1",
           "size": {
             "text": "20.38 GB",
@@ -608,10 +540,7 @@
           "seeders": 1,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "es",
-            "en"
-          ],
+          "languages": ["es", "en"],
           "notes": "No behaviorHints at all. Stats line starts with two spaces. 'Ingles+Subs' contains '+' that is not a cache marker."
         }
       }
@@ -641,9 +570,7 @@
           "seeders": 89,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en"
-          ]
+          "languages": ["en"]
         }
       }
     },
@@ -661,9 +588,7 @@
           "hdr": [],
           "videoCodec": "hevc",
           "source": null,
-          "audio": [
-            "dts"
-          ],
+          "audio": ["dts"],
           "channels": "5.1",
           "size": {
             "text": "20.38 GB",
@@ -673,10 +598,7 @@
           "seeders": 1,
           "availability": "uncached",
           "service": "RD",
-          "languages": [
-            "es",
-            "en"
-          ]
+          "languages": ["es", "en"]
         }
       }
     },
@@ -704,9 +626,7 @@
           "seeders": 89,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en"
-          ]
+          "languages": ["en"]
         }
       }
     },
@@ -721,16 +641,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_orion_test.go#L21-L23",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "bdrip",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "26.6 GB",
@@ -740,9 +654,7 @@
           "seeders": 0,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "No space between emoji and value. '☁️' prefixes the indexer here; AIOStreams treats ☁️ as an uncached marker elsewhere, so do not use it for cache state."
         }
       }
@@ -761,16 +673,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_orion_test.go#L67-L72",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "bluray",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "22.8 GB",
@@ -780,11 +686,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "OC",
-          "languages": [
-            "en",
-            "fr",
-            "es"
-          ],
+          "languages": ["en", "fr", "es"],
           "notes": "URL shortened from the original (the token part was 200+ x's). Resolution only in the description ('📺4K'), service written out as '[Offcloud]'."
         }
       }
@@ -803,9 +705,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dts"
-          ],
+          "audio": ["dts"],
           "channels": null,
           "size": {
             "text": "2.72 GB",
@@ -835,15 +735,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_debridio_test.go#L50-L56",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "5.55 GB",
@@ -853,10 +748,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "ED",
-          "languages": [
-            "en",
-            "it"
-          ],
+          "languages": ["en", "it"],
           "notes": "'H.265' with a dot; flags joined with '|'. Two path segments that looked like account tokens were replaced with x's here."
         }
       }
@@ -875,9 +767,7 @@
           "hdr": [],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "dts-hd-ma"
-          ],
+          "audio": ["dts-hd-ma"],
           "channels": "5.1",
           "size": {
             "text": "65.74 GB",
@@ -906,9 +796,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dd"
-          ],
+          "audio": ["dd"],
           "channels": "5.1",
           "size": {
             "text": "24.42 GB",
@@ -918,11 +806,7 @@
           "seeders": 0,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "dual",
-            "en",
-            "pt-BR"
-          ],
+          "languages": ["dual", "en", "pt-BR"],
           "notes": "Name says 4k, release says 1080p (StremThru's test expects 1080p). Placeholder infoHash. 🇺🇸 for English, 🇧🇷 for Portuguese."
         }
       }
@@ -951,10 +835,7 @@
           "seeders": 76,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "sk",
-            "cs"
-          ],
+          "languages": ["sk", "cs"],
           "notes": "Placeholder infoHash. '/' in the addon name and title; no codec/source info at all."
         }
       }
@@ -1003,14 +884,10 @@
         "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/stream_info.rs#L15-L62",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "HDR10+"
-          ],
+          "hdr": ["HDR10+"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "6.84 GB",
@@ -1042,10 +919,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "web-dl",
-          "audio": [
-            "ddp",
-            "atmos"
-          ],
+          "audio": ["ddp", "atmos"],
           "channels": "5.1",
           "size": {
             "text": "2.91 GB",
@@ -1077,9 +951,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "cam",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": null,
           "size": {
             "text": "1.42 GB",
@@ -1111,9 +983,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "telesync",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": null,
           "size": {
             "text": "948.2 MB",
@@ -1147,9 +1017,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "dvdrip",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": "2.0",
           "size": {
             "text": "158.7 MB",
@@ -1178,14 +1046,10 @@
         "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/providers/mod.rs#L506-L526",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "HDR"
-          ],
+          "hdr": ["HDR"],
           "videoCodec": "av1",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "3.12 GB",
@@ -1217,9 +1081,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dts-hd-ma"
-          ],
+          "audio": ["dts-hd-ma"],
           "channels": "7.1",
           "size": {
             "text": "18.06 GB",
@@ -1229,12 +1091,7 @@
           "seeders": 95,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "multi",
-            "en",
-            "fr",
-            "de"
-          ]
+          "languages": ["multi", "en", "fr", "de"]
         }
       }
     },
@@ -1252,15 +1109,10 @@
         "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/providers/mod.rs#L528-L553",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "dts-x"
-          ],
+          "audio": ["dts-x"],
           "channels": "7.1",
           "size": {
             "text": "71.9 GB",
@@ -1298,9 +1150,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dd"
-          ],
+          "audio": ["dd"],
           "channels": "5.1",
           "size": {
             "text": "12.4 GB",
@@ -1329,16 +1179,10 @@
         "source": "https://github.com/Gabisonfire/knightcrawler/blob/594320ed63b2a0edc64ebf65f0b72d4e9e756184/src/addon/src/moch/moch.js#L170-L185",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10+"
-          ],
+          "hdr": ["DV", "HDR10+"],
           "videoCodec": "hevc",
           "source": "bluray",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "27.88 GB",
@@ -1368,16 +1212,10 @@
         "source": "https://github.com/g0ldyy/comet/blob/f56677f05ed9a158f9a0338ad2f44d8efde35969/comet/utils/formatting.py#L292-L319",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "atmos",
-            "truehd"
-          ],
+          "audio": ["atmos", "truehd"],
           "channels": "7.1",
           "size": {
             "text": "74.3 GB",
@@ -1387,9 +1225,7 @@
           "seeders": 87,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en"
-          ]
+          "languages": ["en"]
         }
       }
     },
@@ -1412,9 +1248,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "2.6 GB",
@@ -1453,9 +1287,7 @@
           "hdr": [],
           "videoCodec": "hevc",
           "source": "webrip",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": "2.0",
           "size": {
             "text": "412.5 MB",
@@ -1465,10 +1297,7 @@
           "seeders": 301,
           "availability": "p2p",
           "service": null,
-          "languages": [
-            "en",
-            "es"
-          ]
+          "languages": ["en", "es"]
         }
       }
     },
@@ -1489,16 +1318,10 @@
         "source": "https://github.com/mhdzumair/MediaFusion/blob/f01aba8bfbfe0c31ead9463e05f0a361ddc651fc/docs/configuration/stream-formatting.md#default-templates",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "atmos",
-            "ddp"
-          ],
+          "audio": ["atmos", "ddp"],
           "channels": "5.1",
           "size": {
             "text": "18.62 GB",
@@ -1508,10 +1331,7 @@
           "seeders": 154,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "fr"
-          ],
+          "languages": ["en", "fr"],
           "notes": "'Dolby Vision' spelled out; 'EAC3' for DD+. notWebReady false is sent explicitly."
         }
       }
@@ -1536,9 +1356,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dts"
-          ],
+          "audio": ["dts"],
           "channels": "5.1",
           "size": {
             "text": "9.87 GB",
@@ -1548,9 +1366,7 @@
           "seeders": 18,
           "availability": "uncached",
           "service": "TB",
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "MediaFusion calls TorBox 'TRB'."
         }
       }
@@ -1571,16 +1387,10 @@
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_template_default.go",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "61.2 GB",
@@ -1590,10 +1400,7 @@
           "seeders": 45,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "fr"
-          ],
+          "languages": ["en", "fr"],
           "notes": "Three-line name: marker+service, addon, resolution."
         }
       }
@@ -1617,9 +1424,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "3.1 GB",
@@ -1650,15 +1455,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L7-L16",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "bluray",
-          "audio": [
-            "dts-hd-ma"
-          ],
+          "audio": ["dts-hd-ma"],
           "channels": "7.1",
           "size": {
             "text": "33.82 GiB",
@@ -1668,10 +1468,7 @@
           "seeders": 61,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "fr"
-          ],
+          "languages": ["en", "fr"],
           "notes": "AIOStreams shows the wrapped addon's name ('Comet'), sizes in GiB, and no space after emojis. 'Subs / ...' lists subtitle languages, not audio."
         }
       }
@@ -1692,16 +1489,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L24-L32",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10+"
-          ],
+          "hdr": ["DV", "HDR10+"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "atmos",
-            "ddp"
-          ],
+          "audio": ["atmos", "ddp"],
           "channels": "5.1",
           "size": {
             "text": "17.3 GB",
@@ -1711,10 +1502,7 @@
           "seeders": 120,
           "availability": "cached",
           "service": "TB",
-          "languages": [
-            "en",
-            "fr"
-          ],
+          "languages": ["en", "fr"],
           "notes": "'sbytes' modifier: decimal GB (1000-based). '🌎 ... 📝 ...' has no separator between audio and subtitle languages."
         }
       }
@@ -1735,15 +1523,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L47-L54",
         "expect": {
           "resolution": "1080p",
-          "hdr": [
-            "HDR"
-          ],
+          "hdr": ["HDR"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "ddp",
-            "atmos"
-          ],
+          "audio": ["ddp", "atmos"],
           "channels": "5.1",
           "size": {
             "text": "7.94 GB",
@@ -1753,9 +1536,7 @@
           "seeders": 230,
           "availability": "uncached",
           "service": "RD",
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "Name has no digits ('🚀 FHD' = 1080p); trust behaviorHints.filename. Trailing spaces on lines."
         }
       }
@@ -1775,16 +1556,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L41-L46",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "truehd",
-            "atmos"
-          ],
+          "audio": ["truehd", "atmos"],
           "channels": "7.1",
           "size": {
             "text": "58.1 GB",
@@ -1794,10 +1569,7 @@
           "seeders": null,
           "availability": "cached",
           "service": null,
-          "languages": [
-            "en",
-            "de"
-          ],
+          "languages": ["en", "de"],
           "notes": "Cache state only as a ticket emoji (🎫 cached, 🎟️ not); no service code. bingeGroup omitted (autoplay disabled)."
         }
       }
@@ -1813,16 +1585,10 @@
         "source": "https://github.com/arvida42/jackettio/blob/576d4f168d4679db2dacb8dd7e268704ef76cd52/src/lib/jackettio.js#L371-L388",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "ddp",
-            "atmos"
-          ],
+          "audio": ["ddp", "atmos"],
           "channels": "5.1",
           "size": {
             "text": "16.42 GB",
@@ -1832,9 +1598,7 @@
           "seeders": 45,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "No behaviorHints at all; 🇺🇸 (not 🇬🇧) for English; seeders marked 👥."
         }
       }
@@ -1853,9 +1617,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "webrip",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": "5.1",
           "size": {
             "text": "2.1 GB",
@@ -1865,10 +1627,7 @@
           "seeders": 310,
           "availability": "uncached",
           "service": "AD",
-          "languages": [
-            "multi",
-            "fr"
-          ],
+          "languages": ["multi", "fr"],
           "notes": "Uncached is shown only by the ABSENCE of '+' after AD. '3.1 MB/s' is a speed, not a size. 🌎 = multi."
         }
       }
@@ -1888,16 +1647,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/presets/torbox.ts#L16-L106",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR"
-          ],
+          "hdr": ["DV", "HDR"],
           "videoCodec": "hevc",
           "source": "web-dl",
-          "audio": [
-            "ddp",
-            "atmos"
-          ],
+          "audio": ["ddp", "atmos"],
           "channels": "5.1",
           "size": {
             "text": "8.4 GB",
@@ -1907,9 +1660,7 @@
           "seeders": 77,
           "availability": "cached",
           "service": "TB",
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "INFERRED shape: built from AIOStreams' TorBox-mimicking formatter and its TorBox parser (which looks for 'Instant', 'Your Media', 'Type:', 'Source:', '| Age:'). Not a captured response."
         }
       }
@@ -1928,9 +1679,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "bluray",
-          "audio": [
-            "dts"
-          ],
+          "audio": ["dts"],
           "channels": "5.1",
           "size": {
             "text": "1,46 GB",
@@ -1940,10 +1689,7 @@
           "seeders": null,
           "availability": "uncached",
           "service": "TB",
-          "languages": [
-            "en",
-            "it"
-          ],
+          "languages": ["en", "it"],
           "notes": "INFERRED shape. Comma decimal separator ('1,46 GB') invented to exercise the size parser (Torrentio's own size parser accepts it)."
         }
       }
@@ -2003,15 +1749,10 @@
         "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L33-L40",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "DV",
-            "HDR10"
-          ],
+          "hdr": ["DV", "HDR10"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "dts-x"
-          ],
+          "audio": ["dts-x"],
           "channels": "7.1",
           "size": {
             "text": "68.4 GB",
@@ -2021,10 +1762,7 @@
           "seeders": null,
           "availability": "cached",
           "service": "RD",
-          "languages": [
-            "en",
-            "it"
-          ],
+          "languages": ["en", "it"],
           "notes": "'DTS:X' with a colon; release name says 'DTS-X'."
         }
       }
@@ -2053,17 +1791,13 @@
           "hdr": [],
           "videoCodec": null,
           "source": null,
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": "2.0",
           "size": null,
           "seeders": null,
           "availability": "direct",
           "service": null,
-          "languages": [
-            "en"
-          ],
+          "languages": ["en"],
           "notes": "proxyHeaders means the host checks Referer/User-Agent: a TV <video> cannot set them, so route via a proxy or warn."
         }
       }
@@ -2077,10 +1811,7 @@
         "filename": "Arrival.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
         "videoSize": 55834574848,
         "videoHash": "8e245d9679d31e12",
-        "countryWhitelist": [
-          "usa",
-          "can"
-        ]
+        "countryWhitelist": ["usa", "can"]
       },
       "_fixture": {
         "id": "direct-mkv-with-video-hash",
@@ -2089,14 +1820,10 @@
         "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#additional-properties-to-provide-information--behaviour-flags",
         "expect": {
           "resolution": "2160p",
-          "hdr": [
-            "HDR10"
-          ],
+          "hdr": ["HDR10"],
           "videoCodec": "hevc",
           "source": "remux",
-          "audio": [
-            "dts-hd-ma"
-          ],
+          "audio": ["dts-hd-ma"],
           "channels": "5.1",
           "size": {
             "text": "52 GB",
@@ -2192,12 +1919,8 @@
       "name": "[Usenet] NZB 1080p",
       "description": "The.Penguin.S01E01.1080p.WEB-DL.DDP5.1.H.264-GRP\n💾 3.2 GB ⏱️ 41d",
       "nzbUrl": "https://indexer.example.org/getnzb/abc123.nzb",
-      "servers": [
-        "nntps://user:pass@news.example.org:563/4"
-      ],
-      "fileMustInclude": [
-        "/.mkv$|.mp4$/i"
-      ],
+      "servers": ["nntps://user:pass@news.example.org:563/4"],
+      "fileMustInclude": ["/.mkv$|.mp4$/i"],
       "_fixture": {
         "id": "usenet-nzb",
         "addon": "Usenet addon",
@@ -2208,9 +1931,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "web-dl",
-          "audio": [
-            "ddp"
-          ],
+          "audio": ["ddp"],
           "channels": "5.1",
           "size": {
             "text": "3.2 GB",
@@ -2229,13 +1950,8 @@
       "name": "RAR 720p",
       "description": "Old.Show.S01E01.720p.HDTV.x264-GRP",
       "rarUrls": [
-        [
-          "https://files.example.org/old.show.s01e01.part1.rar",
-          524288000
-        ],
-        [
-          "https://files.example.org/old.show.s01e01.part2.rar"
-        ]
+        ["https://files.example.org/old.show.s01e01.part1.rar", 524288000],
+        ["https://files.example.org/old.show.s01e01.part2.rar"]
       ],
       "fileIdx": 0,
       "_fixture": {
@@ -2274,9 +1990,7 @@
           "hdr": [],
           "videoCodec": "avc",
           "source": "web-dl",
-          "audio": [
-            "aac"
-          ],
+          "audio": ["aac"],
           "channels": "2.0",
           "size": null,
           "seeders": null,

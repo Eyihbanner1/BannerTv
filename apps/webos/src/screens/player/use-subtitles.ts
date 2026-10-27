@@ -65,7 +65,10 @@ export function useSubtitles(
       .addons.find((candidate) => candidate.manifest.id === entry.addonId);
     return subtitleList(type, videoId, entry.stream, addon?.manifest.name ?? entry.addonId);
   }, [type, videoId, entry]);
-  const listState = useSyncExternalStore(list ? list.subscribe : noop, list ? list.get : () => EMPTY);
+  const listState = useSyncExternalStore(
+    list ? list.subscribe : noop,
+    list ? list.get : () => EMPTY,
+  );
   useEffect(() => {
     if (!list) return;
     list.start();
@@ -142,9 +145,7 @@ export function useSubtitles(
         if (cancelled) return;
         broken.current.add(option.key);
         const key = languageKey(option.lang);
-        const next = options.find(
-          (o) => languageKey(o.lang) === key && !broken.current.has(o.key),
-        );
+        const next = options.find((o) => languageKey(o.lang) === key && !broken.current.has(o.key));
         if (!next) {
           setFailedChoice(choice);
           return;

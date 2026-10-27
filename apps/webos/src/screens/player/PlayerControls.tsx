@@ -50,6 +50,8 @@ function SeekBar({
       ref={ref}
       role="slider"
       tabIndex={-1}
+      data-focus-key="player-seek"
+      data-focused={focused ? 'true' : undefined}
       aria-label={t('player.seek')}
       aria-valuetext={formatTime(shown)}
       className={focused ? `${styles.seek} ${styles.seekFocused}` : styles.seek}

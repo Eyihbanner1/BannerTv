@@ -93,7 +93,10 @@ export function SettingsScreen() {
         />
       )}
       {open === 'style' && (
-        <SubtitleStylePanel returnFocusKey="settings-subtitle-style" onClose={() => setOpen(null)} />
+        <SubtitleStylePanel
+          returnFocusKey="settings-subtitle-style"
+          onClose={() => setOpen(null)}
+        />
       )}
     </div>
   );

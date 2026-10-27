@@ -64,9 +64,12 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
   await expect(page.getByText('Starring Proog, Emo')).toBeVisible();
   await expect(page.getByText('Directed by Bassam Kurdali')).toBeVisible();
 
-  await press(page, 'Enter', 'details-watch');
-  await expect(page.getByText('Choosing a stream arrives in Phase 2')).toBeVisible();
+  // No stream addon is installed, so the player says so.
+  await press(page, 'Enter', 'player-problem-streams');
+  await expect(page.getByText('No stream could play')).toBeVisible();
 
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
   await pressBack(page);
   await expectFocus(page, `${FIRST_ROW}-tile-2`);
   // Home comes back with the row already at that tile, not sliding there.
@@ -90,7 +93,10 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
   for (const item of ['search', 'discover', 'library', 'addons', 'settings']) {
     await press(page, 'ArrowDown', `rail-${item}`);
   }
-  await press(page, 'Enter', 'settings-diagnostics');
+  await press(page, 'Enter', 'settings-stream-choice');
+  await press(page, 'ArrowDown', 'settings-probing');
+  await press(page, 'ArrowDown', 'settings-subtitle-style');
+  await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'Enter', 'diagnostics-refresh');
   await expect(page.getByText('classic script')).toBeVisible();
 

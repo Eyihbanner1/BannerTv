@@ -14,7 +14,10 @@ test('a seek left over from a failed load does not move the next one', async ({ 
   for (const item of ['search', 'discover', 'library', 'addons', 'settings']) {
     await press(page, 'ArrowDown', `rail-${item}`);
   }
-  await press(page, 'Enter', 'settings-diagnostics');
+  await press(page, 'Enter', 'settings-stream-choice');
+  await press(page, 'ArrowDown', 'settings-probing');
+  await press(page, 'ArrowDown', 'settings-subtitle-style');
+  await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'ArrowDown', 'settings-lab');
   await press(page, 'Enter', 'lab-start-mode');
 

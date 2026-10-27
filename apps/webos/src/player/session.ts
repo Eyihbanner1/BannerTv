@@ -207,10 +207,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         patch({ position: trusted ?? lastStartAt, duration });
       },
     ],
-    [
-      'durationchange',
-      () => patch({ duration: isFinite(video.duration) ? video.duration : 0 }),
-    ],
+    ['durationchange', () => patch({ duration: isFinite(video.duration) ? video.duration : 0 })],
     [
       'ended',
       () => {

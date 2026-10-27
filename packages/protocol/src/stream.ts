@@ -111,7 +111,8 @@ export function parseStream(value: unknown): Stream | undefined {
   const videoHash = readString(hints.videoHash);
   if (videoHash !== undefined) stream.behaviorHints.videoHash = videoHash;
   const videoSize = readNumber(hints.videoSize);
-  if (videoSize !== undefined && videoSize > 0) stream.behaviorHints.videoSize = videoSize;
+  if (videoSize !== undefined && videoSize >= 1)
+    stream.behaviorHints.videoSize = Math.floor(videoSize);
   return stream;
 }
 

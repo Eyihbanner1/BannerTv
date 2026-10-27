@@ -44,7 +44,10 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
   const { t } = useTranslation();
   const finder = useMemo(() => streamFinder(type, videoId), [type, videoId]);
   const state = useSyncExternalStore(finder.subscribe, finder.get);
-  const order = useSyncExternalStore(preferences.subscribe, () => preferences.get().allStreamsOrder);
+  const order = useSyncExternalStore(
+    preferences.subscribe,
+    () => preferences.get().allStreamsOrder,
+  );
   const metaQuery = useMemo(
     () => (type === 'movie' ? null : addonClient.meta(type, metaId)),
     [type, metaId],
@@ -66,7 +69,10 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
     saveLastFocusedChild: true,
     preferredChildFocusKey: 'streams-item-0',
   });
-  useScreenFocus(entries.length > 0 ? 'streams-item-0' : 'streams-sort', entries.length > 0 || state.settled);
+  useScreenFocus(
+    entries.length > 0 ? 'streams-item-0' : 'streams-sort',
+    entries.length > 0 || state.settled,
+  );
 
   const open = (entry: StreamEntry) => {
     const action = entry.assessment.action;

@@ -106,12 +106,25 @@ const json = (route: Route, body: unknown, status = 200) =>
     body: JSON.stringify(body),
   });
 
+/** A saved watch position, as the app keeps them. */
+export interface SeedProgress {
+  metaId: string;
+  type: 'movie' | 'series';
+  videoId: string;
+  position: number;
+  duration: number;
+  watched?: boolean;
+}
+
 /**
  * Installs the test stream addon before the app starts, by writing the addon
- * collection into IndexedDB the way the app stores it. Call before page.goto,
- * after mockAddons.
+ * collection (and any watch progress) into IndexedDB the way the app stores
+ * it. Call before page.goto, after mockAddons.
  */
-export async function seedStreamAddon(page: Page): Promise<void> {
+export async function seedStreamAddon(
+  page: Page,
+  options: { progress?: readonly SeedProgress[] } = {},
+): Promise<void> {
   const cinemeta = JSON.parse(
     readFileSync(
       resolve(import.meta.dirname, '../../../packages/core/src/addons/cinemeta.manifest.json'),
@@ -142,24 +155,33 @@ export async function seedStreamAddon(page: Page): Promise<void> {
       fetchedAt: 0,
     },
   ];
-  await page.addInitScript((stored) => {
-    if (sessionStorage.getItem('bannertv.test.seeded')) return;
-    sessionStorage.setItem('bannertv.test.seeded', '1');
-    const request = indexedDB.open('bannertv', 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
-      if (!db.objectStoreNames.contains('cache')) {
-        db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
-      }
-    };
-    request.onsuccess = () => {
-      const db = request.result;
-      const tx = db.transaction('kv', 'readwrite');
-      tx.objectStore('kv').put(stored, 'addons');
-      tx.oncomplete = () => db.close();
-    };
-  }, addons);
+  const progress = (options.progress ?? []).map((entry, i) => ({
+    watched: false,
+    ...entry,
+    updatedAt: 1000 + i,
+  }));
+  await page.addInitScript(
+    ({ stored, saved }) => {
+      if (sessionStorage.getItem('bannertv.test.seeded')) return;
+      sessionStorage.setItem('bannertv.test.seeded', '1');
+      const request = indexedDB.open('bannertv', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('cache')) {
+          db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(stored, 'addons');
+        if (saved.length > 0) tx.objectStore('kv').put(saved, 'progress');
+        tx.oncomplete = () => db.close();
+      };
+    },
+    { stored: addons, saved: progress },
+  );
 }
 
 /** Routes the stream addon, OpenSubtitles' subtitle answers and all media. Call after mockAddons. */

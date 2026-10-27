@@ -61,6 +61,8 @@ function Stepper({
       ref={ref}
       role="slider"
       tabIndex={-1}
+      data-focus-key={focusKey}
+      data-focused={focused ? 'true' : undefined}
       aria-label={label}
       aria-valuetext={value}
       className={focused ? `${styles.item} ${styles.focused}` : styles.item}

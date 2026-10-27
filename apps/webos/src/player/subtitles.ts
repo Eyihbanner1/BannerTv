@@ -44,9 +44,9 @@ async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayB
   const Decompression = (window as { DecompressionStream?: new (format: string) => unknown })
     .DecompressionStream;
   if (!Decompression) throw new SubtitleLoadError('The subtitle file is compressed');
-  const stream = new Blob([bytes]).stream().pipeThrough(
-    new Decompression('gzip') as ReadableWritablePair<Uint8Array, Uint8Array>,
-  );
+  const stream = new Blob([bytes])
+    .stream()
+    .pipeThrough(new Decompression('gzip') as ReadableWritablePair<Uint8Array, Uint8Array>);
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -57,7 +57,8 @@ async function download(url: string, lang: string): Promise<Cue[]> {
     const response = await fetch(url, { signal: controller?.signal }).catch(() => {
       throw new SubtitleLoadError('The subtitle file could not be reached');
     });
-    if (!response.ok) throw new SubtitleLoadError(`The subtitle server answered ${response.status}`);
+    if (!response.ok)
+      throw new SubtitleLoadError(`The subtitle server answered ${response.status}`);
     const declared = Number(response.headers.get('content-length'));
     if (declared > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
     let bytes = new Uint8Array(await response.arrayBuffer());

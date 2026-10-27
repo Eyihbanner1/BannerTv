@@ -53,7 +53,8 @@ export function UpNext({ video, returnFocusKey, onPlay, onDismiss }: UpNextProps
   });
 
   const number = video.episode;
-  const name = video.title || (number !== undefined ? t('details.untitledEpisode', { number }) : '');
+  const name =
+    video.title || (number !== undefined ? t('details.untitledEpisode', { number }) : '');
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className={styles.upNext} role="dialog" aria-label={t('player.upNext')}>
@@ -69,7 +70,11 @@ export function UpNext({ video, returnFocusKey, onPlay, onDismiss }: UpNextProps
             label={t('player.playNextIn', { seconds: left })}
             onPress={onPlay}
           />
-          <Button focusKey="player-upnext-dismiss" label={t('player.keepWatching')} onPress={onDismiss} />
+          <Button
+            focusKey="player-upnext-dismiss"
+            label={t('player.keepWatching')}
+            onPress={onDismiss}
+          />
         </div>
       </div>
     </FocusContext.Provider>

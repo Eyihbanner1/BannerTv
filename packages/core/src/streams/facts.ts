@@ -121,10 +121,12 @@ function language(code: string): Apply {
 
 const ignore: Apply = () => undefined;
 
-/** After a dot and before the end of a word list, "ts" is the MPEG-TS file extension, not a telesync. */
+/** A "ts" after a dot and before a space or the end is a file extension (MPEG-TS), not a telesync. */
 const AFTER_EXTENSION = /^(?:$|[\s?#&)\]"'])/;
 
 const telesync = source('TS');
+const ddPlus = audio('DD+');
+const atmos = audio('Atmos');
 
 const RULES: readonly Rule[] = [
   // HDR. "HDRip" and "HDRezka" are not HDR: the trailing boundary rules them out.
@@ -155,10 +157,10 @@ const RULES: readonly Rule[] = [
   { pattern: 'dts[ ._:-]?x', apply: audio('DTS:X') },
   { pattern: 'dts[ ._-]?(?:es|lossy|hr)', apply: audio('DTS') },
   { pattern: 'dolby[ ._-]?true[ ._-]?hd|true[ ._-]hd', apply: audio('TrueHD') },
-  { pattern: 'dolby[ ._-]?atmos', apply: audio('Atmos') },
+  { pattern: 'dolby[ ._-]?atmos', apply: atmos },
   {
     pattern: 'dolby[ ._-]?digital[ ._-]?plus|dd[ ._-]?plus|e[ ._-]?ac[ ._-]?3',
-    apply: audio('DD+'),
+    apply: ddPlus,
   },
   { pattern: 'dolby[ ._-]?digital|ac[ ._-]?3', apply: audio('DD') },
   { pattern: 'he[ ._-]?aac|aac[ ._-]?lc', apply: audio('AAC') },
@@ -168,24 +170,26 @@ const RULES: readonly Rule[] = [
   { pattern: '6ch', apply: channelWord('5.1') },
   { pattern: '8ch', apply: channelWord('7.1') },
   {
+    // DD+ with Atmos, as in "DDPA5.1".
     pattern: 'ddpa',
     apply: (draft, text, start, end) => {
-      audio('DD+')(draft, text, start, end);
-      audio('Atmos')(draft, text, start, end);
+      ddPlus(draft, text, start, end);
+      atmos(draft, text, start, end);
     },
     digitsMayFollow: true,
   },
-  { pattern: 'ddp|dd\\+', apply: audio('DD+'), digitsMayFollow: true },
+  { pattern: 'ddp|dd\\+', apply: ddPlus, digitsMayFollow: true },
   { pattern: 'dd', apply: audio('DD'), digitsMayFollow: true },
   { pattern: 'aac', apply: audio('AAC'), digitsMayFollow: true },
   { pattern: 'truehd', apply: audio('TrueHD'), digitsMayFollow: true },
-  { pattern: 'atmos', apply: audio('Atmos'), digitsMayFollow: true },
+  { pattern: 'atmos', apply: atmos, digitsMayFollow: true },
   { pattern: 'dts', apply: audio('DTS'), digitsMayFollow: true },
   { pattern: 'flac', apply: audio('FLAC'), digitsMayFollow: true },
   { pattern: 'opus', apply: audio('Opus'), digitsMayFollow: true },
   { pattern: 'l?pcm', apply: audio('PCM'), digitsMayFollow: true },
 
-  // Release source.
+  // Release source. Screeners first, so "WEBSCR" is not read as WEB.
+  { pattern: '(?:dvd|b[dr]|web)[ ._-]?scr|screener|scr', apply: source('SCR') },
   { pattern: 'b[dr][ ._-]?remux|remux', apply: source('REMUX') },
   {
     pattern: 'blu[ ._-]?ray|b[dr][ ._-]?rip|bdmv|bd(?:25|50|66|100)',
@@ -195,7 +199,6 @@ const RULES: readonly Rule[] = [
   { pattern: 'web[ ._-]?rip', apply: source('WEBRip') },
   { pattern: 'web', apply: source('WEB-DL') },
   { pattern: '[hps]dtv(?:rip)?', apply: source('HDTV') },
-  { pattern: '(?:dvd|b[dr]|web)[ ._-]?scr|screener|scr', apply: source('SCR') },
   { pattern: 'dvd(?:[ ._-]?rip|[59]|r)?', apply: source('DVD') },
   { pattern: 'hd[ ._-]?tc|telecine|tc', apply: source('TC') },
   { pattern: 'hd[ ._-]?ts|tele[ ._-]?sync', apply: telesync },
@@ -271,15 +274,16 @@ const RULES: readonly Rule[] = [
  */
 const WORDS = new RegExp(
   '(?:^|[^a-z0-9])(?:' +
-    RULES.map((rule) => `(${rule.pattern})${rule.digitsMayFollow ? '(?![a-z])' : '(?![a-z0-9])'}`).join(
-      '|',
-    ) +
+    RULES.map(
+      (rule) => `(${rule.pattern})${rule.digitsMayFollow ? '(?![a-z])' : '(?![a-z0-9])'}`,
+    ).join('|') +
     ')',
   'g',
 );
 
 /** "1080p", "2160p60", "1920x1080", "4K", "UHD", "FHD"; "HD" only counts when nothing better is said. */
-const RESOLUTION = /(?:^|[^a-z0-9])(?:(\d{3,4})[pi]|\d{3,4}x(\d{3,4})|(4k|uhd|qhd|fhd|hd))(?![a-z])/g;
+const RESOLUTION =
+  /(?:^|[^a-z0-9])(?:(\d{3,4})[pi]|\d{3,4}x(\d{3,4})|(4k|uhd|qhd|fhd|hd))(?![a-z])/g;
 const RESOLUTION_BY_LINES: Readonly<Record<string, Resolution>> = {
   '2160': '2160p',
   '1440': '1440p',
@@ -467,6 +471,8 @@ const SERVICES: Readonly<Record<string, string>> = {
 const NAME_TAG = /[[(]([^[\]()\n]{1,30})[\])]/g;
 /** Digits stay, so "[P2P]" is not read as PikPak's "PP". */
 const TAG_SEPARATORS = /[^a-z0-9]/g;
+const TAG_WORDS = /instant|download/g;
+const TAG_UNCACHED = /download|⬇|⏳/;
 /** MediaFusion's "🧲 RD ⚡️" and AIOStreams' "RD ⏳", without brackets. */
 const NAME_SERVICE_MARK = /(?:^|[^a-z0-9])(rd|pm|ad|dl|ed|oc|tb|trb|hw)\s*(⚡|⏳|⬇)/;
 const NAME_SERVICE_WORD =
@@ -545,7 +551,9 @@ function readSize(text: string): number | undefined {
   if (!match) return undefined;
   const number = match[1]!;
   const value = Number(
-    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(number) ? number.replace(/,/g, '') : number.replace(',', '.'),
+    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(number)
+      ? number.replace(/,/g, '')
+      : number.replace(',', '.'),
   );
   const unit = match[2]!;
   // Most addons divide by 1024 and still write "GB". Only when the same text
@@ -601,11 +609,11 @@ function readCache(name: string, description: string): CacheState {
   while ((tag = NAME_TAG.exec(name)) !== null) {
     const inner = tag[1]!;
     const instant = NAME_INSTANT.test(inner);
-    const code = SERVICES[inner.replace(/instant|download/g, '').replace(TAG_SEPARATORS, '')];
+    const code = SERVICES[inner.replace(TAG_WORDS, '').replace(TAG_SEPARATORS, '')];
     if (code === undefined) continue;
     if (service === undefined) service = code;
     if (instant || inner.indexOf('+') >= 0 || inner.indexOf('⚡') >= 0) cachedMark = true;
-    else if (/download|⬇|⏳/.test(inner)) uncachedMark = true;
+    else if (TAG_UNCACHED.test(inner)) uncachedMark = true;
     // Jackettio and StremThru mark an uncached link only by leaving the marker out.
     else bareTag = true;
   }
@@ -737,9 +745,11 @@ export function describeStream(stream: Stream): StreamFacts {
   const releaseSource = draft.cinema ?? (draft.remux ? 'REMUX' : draft.source);
   if (releaseSource) facts.releaseSource = releaseSource;
 
-  const sizeBytes = stream.behaviorHints.videoSize ?? readSize(description + '\n' + name);
+  // Sizes and seeders are the addon's own figures, never part of a file name.
+  const stats = description + '\n' + name;
+  const sizeBytes = stream.behaviorHints.videoSize ?? readSize(stats);
   if (sizeBytes !== undefined) facts.sizeBytes = sizeBytes;
-  const seeders = readSeeders(description + '\n' + name);
+  const seeders = readSeeders(stats);
   if (seeders !== undefined) facts.seeders = seeders;
 
   // A torrent, YouTube video or web page has no debrid cache.

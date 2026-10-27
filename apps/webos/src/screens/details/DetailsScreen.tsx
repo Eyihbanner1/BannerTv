@@ -251,16 +251,6 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               onPress={() => play(latestVideo.id)}
             />
           )}
-          {watchVideoId !== null && (
-            <Button
-              focusKey="details-streams"
-              label={t('details.allStreams')}
-              onFocus={restOn(watchVideoId)}
-              onPress={() =>
-                push({ name: 'streams', type, metaId: id, videoId: watchVideoId, preview: item })
-              }
-            />
-          )}
           {trailer && (
             <Button
               focusKey="details-trailer"
@@ -270,6 +260,16 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
                 setNote(null);
                 playTrailer(trailer).catch(() => setNote(t('details.trailerFailed')));
               }}
+            />
+          )}
+          {watchVideoId !== null && (
+            <Button
+              focusKey="details-streams"
+              label={t('details.allStreams')}
+              onFocus={restOn(watchVideoId)}
+              onPress={() =>
+                push({ name: 'streams', type, metaId: id, videoId: watchVideoId, preview: item })
+              }
             />
           )}
           {failed && (

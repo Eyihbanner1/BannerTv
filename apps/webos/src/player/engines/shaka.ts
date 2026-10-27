@@ -108,9 +108,6 @@ class CueHandoff implements shakaNs.extern.TextDisplayer {
 
   setTextLanguage() {}
 
-  /** Shaka 4.x asks for this; 5.x does not. */
-  enableTextDisplayer() {}
-
   destroy() {
     return Promise.resolve();
   }
@@ -136,8 +133,8 @@ function report(listener: EngineListener, error: unknown) {
 }
 
 /**
- * Shaka Player over Media Source Extensions, for DASH. Written against the
- * part of the API that 4.16 and 5.x share, so either build can be dropped in.
+ * Shaka Player 5 over Media Source Extensions, for DASH. Shaka 4 differs in
+ * text track selection and preferences, so it is not a drop-in swap.
  */
 export const createShakaEngine: EngineFactory = (video, listener) => {
   let player: ShakaPlayer | null = null;
@@ -153,8 +150,9 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
       await instance.attach(video);
       const activeText = () => instance.getTextTracks().find((track) => track.active);
       instance.configure({
-        // Small buffers for TVs with 1.5 GB shared by everything.
-        streaming: { bufferingGoal: 15, rebufferingGoal: 2, bufferBehind: 10 },
+        // Shaka's forward buffer is already small; keep less behind, for TVs
+        // with 1.5 GB shared by everything.
+        streaming: { bufferBehind: 10 },
         textDisplayFactory: () =>
           new CueHandoff((cues) => {
             const track = activeText();
@@ -208,9 +206,6 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
       if (!player) return;
       const track = id === null ? null : player.getTextTracks().find((t) => String(t.id) === id);
       player.selectTextTrack(track ?? null);
-      // Shaka 4.x streams text only while visible; 5.x shows a track once it is selected.
-      const legacy = player as unknown as { setTextTrackVisibility?: (on: boolean) => unknown };
-      if (legacy.setTextTrackVisibility) void legacy.setTextTrackVisibility(track !== null);
     },
 
     async destroy() {

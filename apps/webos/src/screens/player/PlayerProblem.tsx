@@ -57,8 +57,16 @@ export function PlayerProblem(props: PlayerProblemProps) {
           label={t('player.allStreams')}
           onPress={props.onAllStreams}
         />
-        <Button focusKey="player-problem-retry" label={t('common.tryAgain')} onPress={props.onRetry} />
-        <Button focusKey="player-problem-back" label={t('player.problem.back')} onPress={props.onBack} />
+        <Button
+          focusKey="player-problem-retry"
+          label={t('common.tryAgain')}
+          onPress={props.onRetry}
+        />
+        <Button
+          focusKey="player-problem-back"
+          label={t('player.problem.back')}
+          onPress={props.onBack}
+        />
       </div>
     </Overlay>
   );
