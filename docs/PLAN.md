@@ -200,7 +200,7 @@ One normalised record per event, built in `packages/core/src/sports/`: sport, co
 
 - Meta and stream requests for a sports item go to the addon that listed it, never to another addon that declares the same id prefix.
 - Play asks for streams once per distinct source (addon, type, id) of the event. One stream finder serves the whole event, keyed by the event, and its streams are keyed by source as well as by addon, then handed to Phase 2's automatic stream choice. The event page asks only after the usual focus rest on Play; tiles and rows never ask.
-- Live events and channels save no progress and offer no Resume or Start over. They always open at the live edge, and failover, Quality and Other streams restart at the live edge too. Up Next is off for them. Replays behave like any other video. Sports items never go to Trakt, which has no entry for them.
+- Live playback comes from Phase 2 (ADR 0003 item 12): a broadcast the player reports as live saves no progress and no Continue Watching card, has no Up Next or Start over, and every other stream of it (failover, Quality, Other streams, Try again) starts at the live edge. Replays behave like any other video. The player's live flag says what is playing now, never the schedule: Live now comes from kick-off times. Sports items never go to Trakt, which has no entry for them.
 
 **Fetching and paging**
 
@@ -257,7 +257,6 @@ Later, not Phase 3: a full-screen fixtures list per day (it repeats the rows), f
 - [ ] Competition and team dictionaries from CC0 sources, the UEFA club list, the league calendars, and the build script for the bundled file
 - [ ] Event paging, the `skip` probe and per-genre fetching, the request-slot limit and the refresh rules for sports catalogs
 - [ ] Take sports catalogs out of Home's board and Search's addon fan-out (Detection rule 5)
-- [ ] Live playback rules in the player: no progress or Resume for live events, live-edge restarts on failover and Quality
 - [ ] Sports screen, day strip, fixture tiles, event page and Replays row; the Live sport row on Home
 - [ ] Team search on the local index, and a Sports group in Search
 - [ ] "Show in Sports" per addon in Addons settings
