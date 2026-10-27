@@ -1,9 +1,10 @@
 name: Website
 
 # Publishes site/ (privacy policy, terms of use, help) to GitHub Pages. Only
-# site/ is published, never docs/ or the code. Deploys run once the repository
-# variable PAGES_ENABLED is "true" (see docs/STORE.md); until then the job only
-# checks the pages.
+# site/ is published, never docs/ or the code. Deploys run from main once the
+# repository variable PAGES_ENABLED is "true" (see docs/STORE.md); until then, and
+# on pull requests and other branches, the job only checks the pages. After
+# setting the variable, run this workflow on main once to publish.
 
 on:
   pull_request:
@@ -36,7 +37,7 @@ jobs:
 
       - name: Decide whether to publish
         id: mode
-        run: echo "publish=${{ github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true' }}" >> "$GITHUB_OUTPUT"
+        run: echo "publish=${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true' }}" >> "$GITHUB_OUTPUT"
 
       - name: Links and placeholders
         run: node tools/scripts/check-site.mjs ${{ steps.mode.outputs.publish == 'true' && '--publish' || '' }}

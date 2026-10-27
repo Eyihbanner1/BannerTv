@@ -32,7 +32,7 @@ The same as `title` in appinfo.json, which LG caps at 20 characters.
 > - Details, cast, seasons and episodes, and trailers
 > - Plays on your TV's own video player, with subtitles, audio track choice and resume
 > - Add an addon by typing its address, or send it from your phone with a QR code
-> - Built for LG TVs from 2020 onwards
+> - Built for LG TVs with webOS 5.0 or newer, including most 2020 models
 >
 > BannerTV works with addons that use the Stremio addon format. It doesn't host or provide any films or series: everything comes from the addons you add, and you're responsible for making sure you have the right to watch what they offer. Cinemeta, for titles and artwork, is included to get you started.
 >
@@ -56,9 +56,9 @@ If the app threads add `appDescription` to appinfo.json (60 characters at most, 
 
 ### Note for Tester (Test Info)
 
-> BannerTV is a media centre that plays what addons return; it hosts no content of its own. Cinemeta (titles and artwork), OpenSubtitles v3 (subtitles) and BannerTV Demo (Blender open movies under Creative Commons Attribution licences) come preinstalled, so playback can be tested without adding anything: open Home, find the BannerTV Demo row and play any film. No account or payment is needed. The adult content filter is on by default. The About screen has an optional donation QR code that opens an external page on a phone and unlocks nothing. Full steps are in the UX scenario.
+> BannerTV is a media centre that plays what addons return; apart from its demo addon, it hosts no content of its own. Cinemeta (titles and artwork), OpenSubtitles v3 (subtitles) and BannerTV Demo (Blender open movies under Creative Commons Attribution licences) come preinstalled, so playback can be tested without adding anything: open Home, find the BannerTV Demo row and play any film. No account or payment is needed. The About screen has an optional donation QR code that opens an external page on a phone and unlocks nothing. Full steps are in the UX scenario.
 
-Add a line for each optional feature the submitted build has (Trakt sign-in with the test account, profiles and PIN).
+Add a line for each optional feature the submitted build has (Trakt sign-in with the test account, profiles and the PIN, the adult filter, which is on by default).
 
 ## Service info
 

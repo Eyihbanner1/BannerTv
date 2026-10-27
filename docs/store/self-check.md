@@ -45,7 +45,7 @@ Status: **Built** means the feature exists on a branch and still needs testing o
 | 32 | Colour keys | Work where mapped | Test once colour-key shortcuts exist; each must also be a visible button |
 | 33 | OK key | | Built |
 | 36 | Home | The webOS launcher appears | Platform behaviour; check playback pauses and progress saves |
-| 37 | Back | Goes to the previous screen; on the first screen, back to where the user entered the app (webOS 6 and newer: exit prompt; webOS 5: the launcher) | Built: Back stack, then `webOS.platformBack()` on Home. Measured on webOS 22 in Phase 0. Test on webOS 5, 6 and 23 or newer in the Cloud Test Lab |
+| 37 | Back | Goes to the previous screen; on the first screen, back to where the user entered the app | Built: Back stack, then `webOS.platformBack()` on Home, which goes to the launcher on webOS 5 and shows an exit prompt on webOS 6 to 22 (measured on webOS 22 in Phase 0). Untested on webOS 23 and newer, where the mandatory UX line below asks for the Home screen. Test on webOS 5, 6 and 23 or newer in the Cloud Test Lab |
 | 38 | Exit key | Closes the app | Platform behaviour; test |
 | 39 and 40 | Live and other keys | Number and unsupported keys don't break anything | Test every key on both remotes |
 
@@ -71,7 +71,8 @@ Items 34 and 35 weren't captured in the research; read them in the form.
 
 ## Also on LG's checklist page
 
-- **Mandatory UX:** arrows, OK and Back reach everything; the pointer and OK reach everything; Back on the entry page shows the Home screen on webOS 23 to 25; every object has a selection effect. Built, to be tested on those versions.
-- **Recommended:** buttons at least 75 x 75 px and text at least 20 px at 1920 x 1080 (BannerTV's minimum is 24 px), a loading cue rather than a black screen, the LG keyboard, an on-screen playback menu.
-- **Credentials:** no passwords, tokens, keys or credentials in the code or in file names. See [data-safety.md](data-safety.md).
+- **Mandatory UX:** arrows, OK and Back reach everything; the pointer and OK reach everything; Back on the entry page shows the Home screen on webOS 23 to 25; every object has a selection effect. Built, except Back on webOS 23 to 25, which is **untested**: BannerTV calls `webOS.platformBack()`, which shows an exit prompt on webOS 6 and newer, and this line asks for Home. LG's pages disagree, so check it in the Cloud Test Lab and ask LG (STORE.md, question 8).
+- **Recommended:** buttons at least 75 x 75 px and text at least 20 px at 1920 x 1080 (BannerTV's smallest is 22 px, on the Addons screen's phone help), a loading cue rather than a black screen, the LG keyboard, an on-screen playback menu.
+- **Credentials:** no passwords, tokens, keys or credentials in the code or in file names. Addon addresses can carry a user's account key and sit in the app's IndexedDB; encrypt them with the Trakt token and PIN hash, or record here why the app's own sandbox is enough. See [data-safety.md](data-safety.md).
+- **Developer screens:** the Diagnostics and Playback lab screens, their test streams and the `systemconfig.query` permission must not be in the store build (STORE.md, "App work the store needs").
 - **Content:** nothing sexual, violent, discriminatory, criminal, drug-related, gambling-related, or against a religion or nation. Testers see what Cinemeta and the Demo addon show, so the Demo addon's films should be suitable for all ages.
