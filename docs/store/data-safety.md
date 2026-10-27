@@ -15,13 +15,14 @@ The privacy policy describes BannerTV v1 as planned for the LG store, including 
 
 ## Pending policy changes
 
-The Phase 1 thread's store-readiness plan changes how the app behaves in three places. The policy, this file and the UX scenario describe today's behaviour and must change only when the new behaviour reaches users, never before.
+Planned app changes alter what BannerTV does with data in four places (three from the Phase 1 thread's store-readiness plan, and the Phase 4 debrid step). The policy, this file and the UX scenario describe today's behaviour and must change only when the new behaviour reaches users, never before.
 
 | App change | When to edit | What changes |
 | --- | --- | --- |
 | Relay codes last 9 minutes (or 8.5; Eyitayo to decide) so nothing is held more than 10 | After the relay is deployed and checked, and at least 11 minutes later, since codes opened before the deploy keep their old expiry | Policy: "about 11 minutes" becomes "10 minutes" in the short version, the relay section and the retention table, and "Each code lasts 10 minutes" becomes 9 (or 8.5). The relay row below. UX scenario 7: the code's lifetime |
 | Add an addon contacts the relay only after "Show a code" | With the first store build that has it | Policy relay section: the relay is contacted only after Show a code, or in an addon's Settings window; after an address arrives, the TV takes a new code and keeps checking until that code runs out or the window closes; typing an address on the TV never contacts the relay. The relay row and the device-identifier answer below; close item 10. UX scenario 7 step 3 |
 | Removing an addon deletes its cached copies | With the build that has it | Policy: "copies BannerTV saved from it ... can stay on the TV" becomes "BannerTV deletes the copies it saved from it". The on-TV row below and item 3: cache keys start with the addon's base address; title details are keyed by title only and are cleared when an addon that provides title details is removed |
+| The optional debrid account step and referral screen ([PLAN.md](../PLAN.md), "Debrid accounts and referral links") | With the first store build that has it | Policy: a debrid section (the token is stored encrypted on the TV and deleted on Unlink; the TV talks directly to the provider, which sees the TV's IP address and what is requested; the TV fetches the price file from the website, if used), and "no adverts" removed from the lead, the short version, "What I don't do" and Children. This file: an inventory row, the provider under "Data shared with third parties", and Children's code standards 1, 5, 11 and 13, with the sentence "Nothing is used for adverts, analytics, profiling or sale." reworded to say the Ad screens use no data about the user. Listing: "Free, with no adverts" and the In-app ads field. Self-check item 4 (Back leaves the ad screen). UX scenario: In-app ads and a scenario for the step |
 
 Update the policy's "Last updated" date with each change.
 

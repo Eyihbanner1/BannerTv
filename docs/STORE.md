@@ -100,10 +100,16 @@ To send through Seller Lounge, 1:1 Q&A, Applications, App Submission, once regis
 >    - (e) Does the item also apply to a first-run welcome screen?
 > 9. Which ACG group covers com.webos.service.config/getConfigs? The bundled Shaka Player calls it, and it isn't in the ACG table.
 > 10. My code has no credentials, but bundled libraries use standard property names that match the credential rules (the Fetch API's `credentials` option, `password` input types in React, Shaka Player's token settings). Are these acceptable if I explain them in the self-checklist?
+> 11. In a later update I'd like to add an optional section in Settings for linking an account with a debrid service. A debrid service is a paid cloud service that downloads files from file hosts and peer-to-peer networks to its own servers and streams them to the user over HTTPS. Examples are TorBox and Premiumize, whose terms forbid using them for infringing content. Some addons can use such an account. The section would only be in Settings, never shown on first launch or in a kids profile.
+>    - Linking: the TV shows a code, the user approves it on their phone, and BannerTV then shows the account's plan and expiry date. In this version BannerTV does nothing else with the account.
+>    - Sign-up: for people without an account, a screen labelled "Ad" would show the service's name, who sells it, and a QR code to its sign-up page through my referral link. I would receive free premium days (or a payment, if a service offers one) when someone signs up. Back always leaves the screen, nothing in the app needs an account, and no stream addons are promoted.
+>    - (a) Is the linking section acceptable in the LG Content Store?
+>    - (b) Is the sign-up screen with the referral QR code acceptable? Is there a rule on QR codes that lead to purchases outside the app?
+>    - (c) Should the sign-up screen be declared as In-App Ad or Paid Content in Seller Lounge, what should the UX scenario show, and does the self-checklist's Advertisement item apply to it?
 >
 > Thank you.
 
-When crash reports are built, ask an eleventh: does `webOSSystem.deviceInfo.modelName` fall under the same user agreement as `getSystemInfo`'s `modelName`, and is sending it after an explicit crash-report opt-in acceptable?
+Question 11 is about the optional debrid step in [PLAN.md](PLAN.md) ("Debrid accounts and referral links"). That step isn't in the first submission, but asking now means the answer is ready for the later update. Leave it out if the step is dropped. When crash reports are built, ask a twelfth: does `webOSSystem.deviceInfo.modelName` fall under the same user agreement as `getSystemInfo`'s `modelName`, and is sending it after an explicit crash-report opt-in acceptable?
 
 ## Not known yet
 
