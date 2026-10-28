@@ -24,7 +24,7 @@ import { useQuery } from '../../data/use-query';
 import { activityGap } from '../../navigation/activity';
 import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
-import { canSlide } from '../../platform/input-mode';
+import { canSlide, inputMode } from '../../platform/input-mode';
 import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
@@ -43,6 +43,11 @@ const BUSY_GAP_MS = 800;
 const HERO_BUSY_MS = Math.max(HERO_DELAY_MS, tuning.heroBusyMs);
 
 export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
+
+function pointedAt(): boolean {
+  const key = focusedKey();
+  return inputMode.get() === 'pointer' && key.indexOf('home-') === 0 && doesFocusableExist(key);
+}
 
 const emptyRows = new Set<string>();
 const NO_ITEMS: readonly MetaPreview[] = [];
@@ -154,7 +159,8 @@ export function HomeScreen() {
 
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
-  useScreenFocus(firstRowKey, collection.ready && continueItems !== null, true);
+  // A tile the pointer moved onto while Home waited for that keeps focus.
+  useScreenFocus(firstRowKey, collection.ready && continueItems !== null, true, pointedAt);
 
   // The hero starts on the first title focus will land on.
   useEffect(() => {

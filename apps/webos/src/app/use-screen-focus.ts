@@ -20,14 +20,23 @@ import { useScreenSlot } from './screen-slot';
  * way in is usually still there on the way back. A screen whose content can
  * change while it is hidden (Home's Continue Watching) passes `fallBack`: if
  * what was focused has gone once the screen has drawn, focus goes to the
- * screen's `defaultFocusKey` as it is then.
+ * screen's `defaultFocusKey` as it is then. A screen that waits a while
+ * passes `keep`: if it says the pointer has already put focus on the screen
+ * meanwhile, a first showing leaves focus there.
  */
-export function useScreenFocus(defaultFocusKey?: string, ready = true, fallBack = false): void {
+export function useScreenFocus(
+  defaultFocusKey?: string,
+  ready = true,
+  fallBack = false,
+  keep?: () => boolean,
+): void {
   const slot = useScreenSlot();
   const placed = useRef(false);
   const latestDefault = useRef(defaultFocusKey);
+  const latestKeep = useRef(keep);
   useLayoutEffect(() => {
     latestDefault.current = defaultFocusKey;
+    latestKeep.current = keep;
   });
   useEffect(() => {
     const place = () => {
@@ -37,7 +46,9 @@ export function useScreenFocus(defaultFocusKey?: string, ready = true, fallBack 
       }
       if (!ready || placed.current) return;
       placed.current = true;
-      const target = takePendingFocus() ?? defaultFocusKey;
+      const pending = takePendingFocus();
+      if (pending === undefined && latestKeep.current?.()) return;
+      const target = pending ?? defaultFocusKey;
       if (!target) return;
       const focusing = Promise.resolve(setFocus(target));
       if (!fallBack) return;
