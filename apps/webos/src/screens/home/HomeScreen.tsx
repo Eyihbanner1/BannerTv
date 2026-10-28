@@ -189,7 +189,7 @@ export function HomeScreen() {
   // have, not on a row Continue Watching is about to come above.
   useBack('screen', () => {
     const first = rows[0];
-    if (firstRowKey && !focusReady) return true;
+    if (!focusReady) return true;
     if (!firstRowKey || focusedKey().indexOf(`${firstRowKey}-tile-`) === 0) {
       return false;
     }
