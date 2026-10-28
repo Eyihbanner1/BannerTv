@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessStream,
+  BANNERTV_DEMO_URL,
+  DEFAULT_ADDONS,
   describeStream,
   isLighter,
   languageKey,
@@ -80,6 +82,11 @@ function entries(answer: unknown, tv: TvCapabilities): StreamEntry[] {
 
 describe('the demo, as the TV app reads it', () => {
   const parsed = parseManifest(manifest(ORIGIN));
+
+  it('matches the manifest the TV app ships, so rows keep their keys after the first refresh', () => {
+    const bundled = DEFAULT_ADDONS.find((addon) => addon.transportUrl === BANNERTV_DEMO_URL);
+    expect(bundled?.manifest).toEqual(manifest(new URL(BANNERTV_DEMO_URL).origin));
+  });
 
   it('installs, with one Home row and a search', () => {
     expect(parsed.name).toBe('BannerTV Demo');

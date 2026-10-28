@@ -25,7 +25,12 @@ export {
   type InstalledAddon,
   type StoredAddon,
 } from './addons/collection';
-export { CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './addons/defaults';
+export {
+  BANNERTV_DEMO_URL,
+  CINEMETA_URL,
+  DEFAULT_ADDONS,
+  OPENSUBTITLES_V3_URL,
+} from './addons/defaults';
 export {
   type CatalogPager,
   createCatalogPager,

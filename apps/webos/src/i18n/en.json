@@ -324,9 +324,9 @@
   "welcome": {
     "title": "Welcome to BannerTV",
     "lead": "Films and series from the addons you choose, in one place and made for your remote.",
-    "ready": "Cinemeta is already added, so Home is ready to browse. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
+    "ready": "Cinemeta and BannerTV Demo are already added, so Home is ready to browse, with a few free films to play. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
     "noticeTitle": "Good to know",
-    "notice": "BannerTV doesn't host or provide any films or series. Everything comes from the addons you add, and you're responsible for the addons you choose.",
+    "notice": "Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV doesn't host or provide any films or series. Everything else comes from the addons you add, and you're responsible for the addons you choose.",
     "start": "Start browsing",
     "addAddon": "Add an addon"
   }

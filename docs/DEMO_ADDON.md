@@ -97,7 +97,9 @@ Everything below runs on Eyitayo's Windows laptop, which can reach blender.org a
 5. **Deploy:** from `services/demo`, `npx wrangler@4 login` (already done for the relay), then `npx wrangler@4 deploy`. Only new or changed files upload. If it stops with "Upload took too long", run it again and it carries on.
 6. **Check it:** `pnpm --filter @bannertv/demo check:live` fetches every film, every size's first and last segment, the subtitles and artwork, and tries IPv6.
 7. **Check from Korea:** open `https://check-host.net/check-http?host=https://demo.bannertv.workers.dev/manifest.json` and look at the Korean nodes, or ask someone there to play a film.
-8. **Turn on the preinstall:** once the Demo answers, the commit that adds it to `DEFAULT_ADDONS` can merge.
+8. **Let the preinstall merge:** the app puts the Demo first in `DEFAULT_ADDONS` (the last commit of the Demo's pull request), so that commit must not reach a TV build before the Demo answers.
+
+**Changing the manifest** (its version, name or catalog): copy the new one into `packages/core/src/addons/bannertv-demo.manifest.json`, which the app ships so Home can ask for the Demo's row before the live manifest arrives. A test fails until the two match.
 
 **Changing a film's video** later: raise its `media` number in `films.json`, delete its old folder under `public/media/<film>/`, encode and deploy. The new number gives new addresses, so TVs never mix cached old segments with new ones. Artwork and subtitles can change in place.
 
