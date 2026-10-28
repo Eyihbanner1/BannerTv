@@ -230,13 +230,14 @@ Later, not Phase 3: a full-screen fixtures list per day (it repeats the rows), f
 
 **Matcher data**
 
-- A competition dictionary (an estimated 150 to 300 entries, generated from Wikidata and checked by hand: the English pyramid to the National League, UK cups, UEFA and FIFA competitions, the top two divisions and main cup of about 30 countries, NFL, NBA, NHL, MLB, MLS, college sports, F1 and MotoGP, UFC, cricket formats, both rugby codes) with aliases, country, sport, gender and age group, SofaScore ids, and the BannerTV priority.
+- Competition rows in Phase 3 cover football and the four US leagues (NFL, NBA, NHL, MLB); every other sport is grouped by sport (Eyitayo, 28 October 2026). Cricket, rugby, motor racing and fight sports can get competition rows later.
+- A competition dictionary (an estimated 100 to 200 entries, generated from Wikidata and checked by hand: the English pyramid to the National League, UK cups, UEFA and FIFA competitions, the top two divisions and main cup of about 30 countries, MLS, NFL, NBA, NHL and MLB) with aliases, country, sport, gender and age group, SofaScore ids, and the BannerTV priority. American football that is not NFL goes in "Other American football".
 - A team dictionary with aliases and each team's country, sport and usual league: about 700 teams from 35 competitions in the core set, about 1,800 from 70 in the full set.
 - A league calendar check: openfootball's public-domain fixture lists for the top divisions of England (two tiers), Germany, Spain, Italy, France, the Netherlands and Portugal. The lists can lag behind rescheduled games, so a pair with no fixture goes to its country group rather than being called a cup tie.
 - Only public-domain (CC0) data is bundled: names, aliases and facts from Wikidata and openfootball, built by a script in CI. No club crests or logos are bundled.
 - Delivery: no server in Phase 3. The dictionaries, the UEFA club list and the calendars are one file, loaded only when the first sports catalog is detected and refreshed with each app release. Measured: 781 clubs with 1,795 aliases is 15 KB gzipped; the whole file is estimated at 70 to 90 KB gzipped. A stale calendar fails safely into a country group.
 - Name matching lowercases, folds accents (NFD plus a small table for ß, ø, æ, ł, đ and ı), removes emoji, flags and tag characters by explicit code-point ranges (not `\p{}` classes, which are ES2018 syntax), drops FC, AFC, CF and similar and a trailing sport word both teams share (`Cricket`, `Basketball`, `Rugby League`), and maps Utd, St and & before the lookup. Teams split on ` vs `, ` vs. ` or ` v `; then on ` @ ` or ` at ` (away first, only for US sports or when both sides are known teams); and on ` - ` only when none of those is present.
-- An online fixtures lookup is optional and decided after the first build, by measuring how many matches still land in a country group or Other. Of the sources BannerTV may use, only TheSportsDB named both test matches (an EFL Trophy tie with an under-21 side, and a DFB-Pokal tie between two Bundesliga clubs). Its free key may not be used in an app-store app, so this means the paid tier (about $9 a month) behind a BannerTV Worker in `services/`, crediting TheSportsDB as the source in the app. The TV would fetch one file per day from that Worker, so nothing about the viewer's addons or matches leaves the TV. ESPN's unofficial API, MLB's API, API-Football's free tier and Jolpica's F1 data are ruled out by their terms or coverage.
+- An online fixtures lookup is optional and decided after the first build (Eyitayo, 28 October 2026), by measuring how many matches still land in a country group or Other. Of the sources BannerTV may use, only TheSportsDB named both test matches (an EFL Trophy tie with an under-21 side, and a DFB-Pokal tie between two Bundesliga clubs). Its free key may not be used in an app-store app, so this means the paid tier (about $9 a month) behind a BannerTV Worker in `services/`, crediting TheSportsDB as the source in the app. The TV would fetch one file per day from that Worker, so nothing about the viewer's addons or matches leaves the TV. ESPN's unofficial API, MLB's API, API-Football's free tier and Jolpica's F1 data are ruled out by their terms or coverage.
 
 **Performance**
 
@@ -245,7 +246,7 @@ Later, not Phase 3: a full-screen fixtures list per day (it repeats the rows), f
 
 **Store and privacy**
 
-- The Sports screen appears only because of an addon the user installed. No sports addon is preinstalled, suggested or named in the app or its store listing; tests and the gate use a test sports addon, and store screenshots never show the Sports screen with third-party content. Whether Sports is in the LG store build or only the sideload build is decided before the Phase 3 submission.
+- The Sports screen appears only because of an addon the user installed. No sports addon is preinstalled, suggested or named in the app or its store listing; tests and the gate use a test sports addon, and store screenshots never show the Sports screen with third-party content. Sports ships in the sideload build only at first (Eyitayo, 28 October 2026). The LG store build leaves it out until BannerTV is approved and stable, and a later store update adds it.
 - Configured addon URLs often carry a personal key. Test fixtures are captured from public, unconfigured installs only, and nothing logs addon URLs. A time zone is read from an install address as one `timezone` value only; the rest of the decoded settings is never kept or logged.
 - Removing an addon, or clearing data in Settings, removes its events and kick-offs.
 - Any BannerTV Worker the TV fetches from is added to `docs/store/data-safety.md`, the privacy policy and the Seller Lounge answers before the build that uses it ships.
@@ -275,9 +276,9 @@ Part of the Phase 3 gate, but Sports may slip to Phase 5 without blocking it. On
 **Open questions**
 
 - [ ] Eyitayo: is a "Sports" rail entry right, or should sport live on Home only?
-- [ ] Eyitayo: which sports and teams to try first (football and UK teams are assumed)?
-- [ ] Eyitayo: is a paid fixtures lookup (about $9 a month) worth it, once the free layers are measured?
-- [ ] Eyitayo: Sports in the LG store build, or in the sideload build only at first? Sideload only is recommended.
+- [x] Eyitayo: which sports get competition rows first? Football and the four US leagues (28 October 2026).
+- [x] Eyitayo: a paid fixtures lookup (about $9 a month)? Decide after measuring the free layers on the TV (28 October 2026).
+- [x] Eyitayo: Sports in the LG store build, or sideload only at first? Sideload only at first (28 October 2026).
 - [ ] Is one `skip` probe acceptable for catalogs that do not declare `skip` (request routing rule 2 says "never guess" for resources, not extras), so that one addon shows more than its first 100 events?
 
 ## webOS platform specifics
