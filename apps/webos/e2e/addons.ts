@@ -275,11 +275,10 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
       request.onsuccess = () => {
         const db = request.result;
         const tx = db.transaction('kv', 'readwrite');
-        const kv = tx.objectStore('kv');
-        const existing = kv.get('addons');
-        existing.onsuccess = () => {
-          if (existing.result === undefined) kv.put(stored, 'addons');
-        };
+        // add() rather than get() then put(): it never reads, so a journey holding the
+        // app's read of 'addons' cannot hold this write too.
+        const added = tx.objectStore('kv').add(stored, 'addons');
+        added.onerror = (event) => event.preventDefault(); // a list is already stored
         tx.oncomplete = () => db.close();
       };
     }, EARLIER_ADDONS);
