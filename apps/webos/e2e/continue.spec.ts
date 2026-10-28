@@ -631,16 +631,16 @@ test('Back pressed while Home waits for a card does not leave the app', async ({
   expect(await exitRequested(page)).toBeUndefined();
 });
 
-/** Holds the app's read of saved progress until the returned function is called, as on a busy TV. */
-async function holdProgressRead(page: Page): Promise<() => Promise<void>> {
-  await page.addInitScript(() => {
-    const w = window as Window & { releaseProgress?: () => void };
-    const released = new Promise<void>((resolve) => (w.releaseProgress = resolve));
+/** Holds the app's read of one stored value until the returned function is called, as on a busy TV. */
+async function holdRead(page: Page, key: string): Promise<() => Promise<void>> {
+  await page.addInitScript((held) => {
+    const w = window as Window & { releaseRead?: () => void };
+    const released = new Promise<void>((resolve) => (w.releaseRead = resolve));
     const get = IDBObjectStore.prototype.get;
     const setSuccess = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
     IDBObjectStore.prototype.get = function (this: IDBObjectStore, query: IDBValidKey) {
       const request = get.call(this, query);
-      if (query !== 'progress') return request;
+      if (query !== held) return request;
       Object.defineProperty(request, 'onsuccess', {
         set(handler: (this: IDBRequest, event: Event) => void) {
           setSuccess.call(request, (event: Event) => {
@@ -650,16 +650,16 @@ async function holdProgressRead(page: Page): Promise<() => Promise<void>> {
       });
       return request;
     };
-  });
+  }, key);
   return () =>
-    page.evaluate(() => (window as Window & { releaseProgress?: () => void }).releaseProgress?.());
+    page.evaluate(() => (window as Window & { releaseRead?: () => void }).releaseRead?.());
 }
 
 test('Back pressed while Home still reads saved progress stays in the app, and focus lands only on Continue watching', async ({
   page,
 }) => {
   const focusKeys = await recordFocus(page);
-  const releaseProgress = await holdProgressRead(page);
+  const releaseProgress = await holdRead(page, 'progress');
   await mockAddons(page);
   await seedStreamAddon(page, {
     progress: [MOVIE_PART_WAY],
@@ -679,6 +679,26 @@ test('Back pressed while Home still reads saved progress stays in the app, and f
   await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
   await expectFocusLabel(page, 'Big Buck Bunny, 2008');
   expect((await focusKeys()).map(([key]) => key)).toEqual([`${CONTINUE_ROW}-tile-0`]);
+  expect(await exitRequested(page)).toBeUndefined();
+});
+
+test('Back pressed while the addon list is still being read stays in the app', async ({ page }) => {
+  const focusKeys = await recordFocus(page);
+  const releaseAddons = await holdRead(page, 'addons');
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expect(page.locator('[data-focus-key="rail-home"]')).toBeVisible();
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toHaveCount(0);
+  await watchExit(page);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  expect(await exitRequested(page)).toBeUndefined();
+  expect(await focusKeys()).toEqual([]);
+
+  await releaseAddons();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${FIRST_ROW}-tile-0`]);
   expect(await exitRequested(page)).toBeUndefined();
 });
 
