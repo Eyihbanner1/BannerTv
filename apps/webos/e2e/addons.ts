@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import type { Page, Route } from '@playwright/test';
+import { API_SERVICE } from '../src/data/api-service';
 import { PAIR_SERVICE } from '../src/data/pairing';
 
 /**
@@ -161,7 +162,8 @@ function png(width: number, height: number): Buffer {
   ]);
 }
 
-const IMAGE = png(16, 9);
+/** A small image for any artwork the journeys serve. */
+export const IMAGE = png(16, 9);
 
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({
@@ -241,6 +243,12 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   // Anything not mocked below fails, so a stray request shows up as an error.
   await page.route(/^https?:\/\//, (route) => route.abort());
   if (PAIR_SERVICE) await page.route(`${PAIR_SERVICE}/api/**`, answer);
+  // BannerTV's service without Trakt or TMDB set up; mockServices turns them on.
+  if (API_SERVICE) {
+    await page.route(`${API_SERVICE}/status`, (route) =>
+      json(route, { trakt: false, tmdb: false }),
+    );
+  }
   await page.route(/^https:\/\/(images|episodes)\.metahub\.space\//, (route) =>
     route.fulfill({
       status: 200,
