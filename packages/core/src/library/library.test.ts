@@ -149,8 +149,24 @@ describe('createLibrary', () => {
       await library.add(preview(`t${i}`));
     }
     expect(library.has('t0')).toBe(false);
+    // It never reaches Trakt, so the first sync has nothing to bring back.
+    expect(library.outbox().some((change) => change.id === 't0')).toBe(false);
     await library.sent(library.outbox().slice());
     expect(library.outbox()).toEqual([]);
+    await library.mergeRemote(
+      library.items().map((i) => ({ id: i.id, type: i.type, name: i.name, addedAt: i.addedAt })),
+    );
+    expect(library.has('t0')).toBe(false);
+    expect(library.has('t1')).toBe(true);
+
+    // Dropped while its addition was on its way: Trakt is told to take it off.
+    const sending = library.outbox().slice();
+    time.tick();
+    await library.add(preview('late'));
+    const inFlight = [{ op: 'add' as const, id: 't1', type: 'movie' as const }];
+    await library.sent(sending.concat(inFlight));
+    expect(library.has('t1')).toBe(false);
+    expect(library.outbox()).toContainEqual({ op: 'remove', id: 't1', type: 'movie' });
   });
 
   it('leaves no removal for the next account after signing out', async () => {
@@ -233,8 +249,7 @@ describe('mergeRemote', () => {
   it("queues nothing for a title that does not fit beside Trakt's list", async () => {
     const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 1 });
     await library.add(preview('old'));
-    // Signed out, then in to an account whose list is full of newer titles.
-    await library.forgetRemote();
+    // Signed in to an account whose list is full of newer titles: its waiting addition goes too.
     const remote = Array.from({ length: MAX_LIBRARY_ITEMS }, (_, i) => ({
       id: `tt${i}`,
       type: 'movie' as const,

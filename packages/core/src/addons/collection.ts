@@ -36,6 +36,18 @@ export function installIdOf(addon: InstalledAddon): string {
   return addon.installId ?? addressTag(addon.transportUrl);
 }
 
+/**
+ * Gives `addon` a name no other install in `taken` has. A copy set up again
+ * keeps the tag of its first address, so a later install from that address
+ * needs another.
+ */
+function nameApart(addon: InstalledAddon, taken: Set<string>): void {
+  let id = installIdOf(addon);
+  for (let count = 2; taken.has(id); count++) id = addressTag(`${addon.transportUrl}#${count}`);
+  if (id !== installIdOf(addon)) addon.installId = id;
+  taken.add(id);
+}
+
 /** How an addon is kept in storage: the manifest as the addon sent it, re-read at every launch. */
 export interface StoredAddon {
   transportUrl: string;
@@ -124,10 +136,12 @@ export function createAddonCollection(options: {
 
   function readAll(list: readonly StoredAddon[]): InstalledAddon[] {
     const addons: InstalledAddon[] = [];
+    const names = new Set<string>();
     for (const item of list) {
       const addon = item && typeof item.transportUrl === 'string' ? readStored(item) : undefined;
       if (addon && !addons.some((a) => a.transportUrl === addon.transportUrl)) {
         raw.set(addon.transportUrl, item.manifest);
+        nameApart(addon, names);
         addons.push(addon);
       }
     }
@@ -223,6 +237,9 @@ export function createAddonCollection(options: {
       // Set up again on its settings page, it is the same install: Home rows keep its settings.
       if (existing?.installId) addon.installId = existing.installId;
       else if (!existing && replaced) addon.installId = installIdOf(replaced);
+      else if (!existing) {
+        nameApart(addon, new Set(current.map(installIdOf)));
+      }
       let next: InstalledAddon[];
       if (existing) {
         next = current.map((a) => (a === existing ? addon : a)).filter((a) => a !== replaced);

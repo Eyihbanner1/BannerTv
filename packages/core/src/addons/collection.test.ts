@@ -97,12 +97,19 @@ describe('createAddonCollection', () => {
     expect(saved[0]!.installId).not.toContain('example');
     const reloaded = createAddonCollection({
       storage,
-      fetchJson: vi.fn(),
+      fetchJson: () => Promise.resolve(EXTRA_MANIFEST),
       defaults: DEFAULT_ADDONS,
     });
     await reloaded.load();
     expect(installIdOf(reloaded.get().addons[0]!)).toBe(first);
     expect(saved.slice(1).every((a) => a.installId === undefined)).toBe(true);
+    // Installed again from its first address, the new copy gets a name of its own.
+    await reloaded.install(EXTRA_URL);
+    const names = reloaded.get().addons.map(installIdOf);
+    expect(new Set(names).size).toBe(names.length);
+    const again = createAddonCollection({ storage, fetchJson: vi.fn(), defaults: DEFAULT_ADDONS });
+    await again.load();
+    expect(again.get().addons.map(installIdOf)).toEqual(names);
 
     // Settings that match an addon already in the list update that one instead.
     await collection.install(CINEMETA_URL, { replaces: configured });

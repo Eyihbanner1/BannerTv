@@ -201,14 +201,15 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
     add(preview) {
       return state.update((current) => {
         const item = itemFrom(preview, now());
-        const items = [item, ...current.items.filter((i) => i.id !== item.id)].slice(
-          0,
-          MAX_LIBRARY_ITEMS,
-        );
+        const all = [item, ...current.items.filter((i) => i.id !== item.id)];
+        // The oldest titles past the limit leave, and so do their additions still
+        // waiting for Trakt: a title not on My List is not put on Trakt's list.
+        const dropped = new Set(all.slice(MAX_LIBRARY_ITEMS).map((i) => i.id));
+        const outbox = current.outbox.filter((c) => c.op !== 'add' || !dropped.has(c.id));
         return {
           ...current,
-          items,
-          outbox: queue(current.outbox, { op: 'add', id: item.id, type: item.type }),
+          items: all.slice(0, MAX_LIBRARY_ITEMS),
+          outbox: queue(outbox, { op: 'add', id: item.id, type: item.type }),
         };
       });
     },
@@ -251,10 +252,6 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           sentChanges.some((s) => s.id === change.id && s.op === change.op);
         let outbox = current.outbox.filter((change) => !done(change));
         const saved = new Set(current.items.map((item) => item.id));
-        // remove() takes a title's waiting addition out of the outbox; a title
-        // dropped only to keep My List under its limit leaves it there.
-        const removedHere = (id: string) =>
-          !saved.has(id) && !current.outbox.some((c) => c.id === id && c.op === 'add');
         let synced = current.synced;
         for (const change of sentChanges) {
           synced = synced.filter((id) => id !== change.id);
@@ -262,7 +259,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           synced = synced.concat(change.id);
           // Taken off here while the addition was on its way: it is on Trakt's list
           // now, so the removal goes there too, or the next sync would bring it back.
-          if (removedHere(change.id) && !outbox.some((c) => c.id === change.id)) {
+          if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
             outbox = queue(outbox, { op: 'remove', id: change.id, type: change.type });
           }
         }
@@ -328,9 +325,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
         const fits = new Set(kept.map((item) => item.id));
         return {
           items: kept,
-          outbox: outbox.filter(
-            (change) => change.op !== 'add' || fits.has(change.id) || pending.has(change.id),
-          ),
+          outbox: outbox.filter((change) => change.op !== 'add' || fits.has(change.id)),
           synced: Array.from(remoteIds),
         };
       });
