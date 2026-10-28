@@ -1,4 +1,4 @@
-import { kidsTitleAllowed } from '@bannertv/core';
+import { kidsTitleAllowed, ratingAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -12,7 +12,8 @@ import { Pressable } from '../../components/Pressable';
 import { addonClient } from '../../data/addons';
 import { describeAddonError, metaFacts } from '../../data/describe';
 import { progress } from '../../data/playback';
-import { isKidsProfile } from '../../data/profiles';
+import { activeProfile, isKidsProfile } from '../../data/profiles';
+import { tmdbClient, useTmdbDetails } from '../../data/tmdb';
 import { useQuery } from '../../data/use-query';
 import { playTrailer } from '../../platform/youtube';
 import { formatTime } from '../../player/media';
@@ -23,6 +24,8 @@ import { defaultSeason, groupSeasons, type Season } from './seasons';
 import styles from './DetailsScreen.module.css';
 
 const MAX_CAST = 4;
+/** Cast shown with TMDB's photos. */
+const MAX_FACES = 6;
 
 interface DetailsScreenProps {
   type: string;
@@ -91,10 +94,12 @@ const seasonMemory = new Map<string, number>();
 
 function Episodes({
   meta,
+  tmdb,
   onPress,
   onFocusVideo,
 }: {
   meta: MetaDetail;
+  tmdb?: TmdbDetails;
   onPress: (video: Video) => void;
   onFocusVideo: (video: Video) => void;
 }) {
@@ -104,6 +109,15 @@ function Episodes({
     return saved !== undefined && saved < seasons.length ? saved : defaultSeason(seasons);
   });
   const season = seasons[selected]!;
+  // TMDB's names, overviews and stills, for episodes the addon describes less.
+  const extrasQuery = useMemo(
+    () =>
+      tmdb && tmdb.kind === 'tv' && season.number !== null
+        ? tmdbClient.season(tmdb.tmdbId, season.number)
+        : null,
+    [tmdb, season.number],
+  );
+  const extras = useQuery(extrasQuery).data;
   return (
     <>
       {seasons.length > 1 && (
@@ -121,6 +135,7 @@ function Episodes({
         focusKey="details-episodes"
         memoryKey={`details-${meta.id}-${selected}`}
         videos={season.videos}
+        extras={extras}
         onPress={onPress}
         onFocusVideo={onFocusVideo}
       />
@@ -143,9 +158,20 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   const trailer = item?.trailers[0];
   const isMovie = type === 'movie';
   const failed = state.status === 'error';
-  // A kids profile plays a title only once its full details show it is for children.
+  const tmdb = useTmdbDetails(type, id);
+  const extra = tmdb.details;
+  // A kids profile plays a title only once its full details show it is for
+  // children, and TMDB's UK rating, where it has one, is within the profile's.
   const kids = isKidsProfile();
-  const kidsAllowed = !kids || (meta !== undefined && kidsTitleAllowed(meta));
+  const kidsMax = activeProfile()?.kids;
+  const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
+  const kidsAllowed =
+    !kids ||
+    (kidsDecided &&
+      meta !== undefined &&
+      kidsTitleAllowed(meta) &&
+      (extra?.certificate === undefined ||
+        (kidsMax !== undefined && ratingAllowed(extra.certificate, kidsMax))));
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
   // Titles without episodes get Watch, which plays the addon's default video.
   const canWatch = kidsAllowed && (isMovie || (meta !== undefined && !hasEpisodes));
@@ -180,13 +206,21 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
         : watchVideoId !== null
           ? 'details-watch'
           : 'details-my-list';
-  // A kids profile waits for the full details, which decide whether Watch is there.
-  useScreenFocus(defaultFocus, (isMovie && !kids) || failed || state.status === 'success');
+  // A kids profile waits for the full details and TMDB, which decide whether Watch is there.
+  useScreenFocus(
+    defaultFocus,
+    (isMovie && !kids) || failed || (state.status === 'success' && kidsDecided),
+  );
 
   // The same sizes as the hero, so the image it already loaded is reused.
-  const backdrop = artworkUrl(item?.background, 'backdrop');
-  const logo = artworkUrl(item?.logo, 'titleLogo');
+  // TMDB's artwork only fills in for what the addon has none of.
+  const backdrop =
+    artworkUrl(item?.background, 'backdrop') ?? tmdbImageUrl(extra?.backdropPath, 'w1280');
+  const logo = artworkUrl(item?.logo, 'titleLogo') ?? tmdbImageUrl(extra?.logoPath, 'w500');
   const facts = item ? metaFacts(t, item) : [];
+  if (extra?.certificate) facts.push(extra.certificate);
+  if (extra?.network) facts.push(extra.network);
+  const faces = extra ? extra.cast.filter((person) => person.profilePath).slice(0, MAX_FACES) : [];
   const separator = t('common.listSeparator');
   const error = failed ? describeAddonError(t, state.error, t('rail.addons')) : undefined;
 
@@ -220,8 +254,16 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
         {item && item.genres.length > 0 && (
           <p className={styles.genres}>{item.genres.slice(0, 4).join(' · ')}</p>
         )}
-        {item?.description && <p className={styles.description}>{item.description}</p>}
-        {meta && meta.cast.length > 0 && (
+        {item?.description && (
+          <p
+            className={
+              faces.length > 0 ? `${styles.description} ${styles.short}` : styles.description
+            }
+          >
+            {item.description}
+          </p>
+        )}
+        {faces.length === 0 && meta && meta.cast.length > 0 && (
           <p className={styles.credits}>
             {t('details.cast', { names: meta.cast.slice(0, MAX_CAST).join(separator) })}
           </p>
@@ -301,13 +343,30 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
           {item && <MyListButton item={item} onFocus={restOn(null)} />}
         </div>
         {note && <p className={styles.note}>{note}</p>}
-        {kids && meta && !kidsAllowed && <p className={styles.note}>{t('kids.notForKids')}</p>}
+        {kids && meta && kidsDecided && !kidsAllowed && (
+          <p className={styles.note}>{t('kids.notForKids')}</p>
+        )}
+        {faces.length > 0 && (
+          <ul className={styles.cast} aria-label={t('details.castTitle')}>
+            {faces.map((person, index) => (
+              <li key={index} className={styles.person}>
+                <Artwork
+                  src={tmdbImageUrl(person.profilePath, 'w185')}
+                  className={styles.face}
+                  fallback={<span className={styles.face} />}
+                />
+                <span className={styles.personName}>{person.name}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       {!isMovie && !canWatch && !failed && kidsAllowed && (
         <div className={styles.panel}>
           {meta && hasEpisodes ? (
             <Episodes
               meta={meta}
+              tmdb={extra}
               onPress={(video) => play(video.id)}
               onFocusVideo={(video) => setResting(video.id)}
             />

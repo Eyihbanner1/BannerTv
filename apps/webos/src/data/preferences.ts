@@ -29,6 +29,8 @@ export interface Preferences {
   /** Learned from the last subtitles chosen. Null: subtitles off. */
   subtitleLanguage: string | null;
   subtitleStyle: SubtitleStyle;
+  /** Details adds TMDB's logos, cast photos, episode stills and UK ratings. */
+  tmdb: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -38,6 +40,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   audioLanguage: null,
   subtitleLanguage: null,
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
+  tmdb: true,
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
@@ -99,6 +102,7 @@ export function readPreferences(raw: string | null): Preferences {
         d.subtitleStyle.position,
       ),
     },
+    tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
   };
 }
 

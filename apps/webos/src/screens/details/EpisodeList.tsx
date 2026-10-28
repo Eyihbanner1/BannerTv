@@ -1,11 +1,13 @@
+import { type TmdbEpisode, tmdbImageUrl } from '@bannertv/core';
 import type { Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Artwork } from '../../components/Artwork';
 import { Pressable } from '../../components/Pressable';
 import { fallbackArt } from '../../components/Tile';
 import { formatDate } from '../../data/describe';
+import { watchedSet } from '../../data/library';
 import { progress } from '../../data/playback';
 import {
   recallFocus,
@@ -28,6 +30,8 @@ interface EpisodeListProps {
   onPress: (video: Video) => void;
   /** Focus moved to an episode, so its streams can be looked for. */
   onFocusVideo?: (video: Video) => void;
+  /** TMDB's names, overviews and stills by episode number, for what the addon left out. */
+  extras?: Readonly<Record<number, TmdbEpisode>>;
 }
 
 /**
@@ -41,8 +45,11 @@ export function EpisodeList({
   videos,
   onPress,
   onFocusVideo,
+  extras,
 }: EpisodeListProps) {
   const { t } = useTranslation();
+  // Trakt's watched ticks arrive with a sync.
+  useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
   const [anchor, setAnchor] = useState(() =>
     Math.min(recallScroll(memoryKey), Math.max(0, videos.length - 1)),
   );
@@ -60,12 +67,16 @@ export function EpisodeList({
     const video = videos[index]!;
     const itemKey = `${focusKey}-${index}`;
     const number = video.episode ?? index + 1;
-    const title = video.title
-      ? t('details.episodeTitle', { number, title: video.title })
+    const extra = video.episode === undefined ? undefined : extras?.[video.episode];
+    const name = video.title || extra?.name;
+    const title = name
+      ? t('details.episodeTitle', { number, title: name })
       : t('details.untitledEpisode', { number });
+    const thumbnail = video.thumbnail ?? tmdbImageUrl(extra?.stillPath, 'w300');
+    const overview = video.overview || extra?.overview;
     const upcoming = video.released !== undefined && Date.parse(video.released) > now;
     const seen = progress.get(video.id);
-    const watched = seen?.watched === true;
+    const watched = seen?.watched === true || watchedSet.has(video.id);
     const fraction = seen && seen.duration > 0 ? Math.min(1, seen.position / seen.duration) : 0;
     const date = video.released
       ? upcoming
@@ -92,7 +103,7 @@ export function EpisodeList({
         }}
       >
         <div className={styles.thumb} style={{ backgroundImage: fallbackArt(index, 120) }}>
-          <Artwork key={video.thumbnail} src={video.thumbnail} className={styles.image} />
+          <Artwork key={thumbnail} src={thumbnail} className={styles.image} />
           {watched ? (
             <span className={styles.watched} aria-hidden="true" />
           ) : (
@@ -106,7 +117,7 @@ export function EpisodeList({
         <div className={styles.text}>
           <p className={styles.title}>{title}</p>
           {date && <p className={upcoming ? styles.upcoming : styles.date}>{date}</p>}
-          {video.overview && <p className={styles.overview}>{video.overview}</p>}
+          {overview && <p className={styles.overview}>{overview}</p>}
         </div>
       </Pressable>,
     );

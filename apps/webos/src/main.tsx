@@ -5,8 +5,10 @@ import './styles/fonts.css';
 import './styles/base.css';
 import { App } from './app/App';
 import { startAddons } from './data/addons';
+import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
+import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { bootInfo } from './platform/boot';
@@ -42,6 +44,8 @@ function start() {
   startAddons();
   startPlaybackData();
   startLibraryData();
+  checkServiceStatus();
+  startTrakt();
 
   createRoot(root).render(
     <StrictMode>

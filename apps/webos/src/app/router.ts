@@ -46,7 +46,9 @@ export type Route =
   | { name: 'profiles' }
   | { name: 'profile-edit'; id?: string }
   /** Settings > Home rows: their order, and which are hidden. */
-  | { name: 'home-rows' };
+  | { name: 'home-rows' }
+  /** Settings > Trakt: sign in, sync, sign out. */
+  | { name: 'trakt' };
 
 /**
  * Where focus goes on Back. A function is asked as the screen is shown again,

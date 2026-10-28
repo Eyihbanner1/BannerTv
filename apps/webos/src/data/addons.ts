@@ -19,10 +19,16 @@ export const addonCollection = createAddonCollection({
   defaults: DEFAULT_ADDONS,
 });
 
+/** Every request the app makes for browsing waits its turn here, TMDB's included. */
+export const requestLimiter = createLimiter(MAX_REQUESTS);
+
+/** Cached answers, kept across launches: addons' and TMDB's. */
+export const queryCache = createQueryCache({ store: storage.cache });
+
 export const addonClient = createAddonClient({
   collection: addonCollection,
-  queries: createQueryCache({ store: storage.cache }),
-  limiter: createLimiter(MAX_REQUESTS),
+  queries: queryCache,
+  limiter: requestLimiter,
   fetchJson,
 });
 

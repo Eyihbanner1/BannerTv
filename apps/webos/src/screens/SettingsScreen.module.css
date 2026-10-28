@@ -14,3 +14,7 @@
   color: var(--bt-text-subtle);
   font: var(--bt-text-label);
 }
+
+.later {
+  margin-top: 24px;
+}

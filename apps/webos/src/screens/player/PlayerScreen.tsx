@@ -37,6 +37,7 @@ import { SubtitleLayer } from './SubtitleLayer';
 import { SubtitleStylePanel } from './SubtitleStylePanel';
 import { TracksPanel } from './TracksPanel';
 import { UpNext } from './UpNext';
+import { useScrobble } from './use-scrobble';
 import { useSubtitles } from './use-subtitles';
 import styles from './PlayerScreen.module.css';
 
@@ -147,6 +148,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     session,
     state,
   );
+
+  useScrobble(session, state, { type, metaId, videoId, lab: props.lab });
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for

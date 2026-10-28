@@ -5,6 +5,7 @@ import { push } from '../app/router';
 import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { Menu } from '../components/Menu';
+import { serviceStatus } from '../data/api';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
 import { isKidsProfile } from '../data/profiles';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
@@ -53,6 +54,7 @@ export function SettingsScreen() {
 function FullSettings() {
   const { t } = useTranslation();
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
+  const service = useSyncExternalStore(serviceStatus.subscribe, serviceStatus.get);
   const [open, setOpen] = useState<Open>(null);
   useScreenFocus('settings-stream-choice');
 
@@ -109,10 +111,30 @@ function FullSettings() {
           label={t('homeRows.title')}
           onPress={() => push({ name: 'home-rows' })}
         />
+        {(service.trakt || service.tmdb) && (
+          <h2 className={`${settings.heading} ${settings.later}`}>{t('settings.services')}</h2>
+        )}
+        {service.trakt && (
+          <Button
+            block
+            focusKey="settings-trakt"
+            label={t('settings.trakt')}
+            onPress={() => push({ name: 'trakt' })}
+          />
+        )}
+        {service.tmdb && (
+          <Button
+            block
+            focusKey="settings-tmdb"
+            label={t('settings.tmdb', { value: t(prefs.tmdb ? 'common.on' : 'common.off') })}
+            onPress={() => setPreference('tmdb', !prefs.tmdb)}
+          />
+        )}
       </div>
       <p className={styles.muted}>
         {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
       </p>
+      {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}
       {open === 'streamChoice' && (
         <Menu
           focusKey="settings-stream-choice-menu"

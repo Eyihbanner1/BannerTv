@@ -1,0 +1,50 @@
+/* The buttons on the left, the code to enter at trakt.tv beside them. */
+.actions {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.account {
+  margin-bottom: 24px;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+}
+
+.note {
+  margin-top: 24px;
+  color: var(--bt-text-muted);
+}
+
+.code {
+  display: inline-block;
+  vertical-align: top;
+  margin-left: 96px;
+  padding: 32px;
+  border-radius: 24px;
+  background: var(--bt-surface-1);
+}
+
+.qr {
+  display: inline-block;
+  vertical-align: top;
+  border-radius: 16px;
+}
+
+.codeText {
+  display: inline-block;
+  vertical-align: top;
+  width: 440px;
+  margin-left: 40px;
+}
+
+.help {
+  font: 500 24px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+}
+
+.userCode {
+  margin: 16px 0;
+  font: 700 64px/1.1 var(--bt-font);
+  letter-spacing: 6px;
+  color: var(--bt-text);
+}

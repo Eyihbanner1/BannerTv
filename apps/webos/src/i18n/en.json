@@ -149,7 +149,8 @@
     "noEpisodes": "This addon lists no episodes yet.",
     "trailer": "Trailer",
     "trailerFailed": "The YouTube app didn't open. Check it's installed on the TV.",
-    "watched": "watched"
+    "watched": "watched",
+    "castTitle": "Cast"
   },
   "player": {
     "starting": "Starting",
@@ -292,7 +293,11 @@
     },
     "playback": "Playback",
     "people": "Profiles and Home",
-    "kidsLead": "How subtitles look. Grown-ups can change the rest from their own profile."
+    "kidsLead": "How subtitles look. Grown-ups can change the rest from their own profile.",
+    "services": "Services",
+    "trakt": "Trakt",
+    "tmdb": "Extra details from TMDB: {{value}}",
+    "tmdbCredit": "Extra details and images from TMDB. BannerTV uses the TMDB API but is not endorsed or certified by TMDB."
   },
   "diagnostics": {
     "refresh": "Refresh",
@@ -407,5 +412,33 @@
   },
   "kids": {
     "notForKids": "This title isn't available in a kids profile."
+  },
+  "trakt": {
+    "title": "Trakt",
+    "lead": "Trakt keeps where you stopped, what you've watched and My List the same on every app you use with it.",
+    "signIn": "Sign in to Trakt",
+    "newCode": "Get a new code",
+    "starting": "Getting a code from Trakt",
+    "goTo": "On your phone or computer, go to {{url}} and enter",
+    "codeLasts_one": "The code works for 1 more minute.",
+    "codeLasts_other": "The code works for {{count}} more minutes.",
+    "codeExpired": "That code ran out before it was entered. Get a new one to try again.",
+    "denied": "The sign-in was turned down on Trakt.",
+    "failed": {
+      "network": "BannerTV couldn't reach Trakt. Check the TV's connection and try again.",
+      "unavailable": "Trakt isn't set up on BannerTV's service yet.",
+      "signedOut": "Trakt didn't accept the sign-in. Try again.",
+      "other": "Trakt couldn't sign you in. Try again."
+    },
+    "signInExpired": "Your Trakt sign-in ran out. Sign in again to keep syncing.",
+    "signedIn": "Signed in to Trakt.",
+    "signedInAs": "Signed in to Trakt as {{name}}.",
+    "syncNow": "Sync now",
+    "syncing": "Syncing with Trakt",
+    "synced": "Synced at {{time}}.",
+    "syncFailed": "The last sync didn't finish. BannerTV tries again in half an hour.",
+    "signOut": "Sign out of Trakt",
+    "signOutTitle": "Sign out of Trakt?",
+    "signOutMessage": "BannerTV stops syncing with Trakt on this profile. My List and where you stopped stay on this TV."
   }
 }
