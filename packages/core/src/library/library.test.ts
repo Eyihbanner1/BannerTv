@@ -207,6 +207,29 @@ describe('createLibrary', () => {
     expect(library.outbox().some((change) => change.id === 't1')).toBe(false);
   });
 
+  it('remembers across a restart that Trakt was pulled, until sign-out', async () => {
+    const storage = memoryKeyValueStore();
+    const time = clock();
+    const first = createLibrary({ storage, now: time.now });
+    for (let i = 0; i < MAX_LIBRARY_ITEMS; i++) {
+      time.tick();
+      await first.add(preview(`t${i}`));
+    }
+    await first.forgetRemote();
+    await first.mergeRemote([]);
+    // The push of those additions only goes after the app starts again.
+    const library = createLibrary({ storage, now: time.now });
+    await library.load();
+    const sending = library.outbox().slice();
+    time.tick();
+    await library.add(preview('late'));
+    await library.sent(sending);
+    expect(library.outbox()).toContainEqual({ op: 'remove', id: 't0', type: 'movie' });
+
+    await library.forgetRemote();
+    expect(await storage.get('library')).not.toHaveProperty('pulled');
+  });
+
   it('leaves no removal for the next account after signing out', async () => {
     const library = createLibrary({ storage: memoryKeyValueStore() });
     await library.add(preview('a'));

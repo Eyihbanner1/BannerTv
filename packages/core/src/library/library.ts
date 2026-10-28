@@ -51,6 +51,8 @@ interface LibraryState {
   outbox: LibraryChange[];
   /** The ids Trakt's list had at the last sync, to tell a removal there from an addition here. */
   synced: string[];
+  /** Set once a pull since sign-in has shown what Trakt's list holds. */
+  pulled?: true;
 }
 
 export interface Library {
@@ -134,7 +136,13 @@ function readState(saved: unknown): LibraryState {
     .map(readChange)
     .filter((change): change is LibraryChange => change !== undefined);
   const synced = (Array.isArray(raw.synced) ? raw.synced : []).filter(isText);
-  return { items: newestFirst(items).slice(0, MAX_LIBRARY_ITEMS), outbox, synced };
+  const state: LibraryState = {
+    items: newestFirst(items).slice(0, MAX_LIBRARY_ITEMS),
+    outbox,
+    synced,
+  };
+  if (raw.pulled === true) state.pulled = true;
+  return state;
 }
 
 /** Chromium 68 sorts unstably, so equal times keep their order by hand. */
@@ -182,7 +190,6 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
   // Trakt only when a pull since sign-in showed Trakt did not have the title:
   // otherwise it may have been on the viewer's list before.
   const trimmed = new Set<string>();
-  let pulled = false;
   let index = new Map<string, LibraryItem>();
   let indexed: LibraryItem[] | null = null;
 
@@ -267,7 +274,8 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           synced = synced.concat(change.id);
           // Taken off here while the addition was on its way: it is on Trakt's list
           // now, so the removal goes there too, or the next sync would bring it back.
-          if (trimmed.delete(change.id) && (!pulled || current.synced.indexOf(change.id) !== -1)) {
+          const unknown = !current.pulled || current.synced.indexOf(change.id) !== -1;
+          if (trimmed.delete(change.id) && unknown) {
             continue;
           }
           if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
@@ -279,7 +287,6 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       });
     },
     mergeRemote(remote) {
-      pulled = true;
       return state.update((current) => {
         const pending = new Map(current.outbox.map((change) => [change.id, change]));
         const before = new Set(current.synced);
@@ -342,16 +349,16 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           items: kept,
           outbox: outbox.filter((change) => change.op !== 'add' || fits.has(change.id)),
           synced: Array.from(remoteIds),
+          pulled: true,
         };
       });
     },
     forgetRemote() {
       trimmed.clear();
-      pulled = false;
       return state.update((current) =>
-        current.outbox.length === 0 && current.synced.length === 0
+        current.outbox.length === 0 && current.synced.length === 0 && !current.pulled
           ? current
-          : { ...current, outbox: [], synced: [] },
+          : { items: current.items, outbox: [], synced: [] },
       );
     },
     version: () => changes,
