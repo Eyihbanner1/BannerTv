@@ -17,7 +17,7 @@
  * - The ranker reads words in the description: no "TS", "HD" on its own,
  *   sizes or other words it would take for a quality fact.
  */
-import data from '../films.json';
+import data from '../films.json' with { type: 'json' };
 
 export interface Film {
   slug: string;
