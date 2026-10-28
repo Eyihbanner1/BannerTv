@@ -502,6 +502,45 @@ test('when the row arrives above the focused catalog row, the rows slide to keep
   await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');
 });
 
+test('progress with no card yet, as after an update: Home waits a moment for it and opens on the row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // Every key focus lands on, from the first frame on.
+  await page.addInitScript(() => {
+    const w = window as Window & { focusKeys?: string[] };
+    const keys: string[] = (w.focusKeys = []);
+    new MutationObserver(() => {
+      const key = document.querySelector('[data-focused="true"]')?.getAttribute('data-focus-key');
+      if (key && keys[keys.length - 1] !== key) keys.push(key);
+    }).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['data-focused'],
+    });
+  });
+  await mockAddons(page);
+  await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
+  await mockPlayback(page);
+  // Cinemeta takes a moment over the title, as on a TV.
+  await page.route(/^https:\/\/v3-cinemeta\.strem\.io\/meta\//, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  // Focus went nowhere else first.
+  expect(
+    await page.evaluate(() => (window as Window & { focusKeys?: string[] }).focusKeys),
+  ).toEqual([`${CONTINUE_ROW}-tile-0`]);
+  await expect(page.locator('section[aria-label="Big Buck Bunny"]:visible')).toBeVisible();
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+  expect(errors).toEqual([]);
+});
+
 test('an episode played from a catalog row brings the row in above it, and the focused tile stays in view', async ({
   page,
 }) => {

@@ -7,7 +7,7 @@ import { push } from '../../app/router';
 import { useScreenSlot } from '../../app/screen-slot';
 import { Row } from '../../components/Row';
 import type { TileExtra } from '../../components/Tile';
-import { fillPlayedCards } from '../../data/continue';
+import { cardsMissing, fillPlayedCards } from '../../data/continue';
 import { playedVideos, progress } from '../../data/playback';
 import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 
@@ -15,6 +15,9 @@ import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 export const CONTINUE_ROW_KEY = 'continue';
 export const CONTINUE_FOCUS_KEY = `home-${CONTINUE_ROW_KEY}`;
 const HOUR_MS = 60 * 60 * 1000;
+/** How long after launch Home waits for a tile whose card is still being fetched. */
+const CARD_WAIT_MS = 3000;
+const launchedAt = Date.now();
 
 const sameTitles = (a: readonly ContinueItem[], b: readonly ContinueItem[]) =>
   a.length === b.length &&
@@ -65,7 +68,8 @@ function returnTile(metaId: string, pressed: number): string | undefined {
 }
 
 /**
- * The titles to continue, or null until saved progress has been read. Worked
+ * The titles to continue, or null until saved progress has been read (and,
+ * just after launch, until titles waiting for their cards have them). Worked
  * out again only while Home is on show: the player saves progress every few
  * seconds while Home sits hidden underneath, and showing Home again catches
  * up. Covering or uncovering Home re-renders it only when the list changed.
@@ -106,6 +110,12 @@ export function useContinueItems(): ContinueItem[] | null {
   );
   const items = useSyncExternalStore(subscribe, snapshot);
   const [loaded, setLoaded] = useState(false);
+  const [waited, setWaited] = useState(() => Date.now() - launchedAt >= CARD_WAIT_MS);
+  useEffect(() => {
+    if (waited) return;
+    const timer = setTimeout(() => setWaited(true), CARD_WAIT_MS - (Date.now() - launchedAt));
+    return () => clearTimeout(timer);
+  }, [waited]);
   useEffect(() => {
     let live = true;
     void Promise.all([progress.load(), playedVideos.load()])
@@ -128,7 +138,12 @@ export function useContinueItems(): ContinueItem[] | null {
     const undo = [slot.subscribe(fill), playedVideos.subscribe(fill)];
     return () => undo.forEach((stop) => stop());
   }, [loaded, slot]);
-  return loaded ? items : null;
+  if (!loaded) return null;
+  // Progress can come without the title's name and artwork, as after an
+  // update, and its card is fetched at launch. Home waits a moment for it, so
+  // it opens on the row rather than the row arriving above the catalogs.
+  if (items.length === 0 && !waited && cardsMissing()) return null;
+  return items;
 }
 
 function noteFor(t: TFunction, item: ContinueItem): string | undefined {

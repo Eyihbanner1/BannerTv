@@ -1,4 +1,10 @@
-import { CONTINUE_LIMIT, continueItem, playedCard } from '@bannertv/core';
+import {
+  CONTINUE_LIMIT,
+  continueItem,
+  type PlayedVideo,
+  playedCard,
+  type ProgressEntry,
+} from '@bannertv/core';
 import { addonClient } from './addons';
 import { playedVideos, progress } from './playback';
 
@@ -32,26 +38,16 @@ export function fillPlayedCards(): void {
   }
 }
 
+/** Whether a title the row could show has no card yet, so its tile is still to come. */
+export function cardsMissing(): boolean {
+  let missing = false;
+  eachWithoutCard(() => (missing = true));
+  return missing;
+}
+
 function walk(): void {
-  const now = Date.now();
-  const seen = new Set<string>();
-  let places = 0;
-  for (const entry of progress.recent()) {
-    if (places >= CONTINUE_LIMIT) break;
-    if (seen.has(entry.metaId)) continue;
-    seen.add(entry.metaId);
-    // A film with nothing left to resume is never on the row, so needs no card;
-    // nor is a video of unknown length, such as a live broadcast.
-    if (entry.duration <= 0) continue;
-    if (entry.type === 'movie' && progress.resumeAt(entry.videoId) === undefined) continue;
-    const card = playedVideos.get(entry.videoId);
-    if (card && (card.type === 'movie' || card.episode !== undefined)) {
-      if (continueItem(entry, card, progress, now)) places += 1;
-      continue;
-    }
-    // Once it has a card it may well be on the row.
-    places += 1;
-    if (asked.has(entry.metaId)) continue;
+  eachWithoutCard((entry, card) => {
+    if (asked.has(entry.metaId)) return;
     asked.add(entry.metaId);
     const query = addonClient.meta(entry.type, entry.metaId);
     const done = () => {
@@ -73,5 +69,34 @@ function walk(): void {
     const unsubscribe = query.subscribe(done);
     query.load();
     done();
+  });
+}
+
+/**
+ * Walks history as far as the row reaches, handing on each title the row
+ * could show that has no usable card. Only titles that can take a place count
+ * towards the row's limit, and one with no card yet may well take one.
+ */
+function eachWithoutCard(
+  missing: (entry: ProgressEntry, card: PlayedVideo | undefined) => void,
+): void {
+  const now = Date.now();
+  const seen = new Set<string>();
+  let places = 0;
+  for (const entry of progress.recent()) {
+    if (places >= CONTINUE_LIMIT) break;
+    if (seen.has(entry.metaId)) continue;
+    seen.add(entry.metaId);
+    // A film with nothing left to resume is never on the row, so needs no card;
+    // nor is a video of unknown length, such as a live broadcast.
+    if (entry.duration <= 0) continue;
+    if (entry.type === 'movie' && progress.resumeAt(entry.videoId) === undefined) continue;
+    const card = playedVideos.get(entry.videoId);
+    if (card && (card.type === 'movie' || card.episode !== undefined)) {
+      if (continueItem(entry, card, progress, now)) places += 1;
+      continue;
+    }
+    places += 1;
+    missing(entry, card);
   }
 }

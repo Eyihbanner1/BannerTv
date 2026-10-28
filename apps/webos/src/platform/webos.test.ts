@@ -22,6 +22,13 @@ describe('lunaFailed', () => {
     expect(lunaFailed({ errorCode: '0' })).toBe(false);
   });
 
+  it('takes "No Error" at its word, whatever returnValue says', () => {
+    // How the media service could answer unsubscribe on webOS 22, which logged "No Error" as a failure.
+    expect(lunaFailed({ returnValue: false, errorCode: 0, errorText: 'No Error' })).toBe(false);
+    expect(lunaFailed({ returnValue: false, errorText: 'No Error' })).toBe(false);
+    expect(lunaFailed({ returnValue: false, errorText: 'Invalid mediaId' })).toBe(true);
+  });
+
   it('takes an empty answer as success', () => {
     expect(lunaFailed({})).toBe(false);
   });
