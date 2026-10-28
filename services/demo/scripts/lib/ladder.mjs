@@ -4,10 +4,12 @@
  *
  * LG's self-check item 43 plays a title at 512 kbps, 1 Mbps, 7 Mbps and
  * 17.5 Mbps, twice each, and expects the picture to change resolution without
- * constant buffering. The rungs are sized so each of those lands on a
- * different one with a fifth of the link to spare, and the lowest stays well
- * under 512 kbps with its audio and the MPEG-TS overhead (about 14% at that
- * size, measured).
+ * constant buffering. The rungs are sized so that, even with every segment at
+ * its capped peak (maxrate, audio and the MPEG-TS overhead), each of those
+ * speeds has a different rung that fits with a fifth of the link to spare, and
+ * the lowest stays well under 512 kbps (overhead about 14% at that size,
+ * measured). The player goes by the measured peaks in the master, so a film
+ * that peaks well under its caps may get a bigger rung at 7 Mbps.
  *
  * What the webOS native player needs (LG's streaming spec and forum, see
  * docs/DEMO_ADDON.md): MPEG-TS segments, H.264 High at level 4.0 or lower,

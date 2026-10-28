@@ -74,6 +74,8 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const LOWEST_PEAK_LIMIT = 450_000;
 
 const { values: options } = parseArgs({
+  // pnpm passes on the `--` in `pnpm … media -- --check`.
+  args: process.argv.slice(2).filter((arg, index) => index > 0 || arg !== '--'),
   options: {
     only: { type: 'string' },
     source: { type: 'string', multiple: true, default: [] },
@@ -100,6 +102,15 @@ const overrides = new Map(
     return [pair.slice(0, at), pair.slice(at + 1)];
   }),
 );
+// A mistyped slug would otherwise download the film it was meant to replace.
+for (const slug of overrides.keys()) {
+  if (!allFilms.some((film) => film.slug === slug)) {
+    throw new Error(`--source names "${slug}", which is not a film in films.json`);
+  }
+  if (!films.some((film) => film.slug === slug)) {
+    console.warn(`--source for ${slug} is not used: --only leaves that film out`);
+  }
+}
 
 function inPublic(sitePath) {
   return join(PUBLIC, ...sitePath.split('/'));

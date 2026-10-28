@@ -17,7 +17,7 @@ A Stremio-protocol addon with three Creative Commons films from the Blender Foun
 ```sh
 pnpm --filter @bannertv/demo test          # routes, the app's own parser and ranker, the media scripts
 pnpm --filter @bannertv/demo media         # needs ffmpeg; builds public/
-pnpm --filter @bannertv/demo media -- --check
+pnpm --filter @bannertv/demo media --check
 npx wrangler@4 deploy                      # from this folder, after asking Eyitayo
 pnpm --filter @bannertv/demo check:live
 ```

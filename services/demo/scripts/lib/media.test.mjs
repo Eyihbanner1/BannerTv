@@ -54,8 +54,9 @@ describe('the HLS ladder', () => {
       expect(rung.width / rung.height).toBeCloseTo(16 / 9, 2);
       expect((rung.width % 2) + (rung.height % 2)).toBe(0);
     }
-    // At each of LG's four speeds the best rung that leaves a fifth of the link spare is a
-    // different one, so the picture visibly changes and nothing plays at the edge.
+    // Even with every segment at its capped peak, each of LG's four speeds has a different
+    // rung that leaves a fifth of the link spare, so the picture visibly changes and nothing
+    // plays at the edge.
     const top = (kbps) =>
       RUNGS.filter((rung) => (rung.maxKbps + rung.audioKbps) * 1.12 < kbps * 0.8).at(-1)?.name;
     expect([512, 1000, 7000, 17500].map(top)).toEqual(['288p', '360p', '720p', '1080p']);

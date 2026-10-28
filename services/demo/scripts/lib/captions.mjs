@@ -6,8 +6,9 @@
  * plainly that they are a test.
  *
  * WebVTT in UTF-8, which the app reads as is (packages/core/src/subtitles).
- * Captions are off until the viewer picks a track, so nobody sees these by
- * accident.
+ * BannerTV never turns these on by itself, even for a viewer whose subtitle
+ * language is English or Korean (apps/webos/src/screens/player/use-subtitles.ts),
+ * so nobody sees them by accident.
  */
 
 export const CHECK_EVERY_SECONDS = 30;

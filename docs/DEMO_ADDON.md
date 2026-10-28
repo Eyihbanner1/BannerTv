@@ -16,7 +16,7 @@ All three are suitable for all ages and have no dialogue. The licences and credi
 
 Everything about a film lives in `services/demo/films.json`: its text, credit, licence, source addresses, and the frames chosen for its artwork. The Worker builds the addon's answers from that file and the media script encodes what it lists. `pnpm --filter @bannertv/demo test` checks it.
 
-**What the licences ask, and where BannerTV does it.** CC BY needs the credit, a link to the licence, and a note of any changes. The credit and licence are on the first line of each stream in the picker, in the Details description ("Licensed under CC BY 4.0; re-encoded for streaming by BannerTV"), and on the addon's own page at `https://demo.bannertv.workers.dev/`, which links each licence and says the Blender Foundation does not endorse BannerTV. The store listing should credit them too.
+**What the licences ask, and where BannerTV does it.** CC BY needs the credit, the licence's address, and a note of any changes. On the TV, the Details description ends with all three ("© Blender Foundation | cloud.blender.org/spring. Licensed under CC BY 4.0, creativecommons.org/licenses/by/4.0; re-encoded for streaming by BannerTV"), and the first line of each stream in the picker names the film, its licence and the Blender Foundation. A first-run journey (`apps/webos/e2e/welcome.spec.ts`) checks that every film's Details text, licence address included, fits without being cut off. The addon's own page at `https://demo.bannertv.workers.dev/` links each licence and says the Blender Foundation does not endorse BannerTV. The store listing should credit them too.
 
 **Title artwork.** Blender's licensing pages exclude their logos and title treatments from the CC licence. So each film's title is set in Urbanist, BannerTV's own typeface, by `scripts/render-art.mjs`, and the PNGs are committed in `services/demo/static/art`. Posters and backdrops are made from frames of the films themselves (see Deploying, step 4).
 
@@ -26,9 +26,9 @@ Everything about a film lives in `services/demo/films.json`: its text, credit, l
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `/manifest.json`                                  | `com.bannertv.demo`, movies only, ids starting `bannertv:`                                        |
 | `/catalog/movie/blender.json`                     | The three films, with poster, backdrop, title logo, description, year, runtime and genres        |
-| `/catalog/movie/blender/search=….json`            | Films whose title, director, genre or year match every word typed                                 |
+| `/catalog/movie/blender/search=….json`            | Films where every word typed starts a word of the title, or is a whole word of the director, a genre or the year |
 | `/meta/movie/bannertv%3A<film>.json`              | Details, with the credit sentence. `{"meta": null}` for anything else                            |
-| `/stream/movie/bannertv%3A<film>.json`            | Two entries: the adaptive HLS stream and an identical backup. `{"streams": []}` for anything else |
+| `/stream/movie/bannertv%3A<film>.json`            | Two entries: the adaptive HLS stream and its backup. `{"streams": []}` for anything else          |
 | `/`                                               | The credits page                                                                                  |
 | `/media/…`, `/art/…`                              | Static files: playlists, segments, subtitles, artwork                                             |
 
@@ -37,16 +37,16 @@ These choices come from how the TV app reads addons:
 - **First in the list.** Home loads catalog rows in addon order, and the first row also fills the hero. The Demo goes first in `DEFAULT_ADDONS` so its films are what a new viewer sees.
 - **Every catalog item is complete.** The hero shows catalog data only, so each item carries its own artwork and text. Our own id prefix means Cinemeta and OpenSubtitles are never asked about these films.
 - **Posters carry the title.** Poster tiles hide their caption once the image loads.
-- **No genre list.** A catalog that lists genres would take Home's genre rows from Cinemeta. Search is answered, so the films turn up when someone searches for them.
+- **No genre list.** A catalog that lists genres would take Home's genre rows from Cinemeta. Search is answered, so the films turn up when someone searches for them. The app searches as the viewer types and the Demo's row comes first, so only title words match as they are typed: "bun" finds Big Buck Bunny, but "an" on the way to another title finds nothing.
 - **The stream name is never shown.** The picker shows the description, so the credit goes on its first line. The description also avoids words the stream ranker reads as facts ("TS", sizes, release names).
-- **A backup copy.** The player moves to the next stream if one stalls for 20 seconds. The second entry is the same files under another address (`?b=1`), so a hiccup on one request does not end playback.
-- **Subtitles.** The films have no dialogue, so each has two clearly labelled test tracks, English and Korean, with a numbered line every 30 seconds ("Subtitle check 3 of 20 / This line uses your subtitle size and colour"). They let a tester check that subtitles, their size and colour settings work (LG self-check item 48). Subtitles are off until the viewer picks a track.
+- **A backup copy.** The player moves to the next stream if one stalls for 20 seconds. The second entry reaches the same files through a second master address (`?b=1`), so the player starts them afresh and a hiccup does not end playback. Its first line ends "· backup copy", the only line the stream list shows.
+- **Subtitles.** The films have no dialogue, so each has two clearly labelled test tracks, English and Korean, with a numbered line every 30 seconds ("Subtitle check 3 of 20 / This line uses your subtitle size and colour"). They let a tester check that subtitles, their size and colour settings work (LG self-check item 48). Each is labelled "Subtitle check" for players that show labels; BannerTV lists them as English and Korean from BannerTV Demo. BannerTV never turns them on by itself, even for a viewer whose subtitle language is English or Korean, and picking one does not change the language other titles start with (`apps/webos/e2e/play.spec.ts` checks both).
 
 `src/contract.test.ts` reads every answer through the app's own parser (`@bannertv/protocol`) and stream ranker (`@bannertv/core`), for a webOS 22 4K TV, a webOS 5 Full HD TV and a browser: both copies must be playable without a warning, ranked primary first, and offered as one 1080p choice in the Quality menu.
 
 ## Encoding
 
-LG's self-check item 43 plays a title at 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, and over IPv6, and expects the picture to adapt without constant buffering. Each film is therefore one adaptive HLS stream with five sizes. The figures below were measured on a hard-to-compress test film; real films hit the same averages, since the encoder aims at an average bitrate.
+LG's self-check item 43 plays a title at 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, and over IPv6, and expects the picture to adapt without constant buffering. Each film is therefore one adaptive HLS stream with five sizes. The figures below come from a hard-to-compress test film; real films hit the same averages, since the encoder aims at an average bitrate, and their peaks are measured when they are encoded.
 
 | Size  | Picture   | Video target / peak | Audio    | H.264 level | Measured peak (whole stream) |
 | ----- | --------- | ------------------- | -------- | ----------- | ---------------------------- |
@@ -54,9 +54,9 @@ LG's self-check item 43 plays a title at 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps,
 | 360p  | 640×360   | 400 / 440 kbps      | 64 kbps  | 3.0         | 533 kbps                     |
 | 540p  | 960×540   | 1100 / 1320 kbps    | 128 kbps | 3.1         | 1353 kbps                    |
 | 720p  | 1280×720  | 2800 / 3360 kbps    | 128 kbps | 3.1         | 3158 kbps                    |
-| 1080p | 1920×1080 | 5000 / 6000 kbps    | 128 kbps | 4.0         | about 5.3 Mbps               |
+| 1080p | 1920×1080 | 5000 / 6000 kbps    | 128 kbps | 4.0         | about 5.3 Mbps (estimated)   |
 
-At each of LG's four speeds the best size that leaves a fifth of the link spare is a different one: 288p, 360p, 720p and 1080p. The 288p size also keeps playing when Korean traffic is routed through the United States (see Hosting).
+The player picks a size from its own estimate of the link and each size's `BANDWIDTH`, the measured peak. Keeping a fifth of the link spare, LG's 512 kbps and 1 Mbps steps get 288p and 360p. At 7 Mbps that rule allows 5.6 Mbps. The evenly hard test film's 1080p peak stays under that, but films that vary from scene to scene peak higher, towards the 6000 kbps cap, because the encoder moves bits into the hard scenes; those get 720p at 7 Mbps. At 17.5 Mbps it is 1080p. Even with every segment at its cap, each speed has a size that fits with a fifth to spare (the unit tests check this worst case). The real films' measured peaks go in the table above once they are encoded. The 288p size also keeps playing when Korean traffic is routed through the United States (see Hosting).
 
 What the webOS player needs, from LG's streaming and video specifications and its developer forum:
 
@@ -73,7 +73,7 @@ Sources: [LG streaming protocols](https://webostv.developer.lge.com/develop/spec
 One Cloudflare Worker named `demo`, on the same personal account as the pairing relay, at `https://demo.bannertv.workers.dev`. The films, artwork and subtitles are uploaded with it as static assets; the Worker code answers only the addon's JSON.
 
 - **Why static assets, not R2.** Requests for static assets are free and unlimited and never run the Worker, so a viewer's hundreds of segment requests don't count toward the account's 100,000 Worker requests a day, which the pairing relay shares. Cloudflare caches them and sends the right types (`video/mp2t`, `application/vnd.apple.mpegurl`, `text/vtt`). R2 would add a bucket, keys and a per-request cost, and its development addresses are rate-limited and were once blocked in Korea.
-- **Limits.** 20,000 files per deployment and 25 MiB per file on the free plan. The three films come to about 1,700 files and 1.7 GB. `pnpm --filter @bannertv/demo media -- --check` checks both before a deploy.
+- **Limits.** 20,000 files per deployment and 25 MiB per file on the free plan. The three films come to about 1,700 files and 1.7 GB. `pnpm --filter @bannertv/demo media --check` checks both before a deploy.
 - **Headers.** `static/_headers` opens every file to other pages (CORS) and sets caching: segments for a year, as they never change; playlists for an hour; subtitles and artwork for a day. Leave out a `[cache]` block in `wrangler.toml`: with Workers Cache on, static asset requests are billed too.
 - **No logs.** Observability, logs, traces and Logpush are all off in `wrangler.toml`. The Worker writes nothing anywhere. Search words reach it as part of the address and are only used to filter the three films.
 - **IPv6.** workers.dev addresses answer over IPv6 as well as IPv4; `check:live` checks it.
@@ -92,7 +92,7 @@ Everything below runs on Eyitayo's Windows laptop, which can reach blender.org a
 
 1. **Install ffmpeg** (once): `winget install Gyan.FFmpeg`, then open a new terminal and check `ffmpeg -version`.
 2. **Get the code:** in the repo, `git fetch origin` and check out the branch with this addon, then `pnpm install`.
-3. **Check the film addresses:** `pnpm --filter @bannertv/demo media -- --sources`. Each film should print a working address.
+3. **Check the film addresses:** `pnpm --filter @bannertv/demo media --sources`. Each film should print a working address. (The scripts also accept the flags after a `--`.)
 4. **Encode and draw:** `pnpm --filter @bannertv/demo media`. It downloads each film to `services/demo/.work` (about 1 GB), checks it is the film `films.json` describes, encodes all five sizes into `services/demo/public`, writes the subtitles, and builds the poster and backdrop. Expect 10 to 30 minutes a film with the default `slow` preset; a finished film is skipped next time, so it can be stopped and started again. Then open `services/demo/review`: `<film>-frames.jpg` shows the twelve candidate frames and `<film>-frames.txt` which two were used. To use other frames, put their times in `films.json` (`art.background`, `art.poster`, `art.posterFocus`) and run the command again; only the artwork is redone.
 5. **Deploy:** from `services/demo`, `npx wrangler@4 login` (already done for the relay), then `npx wrangler@4 deploy`. Only new or changed files upload. If it stops with "Upload took too long", run it again and it carries on.
 6. **Check it:** `pnpm --filter @bannertv/demo check:live` fetches every film, every size's first and last segment, the subtitles and artwork, and tries IPv6.
@@ -103,4 +103,8 @@ Everything below runs on Eyitayo's Windows laptop, which can reach blender.org a
 
 **Changing a film's video** later: raise its `media` number in `films.json`, delete its old folder under `public/media/<film>/`, encode and deploy. The new number gives new addresses, so TVs never mix cached old segments with new ones. Artwork and subtitles can change in place.
 
-**Taking it down:** delete the `demo` Worker in the Cloudflare dashboard (Workers & Pages). Then remove it from `DEFAULT_ADDONS` in the next app release, or TVs show a failing row.
+**Taking it down.** Every TV that has launched keeps its own saved list of addons, the Demo included, so deleting the Worker or dropping it from `DEFAULT_ADDONS` alone would leave a failing first row on those TVs, after up to 30 days of cached films (`staleError`). In order:
+
+1. Deploy the Worker with an empty catalog and empty stream lists (an empty `FILMS` list in `src/addon.ts`). Each TV drops the row the next time it refreshes the catalog, within six hours (`cacheMaxAge`), since Home leaves out empty rows.
+2. Release an app that removes `https://demo.bannertv.workers.dev/manifest.json` from saved addon lists when it loads them, and drops it from `DEFAULT_ADDONS`.
+3. Once that release has reached TVs, Eyitayo deletes the `demo` Worker in the Cloudflare dashboard (Workers & Pages).

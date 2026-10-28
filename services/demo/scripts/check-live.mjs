@@ -6,7 +6,7 @@
  * page. Then the address over IPv6, which LG's self-check also asks for.
  *
  *   pnpm --filter @bannertv/demo check:live
- *   pnpm --filter @bannertv/demo check:live -- --base https://demo.bannertv.workers.dev
+ *   pnpm --filter @bannertv/demo check:live --base http://127.0.0.1:8787
  *
  * Only reads; changes nothing.
  */
@@ -19,6 +19,8 @@ import { loadFilms } from './lib/films.mjs';
 import { readMediaPlaylist } from './lib/playlists.mjs';
 
 const { values: options } = parseArgs({
+  // pnpm passes on the `--` in `pnpm … check:live -- --base …`.
+  args: process.argv.slice(2).filter((arg, index) => index > 0 || arg !== '--'),
   options: { base: { type: 'string', default: 'https://demo.bannertv.workers.dev' } },
 });
 const BASE = options.base.replace(/\/+$/, '');
@@ -210,6 +212,10 @@ async function main() {
   const { ok: unknownOk, body: unknown } = await json(`/stream/movie/tt0000000.json`);
   if (unknownOk && Array.isArray(unknown?.streams) && unknown.streams.length === 0) {
     pass('other titles get an empty stream list');
+  } else if (unknownOk) {
+    fail(
+      `other titles get ${Array.isArray(unknown?.streams) ? unknown.streams.length : 'no'} streams, expected an empty list`,
+    );
   }
 
   for (const film of films) await checkFilm(film);
