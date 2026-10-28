@@ -204,8 +204,9 @@ export function HomeScreen() {
     if (canSlide() && slideRow.current !== row.key) {
       slideRow.current = row.key;
       cancelAnimationFrame(slideFrame.current);
+      // Read when it runs: a row that turned out empty meanwhile has handed its place on.
       slideFrame.current = requestAnimationFrame(() =>
-        slideTrack(trackRef.current, rowFocusKey(row)),
+        slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`),
       );
     }
     const now = Date.now();

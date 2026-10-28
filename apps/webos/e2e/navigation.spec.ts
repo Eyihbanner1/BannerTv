@@ -198,6 +198,50 @@ test('a row that turns out empty under focus hands focus to the row below', asyn
   await expectFocusInView(page);
 });
 
+test('a row that empties before the rows slide to it leaves focus in view', async ({ page }) => {
+  // Animation frames run late, as on a busy TV, so the empty answer lands first.
+  await page.addInitScript(() => {
+    const raf = window.requestAnimationFrame.bind(window);
+    const caf = window.cancelAnimationFrame.bind(window);
+    const late = new Map<number, ReturnType<typeof setTimeout>>();
+    let next = 1e6;
+    window.requestAnimationFrame = (callback) => {
+      if (!(window as unknown as { slowFrames?: boolean }).slowFrames) return raf(callback);
+      const id = ++next;
+      late.set(
+        id,
+        setTimeout(() => late.delete(id) && raf(callback), 400),
+      );
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => {
+      clearTimeout(late.get(id));
+      if (!late.delete(id)) caf(id);
+    };
+  });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/catalog\/series\/imdbRating\.json$/, async (route) => {
+    await held;
+    await route.fulfill({
+      json: { metas: [] },
+      headers: { 'access-control-allow-origin': '*' },
+    });
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (const row of HOME_ROWS.slice(1, 3)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await page.evaluate(() => ((window as unknown as { slowFrames: boolean }).slowFrames = true));
+  await page.keyboard.press('ArrowDown');
+  await expectFocus(page, `${HOME_ROWS[3]}-tile-0`);
+  release();
+  await expectFocus(page, `${HOME_ROWS[4]}-tile-0`);
+  // Once the late frame has run, not eventually: the view must not leave focus.
+  await page.waitForTimeout(1000);
+  const box = await page.locator('[data-focused="true"]').boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(1080);
+});
+
 test('an empty last row under focus hands focus to the row above', async ({ page }) => {
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
