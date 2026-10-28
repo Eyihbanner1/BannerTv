@@ -101,6 +101,11 @@ export function createStorage(): Storage {
         if (!database) return fallbackKv.set(key, value);
         await done(database.transaction(KV, 'readwrite').objectStore(KV).put(value, key));
       },
+      async delete(key) {
+        const database = await db;
+        if (!database) return fallbackKv.delete(key);
+        await done(database.transaction(KV, 'readwrite').objectStore(KV).delete(key));
+      },
     },
     cache: {
       async read(key) {

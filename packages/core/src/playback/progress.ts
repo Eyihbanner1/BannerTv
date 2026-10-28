@@ -47,6 +47,12 @@ export interface ProgressStore {
   /** Forgets the position (Start over); keeps nothing about the video. */
   clear(videoId: string): void;
   /**
+   * Brings in progress made elsewhere (Trakt): each entry replaces the
+   * video's own only when it is newer. A video watched here stays watched.
+   * Resolves with how many entries were taken.
+   */
+  merge(entries: readonly ProgressEntry[]): Promise<number>;
+  /**
    * Where to resume in seconds, or undefined to start from the beginning:
    * never near either end, nor in a video whose length is unknown.
    */
@@ -245,6 +251,28 @@ export function createProgressStore(options: {
       if (!loaded) clearedEarly.add(videoId);
       if (had || !loaded) save();
       if (had) changed();
+    },
+    async merge(incoming) {
+      await load().catch(() => undefined);
+      if (!loaded) return 0;
+      let taken = 0;
+      for (const value of incoming) {
+        const entry = readEntry(value);
+        if (!entry) continue;
+        const own = entries.get(entry.videoId);
+        if (own && own.updatedAt >= entry.updatedAt) continue;
+        entries.set(entry.videoId, own?.watched ? { ...entry, watched: true } : entry);
+        taken += 1;
+      }
+      if (taken === 0) return 0;
+      // Kept least recently updated first, so trimming drops the oldest, wherever they came from.
+      const sorted = readEntries(Array.from(entries.values()));
+      entries.clear();
+      sorted.forEach(put);
+      trim();
+      save();
+      changed();
+      return taken;
     },
     resumeAt(videoId) {
       const entry = entries.get(videoId);

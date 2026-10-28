@@ -1,0 +1,294 @@
+import type { ContentType, MetaPreview } from '@bannertv/protocol';
+import { createPersisted } from '../persisted';
+import type { KeyValueStore } from '../storage';
+import type { Listener } from '../store';
+
+const KEY = 'library';
+export const MAX_LIBRARY_ITEMS = 1000;
+
+/** A saved title: what a tile needs, so the Library opens without asking any addon. */
+export interface LibraryItem {
+  id: string;
+  type: ContentType;
+  name: string;
+  poster?: string;
+  background?: string;
+  logo?: string;
+  releaseInfo?: string;
+  imdbRating?: string;
+  genres?: string[];
+  /** Milliseconds since 1970. */
+  addedAt: number;
+}
+
+/** A change made on the TV that Trakt has not been told about yet. */
+export interface LibraryChange {
+  op: 'add' | 'remove';
+  id: string;
+  type: ContentType;
+}
+
+/** A title as Trakt's watchlist lists it. */
+export interface RemoteLibraryItem {
+  id: string;
+  type: ContentType;
+  name: string;
+  releaseInfo?: string;
+  /** When it was put on the list, milliseconds since 1970. */
+  addedAt: number;
+}
+
+interface LibraryState {
+  /** Most recently added first. */
+  items: LibraryItem[];
+  /** Changes not sent to Trakt yet, oldest first, at most one per title. */
+  outbox: LibraryChange[];
+  /** The ids Trakt's list had at the last sync, to tell a removal there from an addition here. */
+  synced: string[];
+}
+
+export interface Library {
+  load(): Promise<void>;
+  has(id: string): boolean;
+  get(id: string): LibraryItem | undefined;
+  /** Most recently added first. */
+  items(): readonly LibraryItem[];
+  add(item: MetaPreview): Promise<void>;
+  remove(id: string): Promise<void>;
+  /**
+   * Fills in a saved title's name and artwork from a fresh answer, for titles
+   * that came from Trakt with a name only. Keeps when it was added.
+   */
+  refresh(item: MetaPreview): Promise<void>;
+  /** Changes made on the TV that Trakt has not been told about, oldest first. */
+  outbox(): readonly LibraryChange[];
+  /** Forgets changes Trakt now has. */
+  sent(changes: readonly LibraryChange[]): Promise<void>;
+  /**
+   * Brings in Trakt's list: what was added there is added here, what was
+   * removed there (it was in Trakt's list at the last sync and is not now)
+   * is removed here, unless the TV has a newer change of its own waiting in
+   * the outbox. Titles saved here that Trakt never had are queued to be sent.
+   */
+  mergeRemote(remote: readonly RemoteLibraryItem[]): Promise<void>;
+  /** Forgets the sync state, for signing out of Trakt. The titles stay. */
+  forgetRemote(): Promise<void>;
+  /** Bumps on every change, for screens that show the library. */
+  version(): number;
+  subscribe(listener: Listener): () => void;
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
+const isTime = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+function readItem(value: unknown): LibraryItem | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (!isText(raw.id) || !isText(raw.type) || !isText(raw.name) || !isTime(raw.addedAt)) {
+    return undefined;
+  }
+  const item: LibraryItem = { id: raw.id, type: raw.type, name: raw.name, addedAt: raw.addedAt };
+  for (const field of ['poster', 'background', 'logo', 'releaseInfo', 'imdbRating'] as const) {
+    if (isText(raw[field])) item[field] = raw[field];
+  }
+  if (Array.isArray(raw.genres)) {
+    const genres = raw.genres.filter(isText).slice(0, 6);
+    if (genres.length > 0) item.genres = genres;
+  }
+  return item;
+}
+
+function readChange(value: unknown): LibraryChange | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { op, id, type } = value as Record<string, unknown>;
+  if ((op !== 'add' && op !== 'remove') || !isText(id) || !isText(type)) return undefined;
+  return { op, id, type };
+}
+
+function readState(saved: unknown): LibraryState {
+  const raw = (typeof saved === 'object' && saved !== null ? saved : {}) as Record<string, unknown>;
+  const seen = new Set<string>();
+  const items: LibraryItem[] = [];
+  for (const value of Array.isArray(raw.items) ? raw.items : []) {
+    const item = readItem(value);
+    if (!item || seen.has(item.id)) continue;
+    seen.add(item.id);
+    items.push(item);
+  }
+  const outbox = (Array.isArray(raw.outbox) ? raw.outbox : [])
+    .map(readChange)
+    .filter((change): change is LibraryChange => change !== undefined);
+  const synced = (Array.isArray(raw.synced) ? raw.synced : []).filter(isText);
+  return { items: newestFirst(items).slice(0, MAX_LIBRARY_ITEMS), outbox, synced };
+}
+
+/** Chromium 68 sorts unstably, so equal times keep their order by hand. */
+function newestFirst(items: LibraryItem[]): LibraryItem[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => b.item.addedAt - a.item.addedAt || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+function itemFrom(preview: MetaPreview, addedAt: number): LibraryItem {
+  const item: LibraryItem = { id: preview.id, type: preview.type, name: preview.name, addedAt };
+  if (preview.poster) item.poster = preview.poster;
+  if (preview.background) item.background = preview.background;
+  if (preview.logo) item.logo = preview.logo;
+  if (preview.releaseInfo) item.releaseInfo = preview.releaseInfo;
+  if (preview.imdbRating) item.imdbRating = preview.imdbRating;
+  if (preview.genres.length > 0) item.genres = preview.genres.slice(0, 6);
+  return item;
+}
+
+/** Changes kept for Trakt at most; without a Trakt account nothing ever sends them. */
+const MAX_OUTBOX = 2 * MAX_LIBRARY_ITEMS;
+
+/** The outbox with `change` as the title's latest change, replacing any earlier one. */
+function queue(outbox: readonly LibraryChange[], change: LibraryChange): LibraryChange[] {
+  return outbox
+    .filter((c) => c.id !== change.id)
+    .concat(change)
+    .slice(-MAX_OUTBOX);
+}
+
+/** "My List" for one profile, kept in the key-value store, at most MAX_LIBRARY_ITEMS titles. */
+export function createLibrary(options: { storage: KeyValueStore; now?: () => number }): Library {
+  const { storage, now = Date.now } = options;
+  const state = createPersisted<LibraryState>({
+    storage,
+    key: KEY,
+    initial: { items: [], outbox: [], synced: [] },
+    read: readState,
+  });
+  let changes = 0;
+  let index = new Map<string, LibraryItem>();
+  let indexed: LibraryItem[] | null = null;
+
+  function lookup(): Map<string, LibraryItem> {
+    const items = state.get().items;
+    if (indexed !== items) {
+      index = new Map(items.map((item) => [item.id, item]));
+      indexed = items;
+    }
+    return index;
+  }
+
+  state.subscribe(() => {
+    changes += 1;
+  });
+
+  return {
+    load: state.load,
+    has: (id) => lookup().has(id),
+    get: (id) => lookup().get(id),
+    items: () => state.get().items,
+    add(preview) {
+      return state.update((current) => {
+        const item = itemFrom(preview, now());
+        const items = [item, ...current.items.filter((i) => i.id !== item.id)].slice(
+          0,
+          MAX_LIBRARY_ITEMS,
+        );
+        return {
+          ...current,
+          items,
+          outbox: queue(current.outbox, { op: 'add', id: item.id, type: item.type }),
+        };
+      });
+    },
+    remove(id) {
+      return state.update((current) => {
+        const item = current.items.find((i) => i.id === id);
+        if (!item) return current;
+        return {
+          ...current,
+          items: current.items.filter((i) => i.id !== id),
+          outbox: queue(current.outbox, { op: 'remove', id, type: item.type }),
+        };
+      });
+    },
+    refresh(preview) {
+      return state.update((current) => {
+        const at = current.items.findIndex((i) => i.id === preview.id);
+        if (at < 0) return current;
+        const old = current.items[at]!;
+        const item = itemFrom(preview, old.addedAt);
+        item.type = old.type;
+        const same = (Object.keys(item) as Array<keyof LibraryItem>).every(
+          (field) => JSON.stringify(item[field]) === JSON.stringify(old[field]),
+        );
+        if (same && Object.keys(old).length === Object.keys(item).length) return current;
+        const items = current.items.slice();
+        items[at] = item;
+        return { ...current, items };
+      });
+    },
+    outbox: () => state.get().outbox,
+    sent(sentChanges) {
+      return state.update((current) => {
+        const done = (change: LibraryChange) =>
+          sentChanges.some((s) => s.id === change.id && s.op === change.op);
+        const outbox = current.outbox.filter((change) => !done(change));
+        let synced = current.synced;
+        for (const change of sentChanges) {
+          synced = synced.filter((id) => id !== change.id);
+          if (change.op === 'add') synced = synced.concat(change.id);
+        }
+        if (outbox.length === current.outbox.length && synced === current.synced) return current;
+        return { ...current, outbox, synced };
+      });
+    },
+    mergeRemote(remote) {
+      return state.update((current) => {
+        const pending = new Map(current.outbox.map((change) => [change.id, change]));
+        const before = new Set(current.synced);
+        const remoteIds = new Set(remote.map((item) => item.id));
+        let outbox = current.outbox;
+        const items: LibraryItem[] = [];
+        for (const item of current.items) {
+          if (remoteIds.has(item.id)) {
+            items.push(item);
+            continue;
+          }
+          // Removed on Trakt since the last sync, and not added again here since.
+          if (before.has(item.id) && pending.get(item.id)?.op !== 'add') continue;
+          items.push(item);
+          if (!pending.has(item.id)) {
+            outbox = queue(outbox, { op: 'add', id: item.id, type: item.type });
+          }
+        }
+        const have = new Set(items.map((item) => item.id));
+        for (const entry of remote) {
+          if (have.has(entry.id)) continue;
+          // Removed here and not sent yet: the removal goes to Trakt instead.
+          if (pending.get(entry.id)?.op === 'remove') continue;
+          const item: LibraryItem = {
+            id: entry.id,
+            type: entry.type,
+            name: entry.name,
+            addedAt: entry.addedAt,
+          };
+          if (entry.releaseInfo) item.releaseInfo = entry.releaseInfo;
+          items.push(item);
+          have.add(entry.id);
+        }
+        return {
+          items: newestFirst(items).slice(0, MAX_LIBRARY_ITEMS),
+          outbox,
+          synced: Array.from(remoteIds),
+        };
+      });
+    },
+    forgetRemote() {
+      return state.update((current) =>
+        current.outbox.length === 0 && current.synced.length === 0
+          ? current
+          : { ...current, outbox: [], synced: [] },
+      );
+    },
+    version: () => changes,
+    subscribe: state.subscribe,
+  };
+}

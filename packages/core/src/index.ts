@@ -1,5 +1,16 @@
 export { buildBoard, type BoardRow, GENRE_PICKS, type RowStyle } from './addons/board';
 export {
+  arrangeBoard,
+  createHomeLayout,
+  EMPTY_LAYOUT,
+  type HomeLayout,
+  type HomeLayoutStore,
+  moveRow,
+  orderedRows,
+  rowIdentity,
+  setRowHidden,
+} from './addons/layout';
+export {
   type AddonAnswer,
   type AddonClient,
   BROWSE_TIMEOUT_MS,
@@ -40,7 +51,16 @@ export {
   searchSources,
 } from './addons/sources';
 export { type FetchJson, type FetchJsonOptions, HttpError, type HttpErrorKind } from './http';
+export {
+  createLibrary,
+  type Library,
+  type LibraryChange,
+  type LibraryItem,
+  MAX_LIBRARY_ITEMS,
+  type RemoteLibraryItem,
+} from './library/library';
 export { createLimiter, type Limiter } from './limiter';
+export { createPersisted, type Persisted, type PersistedOptions } from './persisted';
 export {
   type CachePolicy,
   createQueryCache,
@@ -73,6 +93,48 @@ export {
 } from './playback/progress';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
+export {
+  createTrackMemory,
+  MAX_TRACK_TITLES,
+  type TrackChoice,
+  type TrackMemory,
+} from './playback/tracks';
+export { createWatchedSet, MAX_WATCHED, type WatchedSet } from './playback/watched';
+export {
+  buildKidsBoard,
+  KIDS_GENRE,
+  KIDS_TYPES,
+  kidsAddons,
+  kidsTitleAllowed,
+  ratingAllowed,
+  ukRating,
+} from './profiles/kids';
+export {
+  checkPin,
+  cleanName,
+  createPinGuard,
+  defaultProfiles,
+  isPinFormat,
+  KIDS_RATINGS,
+  type KidsRating,
+  MAIN_PROFILE_ID,
+  makePin,
+  MAX_NAME_LENGTH,
+  MAX_PROFILES,
+  newProfileId,
+  PIN_LENGTH,
+  PIN_LOCK_MS,
+  PIN_TRIES,
+  type PinGuard,
+  type Profile,
+  PROFILE_COLOURS,
+  profileKeyPrefix,
+  type ProfilesState,
+  readProfiles,
+  type StoredPin,
+} from './profiles/profiles';
+export { profileKeyValueStore } from './profiles/scoped';
+export { sha256 } from './profiles/sha256';
 export { createRecentList, type RecentList } from './recent';
 export {
   type CacheRecord,
