@@ -53,6 +53,11 @@ const heroBackdrops = (page: Page) =>
 
 test('the hero follows focus back to a title whose backdrop just faded out', async ({ page }) => {
   await mockAddons(page);
+  // The keys are timed against a 250 ms hero wait. By default quick presses
+  // wait 800 ms, which a single press after a rest can still race.
+  await page.addInitScript(() =>
+    localStorage.setItem('bannertv.tuning', JSON.stringify({ heroBusyMs: 250 })),
+  );
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);

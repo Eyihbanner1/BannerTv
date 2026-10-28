@@ -380,18 +380,67 @@ test('quick presses all count, and a held arrow moves at most once per 100 ms', 
   await expectFocus(page, `${FIRST_ROW}-tile-3`);
   await expectFocusInView(page);
 
-  // Key repeat from a held arrow is still held back.
+  // Key repeat from a held arrow is still held back: one move per 100 ms at
+  // most. Six presses from tile 9 stay in the row, however slow the runner.
+  for (let n = 0; n < 6; n++) await page.keyboard.press('ArrowRight');
+  await expectFocus(page, `${FIRST_ROW}-tile-9`);
   await page.waitForTimeout(150);
   const started = Date.now();
-  await page.keyboard.down('ArrowLeft');
-  for (let n = 0; n < 4; n++) await page.keyboard.down('ArrowLeft');
+  for (let n = 0; n < 6; n++) await page.keyboard.down('ArrowLeft');
   const held = Date.now() - started;
   await page.keyboard.up('ArrowLeft');
   await page.waitForTimeout(200);
   const key = await page.locator('[data-focused="true"]').getAttribute('data-focus-key');
-  const moved = 3 - Number(/-tile-(\d+)$/.exec(key ?? '')?.[1]);
+  const moved = 9 - Number(/-tile-(\d+)$/.exec(key ?? '')?.[1]);
   expect(moved).toBeGreaterThanOrEqual(1);
-  expect(moved).toBeLessThanOrEqual(1 + Math.floor(held / 100));
+  expect(moved).toBeLessThanOrEqual(Math.min(6, 1 + Math.floor(held / 100)));
+  if (held < 500) expect(moved).toBeLessThan(6);
+});
+
+test('going up to the hero after quick presses shows, and opens, the title focus was on', async ({
+  page,
+}) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
+  await page.waitForTimeout(1000);
+  // Quick presses hold the hero back, so it still shows the first title...
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expectFocus(page, `${FIRST_ROW}-tile-2`);
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
+  // ...until focus goes up to it, which shows the title focus left at once.
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'details-watch');
+  await expect(page.locator('section[aria-label="Sintel"]:visible')).toBeVisible();
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toHaveCount(0);
+  await pressBack(page);
+  await expectFocus(page, 'home-hero-details');
+  await expect(page.locator('section[aria-label="Sintel"]:visible')).toBeVisible();
+});
+
+test('the hero follows a row that loads under focus without the quick-press wait', async ({
+  page,
+}) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/catalog\/series\/top\.json$/, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await page.waitForTimeout(1500);
+  // One press after a rest, onto a row still loading.
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await page.waitForTimeout(300);
+  release();
+  await expectFocusLabel(page, 'Morevna Project, 2016–');
+  // The catalog arriving is not another press: the hero waits 250 ms, not 800.
+  await expect(page.locator('section[aria-label="Morevna Project"]:visible')).toBeVisible({
+    timeout: 600,
+  });
 });
 
 test('on a TV, Back on the root screen calls platformBack', async ({ page }) => {
