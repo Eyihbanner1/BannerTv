@@ -26,6 +26,7 @@ export {
   type StoredAddon,
 } from './addons/collection';
 export {
+  BANNERTV_DEMO_ID,
   BANNERTV_DEMO_URL,
   CINEMETA_URL,
   DEFAULT_ADDONS,

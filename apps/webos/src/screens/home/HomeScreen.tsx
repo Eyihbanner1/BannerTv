@@ -58,6 +58,8 @@ interface HomeRowProps {
   near: boolean;
   /** The row's catalog came back empty; `focused` if focus was in it. */
   onEmpty: (key: string, focused: boolean) => void;
+  /** The row's addon failed, or answered again after failing. */
+  onFailed: (key: string, failed: boolean) => void;
   onItemFocus: (rowKey: string, item: MetaPreview | undefined, element: HTMLElement) => void;
 }
 
@@ -74,7 +76,14 @@ function openCatalog(row: BoardRow): void {
 
 // Memoised with stable handlers: moving between rows redraws only the rows
 // that come into or leave the drawn window, not every row on Home.
-const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
+const HomeRow = memo(function HomeRow({
+  row,
+  first,
+  near,
+  onEmpty,
+  onFailed,
+  onItemFocus,
+}: HomeRowProps) {
   const { t } = useTranslation();
   const query = useMemo(
     () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
@@ -86,6 +95,7 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
     [state.data],
   );
   const empty = state.status === 'success' && items !== null && items.length === 0;
+  const failed = state.status === 'error';
   const onRetry = useCallback(() => query.retry(), [query]);
   const onRowItemFocus = useCallback(
     (item: MetaPreview | undefined, element: HTMLElement) => onItemFocus(row.key, item, element),
@@ -98,6 +108,7 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
     if (!empty) return;
     onEmpty(row.key, focusedKey().indexOf(`${rowFocusKey(row)}-tile-`) === 0);
   }, [empty, onEmpty, row]);
+  useEffect(() => onFailed(row.key, failed), [failed, onFailed, row.key]);
   useEffect(() => {
     if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
   }, [first, items]);
@@ -132,6 +143,10 @@ export function HomeScreen() {
   const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
+  // The hero starts on the first row whose addon answered: on a new TV whose
+  // first addon is down, Cinemeta's row below fills it.
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const heroIndex = rows.findIndex((row) => !failed.has(row.key));
   // Home opens on its first row: it only mounts when the section is opened,
   // and Back from a screen on top of it finds it still mounted.
   const [focusedRow, setFocusedRow] = useState<string>();
@@ -227,6 +242,16 @@ export function HomeScreen() {
     if (focused) void setFocus(`home-${next}`);
   }, []);
 
+  const onFailed = useCallback((key: string, now: boolean) => {
+    setFailed((keys) => {
+      if (keys.has(key) === now) return keys;
+      const next = new Set(keys);
+      if (now) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
   // Rows that are loading or failed report focus too, so the rows under them
   // are drawn and Down has somewhere to go. Only titles change the hero.
   const onItemFocus = useCallback((rowKey: string, item: MetaPreview | undefined) => {
@@ -267,11 +292,12 @@ export function HomeScreen() {
             <HomeRow
               key={row.key}
               row={row}
-              first={continueItems !== null && !continuing && index === 0}
+              first={continueItems !== null && !continuing && index === heroIndex}
               near={
                 Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
               }
               onEmpty={onEmpty}
+              onFailed={onFailed}
               onItemFocus={onItemFocus}
             />
           ))}

@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, type Page, test } from '@playwright/test';
-import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
+import { DEMO_ROW, FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import {
   DEFAULT_STREAMS,
   HLS_PATH,
@@ -29,6 +31,39 @@ async function setHidden(page: Page, hidden: boolean) {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => value });
     document.dispatchEvent(new Event('visibilitychange'));
   }, hidden);
+}
+
+/**
+ * BannerTV Demo's films are the journeys' small HLS stream, and its subtitle
+ * check tracks one line each.
+ */
+async function routeDemoFilms(page: Page) {
+  const types: Record<string, string> = {
+    m3u8: 'application/vnd.apple.mpegurl',
+    mp4: 'video/mp4',
+    m4s: 'video/mp4',
+    vtt: 'text/vtt',
+  };
+  await page.route(/^https:\/\/demo\.bannertv\.workers\.dev\/media\//, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    const check = /\/subs\/(eng|kor)\.vtt$/.exec(path);
+    if (check) {
+      const language = check[1] === 'eng' ? 'English' : 'Korean';
+      return route.fulfill({
+        contentType: 'text/vtt',
+        headers,
+        body: `WEBVTT\n\n00:00.000 --> 01:00.000\nSubtitle check in ${language}\n`,
+      });
+    }
+    const file = path.replace(/^.*\//, '');
+    if (!/^[\w-]+\.(m3u8|mp4|m4s|vtt)$/.test(file)) return route.fulfill({ status: 404 });
+    return route.fulfill({
+      contentType: types[file.replace(/^.*\./, '')],
+      headers,
+      body: readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file)),
+    });
+  });
 }
 
 async function openMovie(page: Page) {
@@ -620,4 +655,45 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Watch');
   const saved = ((await readKv(page, 'progress')) ?? []) as Array<{ videoId: string }>;
   expect(saved.map((entry) => entry.videoId)).not.toContain(MOVIE);
+});
+
+test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({
+  page,
+}) => {
+  await mockAddons(page, { firstRun: true });
+  await mockPlayback(page);
+  await routeDemoFilms(page);
+  // This viewer reads English subtitles.
+  await page.addInitScript(() =>
+    localStorage.setItem('bannertv.preferences', JSON.stringify({ subtitleLanguage: 'eng' })),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, 'welcome-start');
+  await press(page, 'Enter', `${DEMO_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(1500);
+  await expect(page.getByText(/^Subtitle check/)).toHaveCount(0);
+  await expect(page.getByText('Hello from the stream')).toHaveCount(0);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-off');
+  const focused = page.locator('[data-focused="true"]');
+  // Down past the stream's own tracks to the Korean check.
+  for (let step = 0; step < 8; step++) {
+    if ((await focused.getAttribute('data-focus-key')) === 'player-tracks-lang-ko') break;
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+  }
+  await expectFocus(page, 'player-tracks-lang-ko');
+  await expect(focused).toContainText('BannerTV Demo');
+  await press(page, 'Enter', 'player-tracks-lang-ko');
+  await expect(page.getByText('Subtitle check in Korean')).toBeVisible();
+
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-button');
+  const saved = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
+  expect(JSON.parse(saved ?? '{}')).toMatchObject({ subtitleLanguage: 'eng' });
 });
