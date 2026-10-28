@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { applyTuning, changedTuning, parseTuning, TUNING_DEFAULTS } from './tuning';
 
 describe('TUNING_DEFAULTS', () => {
-  it('keeps what shipped before the switches existed', () => {
+  it('are the lightest set the TV comparison chose', () => {
     expect(TUNING_DEFAULTS).toEqual({
-      motion: 'slide',
-      zoom: 'animate',
+      motion: 'jump',
+      zoom: 'instant',
       heroDelayMs: 250,
-      heroBusyMs: 250,
-      heroArt: 'large',
-      heroPan: true,
+      heroBusyMs: 800,
+      heroArt: 'medium',
+      heroPan: false,
       rowsAround: 2,
       overscan: 2,
       decoding: 'auto',
-      mips: true,
+      mips: false,
     });
   });
 });
@@ -28,17 +28,17 @@ describe('parseTuning', () => {
   it('takes valid switches and keeps the default for the rest', () => {
     expect(
       parseTuning(
-        '{"motion":"jump","heroDelayMs":600,"heroBusyMs":800,"heroArt":"medium","heroPan":false,"decoding":"async","mips":false}',
+        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","heroPan":true,"decoding":"async","mips":true}',
       ),
     ).toEqual({
       ...TUNING_DEFAULTS,
-      motion: 'jump',
+      motion: 'slide',
       heroDelayMs: 600,
-      heroBusyMs: 800,
-      heroArt: 'medium',
-      heroPan: false,
+      heroBusyMs: 250,
+      heroArt: 'large',
+      heroPan: true,
       decoding: 'async',
-      mips: false,
+      mips: true,
     });
   });
 
@@ -63,25 +63,36 @@ describe('changedTuning', () => {
 });
 
 describe('applyTuning', () => {
-  it('adds a class for each CSS switch that is not the default', () => {
+  function classesFor(value: Parameters<typeof applyTuning>[1]): string[] {
     const classes: string[] = [];
     const root = {
       classList: { add: (name: string) => classes.push(name) },
     } as unknown as HTMLElement;
-    applyTuning(root, { ...TUNING_DEFAULTS });
-    expect(classes).toEqual([]);
-    applyTuning(root, {
-      ...TUNING_DEFAULTS,
-      motion: 'layer',
-      zoom: 'instant',
-      heroPan: false,
-      mips: false,
-    });
-    expect(classes).toEqual([
-      'tune-motion-layer',
+    applyTuning(root, value);
+    return classes;
+  }
+
+  it('adds a class for each CSS switch away from what the stylesheets draw', () => {
+    expect(classesFor({ ...TUNING_DEFAULTS })).toEqual([
+      'tune-motion-jump',
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
     ]);
+    expect(classesFor({ ...TUNING_DEFAULTS, motion: 'layer', zoom: 'off' })).toEqual([
+      'tune-motion-layer',
+      'tune-zoom-off',
+      'tune-no-pan',
+      'tune-no-mips',
+    ]);
+    expect(
+      classesFor({
+        ...TUNING_DEFAULTS,
+        motion: 'slide',
+        zoom: 'animate',
+        heroPan: true,
+        mips: true,
+      }),
+    ).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { isWebOS, lunaCall, lunaSubscribe } from '../platform/webos';
+import { isWebOS, LunaError, lunaCall, lunaSubscribe } from '../platform/webos';
 
 /**
  * The Phase 2 spike on embedded tracks: webOS 22 lists none of an MKV's
@@ -53,13 +53,19 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
 
   const call = async (method: string, params: Record<string, unknown>) => {
     try {
-      await lunaCall(`${MEDIA}/${method}`, params, 3000);
+      const answer = await lunaCall<Record<string, unknown>>(`${MEDIA}/${method}`, params, 3000);
+      // An answer that is not a plain success is noted as it came, for the next look.
+      const odd =
+        answer.returnValue === true
+          ? ''
+          : ` (returnValue ${String(answer.returnValue)}, errorCode ${String(answer.errorCode)}, ${String(answer.errorText)})`;
       say(
-        `${method} ${JSON.stringify(params.type ?? params.enable ?? '')} ${params.index ?? ''}: ok`,
+        `${method} ${JSON.stringify(params.type ?? params.enable ?? '')} ${params.index ?? ''}: ok${odd}`,
       );
       return true;
     } catch (error) {
-      say(`${method}: ${error instanceof Error ? error.message : String(error)}`);
+      const code = error instanceof LunaError ? ` (errorCode ${String(error.errorCode)})` : '';
+      say(`${method}: ${error instanceof Error ? error.message : String(error)}${code}`);
       return false;
     }
   };
@@ -178,8 +184,9 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     await call('selectTrack', { mediaId, type: 'audio', index: 1 });
     await watch('after audio 1');
     if (stopped) return;
-    unsubscribe();
+    // The media service only finds a subscription still open, so it is asked first.
     await call('unsubscribe', { mediaId });
+    unsubscribe();
     say('Embedded tracks test done');
   };
 

@@ -8,24 +8,31 @@ const luna = vi.hoisted(() => ({
   /** The mediaId of each subscription, in order, and those cancelled. */
   subscribed: [] as string[],
   cancelled: [] as string[],
+  /** How many subscriptions had been cancelled when each call was made. */
+  cancelledAtCall: [] as number[],
   /** Whether the pipeline describes the file to a subscription on this mediaId. */
   describes: (() => true) as (mediaId: string) => boolean,
-  /** What the media service answers every call with. */
+  /** What the media service answers every call with... */
   answer: {} as Record<string, unknown>,
+  /** ...or, by method, this instead. */
+  answers: {} as Record<string, Record<string, unknown>>,
 }));
 
 // A TV whose media pipeline answers every call at once.
 vi.mock('../platform/webos', async (importOriginal) => {
-  const { lunaFailed } = await importOriginal<typeof import('../platform/webos')>();
+  const { LunaError, lunaFailed } = await importOriginal<typeof import('../platform/webos')>();
   return {
+    LunaError,
     isWebOS: () => true,
     // Fails only where the real lunaCall does.
     lunaCall: (uri: string, params: Record<string, unknown>) => {
       luna.calls.push(uri);
       luna.mediaIds.push(params.mediaId);
-      return lunaFailed(luna.answer)
-        ? Promise.reject(new Error(`${uri}: ${String(luna.answer.errorText)}`))
-        : Promise.resolve(luna.answer);
+      luna.cancelledAtCall.push(luna.cancelled.length);
+      const answer = luna.answers[uri.slice(uri.lastIndexOf('/') + 1)] ?? luna.answer;
+      return lunaFailed(answer)
+        ? Promise.reject(new LunaError(uri, answer))
+        : Promise.resolve(answer);
     },
     lunaSubscribe: (
       _uri: string,
@@ -81,8 +88,10 @@ beforeEach(() => {
   luna.mediaIds = [];
   luna.subscribed = [];
   luna.cancelled = [];
+  luna.cancelledAtCall = [];
   luna.describes = () => true;
   luna.answer = {};
+  luna.answers = {};
 });
 
 afterEach(() => {
@@ -170,8 +179,63 @@ describe('runEmbeddedTracksTest', () => {
     const notes: string[] = [];
     runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
     await vi.advanceTimersByTimeAsync(60000);
-    expect(notes).toContain('setSubtitleEnable true : ok');
+    expect(notes).toContain(
+      'setSubtitleEnable true : ok (returnValue undefined, errorCode 0, No Error)',
+    );
     expect(luna.calls.filter((uri) => uri.endsWith('/selectTrack'))).toHaveLength(3);
     expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
+  });
+
+  it('asks to unsubscribe while the subscription is still open, then closes it', async () => {
+    luna.answer = { returnValue: true };
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    const at = luna.calls.findIndex((uri) => uri.endsWith('/unsubscribe'));
+    expect(luna.cancelledAtCall[at]).toBe(0);
+    expect(luna.cancelled).toEqual(['media-1']);
+    expect(notes).toContain('unsubscribe "" : ok');
+    expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
+  });
+
+  it('notes a refused unsubscribe as the failure it is, and still finishes', async () => {
+    luna.answer = { returnValue: true };
+    // The media service fills in "No Error" whatever the outcome.
+    luna.answers.unsubscribe = { returnValue: false, errorCode: 0, errorText: 'No Error' };
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(notes).toContain(
+      'unsubscribe: luna://com.webos.media/unsubscribe: No Error (errorCode 0)',
+    );
+    expect(luna.cancelled).toEqual(['media-1']);
+    expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
+  });
+
+  it('stops at subtitles on when the media service refuses them, whatever its text says', async () => {
+    luna.answer = { returnValue: true };
+    luna.answers.setSubtitleEnable = { returnValue: false, errorCode: 0, errorText: 'No Error' };
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(notes).toContain(
+      'setSubtitleEnable: luna://com.webos.media/setSubtitleEnable: No Error (errorCode 0)',
+    );
+    expect(luna.calls.some((uri) => uri.endsWith('/selectTrack'))).toBe(false);
+  });
+
+  it('notes the error code of a call that fails', async () => {
+    luna.answers.setSubtitleEnable = {
+      returnValue: false,
+      errorCode: -1,
+      errorText: 'Invalid mediaId',
+    };
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(notes).toContain(
+      'setSubtitleEnable: luna://com.webos.media/setSubtitleEnable: Invalid mediaId (errorCode -1)',
+    );
+    expect(luna.calls.some((uri) => uri.endsWith('/selectTrack'))).toBe(false);
   });
 });

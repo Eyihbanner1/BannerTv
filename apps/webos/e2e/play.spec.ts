@@ -38,6 +38,15 @@ async function openMovie(page: Page) {
   await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
 }
 
+/** The same with the film left part way: Home opens on Continue watching, above the catalogs. */
+async function openResumableMovie(page: Page) {
+  await page.goto(APP_URL);
+  await expectFocus(page, 'home-continue-tile-0');
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
+}
+
 test('Watch plays the best stream at once, with no list to choose from', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -259,9 +268,7 @@ test('a title left part way through resumes from where it stopped', async ({ pag
     progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 120 }],
   });
   await mockPlayback(page);
-  await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  await press(page, 'Enter', 'details-watch');
+  await openResumableMovie(page);
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
   await expect(page.locator('[data-focus-key="details-restart"]')).toHaveText('Start over');
 
@@ -283,9 +290,7 @@ test('a title with no stream left to try keeps its resume point through All stre
   await page.route(/^https:\/\/media\.example\.com\/movie-(1080|720)p\.webm$/, (route) =>
     down ? route.fulfill({ status: 404, body: '' }) : route.fallback(),
   );
-  await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  await press(page, 'Enter', 'details-watch');
+  await openResumableMovie(page);
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
   await press(page, 'Enter', 'player-problem-streams');
   await pressBack(page);
@@ -601,7 +606,7 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
       ],
     },
   });
-  await openMovie(page);
+  await openResumableMovie(page);
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);

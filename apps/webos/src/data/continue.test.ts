@@ -64,6 +64,8 @@ vi.mock('./addons', () => ({
 
 // Fresh each test: the module remembers what it asked for this session.
 let fillPlayedCards: () => void;
+let cardsMissing: () => boolean;
+let onCardAnswer: (listener: () => void) => () => void;
 
 function preview(id: string, type: 'movie' | 'series'): MetaPreview {
   return { id, type, name: id, posterShape: 'poster', genres: [], trailers: [] };
@@ -104,7 +106,7 @@ beforeEach(async () => {
   metas.listeners.clear();
   metas.asked.length = 0;
   vi.resetModules();
-  ({ fillPlayedCards } = await import('./continue'));
+  ({ fillPlayedCards, cardsMissing, onCardAnswer } = await import('./continue'));
 });
 
 describe('fillPlayedCards', () => {
@@ -210,5 +212,53 @@ describe('fillPlayedCards', () => {
     fillPlayedCards();
     answer('tt7', { status: 'success', data: cached, stale: true, error: new Error('offline') });
     expect(stores.played.get('tt7:1:2')).toMatchObject({ season: 1, episode: 2 });
+  });
+});
+
+describe('cardsMissing', () => {
+  it('holds while a title is still to be asked for or its answer has not come', () => {
+    watch('tt5', 'movie', 'tt5', 600);
+    expect(cardsMissing()).toBe(true);
+    fillPlayedCards();
+    expect(cardsMissing()).toBe(true);
+  });
+
+  it('lets go once the answer comes without a card, and says so', () => {
+    watch('tt5', 'movie', 'tt5', 600);
+    const answers = vi.fn();
+    onCardAnswer(answers);
+    fillPlayedCards();
+    answer('tt5', { status: 'error', error: new Error('offline'), stale: false });
+    expect(answers).toHaveBeenCalledTimes(1);
+    expect(stores.played.get('tt5')).toBeUndefined();
+    expect(cardsMissing()).toBe(false);
+  });
+
+  it('lets go once a card arrives, and says so after saving it', () => {
+    watch('tt5', 'movie', 'tt5', 600);
+    let saved: unknown;
+    onCardAnswer(() => (saved = stores.played.get('tt5')));
+    fillPlayedCards();
+    answer('tt5', { status: 'success', data: meta('tt5', 'movie'), stale: false });
+    expect(saved).toMatchObject({ metaId: 'tt5' });
+    expect(cardsMissing()).toBe(false);
+  });
+
+  it('lets go of a series card the answer could not place, which is never on the row', () => {
+    watch('tt7', 'series', 'tt7:9:9', 2990);
+    fillPlayedCards();
+    answer('tt7', {
+      status: 'success',
+      data: meta('tt7', 'series', [ep('tt7', 1, 1)]),
+      stale: false,
+    });
+    expect(stores.played.get('tt7:9:9')?.episode).toBeUndefined();
+    expect(cardsMissing()).toBe(false);
+  });
+
+  it('holds for nothing when every title already has its card', () => {
+    stores.played.record(playedCard(preview('tt5', 'movie'), 'tt5', undefined));
+    watch('tt5', 'movie', 'tt5', 600);
+    expect(cardsMissing()).toBe(false);
   });
 });

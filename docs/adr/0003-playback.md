@@ -42,7 +42,7 @@ Phase 2 makes BannerTV play. The plan asked for a stream picker, a remote-driven
 - Most viewers press Watch and get a picture. When the guess is wrong, the next stream starts by itself, and All streams is one press away.
 - On a fast connection a 4K web release wins over a 4K remux until a remux the viewer picks plays ten minutes without buffering; after that the limit has risen and remuxes rank by quality again.
 - Asking addons on a focus rest costs requests the viewer may never use. The rest delay, the five-minute cache and the never-on-Home rule keep that small; the link test is the costly part and is the first thing to turn off if the floor TV struggles.
-- Embedded subtitles in direct-play files are still missing. The Lab has a test of the webOS media pipeline's Luna calls (`subscribe` for the track list, `setSubtitleEnable` and `selectTrack` by `mediaId`), which Lampa, Stremio and Nuvio use. LG does not document them, and on webOS 25 selecting a text track has frozen HLS playback, so the player uses them only if the TV run shows they are safe.
+- Embedded subtitles in direct-play files are still missing. The Lab tests the webOS media pipeline's Luna calls (`subscribe` for the track list, `setSubtitleEnable` and `selectTrack` by `mediaId`), which Lampa, Stremio and Nuvio use. LG does not document them, and on webOS 25 selecting a text track has frozen HLS playback. On the webOS 22 TV they answer OK and list the tracks but draw no subtitle (see below), so the player does not use them and the subtitle menu offers addon subtitles.
 - ASS styling, positioning and karaoke are Phase 5 (JASSUB on webOS 6+). Torrents and proxy-header streams wait for the Phase 5 streaming server.
 - The LG demo addon's adaptive HLS needs nothing special: the TV's player takes it, and hls.js takes over if it has subtitle or audio renditions.
 
@@ -71,9 +71,21 @@ Codex ran the checks on the LG 65NANO766QA on 27 October 2026 with build e166786
   - `setSubtitleEnable` answered "No Error", which BannerTV's Luna wrapper wrongly took for a failure. Answers with `returnValue: true` or error code 0 now count as success.
   - `sourceInfo` never arrived. The pipeline sends it once, as it opens a file, and the test subscribed mid-play. The test now opens the video again with a subscription ready, and notes what each subscription sends.
 
+The combined run on 28 October 2026 with build 7949e01 (Agent Hub message 1256, saved as `phase2/combined-tv-results-7949e01.md` in the project files) checked the changes:
+
+- **Passed.**
+  - Watch on Dune picked a 3.2 GB 4K web release over the 84 GB remux and played five minutes without buffering. The remux picked by hand stalled once for 2.7 s and stayed on that stream.
+  - Continue Watching resumed from its tile, Back landed on the title played, the next episode started from 0, and a finished film left the row.
+  - Up Next counted 10 to 1 and started the next episode. Addon subtitles showed, with "version 2 of 5".
+  - No crash, console error or out-of-memory kill.
+- **Lab Luna test: run to the end, no subtitle drawn.**
+  - Opened again, the pipeline listed 8 subtitle tracks and 2 audio tracks. `setSubtitleEnable` and `selectTrack` text 0 and 1 answered OK and the clock kept moving, but no subtitle appeared on the picture. The audio switch was heard.
+  - `unsubscribe` answered `returnValue: false`. The media service writes "No Error" into every answer, failures included, so only `returnValue` counts. It failed because the Lab had already closed its subscription before asking; the Lab now asks first, and notes error codes and any answer that is not a plain success.
+- **Changed after the run.** On the first launch after the update, Continue Watching had no title cards yet, so Home opened on the first catalog row and the row arrived above it. In the first 3 s after launch, Home now waits for cards still being fetched before placing focus, so it opens on the row. The wait ends early when no answer is still to come or the viewer presses a key. After that, a row that arrives late still leaves focus where it is.
+
 Still to check on the TV:
 
-1. The Luna embedded-subtitle test, rerun to the end: the track list in `sourceInfo`, whether `selectTrack` shows a subtitle, and whether the clock keeps moving after each call.
-2. Watch on a title with a 4K remux and a 4K web release picks the web release, and a stream that keeps buffering steps down by itself.
+1. A stream that keeps buffering steps down by itself, and the hint on a stream picked by hand (neither happened in the 28 October run).
+2. A live stream: it opens at the live edge, saves no progress and offers no Up Next (no installed addon had a live catalogue).
 3. A Shaka DASH stream, a DTS or TrueHD stream played on purpose, and 4K over HLS with the lifted `adaptiveStreaming` cap.
 4. On webOS 5 (floor TV, when bought): hls.js with its worker, Shaka, and whether link testing can be turned on.

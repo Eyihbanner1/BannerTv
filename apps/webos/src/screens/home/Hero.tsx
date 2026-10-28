@@ -8,7 +8,7 @@ import { artworkUrl } from '../../components/artwork-size';
 import { Button } from '../../components/Button';
 import { metaFacts } from '../../data/describe';
 import { backdrops, firstBackdrops } from './backdrops';
-import { heroItem } from './hero-item';
+import { heroItem, showWaitingHero } from './hero-item';
 import styles from './Hero.module.css';
 
 export function openDetails(item: MetaPreview): void {
@@ -112,7 +112,8 @@ export function Hero() {
               focusKey="home-hero-details"
               label={t('home.details')}
               variant="primary"
-              onPress={() => openDetails(item)}
+              onFocus={showWaitingHero}
+              onPress={() => openDetails(heroItem.get() ?? item)}
             />
           </div>
         ) : (
