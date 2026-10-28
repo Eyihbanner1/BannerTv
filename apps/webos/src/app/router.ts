@@ -1,16 +1,36 @@
-import { createStore, type StreamEntry } from '@bannertv/core';
+import { createStore, type SportEvent, type StreamEntry } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
 
-/** Top-level destinations in the rail. */
-export const SECTIONS = ['home', 'search', 'discover', 'library', 'addons', 'settings'] as const;
+/** Top-level destinations in the rail. Some show only some of the time: see sections.ts. */
+export const SECTIONS = [
+  'home',
+  'search',
+  'discover',
+  'sports',
+  'library',
+  'addons',
+  'settings',
+] as const;
 export type Section = (typeof SECTIONS)[number];
+
+/**
+ * A sports event to play: streams come only from the addons that listed it,
+ * one request per source (docs/PLAN.md, Sports addons, Play and playback).
+ */
+export interface EventPlay {
+  /** The event's key, which names its stream finder. */
+  key: string;
+  sources: SportEvent['sources'];
+}
 
 export type Route =
   | { name: Section }
   /** `preview` is what the tile already knew, drawn while the full meta loads. */
   | { name: 'details'; type: string; id: string; preview?: MetaPreview }
+  /** One sports event, as the Sports screen had it when it was opened. */
+  | { name: 'event'; event: SportEvent }
   /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */
   | { name: 'catalog'; transportUrl: string; type: string; catalogId: string; genre?: string }
   /**
@@ -30,6 +50,8 @@ export type Route =
       startAt?: number;
       /** A Lab test stream: no addons are asked and nothing is remembered. */
       lab?: boolean;
+      /** A sports event: only its own sources are asked, and nothing is saved to continue. */
+      event?: EventPlay;
     }
   /** Every stream for one video, for choosing by hand instead of auto-play. */
   | {
@@ -39,6 +61,7 @@ export type Route =
       videoId: string;
       preview?: MetaPreview;
       startAt?: number;
+      event?: EventPlay;
     }
   | { name: 'diagnostics' }
   | { name: 'lab' };

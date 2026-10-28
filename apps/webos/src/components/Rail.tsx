@@ -1,7 +1,8 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { currentSection, openSection, router, SECTIONS } from '../app/router';
+import { currentSection, openSection, router } from '../app/router';
+import { useVisibleSections } from '../app/sections';
 import markUrl from '../../../../brand/logo/bannertv-mark.svg';
 import { Pressable } from './Pressable';
 import { RailIcon } from './RailIcon';
@@ -16,6 +17,7 @@ export const RAIL_FOCUS_KEY = 'rail';
 export function Rail() {
   const { t } = useTranslation();
   const section = useSyncExternalStore(router.subscribe, () => currentSection());
+  const sections = useVisibleSections();
   const { ref, focusKey, hasFocusedChild } = useFocusable<object, HTMLElement>({
     focusKey: RAIL_FOCUS_KEY,
     trackChildren: true,
@@ -32,7 +34,7 @@ export function Rail() {
       >
         <div className={styles.backdrop} />
         <img className={styles.logo} src={markUrl} alt="BannerTV" />
-        {SECTIONS.map((item) => (
+        {sections.map((item) => (
           <Pressable
             key={item}
             focusKey={`rail-${item}`}

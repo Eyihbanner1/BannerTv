@@ -93,6 +93,18 @@ function namesSportsView(catalog: ManifestCatalog): boolean {
 }
 
 /**
+ * Whether what a first page looks like can change the answer for this
+ * catalog, so Home and Discover note it. Catalogs typed sport are sports
+ * catalogs whatever they hold; catalogs that name neither a sport nor a
+ * sports view never are.
+ */
+export function needsEvidence(catalog: ManifestCatalog): boolean {
+  const type = foldText(catalog.type);
+  if (type === 'sport' || type === 'sports') return false;
+  return namesSport(catalog) || namesSportsView(catalog);
+}
+
+/**
  * Whether a first page reads as sport: at least 3 items, and most of them
  * matches (`A vs B`, `A at B`) or live-labelled. Channels and placeholders
  * count against it.

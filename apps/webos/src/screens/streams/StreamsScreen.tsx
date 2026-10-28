@@ -3,7 +3,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { replace } from '../../app/router';
+import { type EventPlay, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
@@ -29,6 +29,8 @@ interface StreamsScreenProps {
   preview?: MetaPreview;
   /** Seconds, when the player sent the viewer here: the chosen stream starts at the same moment. */
   startAt?: number;
+  /** A sports event: the streams of its own sources only. */
+  event?: EventPlay;
 }
 
 function addonNames(): Map<string, string> {
@@ -40,17 +42,19 @@ function addonNames(): Map<string, string> {
  * auto-play's pick is not the one wanted. Streams this TV cannot play stay
  * in the list, last and dimmed, with the reason.
  */
-export function StreamsScreen({ type, metaId, videoId, preview, startAt }: StreamsScreenProps) {
+export function StreamsScreen(props: StreamsScreenProps) {
+  const { type, metaId, videoId, preview, startAt, event } = props;
   const { t } = useTranslation();
-  const finder = useMemo(() => streamFinder(type, videoId), [type, videoId]);
+  const finder = useMemo(() => streamFinder(type, videoId, event), [type, videoId, event]);
   const state = useSyncExternalStore(finder.subscribe, finder.get);
   const order = useSyncExternalStore(
     preferences.subscribe,
     () => preferences.get().allStreamsOrder,
   );
+  // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
-    () => (type === 'movie' ? null : addonClient.meta(type, metaId)),
-    [type, metaId],
+    () => (type === 'movie' || event ? null : addonClient.meta(type, metaId)),
+    [type, metaId, event],
   );
   const meta = useQuery(metaQuery).data;
   const item = meta ?? preview;
@@ -93,6 +97,7 @@ export function StreamsScreen({ type, metaId, videoId, preview, startAt }: Strea
         stream: entry,
         chosen: true,
         startAt,
+        event,
       });
     } else if (action.kind === 'youtube' && entry.stream.source.kind === 'youtube') {
       playTrailer(entry.stream.source.ytId).catch(() => setNote(t('details.trailerFailed')));

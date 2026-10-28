@@ -56,3 +56,13 @@
   font: var(--bt-text-heading);
   color: var(--bt-text-muted);
 }
+
+/* The Sports group: "Search sports addons", with a note when the lists had nothing. */
+.sportsSearch {
+  padding: 0 0 40px var(--bt-content-inset);
+}
+
+.sportsNote {
+  margin-bottom: 20px;
+  color: var(--bt-text-muted);
+}

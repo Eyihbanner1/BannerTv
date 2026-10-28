@@ -30,7 +30,7 @@ export const ROW_GEOMETRY = {
 const OVERSCAN = tuning.overscan;
 
 /** The remembered tile, if it is among those drawn. */
-function drawnTile(
+export function drawnTile(
   focusKey: string,
   remembered: string | undefined,
   first: number,
@@ -47,7 +47,7 @@ function drawnTile(
  * does not measure every tile in the row on each press. Up and Down, and
  * Left or Right past either end, leave the row as before.
  */
-function nextTile(
+export function nextTile(
   direction: string,
   focusKey: string,
   siblings: FocusableComponent[],

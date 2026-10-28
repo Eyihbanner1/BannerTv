@@ -125,3 +125,4 @@ export {
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
+export type { Timers } from './timers';

@@ -3,6 +3,7 @@ export {
   catalogView,
   isSportsCatalog,
   looksLikeSports,
+  needsEvidence,
   type SportsCatalog,
   sportsCatalogFilter,
   sportsCatalogs,
@@ -21,7 +22,7 @@ export {
 export { createKickoffMemory, type KickoffMemory } from './kickoffs';
 export { type CatalogContext, type Listing, readListing } from './listing';
 export { sportOf } from './sport';
-export { localClock, localDate } from './time';
+export { addDays, localClock, localDate, localDayStart } from './time';
 export type {
   Competition,
   EventSource,

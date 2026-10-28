@@ -14,6 +14,8 @@ import { PlaceholderScreen } from '../screens/PlaceholderScreen';
 import { PlayerScreen } from '../screens/player/PlayerScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { EventScreen } from '../screens/sports/EventScreen';
+import { SportsScreen } from '../screens/sports/SportsScreen';
 import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
 import { back, currentSection, openSection, type Route, router } from './router';
@@ -46,6 +48,10 @@ function Screen({ route }: { route: Route }) {
       return <DiscoverScreen />;
     case 'catalog':
       return <DiscoverScreen preset={route} />;
+    case 'sports':
+      return <SportsScreen />;
+    case 'event':
+      return <EventScreen event={route.event} />;
     case 'addons':
       return <AddonsScreen />;
     case 'settings':

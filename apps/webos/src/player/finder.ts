@@ -15,9 +15,11 @@ import {
   type TvCapabilities,
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
+import type { EventPlay } from '../app/router';
 import { addonClient } from '../data/addons';
 import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
+import { itemSources } from '../data/sports';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 
@@ -128,7 +130,7 @@ function buildEntries(
   return entries;
 }
 
-function create(type: string, videoId: string): StreamFinder {
+function create(type: string, videoId: string, event?: EventPlay): StreamFinder {
   let answers: ReadonlyArray<AddonAnswer<Stream[]>> = [];
   let unsubscribe: Array<() => void> = [];
   let started = false;
@@ -231,7 +233,10 @@ function create(type: string, videoId: string): StreamFinder {
       }
       started = true;
       dropped = false;
-      answers = addonClient.streams(type, videoId);
+      // A sports event asks only the addons that listed it, once per source.
+      answers = event
+        ? addonClient.streamsFrom(itemSources(event.sources))
+        : addonClient.streams(type, videoId);
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
       // A lower limit after a stream kept buffering moves heavy streams down.
       unsubscribe.push(bandwidth.subscribe(refresh));
@@ -326,16 +331,19 @@ function create(type: string, videoId: string): StreamFinder {
 
 const finders = new Map<string, { finder: StreamFinder; createdAt: number }>();
 
-/** The finder for one video, shared by Details (prefetch), the player and All streams. */
-export function streamFinder(type: string, videoId: string): StreamFinder {
-  const key = `${type}:${videoId}`;
+/**
+ * The finder for one video, shared by Details (prefetch), the player and All
+ * streams. A sports event has one finder for all its sources, keyed by the event.
+ */
+export function streamFinder(type: string, videoId: string, event?: EventPlay): StreamFinder {
+  const key = event ? `event:${event.key}` : `${type}:${videoId}`;
   const now = Date.now();
   const existing = finders.get(key);
   if (existing && now - existing.createdAt < FINDER_LIFETIME_MS) return existing.finder;
   existing?.finder.destroy();
   // The new finder goes to the end, so the map stays oldest first.
   finders.delete(key);
-  const finder = create(type, videoId);
+  const finder = create(type, videoId, event);
   finders.set(key, { finder, createdAt: now });
   // Only a few videos are ever in play at once; drop the oldest.
   if (finders.size > 8) {

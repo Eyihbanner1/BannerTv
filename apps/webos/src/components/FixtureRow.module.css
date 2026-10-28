@@ -1,0 +1,101 @@
+/* Fixture tiles are shorter than Home's wide tiles: text only, no artwork.
+   20px of padding above and below leave room for the focus scale. */
+.viewport {
+  height: 216px;
+}
+
+.tile {
+  position: absolute;
+  top: 0;
+  width: 384px;
+  height: 176px;
+  padding: 16px 20px 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: var(--bt-surface-2);
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.loading {
+  background: var(--bt-surface-1);
+}
+
+.focused {
+  box-shadow: var(--bt-focus-ring);
+  background-color: var(--bt-surface-3);
+  transform: scale(var(--bt-focus-scale));
+}
+
+:global(.low-power) .focused {
+  transform: none;
+}
+
+/* Tuning switches, see src/platform/tuning.ts. */
+:global(.tune-zoom-instant) .tile {
+  transition: none;
+}
+
+:global(.tune-zoom-off) .focused {
+  transform: none;
+}
+
+.competition,
+.side,
+.when,
+.sources {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.competition {
+  margin-bottom: 6px;
+  font: var(--bt-text-label);
+  font-size: 20px;
+  color: var(--bt-text-subtle);
+}
+
+.side {
+  font: var(--bt-text-label);
+  font-size: 28px;
+  line-height: 36px;
+  color: var(--bt-text);
+}
+
+.footer {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 14px;
+  height: 32px;
+}
+
+.when {
+  float: left;
+  max-width: 220px;
+  font: var(--bt-text-label);
+  line-height: 32px;
+  color: var(--bt-accent);
+}
+
+.live {
+  float: left;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #d61f45;
+  font: var(--bt-text-label);
+  font-size: 20px;
+  line-height: 32px;
+  letter-spacing: 1px;
+  color: #ffffff;
+}
+
+.sources {
+  float: right;
+  max-width: 140px;
+  font: var(--bt-text-label);
+  font-size: 20px;
+  line-height: 32px;
+  color: var(--bt-text-muted);
+}
