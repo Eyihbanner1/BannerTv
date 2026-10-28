@@ -225,6 +225,8 @@ describe('merging', () => {
         },
       ],
       [{ name: 'No live streams right now', genres: ['Sports'] }],
+      [{ name: 'No more events today', genres: ['Sports'] }],
+      [{ name: 'No upcoming matches', genres: ['Football'] }],
       [{ name: '🔴 LIVE: NCIS S24, E4', genres: ['OTHER'], releaseInfo: 'LIVE' }],
       [{ name: '24/7 Classic Football', releaseInfo: '24/7' }],
     ]);

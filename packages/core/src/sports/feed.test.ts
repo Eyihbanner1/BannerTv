@@ -289,6 +289,44 @@ describe('paging by events', () => {
     expect(feed.get().events.length).toBeGreaterThan(20);
   });
 
+  it('keeps every page when an addon refresh brings back the same catalogs', async () => {
+    const items = Array.from({ length: 100 }, (_, n) => match(n, NOW + n * HOUR));
+    const fake = fakeAddon('Days', [{ id: 'football', name: 'Football', items }]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day(1));
+    await clock.advance(1000);
+    const events = feed.get().events.length;
+    expect(fake.requests).toHaveLength(2);
+    // The manifest was fetched again: new objects, same catalogs.
+    const refreshed: InstalledAddon = {
+      ...fake.addon,
+      manifest: {
+        ...fake.addon.manifest,
+        catalogs: fake.addon.manifest.catalogs.map((catalog) => ({ ...catalog })),
+      },
+      fetchedAt: 1,
+    };
+    feed.setCatalogs(sportsCatalogs([refreshed], { evidence: () => true }));
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(events);
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('goes on paging when a first page comes straight from the cache', async () => {
+    const items = Array.from({ length: 100 }, (_, n) => match(n, NOW + n * HOUR));
+    const fake = fakeAddon('Days', [{ id: 'football', name: 'Football', items }]);
+    const { feed, clock, catalogs } = await setup([fake]);
+    feed.want(day(1));
+    await clock.advance(1000);
+    const events = feed.get().events.length;
+    expect(events).toBeGreaterThan(20);
+    // Gone and back: the first page is still fresh in the cache and answers at once.
+    feed.setCatalogs([]);
+    feed.setCatalogs(catalogs);
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(events);
+  });
+
   it('asks once with skip when a catalog declares none but sends a full page', async () => {
     const items = Array.from({ length: 150 }, (_, n) => match(n, NOW + n * 60 * 1000));
     const fake = fakeAddon('Capped', [

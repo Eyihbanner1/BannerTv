@@ -154,12 +154,13 @@ export function SportsResults({ term, sources, onFocusRow, onContent }: SportsRe
         />
       )}
       {sources.length > 0 && !asked && (
-        <div className={styles.sportsSearch} data-row-key={SEARCH_SPORTS_BUTTON}>
+        // Not a row (no data-row-key), so spatial navigation measures the button.
+        // It sits under the Sports row, so the track stays where that row put it.
+        <div className={styles.sportsSearch}>
           {found.length === 0 && <p className={styles.sportsNote}>{t('sports.notInLists')}</p>}
           <Button
             focusKey={SEARCH_SPORTS_BUTTON}
             label={t('sports.searchAddons')}
-            onFocus={() => onFocusRow(SEARCH_SPORTS_BUTTON)}
             onPress={() => setAsked(true)}
           />
         </div>

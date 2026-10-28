@@ -10,6 +10,7 @@ import {
   catalogView,
   isSportsCatalog,
   looksLikeSports,
+  needsEvidence,
   sportsCatalogFilter,
   sportsCatalogs,
 } from './detect';
@@ -151,5 +152,14 @@ describe('first-page evidence', () => {
     expect(looksLikeSports(items('The Matrix', 'Heat', 'Alien', 'Arsenal vs Spurs'))).toBe(false);
     expect(looksLikeSports(items('Celtic vs Rangers', 'Arsenal v Spurs'))).toBe(false);
     expect(looksLikeSports([])).toBe(false);
+  });
+
+  it('is noted only for catalogs whose first page can change the answer', () => {
+    expect(needsEvidence(catalog('Live Events', 'live_events'))).toBe(true);
+    expect(needsEvidence(catalog('Football', 'football', 'movie'))).toBe(true);
+    // Typed sport: a sports catalog whatever it holds.
+    expect(needsEvidence(catalog('Today', 'today', 'sport'))).toBe(false);
+    expect(needsEvidence(catalog('Popular', 'top', 'movie'))).toBe(false);
+    expect(needsEvidence(cinemetaAddon.manifest.catalogs[0]!)).toBe(false);
   });
 });

@@ -124,6 +124,19 @@ interface Track {
   seen: Set<string>;
 }
 
+/** The same catalog of the same install, asked the same way, whatever the objects. */
+function sameCatalog(a: SportsCatalog, b: SportsCatalog): boolean {
+  if (a.catalog === b.catalog && a.addon === b.addon) return true;
+  return (
+    a.addon.transportUrl === b.addon.transportUrl &&
+    a.addon.manifest.id === b.addon.manifest.id &&
+    a.catalog.type === b.catalog.type &&
+    a.catalog.id === b.catalog.id &&
+    a.catalog.name === b.catalog.name &&
+    JSON.stringify(a.catalog.extra) === JSON.stringify(b.catalog.extra)
+  );
+}
+
 function isEvent(listing: Listing): boolean {
   return listing.kind === 'event' || listing.kind === 'replay';
 }
@@ -446,36 +459,36 @@ export function createSportsFeed(options: {
           followers.push(trackFor(entry, genre));
       }
       for (const current of followers) {
-        if (current.pages.length === 0) {
-          addPage(current, 0);
-          loading = true;
-          continue;
-        }
-        const last = current.pages[current.pages.length - 1]!;
-        const page = last.query.get();
-        if (page.status === 'idle') {
-          last.query.load();
-          loading = true;
-          continue;
-        }
-        if (page.status === 'loading') {
-          loading = true;
-          continue;
-        }
-        if (page.status === 'error') {
-          // Dropped when the screen closed: asked again now it is back.
-          if (page.error instanceof DroppedError) {
+        if (current.pages.length === 0) addPage(current, 0);
+        // A page can come from the cache already loaded, and so never call back:
+        // its next page is decided at once (bounded by MAX_PAGES).
+        for (;;) {
+          const last = current.pages[current.pages.length - 1]!;
+          const page = last.query.get();
+          if (page.status === 'idle') {
             last.query.load();
             loading = true;
+            break;
           }
-          continue;
+          if (page.status === 'loading') {
+            loading = true;
+            break;
+          }
+          if (page.status === 'error') {
+            // Dropped when the screen closed: asked again now it is back.
+            if (page.error instanceof DroppedError) {
+              last.query.load();
+              loading = true;
+            }
+            break;
+          }
+          if (page.error instanceof DroppedError && page.stale) last.query.load();
+          readPage(current, last);
+          if (light || entry.view === 'replays' || current.genre !== undefined) break;
+          const count = current.pages.length;
+          decide(current, wanted);
+          if (current.pages.length === count) break;
         }
-        if (page.error instanceof DroppedError && page.stale) last.query.load();
-        readPage(current, last);
-        if (light || entry.view === 'replays' || current.genre !== undefined) continue;
-        decide(current, wanted);
-        const after = current.pages[current.pages.length - 1]!.query.get().status;
-        if (after === 'loading' || after === 'idle') loading = true;
       }
     }
     return loading;
@@ -620,7 +633,9 @@ export function createSportsFeed(options: {
       const keep = new Map<string, Track>();
       tracks.forEach((track, key) => {
         const still = next.find((entry) => entry.key === track.entry.key);
-        if (still && still.catalog === track.entry.catalog && still.addon === track.entry.addon) {
+        // An addon refresh hands back new objects for the same catalog: its pages stay.
+        if (still && sameCatalog(still, track.entry)) {
+          track.entry = still;
           keep.set(key, track);
         } else {
           for (const page of track.pages) page.unsubscribe();

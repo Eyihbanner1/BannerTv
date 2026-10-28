@@ -50,11 +50,10 @@
   margin-top: 24px;
 }
 
+/* The button sits under the text at the left, where Down from the strip finds it. */
 .problemText {
-  display: inline-block;
-  vertical-align: middle;
   max-width: 1100px;
-  margin-right: 24px;
+  margin-bottom: 12px;
   color: var(--bt-text-muted);
 }
 

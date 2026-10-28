@@ -76,7 +76,7 @@ const GENERIC =
   /^(?:sports?|live|live now|live tv|tv|tv channels?|channels?|networks?|events?|today|upcoming|replays?|recaps?|highlights?|other|others|misc|all|24\/7|ppv|hd|fhd|uhd|4k)$/i;
 
 const PLACEHOLDER =
-  /\b(?:no (?:live )?(?:streams?|events?|matches|games|fixtures)\b|private manifest|manifest required|configure|reinstall|please (?:install|update|visit|support)|coming soon|not available|nothing (?:live|on)|check back)/i;
+  /\b(?:no (?:(?:more|live|other|upcoming) )*(?:streams?|events?|matches|games|fixtures)\b|private manifest|manifest required|configure|reinstall|please (?:install|update|visit|support)|coming soon|not available|nothing (?:live|on)|check back)/i;
 
 const SEASON_EPISODE = /\bS\d{1,3}\s*,?\s*E\d{1,4}\b/i;
 
