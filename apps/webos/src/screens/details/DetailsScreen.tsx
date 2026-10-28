@@ -1,3 +1,4 @@
+import { kidsTitleAllowed } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -11,11 +12,13 @@ import { Pressable } from '../../components/Pressable';
 import { addonClient } from '../../data/addons';
 import { describeAddonError, metaFacts } from '../../data/describe';
 import { progress } from '../../data/playback';
+import { isKidsProfile } from '../../data/profiles';
 import { useQuery } from '../../data/use-query';
 import { playTrailer } from '../../platform/youtube';
 import { formatTime } from '../../player/media';
 import { usePrefetch } from '../../player/prefetch';
 import { EpisodeList } from './EpisodeList';
+import { MyListButton } from './MyListButton';
 import { defaultSeason, groupSeasons, type Season } from './seasons';
 import styles from './DetailsScreen.module.css';
 
@@ -140,9 +143,12 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   const trailer = item?.trailers[0];
   const isMovie = type === 'movie';
   const failed = state.status === 'error';
+  // A kids profile plays a title only once its full details show it is for children.
+  const kids = isKidsProfile();
+  const kidsAllowed = !kids || (meta !== undefined && kidsTitleAllowed(meta));
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
   // Titles without episodes get Watch, which plays the addon's default video.
-  const canWatch = isMovie || (meta !== undefined && !hasEpisodes);
+  const canWatch = kidsAllowed && (isMovie || (meta !== undefined && !hasEpisodes));
   const watchVideoId = canWatch ? (meta?.behaviorHints.defaultVideoId ?? id) : null;
 
   // Progress decides between Watch and Resume, and marks episodes.
@@ -151,7 +157,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
     void progress.load();
   }, []);
   const resumeAt = watchVideoId === null ? undefined : progress.resumeAt(watchVideoId);
-  const latest = !canWatch ? progress.forMeta(id)[0] : undefined;
+  const latest = !canWatch && kidsAllowed ? progress.forMeta(id)[0] : undefined;
   const latestVideo = latest && meta?.videos.find((v) => v.id === latest.videoId);
   const latestResume = latest && progress.resumeAt(latest.videoId);
 
@@ -169,10 +175,13 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
     ? 'details-retry'
     : latestVideo && latestResume !== undefined
       ? 'details-resume-episode'
-      : hasEpisodes
+      : hasEpisodes && kidsAllowed
         ? 'details-episodes'
-        : 'details-watch';
-  useScreenFocus(defaultFocus, isMovie || failed || state.status === 'success');
+        : watchVideoId !== null
+          ? 'details-watch'
+          : 'details-my-list';
+  // A kids profile waits for the full details, which decide whether Watch is there.
+  useScreenFocus(defaultFocus, (isMovie && !kids) || failed || state.status === 'success');
 
   // The same sizes as the hero, so the image it already loaded is reused.
   const backdrop = artworkUrl(item?.background, 'backdrop');
@@ -289,10 +298,12 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               onPress={() => query.retry()}
             />
           )}
+          {item && <MyListButton item={item} onFocus={restOn(null)} />}
         </div>
         {note && <p className={styles.note}>{note}</p>}
+        {kids && meta && !kidsAllowed && <p className={styles.note}>{t('kids.notForKids')}</p>}
       </div>
-      {!isMovie && !canWatch && !failed && (
+      {!isMovie && !canWatch && !failed && kidsAllowed && (
         <div className={styles.panel}>
           {meta && hasEpisodes ? (
             <Episodes

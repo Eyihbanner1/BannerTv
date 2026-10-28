@@ -11,7 +11,7 @@ import { DiagnosticsScreen } from '../screens/DiagnosticsScreen';
 import { DiscoverScreen } from '../screens/discover/DiscoverScreen';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
-import { PlaceholderScreen } from '../screens/PlaceholderScreen';
+import { LibraryScreen } from '../screens/library/LibraryScreen';
 import { PlayerScreen } from '../screens/player/PlayerScreen';
 import { ProfileEditScreen } from '../screens/profiles/ProfileEditScreen';
 import { ProfilePicker } from '../screens/profiles/ProfilePicker';
@@ -72,8 +72,8 @@ function Screen({ route }: { route: Route }) {
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;
-    default:
-      return <PlaceholderScreen section={route.name} />;
+    case 'library':
+      return <LibraryScreen />;
   }
 }
 

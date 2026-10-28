@@ -1,7 +1,7 @@
 import { type Cue, languageKey, type StreamEntry } from '@bannertv/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
-import { preferences, setPreference } from '../../data/preferences';
+import { chooseSubtitleLanguage, wantedSubtitle } from '../../data/tracks';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import {
@@ -54,6 +54,8 @@ function languageOf(
 export function useSubtitles(
   type: string,
   videoId: string,
+  /** The title, whose last subtitle choice comes first; undefined for Lab streams. */
+  metaId: string | undefined,
   entry: StreamEntry | null,
   session: PlaybackSession | null,
   state: SessionState,
@@ -112,7 +114,7 @@ export function useSubtitles(
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
       const made = decided.current;
-      const wanted = preferences.get().subtitleLanguage;
+      const wanted = wantedSubtitle(metaId);
       if (made?.entry === entry) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
@@ -155,7 +157,7 @@ export function useSubtitles(
       stopList();
       stopSession();
     };
-  }, [entry, session, list]);
+  }, [entry, session, list, metaId]);
 
   // Load the chosen file, moving to the next in its language if it fails.
   useEffect(() => {
@@ -234,7 +236,7 @@ export function useSubtitles(
         const option = options.find((o) => o.key === next.key);
         if (option) broken.current.delete(option.url);
       }
-      setPreference('subtitleLanguage', languageOf(next, options, tracks));
+      chooseSubtitleLanguage(metaId, languageOf(next, options, tracks));
     },
     setOffset,
   };

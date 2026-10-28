@@ -63,17 +63,44 @@ describe('PINs', () => {
 
   it('waits after too many wrong PINs, and a right one starts the count again', () => {
     let time = 1000;
-    const guard = createPinGuard(() => time);
+    const guard = createPinGuard({ now: () => time });
     const profile = { id: 'kid', name: 'Kid', colour: 1, pin: makePin('2468', counter()) };
     for (let i = 0; i < PIN_TRIES - 1; i++) expect(guard.attempt(profile, '0000')).toBe('wrong');
     expect(guard.attempt(profile, '2468')).toBe('ok');
-    for (let i = 0; i < PIN_TRIES; i++) expect(guard.attempt(profile, '0000')).toBe('wrong');
+    for (let i = 0; i < PIN_TRIES - 1; i++) expect(guard.attempt(profile, '0000')).toBe('wrong');
+    // The try that reaches the limit says so at once.
+    expect(guard.attempt(profile, '0000')).toBe('locked');
     expect(guard.waitMs('kid')).toBe(PIN_LOCK_MS);
     expect(guard.attempt(profile, '2468')).toBe('locked');
     time += PIN_LOCK_MS;
     expect(guard.attempt(profile, '2468')).toBe('ok');
     // A profile without a PIN always opens.
     expect(guard.attempt({ id: 'x', name: 'X', colour: 0 }, '')).toBe('ok');
+  });
+
+  it('keeps counting across launches, and ignores damaged counts', () => {
+    let time = 1000;
+    let saved: unknown;
+    const launch = () =>
+      createPinGuard({ now: () => time, saved, save: (tries) => (saved = tries) });
+    const profile = { id: 'kid', name: 'Kid', colour: 1, pin: makePin('2468', counter()) };
+    let guard = launch();
+    for (let i = 0; i < PIN_TRIES - 1; i++) guard.attempt(profile, '0000');
+    guard = launch();
+    expect(guard.attempt(profile, '0000')).toBe('locked');
+    guard = launch();
+    expect(guard.waitMs('kid')).toBe(PIN_LOCK_MS);
+    // A clock moved back a day waits the usual time, not a day.
+    time -= 86_400_000;
+    guard = launch();
+    expect(guard.waitMs('kid')).toBe(PIN_LOCK_MS);
+    time += PIN_LOCK_MS;
+    expect(guard.attempt(profile, '2468')).toBe('ok');
+
+    const damaged = createPinGuard({
+      saved: { kid: { count: 'x', lockedUntil: 1 }, other: null },
+    });
+    expect(damaged.waitMs('kid')).toBe(0);
   });
 });
 

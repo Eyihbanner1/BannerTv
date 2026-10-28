@@ -18,7 +18,8 @@ import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
 import { addonClient, addonCollection } from '../../data/addons';
 import { playedVideos, progress } from '../../data/playback';
-import { preferences, setPreference } from '../../data/preferences';
+import { preferences } from '../../data/preferences';
+import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
 import { KeyCode } from '../../navigation/keys';
 import { useBack } from '../../navigation/use-back';
@@ -138,7 +139,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
     upNextOpen.current = showUpNext;
   });
 
-  const subtitles = useSubtitles(type, videoId, state.entry, session, state);
+  const subtitles = useSubtitles(
+    type,
+    videoId,
+    props.lab ? undefined : metaId,
+    state.entry,
+    session,
+    state,
+  );
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for
@@ -241,11 +249,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const key = entryKey(entry);
     if (audioDecided.current === key) return;
     audioDecided.current = key;
-    const wanted = preferences.get().audioLanguage;
+    const wanted = wantedAudio(props.lab ? undefined : metaId);
     if (!wanted) return;
     const match = state.audio.find((track) => languageKey(track.lang) === languageKey(wanted));
     if (match && !match.active) session.selectAudio(match.id);
-  }, [session, state.entry, state.audio]);
+  }, [session, state.entry, state.audio, props.lab, metaId]);
 
   // Controls.
   function armHide() {
@@ -500,7 +508,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   const chooseAudio = (track: EngineTrack) => {
     session?.selectAudio(track.id);
-    if (track.lang) setPreference('audioLanguage', track.lang);
+    if (track.lang) chooseAudioLanguage(props.lab ? undefined : metaId, track.lang);
   };
 
   return (

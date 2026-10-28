@@ -2,6 +2,8 @@ import {
   createCatalogPager,
   type DiscoverSource,
   discoverSources,
+  kidsDiscoverSources,
+  kidsTitleAllowed,
   orderedTypes,
   type PagerState,
 } from '@bannertv/core';
@@ -13,6 +15,7 @@ import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { isKidsProfile } from '../../data/profiles';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
@@ -94,7 +97,11 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
     ? `see-all:${preset.transportUrl}|${preset.type}|${preset.catalogId}|${preset.genre ?? ''}`
     : 'section';
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  const sources = useMemo(() => discoverSources(collection.addons), [collection.addons]);
+  // A kids profile browses Family catalogs only (ADR 0004).
+  const sources = useMemo(() => {
+    const all = discoverSources(collection.addons);
+    return isKidsProfile() ? kidsDiscoverSources(all) : all;
+  }, [collection.addons]);
   const [wanted, setWanted] = useState(() => memoryFor(memoryKey).selection ?? preset);
   const resolved = useMemo(() => resolve(sources, wanted), [sources, wanted]);
   const source = resolved?.source;
@@ -115,9 +122,16 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
         ),
     });
   }, [source, genre]);
-  const state = useSyncExternalStore(
+  const paged = useSyncExternalStore(
     pager ? pager.subscribe : noSubscription,
     pager ? pager.get : () => IDLE,
+  );
+  const state = useMemo(
+    () =>
+      isKidsProfile()
+        ? { ...paged, items: paged.items.filter((item) => kidsTitleAllowed(item, true)) }
+        : paged,
+    [paged],
   );
 
   // The first page, then, on return from a title, enough pages to reach the tile left.

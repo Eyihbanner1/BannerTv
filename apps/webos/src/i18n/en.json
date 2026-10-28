@@ -272,9 +272,6 @@
       "uncached": "Not cached by your debrid service yet: it would have to download first."
     }
   },
-  "placeholder": {
-    "library": "Your saved titles and watch history arrive in Phase 3."
-  },
   "settings": {
     "lead": "Playback, profiles and developer tools.",
     "diagnostics": "Diagnostics",
@@ -388,5 +385,27 @@
     "hideLabel": "Hide {{name}} from Home",
     "showLabel": "Show {{name}} on Home",
     "hiddenFrom": "Hidden · {{addon}}"
+  },
+  "library": {
+    "show": "Show",
+    "myList": "My List",
+    "history": "History",
+    "kind": "Type",
+    "all": "Films and series",
+    "films": "Films",
+    "series": "Series",
+    "sort": "Order",
+    "sortAdded": "Recently added",
+    "sortName": "A to Z",
+    "sortYear": "Newest release",
+    "emptyList": "Nothing saved yet. Press My List on a title to keep it here.",
+    "emptyHistory": "Nothing played yet. What you watch shows up here.",
+    "add": "My List",
+    "remove": "On My List",
+    "addLabel": "Add {{name}} to My List",
+    "removeLabel": "Remove {{name}} from My List"
+  },
+  "kids": {
+    "notForKids": "This title isn't available in a kids profile."
   }
 }

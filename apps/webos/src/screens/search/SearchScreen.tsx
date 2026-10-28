@@ -1,4 +1,9 @@
-import { type CatalogSource, searchSources } from '@bannertv/core';
+import {
+  type CatalogSource,
+  kidsSearchSources,
+  kidsTitleAllowed,
+  searchSources,
+} from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -18,6 +23,7 @@ import { slideTrack } from '../../components/row-track';
 import { TextField } from '../../components/TextField';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { isKidsProfile } from '../../data/profiles';
 import { loadRecentSearches, recentSearches } from '../../data/search';
 import { useQuery } from '../../data/use-query';
 import { forgetFocus } from '../../navigation/focus-memory';
@@ -59,7 +65,15 @@ function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: Res
     [addon, catalog, term],
   );
   const state = useQuery(query);
-  const empty = state.status === 'success' && state.data !== undefined && state.data.length === 0;
+  // A kids profile sees only results that name themselves as for children.
+  const items = useMemo(
+    () =>
+      state.data && isKidsProfile()
+        ? state.data.filter((item) => kidsTitleAllowed(item))
+        : state.data,
+    [state.data],
+  );
+  const empty = state.status === 'success' && items !== undefined && items.length === 0;
   const focusKey = `${RESULT_PREFIX}${source.key}`;
 
   useEffect(() => {
@@ -73,7 +87,7 @@ function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: Res
       title={typeLabel(t, catalog.type)}
       tag={tag}
       shape="poster"
-      items={state.status === 'error' ? [] : (state.data ?? null)}
+      items={state.status === 'error' ? [] : (items ?? null)}
       error={
         state.status === 'error'
           ? describeAddonError(t, state.error, addon.manifest.name)
@@ -180,7 +194,10 @@ function RecentSearches({ onPick }: { onPick: (term: string) => void }) {
 export function SearchScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  const sources = useMemo(() => searchSources(collection.addons), [collection.addons]);
+  const sources = useMemo(() => {
+    const all = searchSources(collection.addons);
+    return isKidsProfile() ? kidsSearchSources(all) : all;
+  }, [collection.addons]);
   const [text, setText] = useState(memory.text);
   const [term, setTerm] = useState(memory.term);
 

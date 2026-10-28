@@ -1,6 +1,7 @@
 import { boardCatalogs, type ContentType, findExtra, type MetaPreview } from '@bannertv/protocol';
 import { type BoardRow, slug } from '../addons/board';
 import type { InstalledAddon } from '../addons/collection';
+import type { CatalogSource, DiscoverSource } from '../addons/sources';
 import type { KidsRating } from './profiles';
 
 /** The only kinds of title a kids profile sees. */
@@ -104,4 +105,27 @@ export function buildKidsBoard(addons: readonly InstalledAddon[]): BoardRow[] {
     }
   });
   return rows;
+}
+
+/**
+ * Discover for a kids profile: film and series catalogs that can filter by
+ * Family, always asked for Family titles.
+ */
+export function kidsDiscoverSources(sources: readonly DiscoverSource[]): DiscoverSource[] {
+  return sources
+    .filter(
+      (source) =>
+        KIDS_TYPES.indexOf(source.catalog.type) !== -1 &&
+        !source.addon.manifest.behaviorHints.adult &&
+        source.genres.indexOf(KIDS_GENRE) !== -1,
+    )
+    .map((source) => ({ ...source, genres: [KIDS_GENRE], genreRequired: true }));
+}
+
+/** Search for a kids profile: film and series catalogs only; results are checked one by one. */
+export function kidsSearchSources<S extends CatalogSource>(sources: readonly S[]): S[] {
+  return sources.filter(
+    (source) =>
+      KIDS_TYPES.indexOf(source.catalog.type) !== -1 && !source.addon.manifest.behaviorHints.adult,
+  );
 }

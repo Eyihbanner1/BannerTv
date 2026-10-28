@@ -85,8 +85,28 @@ export function isKidsProfile(): boolean {
   return activeProfile()?.kids !== undefined;
 }
 
-/** Counts wrong PINs, for every PIN pad in the app. */
-export const pinGuard = createPinGuard();
+const TRIES_KEY = 'bannertv.pinTries';
+
+function readTries(): unknown {
+  try {
+    const raw = localStorage.getItem(TRIES_KEY);
+    return raw ? (JSON.parse(raw) as unknown) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Counts wrong PINs for every PIN pad in the app, across launches. */
+export const pinGuard = createPinGuard({
+  saved: readTries(),
+  save: (tries) => {
+    try {
+      localStorage.setItem(TRIES_KEY, JSON.stringify(tries));
+    } catch {
+      // The count then lasts until the app closes.
+    }
+  },
+});
 
 function reloadApp(): void {
   window.location.reload();

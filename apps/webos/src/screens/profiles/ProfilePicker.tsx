@@ -106,10 +106,8 @@ export function ProfilePicker({ mode }: ProfilePickerProps) {
     if (result === 'ok') {
       setAsking(null);
       chooseProfile(profile.id);
-    } else if (result === 'locked') {
-      setMessage(lockedMessage(profile.id));
     } else {
-      setMessage(t('pin.wrong'));
+      setMessage(result === 'locked' ? lockedMessage(profile.id) : t('pin.wrong'));
     }
   };
 
@@ -145,7 +143,7 @@ export function ProfilePicker({ mode }: ProfilePickerProps) {
       </div>
       {asking && (
         <PinPad
-          focusKey="profile-pin"
+          focusKey="picker-pin"
           title={t('pin.enterFor', { name: asking.name })}
           message={message}
           returnFocusKey={() => `profile-${asking.id}`}

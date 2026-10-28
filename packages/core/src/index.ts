@@ -59,6 +59,14 @@ export {
   MAX_LIBRARY_ITEMS,
   type RemoteLibraryItem,
 } from './library/library';
+export {
+  HISTORY_LIMIT,
+  historyView,
+  type LibraryKind,
+  libraryPreview,
+  type LibrarySort,
+  libraryView,
+} from './library/views';
 export { createLimiter, type Limiter } from './limiter';
 export { createPersisted, type Persisted, type PersistedOptions } from './persisted';
 export {
@@ -102,6 +110,8 @@ export {
 export { createWatchedSet, MAX_WATCHED, type WatchedSet } from './playback/watched';
 export {
   buildKidsBoard,
+  kidsDiscoverSources,
+  kidsSearchSources,
   KIDS_GENRE,
   KIDS_TYPES,
   kidsAddons,

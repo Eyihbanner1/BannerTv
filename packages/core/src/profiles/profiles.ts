@@ -146,34 +146,81 @@ export function checkPin(digits: string, pin: StoredPin): boolean {
 export const PIN_TRIES = 5;
 export const PIN_LOCK_MS = 30000;
 
+/** Wrong PINs per profile, as the guard keeps them between launches. */
+export type PinTries = Record<string, { count: number; lockedUntil: number }>;
+
+function readTries(saved: unknown): Map<string, { count: number; lockedUntil: number }> {
+  const misses = new Map<string, { count: number; lockedUntil: number }>();
+  if (typeof saved !== 'object' || saved === null) return misses;
+  for (const [id, value] of Object.entries(saved as Record<string, unknown>)) {
+    const entry = value as { count?: unknown; lockedUntil?: unknown } | null;
+    if (
+      entry &&
+      typeof entry.count === 'number' &&
+      typeof entry.lockedUntil === 'number' &&
+      Number.isFinite(entry.count) &&
+      Number.isFinite(entry.lockedUntil)
+    ) {
+      misses.set(id, { count: entry.count, lockedUntil: entry.lockedUntil });
+    }
+  }
+  return misses;
+}
+
+export interface PinGuardOptions {
+  now?: () => number;
+  /** What `save` kept last time, so closing the app does not reset the count. */
+  saved?: unknown;
+  save?: (tries: PinTries) => void;
+}
+
 /**
  * Counts wrong PINs per profile: after PIN_TRIES in a row the pad refuses
- * every PIN for PIN_LOCK_MS. A right PIN starts the count again.
+ * every PIN for PIN_LOCK_MS. A right PIN starts the count again. The count
+ * is saved, so restarting the app does not buy more tries.
  */
-export function createPinGuard(now: () => number = Date.now) {
-  const misses = new Map<string, { count: number; lockedUntil: number }>();
+export function createPinGuard(options: PinGuardOptions = {}) {
+  const { now = Date.now, save } = options;
+  const misses = readTries(options.saved);
+  const persist = () => {
+    if (!save) return;
+    const tries: PinTries = {};
+    misses.forEach((entry, id) => {
+      tries[id] = { count: entry.count, lockedUntil: entry.lockedUntil };
+    });
+    save(tries);
+  };
+  const waitMs = (profileId: string): number => {
+    const entry = misses.get(profileId);
+    if (!entry) return 0;
+    // A clock set back since the lock began would stretch it: start it again from now.
+    if (entry.lockedUntil - now() > PIN_LOCK_MS) entry.lockedUntil = now() + PIN_LOCK_MS;
+    return Math.max(0, entry.lockedUntil - now());
+  };
   return {
     /** Milliseconds until the profile's pad takes PINs again; 0 when it does. */
-    waitMs(profileId: string): number {
-      const entry = misses.get(profileId);
-      return entry ? Math.max(0, entry.lockedUntil - now()) : 0;
-    },
-    /** Checks `digits` unless the pad is waiting. */
+    waitMs,
+    /**
+     * Checks `digits` unless the pad is waiting. The try that reaches the
+     * limit answers 'locked', so the pad says to wait straight away.
+     */
     attempt(profile: Profile, digits: string): 'ok' | 'wrong' | 'locked' {
       if (!profile.pin) return 'ok';
-      if (this.waitMs(profile.id) > 0) return 'locked';
+      if (waitMs(profile.id) > 0) return 'locked';
       if (checkPin(digits, profile.pin)) {
-        misses.delete(profile.id);
+        if (misses.delete(profile.id)) persist();
         return 'ok';
       }
       const entry = misses.get(profile.id) ?? { count: 0, lockedUntil: 0 };
       entry.count += 1;
-      if (entry.count >= PIN_TRIES) {
+      const locked = entry.count >= PIN_TRIES;
+      if (locked) {
         entry.count = 0;
         entry.lockedUntil = now() + PIN_LOCK_MS;
       }
       misses.set(profile.id, entry);
-      return 'wrong';
+      persist();
+      return locked ? 'locked' : 'wrong';
     },
   };
 }

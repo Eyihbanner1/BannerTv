@@ -2,7 +2,16 @@ import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import type { InstalledAddon } from '../addons/collection';
 import { DEFAULT_ADDONS } from '../addons/defaults';
-import { buildKidsBoard, kidsAddons, kidsTitleAllowed, ratingAllowed, ukRating } from './kids';
+import { discoverSources, searchSources } from '../addons/sources';
+import {
+  buildKidsBoard,
+  kidsAddons,
+  kidsDiscoverSources,
+  kidsSearchSources,
+  kidsTitleAllowed,
+  ratingAllowed,
+  ukRating,
+} from './kids';
 
 function installed(
   manifest: unknown,
@@ -118,5 +127,43 @@ describe('kids addons and Home', () => {
       ],
     });
     expect(buildKidsBoard([plain])).toEqual([]);
+  });
+});
+
+describe('kids Discover and Search', () => {
+  const tv = installed(
+    {
+      id: 'org.tv',
+      version: '1.0.0',
+      name: 'TV',
+      types: ['tv', 'movie'],
+      resources: ['catalog'],
+      catalogs: [
+        { type: 'tv', id: 'live', name: 'Live', extra: [{ name: 'search' }] },
+        { type: 'movie', id: 'new', name: 'New', extra: [{ name: 'genre', options: ['Drama'] }] },
+      ],
+    },
+    'https://tv.example/manifest.json',
+  );
+
+  it('keeps film and series catalogs that can ask for Family, and only for Family', () => {
+    const sources = kidsDiscoverSources(discoverSources([...defaults, adult, tv]));
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) {
+      expect(['movie', 'series']).toContain(source.catalog.type);
+      expect(source.addon.manifest.behaviorHints.adult).toBe(false);
+      expect(source.genres).toEqual(['Family']);
+      expect(source.genreRequired).toBe(true);
+    }
+    expect(sources.some((s) => s.catalog.id === 'new')).toBe(false);
+  });
+
+  it('searches films and series only, never an adult addon', () => {
+    const sources = kidsSearchSources(searchSources([...defaults, adult, tv]));
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources.every((s) => s.catalog.type === 'movie' || s.catalog.type === 'series')).toBe(
+      true,
+    );
+    expect(sources.some((s) => s.addon === adult || s.addon === tv)).toBe(false);
   });
 });
