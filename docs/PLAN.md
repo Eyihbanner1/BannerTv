@@ -275,7 +275,7 @@ Part of the Phase 3 gate, but Sports may slip to Phase 5 without blocking it. On
 
 **Open questions**
 
-- [ ] Eyitayo: is a "Sports" rail entry right, or should sport live on Home only?
+- [x] Eyitayo: a "Sports" rail entry, or sport on Home only? Its own rail entry, plus the Live sport row on Home (28 October 2026).
 - [x] Eyitayo: which sports get competition rows first? Football and the four US leagues (28 October 2026).
 - [x] Eyitayo: a paid fixtures lookup (about $9 a month)? Decide after measuring the free layers on the TV (28 October 2026).
 - [x] Eyitayo: Sports in the LG store build, or sideload only at first? Sideload only at first (28 October 2026).
