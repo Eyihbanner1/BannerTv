@@ -1,0 +1,33 @@
+/* The padding leaves room for the focus scale. */
+.grid {
+  position: relative;
+  height: 880px;
+  padding: 20px 0 0 var(--bt-content-inset);
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.more {
+  position: absolute;
+  left: 0;
+  width: 1100px;
+  color: var(--bt-text-muted);
+}
+
+.more p {
+  margin-bottom: 20px;
+}
+
+.message {
+  padding: 24px 0 0 var(--bt-content-inset);
+  color: var(--bt-text-muted);
+}
+
+.message p {
+  max-width: 1100px;
+  margin-bottom: 24px;
+}

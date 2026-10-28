@@ -6,6 +6,7 @@ test-results/
 playwright-report/
 *.ipk
 *.tsbuildinfo
+.wrangler/
 .DS_Store
 .env
 .env.*

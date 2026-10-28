@@ -39,7 +39,7 @@ describe('router', () => {
   });
 
   it('opening a section resets the stack', () => {
-    push({ name: 'details', itemId: 'sintel' }, 'home-row-0-tile-2');
+    push({ name: 'details', type: 'movie', id: 'tt1727587' }, 'home-row-0-tile-2');
     openSection('search');
     expect(router.get().stack).toEqual([{ route: { name: 'search' } }]);
     expect(takePendingFocus()).toBeUndefined();

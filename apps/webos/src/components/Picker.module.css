@@ -1,0 +1,45 @@
+.picker {
+  position: relative;
+  display: inline-block;
+  vertical-align: top;
+  max-width: 560px;
+  margin-right: 20px;
+  padding: 10px 64px 12px 28px;
+  border-radius: 16px;
+  background: var(--bt-surface-2);
+  white-space: nowrap;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+/* A small down chevron. */
+.picker::after {
+  content: '';
+  position: absolute;
+  top: 44px;
+  right: 28px;
+  width: 12px;
+  height: 12px;
+  border-right: 4px solid var(--bt-text-subtle);
+  border-bottom: 4px solid var(--bt-text-subtle);
+  transform: rotate(45deg);
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+  transform: scale(var(--bt-focus-scale));
+}
+
+.label {
+  display: block;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.value {
+  display: block;
+  font: 600 28px/1.3 var(--bt-font);
+  color: var(--bt-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

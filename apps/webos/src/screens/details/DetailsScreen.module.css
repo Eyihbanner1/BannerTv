@@ -1,0 +1,175 @@
+.details {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-content-width);
+  height: 1080px;
+}
+
+/* Full-bleed backdrop, darkened on the left for the text and on the right for the episodes. */
+.art {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  opacity: 0.7;
+}
+
+.art::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(90deg, var(--bt-bg) 8%, rgba(11, 8, 21, 0.75) 40%, rgba(11, 8, 21, 0.2) 75%),
+    linear-gradient(0deg, var(--bt-bg) 5%, rgba(11, 8, 21, 0) 40%);
+}
+
+.info {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 900px;
+  padding: 96px 0 0 var(--bt-content-inset);
+}
+
+.wide {
+  width: 1100px;
+}
+
+.logoBox {
+  display: flex;
+  align-items: flex-end;
+  height: 180px;
+  margin-bottom: 24px;
+}
+
+.logo {
+  max-width: 640px;
+  max-height: 180px;
+  object-fit: contain;
+  object-position: left bottom;
+}
+
+.title {
+  font: var(--bt-text-display);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.facts {
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+}
+
+.genres {
+  margin-top: 4px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.description {
+  margin-top: 24px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.credits {
+  margin-top: 16px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.error {
+  margin-top: 24px;
+  color: var(--bt-text);
+}
+
+.actions {
+  margin-top: 40px;
+}
+
+/* Buttons side by side; margins instead of flex gap for Chromium 68. */
+.actions > * {
+  margin-right: 24px;
+}
+
+.note {
+  margin-top: 24px;
+  font: var(--bt-text-label);
+  color: var(--bt-accent);
+}
+
+/* Seasons and episodes, on a dark glass panel to the right. */
+.panel {
+  position: absolute;
+  top: 54px;
+  right: var(--bt-safe-x);
+  width: 744px;
+  height: 972px;
+  padding: 24px 16px 0;
+  border-radius: 24px;
+  background: rgba(18, 14, 32, 0.82);
+  overflow: hidden;
+}
+
+.panel > .note {
+  margin: 24px 16px;
+}
+
+.seasons {
+  position: relative;
+  height: 80px;
+  margin: 0 8px 16px;
+  overflow: hidden;
+}
+
+.seasonTrack {
+  white-space: nowrap;
+  padding: 8px 4px;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.season {
+  display: inline-block;
+  margin-right: 16px;
+  padding: 12px 28px;
+  border-radius: 32px;
+  background: var(--bt-surface-2);
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.active {
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+}
+
+.seasonFocused {
+  background: var(--bt-action-focused);
+  color: #fff;
+  box-shadow: var(--bt-focus-ring);
+}

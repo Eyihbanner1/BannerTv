@@ -23,8 +23,8 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
-    // The core runs anywhere: no DOM, no browser globals, no React.
-    files: ['packages/core/**/*.ts'],
+    // The core and protocol packages run anywhere: no DOM, no browser globals, no React.
+    files: ['packages/core/**/*.ts', 'packages/protocol/**/*.ts'],
     rules: {
       'no-restricted-globals': ['error', 'window', 'document', 'navigator', 'localStorage'],
       'no-restricted-imports': ['error', { patterns: ['react', 'react-*', '@noriginmedia/*'] }],

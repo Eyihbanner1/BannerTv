@@ -4,7 +4,11 @@
     "yes": "Yes",
     "no": "No",
     "unknown": "Unknown",
-    "notAvailable": "n/a"
+    "notAvailable": "n/a",
+    "tryAgain": "Try again",
+    "loading": "Loading",
+    "listSeparator": ", ",
+    "cancel": "Cancel"
   },
   "rail": {
     "label": "Main menu",
@@ -15,20 +19,130 @@
     "addons": "Addons",
     "settings": "Settings"
   },
+  "types": {
+    "movie": "Movies",
+    "series": "Series",
+    "channel": "Channels",
+    "tv": "TV"
+  },
   "home": {
-    "rowPosters": "Open movies",
-    "rowLandscape": "Landscape tiles",
-    "heroMeta": "{{year}} · Blender open movie · sample tile",
-    "details": "Details"
+    "details": "Details",
+    "heroLoading": "Loading your catalogs",
+    "noAddons": "Nothing to show yet",
+    "noAddonsLead": "None of your addons has a catalog. Add one, such as Cinemeta, to fill Home.",
+    "previous": "Previous titles",
+    "next": "More titles",
+    "loadingTile": "Loading",
+    "seeAll": "See all"
+  },
+  "search": {
+    "label": "Search",
+    "placeholder": "Search for a film or series",
+    "hint": "Press OK on the box to type. The microphone key on the TV keyboard lets you speak instead.",
+    "recent": "Recent searches",
+    "clearRecent": "Clear recent searches",
+    "nothingFound": "Nothing found for “{{term}}”.",
+    "noAddons": "None of your addons can search. Add one, such as Cinemeta, in Addons."
+  },
+  "discover": {
+    "type": "Type",
+    "catalog": "Catalog",
+    "genre": "Genre",
+    "allGenres": "All genres",
+    "empty": "This catalog has nothing to show yet.",
+    "noCatalogs": "None of your addons has a catalog to browse. Add one, such as Cinemeta, in Addons."
+  },
+  "addons": {
+    "lead": "Addons give BannerTV its catalogs and titles, and in Phase 2 its streams. Higher addons answer first, and their rows come first on Home.",
+    "add": "Add an addon",
+    "none": "You have no addons, so Home is empty. Add one, such as Cinemeta, with its address.",
+    "version": "v{{version}}",
+    "default": "Default",
+    "resources": {
+      "catalog": "Catalogs",
+      "meta": "Titles",
+      "stream": "Streams",
+      "subtitles": "Subtitles"
+    },
+    "up": "Move up",
+    "down": "Move down",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "remove": "Remove",
+    "removeLabel": "Remove {{name}}",
+    "settings": "Settings",
+    "settingsLabel": "Settings for {{name}}",
+    "keep": "Keep it",
+    "removeTitle": "Remove {{name}}?",
+    "removeMessage": "Its rows leave Home and it stops answering for titles. You can add it again later from its address.",
+    "removed": "Removed {{name}}.",
+    "added": "Added {{name}}. Its catalogs are on Home now.",
+    "updated": "Updated {{name}}.",
+    "installTitle": "Add an addon",
+    "installLead": "Type the addon's address: it usually ends in manifest.json. The microphone key on the TV keyboard lets you say it instead.",
+    "addressLabel": "Addon address",
+    "addressPlaceholder": "https://…/manifest.json",
+    "install": "Add",
+    "installing": "Checking the addon…",
+    "phone": {
+      "title": "Or send it from your phone",
+      "opening": "Getting a code…",
+      "code": "Code",
+      "scan": "Scan with your phone's camera, or go to this address and enter the code:",
+      "expired": "This code has run out.",
+      "newCode": "New code",
+      "unavailable": "BannerTV can't reach its pairing service right now.",
+      "retry": "Try again",
+      "received": "Received from your phone. Press Add to add it.",
+      "dropped": "Another address came from your phone while BannerTV was checking this one. Send it again to use it."
+    },
+    "configure": {
+      "title": "Settings for {{name}}",
+      "lead": "Open the addon's settings page on your phone, choose what you want, and send the install link it gives you to BannerTV. The new settings then replace the old ones here.",
+      "scanTitle": "Scan with your phone",
+      "scan": "Scan with your phone's camera: the QR code also opens the addon's settings. If you already have the new install link, go to this address and enter the code:",
+      "tooLong": "This addon's settings address is too long for a QR code, so open its settings on your phone yourself. Then scan, or go to this address and enter the code, to send the new install link:",
+      "received": "New settings for {{name}} arrived. Press Update to use them.",
+      "update": "Update",
+      "updated": "Updated {{name}} with its new settings."
+    },
+    "installError": {
+      "invalid-url": "That doesn't look like an addon address. It starts with https:// and usually ends in manifest.json.",
+      "unreachable": "BannerTV couldn't reach that address. Check it, and that the TV is online.",
+      "not-an-addon": "That address answered, but not with an addon.",
+      "different-addon": "That link is for a different addon. Add it with Add an addon instead.",
+      "other": "That addon couldn't be added."
+    }
+  },
+  "addonError": {
+    "timeout": "{{addon}} took too long to answer.",
+    "network": "{{addon}} could not be reached. Check the TV is online.",
+    "status": "{{addon}} answered with an error ({{status}}).",
+    "invalid": "{{addon}} sent something BannerTV cannot read.",
+    "notFound": "None of your addons know this title.",
+    "other": "{{addon}} did not answer."
+  },
+  "meta": {
+    "rating": "IMDb {{rating}}"
   },
   "details": {
-    "lead": "{{year}}. This is a sample details page. Seasons, episodes and the stream picker arrive in Phases 1 and 2."
+    "watch": "Watch",
+    "comingInPhase2": "Choosing a stream arrives in Phase 2, with the player.",
+    "season": "Season {{number}}",
+    "specials": "Specials",
+    "episodes": "Episodes",
+    "episodeTitle": "{{number}}. {{title}}",
+    "untitledEpisode": "Episode {{number}}",
+    "airs": "Coming {{date}}",
+    "cast": "Starring {{names}}",
+    "directors": "Directed by {{names}}",
+    "loading": "Loading details",
+    "noEpisodes": "This addon lists no episodes yet.",
+    "trailer": "Trailer",
+    "trailerFailed": "The YouTube app didn't open. Check it's installed on the TV."
   },
   "placeholder": {
-    "search": "Search across all your addons arrives in Phase 1.",
-    "discover": "Browsing by type, catalog and genre arrives in Phase 1.",
-    "library": "Your saved titles and watch history arrive in Phase 3.",
-    "addons": "Installing addons by URL or from your phone arrives in Phase 1."
+    "library": "Your saved titles and watch history arrive in Phase 3."
   },
   "settings": {
     "lead": "Developer tools for the Phase 0 spikes. Real settings arrive in Phase 1.",
@@ -62,5 +176,14 @@
     },
     "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
     "error": "Error: {{error}}"
+  },
+  "welcome": {
+    "title": "Welcome to BannerTV",
+    "lead": "Films and series from the addons you choose, in one place and made for your remote.",
+    "ready": "Cinemeta is already added, so Home is ready to browse. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
+    "noticeTitle": "Good to know",
+    "notice": "BannerTV doesn't host or provide any films or series. Everything comes from the addons you add, and you're responsible for the addons you choose.",
+    "start": "Start browsing",
+    "addAddon": "Add an addon"
   }
 }

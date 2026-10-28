@@ -1,0 +1,93 @@
+import { useState } from 'react';
+import { canSlide } from '../platform/input-mode';
+import { Overlay } from './Overlay';
+import { Pressable } from './Pressable';
+import styles from './Menu.module.css';
+
+export interface MenuOption {
+  value: string;
+  label: string;
+}
+
+const ITEM_HEIGHT = 88;
+const VISIBLE = 9;
+const OVERSCAN = 2;
+// The focused option sits this many places from the top while the list scrolls.
+const LEAD = 3;
+
+interface MenuProps {
+  focusKey: string;
+  title: string;
+  options: readonly MenuOption[];
+  selected: string | undefined;
+  returnFocusKey: string;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+}
+
+/**
+ * A list to pick one option from, sliding in from the right. Long lists
+ * (Cinemeta has over a hundred years) draw only the options near the view.
+ */
+export function Menu({
+  focusKey,
+  title,
+  options,
+  selected,
+  returnFocusKey,
+  onSelect,
+  onClose,
+}: MenuProps) {
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === selected),
+  );
+  const lastAnchor = Math.max(0, options.length - VISIBLE);
+  const anchorFor = (index: number) => Math.max(0, Math.min(lastAnchor, index - LEAD));
+  const [anchor, setAnchor] = useState(() => anchorFor(selectedIndex));
+
+  const first = Math.max(0, anchor - OVERSCAN);
+  const last = Math.min(options.length, anchor + VISIBLE + OVERSCAN);
+  const items = [];
+  for (let index = first; index < last; index++) {
+    const option = options[index]!;
+    const isSelected = option.value === selected;
+    items.push(
+      <Pressable
+        key={index}
+        focusKey={`${focusKey}-${index}`}
+        label={option.label}
+        className={isSelected ? `${styles.option} ${styles.selected}` : styles.option}
+        focusedClassName={styles.focused}
+        style={{ top: index * ITEM_HEIGHT }}
+        onPress={() => onSelect(option.value)}
+        onFocus={() => {
+          if (canSlide()) setAnchor(anchorFor(index));
+        }}
+      >
+        {option.label}
+      </Pressable>,
+    );
+  }
+
+  return (
+    <Overlay
+      focusKey={focusKey}
+      label={title}
+      defaultFocusKey={`${focusKey}-${selectedIndex}`}
+      returnFocusKey={returnFocusKey}
+      onClose={onClose}
+      placement="side"
+    >
+      <h2 className={styles.title}>{title}</h2>
+      <div className={styles.list}>
+        <div
+          className={styles.track}
+          style={{ transform: `translateY(${-anchor * ITEM_HEIGHT}px)` }}
+        >
+          {items}
+        </div>
+      </div>
+    </Overlay>
+  );
+}

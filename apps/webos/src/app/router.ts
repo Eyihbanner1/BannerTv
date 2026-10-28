@@ -1,4 +1,5 @@
 import { createStore } from '@bannertv/core';
+import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
 
@@ -8,7 +9,10 @@ export type Section = (typeof SECTIONS)[number];
 
 export type Route =
   | { name: Section }
-  | { name: 'details'; itemId: string }
+  /** `preview` is what the tile already knew, drawn while the full meta loads. */
+  | { name: 'details'; type: string; id: string; preview?: MetaPreview }
+  /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */
+  | { name: 'catalog'; transportUrl: string; type: string; catalogId: string; genre?: string }
   | { name: 'diagnostics' }
   | { name: 'lab' };
 

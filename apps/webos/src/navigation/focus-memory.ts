@@ -13,6 +13,24 @@ export function recallFocus(containerKey: string): string | undefined {
   return memory.get(containerKey);
 }
 
+const scrollMemory = new Map<string, number>();
+
+/** Remembers how far a row or list has scrolled, as the index of its first item in view. */
+export function rememberScroll(containerKey: string, index: number): void {
+  scrollMemory.set(containerKey, index);
+}
+
+export function recallScroll(containerKey: string): number {
+  return scrollMemory.get(containerKey) ?? 0;
+}
+
+/** Forgets every container whose key starts with `prefix`, for example when Home's rows change. */
+export function forgetFocus(prefix: string): void {
+  for (const map of [memory, scrollMemory] as Array<Map<string, unknown>>) {
+    for (const key of Array.from(map.keys())) if (key.indexOf(prefix) === 0) map.delete(key);
+  }
+}
+
 let pressedKey: string | undefined;
 
 /**

@@ -1,19 +1,56 @@
 .hero {
   position: relative;
-  height: 440px;
-  padding: 96px 0 0 var(--bt-content-inset);
+  height: 540px;
+  padding: 72px 0 0 var(--bt-content-inset);
 }
 
+/* 16:9 backdrop in the top right, faded into the page on the left and bottom.
+   It runs under the first row, as on Netflix. */
 .art {
   position: absolute;
   top: 0;
   right: 0;
-  width: 1100px;
-  height: 440px;
-  opacity: 0.55;
+  width: 1376px;
+  height: 774px;
+  overflow: hidden;
 }
 
-/* Fades the art into the background on the left and bottom. */
+.backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 400ms ease-out;
+}
+
+.loaded {
+  opacity: 0.8;
+  animation: drift 24s ease-in-out infinite alternate;
+}
+
+.gone {
+  opacity: 0;
+}
+
+/* A slow pan that costs one composited transform: no layout, no repaint. */
+@keyframes drift {
+  from {
+    transform: scale(1.02) translate(0, 0);
+  }
+
+  to {
+    transform: scale(1.08) translate(-24px, -12px);
+  }
+}
+
+:global(.low-power) .loaded,
+:global(.tune-no-pan) .loaded {
+  animation: none;
+}
+
 .art::after {
   content: '';
   position: absolute;
@@ -22,24 +59,66 @@
   width: 100%;
   height: 100%;
   background:
-    linear-gradient(90deg, var(--bt-bg), rgba(11, 8, 21, 0) 60%),
-    linear-gradient(0deg, var(--bt-bg), rgba(11, 8, 21, 0) 50%);
+    linear-gradient(90deg, var(--bt-bg), rgba(11, 8, 21, 0.6) 30%, rgba(11, 8, 21, 0) 60%),
+    linear-gradient(0deg, var(--bt-bg), rgba(11, 8, 21, 0) 45%);
 }
 
 .text {
   position: relative;
-  width: 1000px;
+  width: 880px;
+}
+
+.logoBox {
+  display: flex;
+  align-items: flex-end;
+  height: 140px;
+  margin-bottom: 16px;
+}
+
+.logo {
+  max-width: 560px;
+  max-height: 140px;
+  object-fit: contain;
+  object-position: left bottom;
 }
 
 .title {
   font: var(--bt-text-display);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.facts {
+  height: 39px;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.meta {
-  margin: 12px 0 32px;
+.genres {
+  margin-left: 24px;
+  color: var(--bt-text-muted);
+}
+
+.description {
+  height: 117px;
+  margin: 12px 0 24px;
   font: var(--bt-text-body);
   color: var(--bt-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Hidden under another screen, or while the remote is in use: hold the pan.
+   On a 4K TV each frame of it redraws most of the screen, which competes with
+   the frames a key press needs. It carries on once the remote rests. */
+:global(.screen-covered) .loaded,
+:global(.is-browsing) .loaded {
+  animation-play-state: paused;
 }

@@ -35,12 +35,18 @@ importers:
       '@bannertv/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@bannertv/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@noriginmedia/norigin-spatial-navigation':
         specifier: ^3.4.0
         version: 3.4.0(react@18.3.1)
       i18next:
         specifier: ^26.5.0
         version: 26.5.11(typescript@6.0.3)
+      qrcode-generator:
+        specifier: 2.0.4
+        version: 2.0.4
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -80,7 +86,26 @@ importers:
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
 
   packages/core:
+    dependencies:
+      '@bannertv/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
+
+  packages/protocol:
+    devDependencies:
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
+
+  services/pair:
+    devDependencies:
+      '@bannertv/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       vitest:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
@@ -1491,6 +1516,9 @@ packages:
   qified@0.10.1:
     resolution: {integrity: sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA==}
     engines: {node: '>=20'}
+
+  qrcode-generator@2.0.4:
+    resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
 
   qs@6.16.1:
     resolution: {integrity: sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==}
@@ -3354,6 +3382,8 @@ snapshots:
   qified@0.10.1:
     dependencies:
       hookified: 2.2.0
+
+  qrcode-generator@2.0.4: {}
 
   qs@6.16.1:
     dependencies:

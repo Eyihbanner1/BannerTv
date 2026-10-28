@@ -1,0 +1,53 @@
+.title {
+  margin-bottom: 24px;
+  font: var(--bt-text-heading);
+}
+
+.list {
+  position: relative;
+  height: 880px;
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.option {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 76px;
+  padding: 0 64px 0 28px;
+  border-radius: 16px;
+  font: var(--bt-text-body);
+  line-height: 76px;
+  color: var(--bt-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selected {
+  color: var(--bt-text);
+}
+
+/* A tick on the chosen option. */
+.selected::after {
+  content: '';
+  position: absolute;
+  top: 24px;
+  right: 32px;
+  width: 12px;
+  height: 22px;
+  border-right: 4px solid var(--bt-accent);
+  border-bottom: 4px solid var(--bt-accent);
+  transform: rotate(45deg);
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+  color: var(--bt-text);
+}

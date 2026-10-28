@@ -11,6 +11,9 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@bannertv/protocol": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "^5.0.5"
   }
