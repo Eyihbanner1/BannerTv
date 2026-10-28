@@ -46,6 +46,13 @@ export interface KickoffMemory {
   firstSeen(addonId: string, id: string): number | undefined;
   /** Everything about one addon, for when it is removed. */
   forget(addonId: string): void;
+  /**
+   * Everything about one addon, under the id it came back with when it was
+   * set up again (a new settings hash). For an item the new id already holds,
+   * its own kick-off wins; it takes the old one only when it has none, and
+   * keeps the earlier first-seen.
+   */
+  move(fromAddonId: string, toAddonId: string): void;
   /** Everything, for "Clear data" in Settings. */
   clear(): void;
   /** Writes now instead of after the usual pause. */
@@ -54,6 +61,48 @@ export interface KickoffMemory {
 
 function keyOf(addonId: string, id: string): string {
   return `${addonId}\n${id}`;
+}
+
+/**
+ * Adds what `other` knew of the same item to `entry`: the earlier first-seen
+ * and the later last-seen, and its kick-off only where `entry` has none, or
+ * has a date where `other` has a time.
+ */
+function mergeEntry(entry: Entry, other: Entry): void {
+  if (other.seen < entry.seen) entry.seen = other.seen;
+  if (other.last > entry.last) entry.last = other.last;
+  if (entry.at !== undefined) return;
+  if (other.at !== undefined) {
+    entry.at = other.at;
+    entry.sure = other.sure;
+    delete entry.date;
+  } else if (entry.date === undefined && other.date !== undefined) {
+    entry.date = other.date;
+    entry.sure = other.sure;
+  }
+}
+
+function forgetIn(entries: Map<string, Entry>, addonId: string): void {
+  const prefix = `${addonId}\n`;
+  entries.forEach((_, key) => {
+    if (key.indexOf(prefix) === 0) entries.delete(key);
+  });
+}
+
+function moveIn(entries: Map<string, Entry>, from: string, to: string): void {
+  const prefix = `${from}\n`;
+  const moving: string[] = [];
+  entries.forEach((_, key) => {
+    if (key.indexOf(prefix) === 0) moving.push(key);
+  });
+  for (const key of moving) {
+    const entry = entries.get(key)!;
+    entries.delete(key);
+    const renamed = `${to}\n${key.slice(prefix.length)}`;
+    const held = entries.get(renamed);
+    if (held) mergeEntry(held, entry);
+    else entries.set(renamed, entry);
+  }
 }
 
 export function createKickoffMemory(options: {
@@ -66,6 +115,11 @@ export function createKickoffMemory(options: {
   let loading: Promise<void> | undefined;
   let cancelSave: (() => void) | undefined;
   let dirty = false;
+  /**
+   * Removals, moves and clears made before the stored rows were read: done
+   * to those rows too as they arrive, so a removed addon's items never come back.
+   */
+  let pending: Array<(rows: Map<string, Entry>) => void> | undefined = [];
 
   function prune() {
     const limit = now() - KICKOFF_MEMORY_MS;
@@ -130,8 +184,10 @@ export function createKickoffMemory(options: {
           } catch {
             value = undefined;
           }
+          const changes = pending ?? [];
+          pending = undefined;
           if (!Array.isArray(value)) return;
-          let merged = false;
+          const rows = new Map<string, Entry>();
           for (const row of value) {
             if (!Array.isArray(row) || typeof row[0] !== 'string' || typeof row[4] !== 'number') {
               continue;
@@ -142,21 +198,23 @@ export function createKickoffMemory(options: {
             if (typeof row[1] === 'number' && row[1] > 0) entry.at = row[1];
             if (typeof row[2] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row[2]))
               entry.date = row[2];
-            const current = entries.get(row[0]);
+            rows.set(row[0], entry);
+          }
+          for (const change of changes) change(rows);
+          let merged = false;
+          rows.forEach((entry, key) => {
+            const current = entries.get(key);
             if (!current) {
-              entries.set(row[0], entry);
-              continue;
+              entries.set(key, entry);
+              return;
             }
             // Noted before this read finished: the kick-off this launch saw wins, but the
             // item was first seen in the earlier launch, and may have lost its time since.
             merged = true;
-            if (seen < current.seen) current.seen = seen;
-            if (current.at === undefined && current.date === undefined) {
-              if (entry.at !== undefined) current.at = entry.at;
-              if (entry.date !== undefined) current.date = entry.date;
-              current.sure = entry.sure;
-            }
-          }
+            mergeEntry(current, entry);
+          });
+          // A removal or move made before this read finished is saved with the rows it changed.
+          if (changes.length > 0) merged = true;
           prune();
           // A save made before this read finished held this launch's items only.
           if (merged) changed();
@@ -199,15 +257,21 @@ export function createKickoffMemory(options: {
     },
 
     forget(addonId) {
-      const prefix = `${addonId}\n`;
-      entries.forEach((_, key) => {
-        if (key.indexOf(prefix) === 0) entries.delete(key);
-      });
+      forgetIn(entries, addonId);
+      pending?.push((rows) => forgetIn(rows, addonId));
+      changed();
+    },
+
+    move(from, to) {
+      if (from === to) return;
+      moveIn(entries, from, to);
+      pending?.push((rows) => moveIn(rows, from, to));
       changed();
     },
 
     clear() {
       entries.clear();
+      pending?.push((rows) => rows.clear());
       changed();
     },
 

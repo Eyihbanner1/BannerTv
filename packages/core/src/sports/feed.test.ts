@@ -186,6 +186,8 @@ function manualTimers() {
   };
   return {
     timers,
+    /** How far the timers have run, in ms. */
+    elapsed: () => clock,
     /** Runs everything that is due within `ms`, letting promises settle in between. */
     async advance(ms = 100) {
       const until = clock + ms;
@@ -205,8 +207,16 @@ function manualTimers() {
 
 async function setup(
   addons: Array<ReturnType<typeof fakeAddon>>,
-  options: { now?: () => number; laneSize?: number; store?: KeyValueStore } = {},
+  options: {
+    now?: () => number;
+    /** The clock moves with the timers, so an answer can take time to come. */
+    timed?: boolean;
+    laneSize?: number;
+    store?: KeyValueStore;
+  } = {},
 ) {
+  const clock = manualTimers();
+  const now = options.now ?? (options.timed ? () => NOW + clock.elapsed() : () => NOW);
   let inFlight = 0;
   let maxInFlight = 0;
   const fetchJson = async (url: string) => {
@@ -230,13 +240,11 @@ async function setup(
   });
   const client = createAddonClient({
     collection,
-    queries: createQueryCache({ now: options.now ?? (() => NOW) }),
+    queries: createQueryCache({ now }),
     limiter: createLimiter(6),
     fetchJson,
   });
   const lane = createLane(options.laneSize ?? 2);
-  const clock = manualTimers();
-  const now = options.now ?? (() => NOW);
   const memory = createKickoffMemory({ store: options.store, timers: clock.timers, now });
   const feed = createSportsFeed({ client, lane, memory, timers: clock.timers, now });
   const catalogs = sportsCatalogs(
@@ -956,5 +964,241 @@ describe('addon addresses', () => {
     const stored = JSON.stringify(await store.get('sports.kickoffs'));
     expect(stored).toContain(keyed.addon.manifest.id);
     expect(stored).not.toContain(SECRET);
+  });
+});
+
+describe('clock-only times', () => {
+  const EVENING = Date.parse('2026-10-28T21:00:00Z');
+  // The zone comes from the addon's own settings, in its address.
+  const base = 'https://clocks.example/tz=Europe%2FLondon';
+  const clockMatch = (n: number, clockTime: string) => ({
+    ...match(n, EVENING),
+    releaseInfo: clockTime,
+  });
+  const at = (iso: string) => Date.parse(iso);
+
+  it('puts the times after a wrap past midnight on the next day, and remembers that day', async () => {
+    const items = ['20:00', '22:00', '23:45', '00:30', '02:00'].map((t, n) => clockMatch(n, t));
+    const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
+    const { feed, clock, memory } = await setup([fake], { now: () => EVENING });
+    feed.want(day());
+    await clock.advance(1000);
+    const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
+    expect(event('ev:2').kickOff?.at).toBe(at('2026-10-28T23:45:00Z'));
+    expect(event('ev:3').kickOff?.at).toBe(at('2026-10-29T00:30:00Z'));
+    expect(event('ev:4').kickOff?.at).toBe(at('2026-10-29T02:00:00Z'));
+    expect(eventState(event('ev:3'), { now: EVENING })).toBe('upcoming');
+    // Kept for when the addon swaps the time for LIVE: tomorrow's, not this morning's.
+    expect(memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
+  });
+
+  it('reads a wrap across pages, and stops paging once the list reaches tomorrow', async () => {
+    // Every quarter of an hour from 17:00: the last two are at 00:00 and 00:15.
+    const items = Array.from({ length: 30 }, (_, n) => {
+      const minutes = 17 * 60 + n * 15;
+      const pad = (value: number) => String(value).padStart(2, '0');
+      return clockMatch(n, `${pad(Math.floor(minutes / 60) % 24)}:${pad(minutes % 60)}`);
+    });
+    const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
+    const { feed, clock, memory } = await setup([fake], { now: () => EVENING });
+    feed.want(day());
+    await clock.advance(1000);
+    const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
+    expect(event('ev:19').kickOff?.at).toBe(at('2026-10-28T21:45:00Z'));
+    expect(event('ev:28').kickOff?.at).toBe(at('2026-10-29T00:00:00Z'));
+    expect(event('ev:29').kickOff?.at).toBe(at('2026-10-29T00:15:00Z'));
+    expect(memory.get(fake.addon.manifest.id, 'ev:29')?.at).toBe(at('2026-10-29T00:15:00Z'));
+    expect(fake.requests).toEqual([
+      '/catalog/sport/football.json',
+      '/catalog/sport/football/skip=18.json',
+    ]);
+  });
+});
+
+describe('pages that could not answer', () => {
+  const timedOut = () => Promise.reject(new HttpError('timeout', 'Timed out'));
+  const skipOf = (url: string) => Number(/skip=(\d+)/.exec(url)?.[1] ?? 0);
+
+  it('names the addon when a later page fails, and asks it again on retry or after a while', async () => {
+    let time = NOW;
+    let down = true;
+    const items = Array.from({ length: 55 }, (_, n) => match(n, NOW + n * 5 * 60 * 1000));
+    const answer = (url: string) => {
+      const skip = skipOf(url);
+      if (skip > 0 && down) return timedOut();
+      return Promise.resolve({ metas: items.slice(skip, skip + 20) });
+    };
+    const fake = fakeAddon('Pager', [{ id: 'football', name: 'Football', items: [], answer }]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want(day());
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(20);
+    expect(feed.get().failed).toEqual(['Pager']);
+    // Not asked again before a fresh copy would be.
+    time += 5 * 60 * 1000;
+    await clock.advance(60 * 1000);
+    expect(fake.requests).toHaveLength(2);
+    feed.retry();
+    await clock.advance(1000);
+    expect(fake.requests).toHaveLength(3);
+    expect(feed.get().failed).toEqual(['Pager']);
+    // The addon is back: the next look after fifteen minutes asks it again.
+    down = false;
+    time += 16 * 60 * 1000;
+    await clock.advance(60 * 1000);
+    expect(feed.get().events).toHaveLength(55);
+    expect(feed.get().failed).toEqual([]);
+  });
+
+  it('keeps a skip probe that did not answer in time, and pages once it answers', async () => {
+    let timeouts = 1;
+    const items = Array.from({ length: 120 }, (_, n) => match(n, NOW + n * 5 * 60 * 1000));
+    const answer = (url: string) => {
+      const skip = skipOf(url);
+      if (skip > 0 && timeouts-- > 0) return timedOut();
+      return Promise.resolve({ metas: items.slice(skip, skip + FULL_PAGE) });
+    };
+    const fake = fakeAddon('Capped', [
+      { id: 'football', name: 'Football', items: [], answer, declareSkip: false },
+    ]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day());
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(FULL_PAGE);
+    expect(feed.get().failed).toEqual(['Capped']);
+    feed.retry();
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(120);
+    expect(feed.get().failed).toEqual([]);
+  });
+
+  it('asks catalogs that stopped answering no more often than a fresh copy, on ticks and day changes', async () => {
+    let time = NOW;
+    let down = false;
+    const items = [match(1, NOW + HOUR)];
+    const answer = () => (down ? timedOut() : Promise.resolve({ metas: items }));
+    const fake = fakeAddon(
+      'Down',
+      ['Football', 'Basketball', 'Tennis'].map((name) => ({
+        id: name.toLowerCase(),
+        name,
+        items,
+        answer,
+      })),
+    );
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want(day());
+    await clock.advance(1000);
+    expect(fake.requests).toHaveLength(3);
+    down = true;
+    for (let i = 0; i < 15; i++) {
+      time += 2 * 60 * 1000;
+      await clock.advance(2 * 60 * 1000);
+    }
+    // Asked once each when the copies turned stale at fifteen minutes, then left for fifteen more.
+    expect(fake.requests).toHaveLength(6);
+    // The viewer looks along the day strip and back.
+    for (let n = 1; n <= 6; n++) {
+      feed.want(day(n));
+      await clock.advance(500);
+    }
+    feed.want(day());
+    await clock.advance(500);
+    expect(fake.requests).toHaveLength(6);
+    time += 2 * 60 * 1000;
+    await clock.advance(30 * 1000);
+    expect(fake.requests).toHaveLength(9);
+    // The copy is not six hours old: still shown, and nothing says the addon failed.
+    expect(feed.get().events).toHaveLength(1);
+    expect(feed.get().failed).toEqual([]);
+  });
+});
+
+describe('copies no longer followed', () => {
+  it('stops showing a catalog once its copy is six hours old, and asks it when it is back', async () => {
+    let time = NOW;
+    const fake = fakeAddon('Old', [
+      { id: 'live', name: 'Live Now', items: [match(1, NOW - HOUR)] },
+      { id: 'football', name: 'Football', items: [match(2, NOW + 7 * HOUR)] },
+    ]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    const ids = () => feed.get().events.map((e) => e.sources[0]!.id);
+    feed.want(day());
+    await clock.advance(1000);
+    expect(ids()).toContain('ev:2');
+    // Home's Live sport row for the rest of the day asks only the live catalog.
+    feed.want('live', { light: true });
+    for (let i = 0; i < 11; i++) {
+      time += 30 * 60 * 1000;
+      await clock.advance(30 * 60 * 1000);
+    }
+    expect(ids()).toContain('ev:2');
+    time += 60 * 60 * 1000;
+    await clock.advance(30 * 60 * 1000);
+    expect(ids()).toEqual(['ev:1']);
+    expect(fake.requests.filter((r) => r.indexOf('football') !== -1)).toHaveLength(1);
+    feed.want(day());
+    await clock.advance(1000);
+    expect(ids()).toContain('ev:2');
+    expect(fake.requests.filter((r) => r.indexOf('football') !== -1)).toHaveLength(2);
+  });
+});
+
+describe('how often live catalogs are asked', () => {
+  /** A live catalog whose answers take two seconds, with the cache hints given. */
+  function slowLive(hints: Record<string, number> = {}) {
+    const asked: number[] = [];
+    let after: Timers['after'] = () => () => undefined;
+    let elapsed = () => 0;
+    const fake = fakeAddon('Slow', [
+      {
+        id: 'live',
+        name: 'Live Now',
+        items: [],
+        answer: () => {
+          asked.push(elapsed());
+          return new Promise((resolve) =>
+            after(2000, () => resolve({ metas: [match(1, NOW - HOUR)], ...hints })),
+          );
+        },
+      },
+    ]);
+    return {
+      fake,
+      asked,
+      bind(clock: ReturnType<typeof manualTimers>) {
+        after = clock.timers.after;
+        elapsed = clock.elapsed;
+      },
+    };
+  }
+
+  it('asks again about two minutes after each answer', async () => {
+    const live = slowLive();
+    const { feed, clock } = await setup([live.fake], { timed: true });
+    live.bind(clock);
+    feed.want('live');
+    for (let minute = 0; minute < 20; minute++) await clock.advance(60 * 1000);
+    expect(live.asked.length).toBeGreaterThanOrEqual(9);
+    for (let i = 1; i < live.asked.length; i++) {
+      const gap = live.asked[i]! - live.asked[i - 1]!;
+      expect(gap).toBeGreaterThanOrEqual(2 * 60 * 1000);
+      expect(gap).toBeLessThanOrEqual(2 * 60 * 1000 + 20 * 1000);
+    }
+  });
+
+  it('never asks sooner than two minutes after an answer, whatever the addon allows', async () => {
+    const live = slowLive({ cacheMaxAge: 10 });
+    const { feed, clock } = await setup([live.fake], { timed: true });
+    live.bind(clock);
+    feed.want('live');
+    await clock.advance(30 * 1000);
+    feed.want(day());
+    await clock.advance(30 * 1000);
+    feed.want('live');
+    await clock.advance(30 * 1000);
+    expect(live.asked).toHaveLength(1);
+    await clock.advance(60 * 1000);
+    expect(live.asked).toHaveLength(2);
   });
 });

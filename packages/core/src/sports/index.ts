@@ -20,7 +20,7 @@ export {
   type WantOptions,
 } from './feed';
 export { createKickoffMemory, type KickoffMemory } from './kickoffs';
-export { type CatalogContext, type Listing, readListing } from './listing';
+export { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
 export { sportOf } from './sport';
 export { addDays, localClock, localDate, localDayStart } from './time';
 export type {

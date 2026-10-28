@@ -176,6 +176,25 @@ describe('a list of clock times that wraps past midnight', () => {
     const listed = clocks(['20:00', '15:00', '00:30'], evening, 'Europe/London');
     expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual(kickOffs(listed));
   });
+
+  it('reads the repeats where pages overlap as the same matches, not as a step back', () => {
+    const evening = at('2026-10-28T21:00:00Z');
+    // The first page was asked again after matches left the top: it now reaches as far
+    // as the older second page, which repeats the last four.
+    const first = clocks(['20:00', '21:00', '22:00', '23:00', '00:30'], evening, 'Europe/London');
+    const listed = [...first, ...first.slice(1)];
+    const days = [
+      at('2026-10-28T21:00:00Z'),
+      at('2026-10-28T22:00:00Z'),
+      at('2026-10-28T23:00:00Z'),
+      at('2026-10-29T00:30:00Z'),
+    ];
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2026-10-28T20:00:00Z'),
+      ...days,
+      ...days,
+    ]);
+  });
 });
 
 describe('released', () => {

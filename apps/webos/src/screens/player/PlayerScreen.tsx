@@ -151,7 +151,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // episode: again when the series' episode list arrives or changes, never for
   // the Lab or a live broadcast. The card keeps the ids the progress is saved under.
   // Never for sports either, replays included: the row would ask every addon
-  // with the id's prefix for its page, not the one that listed it.
+  // with the id's prefix for its page, not the one that listed it. Their
+  // progress is marked to stay off the row too (continueRow below).
   const playing = state.status === 'playing';
   const live = state.live;
   const recorded = useRef<string | null>(null);
@@ -191,7 +192,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setVideo(element);
     const releaseProbing = holdProbing();
     // A sports match saves nothing and never resumes; a replay keeps its place
-    // like any other video.
+    // like any other video, but never goes on Continue Watching.
     const remember = remembersPlace(props);
     const created = createPlaybackSession({
       video: element,
@@ -201,6 +202,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       finder,
       autoFailover: !props.chosen,
       remember,
+      continueRow: !sportsEvent,
     });
     setSession(created);
     if (!props.lab) finder.start();

@@ -9,7 +9,7 @@ import type { SportsCatalog } from './detect';
 import type { Matcher } from './dictionary';
 import { buildEvents } from './events';
 import type { KickoffMemory } from './kickoffs';
-import { type CatalogContext, type Listing, readListing } from './listing';
+import { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
 import { sportOf } from './sport';
 import { cleanTitle } from './text';
 import { addDays, localDate, localDayStart, readKickOff } from './time';
@@ -46,8 +46,17 @@ export const MAX_GENRES = 12;
 export const META_LOOKUPS = 20;
 /** Replay catalogs asked per addon: one addon has seventy. */
 export const REPLAY_CATALOGS = 2;
-/** Live catalogs are asked again this often while sport is on screen, when their copy is old. */
+/**
+ * While sport is on screen: a new round of meta lookups this often, and no
+ * catalog page asked again sooner after its last answer.
+ */
 export const REFRESH_EVERY_MS = 2 * MINUTE;
+/**
+ * How often the feed looks for copies that are no longer fresh while sport is
+ * on screen, so a live catalog is asked again within this long of its copy
+ * turning stale, about every 2 minutes (docs/PLAN.md, Fetching and paging).
+ */
+export const CHECK_EVERY_MS = 15 * 1000;
 const REBUILD_DELAY_MS = 30;
 /** A live-first catalog is past the Live day once its kick-offs are this far ahead. */
 const LIVE_HORIZON_MS = HOUR;
@@ -92,7 +101,8 @@ export interface SportsFeed extends Pick<Store<SportsFeedState>, 'get' | 'subscr
   retry(): void;
   /**
    * Asks the catalogs on screen again when their copy is no longer fresh,
-   * and allows a new round of meta lookups. Called on a timer while wanted.
+   * and allows a new round of meta lookups. The feed's own timer does both
+   * while sport is wanted.
    */
   refresh(): void;
   /** When BannerTV first saw an event, for the limits on events with no time. */
@@ -115,6 +125,19 @@ interface Page {
   query: Query<MetaPreview[]>;
   unsubscribe: () => void;
   read?: PageRead;
+  /** When BannerTV last asked for it. */
+  asked: number;
+  /** When its copy arrived, or for an older copy from storage, the latest it can be from. */
+  answered?: number;
+}
+
+interface TrackListings {
+  /** The reads they came from, page by page; undefined for a page not shown. */
+  reads: Array<PageRead | undefined>;
+  /** As read. */
+  read: Listing[];
+  /** The same, clock-only times moved on a day where the list wraps past midnight. */
+  listings: Listing[];
 }
 
 type StopReason = 'unpaged' | 'no-new' | 'end' | 'cap';
@@ -131,6 +154,7 @@ interface Track {
   /** How the addon counts `skip`, once the second page shows it. */
   counting?: 'items' | 'events';
   genresOpened: boolean;
+  listings?: TrackListings;
 }
 
 /** The same catalog of the same install, asked the same way, whatever the objects. */
@@ -150,10 +174,21 @@ function isEvent(listing: Listing): boolean {
   return listing.kind === 'event' || listing.kind === 'replay';
 }
 
-/** No answer in time, or the server's own error: asking again later may get one. */
+/** No answer in time, the server's own error, or too many asked: asking later may get one. */
 function mayPass(error: Error | undefined): boolean {
   if (!(error instanceof HttpError)) return false;
-  return error.kind === 'timeout' || error.kind === 'network' || (error.status ?? 0) >= 500;
+  const status = error.status ?? 0;
+  return (
+    error.kind === 'timeout' ||
+    error.kind === 'network' ||
+    status >= 500 ||
+    status === 408 ||
+    status === 429
+  );
+}
+
+function policyOf(entry: SportsCatalog): CachePolicy {
+  return entry.view === 'live' ? SPORTS_LIVE_POLICY : SPORTS_POLICY;
 }
 
 /** What a listing depends on besides its item: it is read again when any of it changes. */
@@ -220,8 +255,12 @@ export function createSportsFeed(options: {
   let scheduled = false;
   let disposed = false;
   let stopRefresh: (() => void) | undefined;
-  /** Set by refresh() and by want(): the next pass asks again what is no longer fresh. */
-  let recheck = false;
+  /** The pages followed for what is on screen, as the last pass found them. */
+  const followed = new Set<Page>();
+  /** When the current round of meta lookups began. */
+  let lookupsAt = now();
+  /** The day each clock-only kick-off was remembered on, by the listing as read. */
+  const notedClocks = new WeakMap<Listing, number>();
   /**
    * Each item read once, until the catalog it came from changes: a moved or
    * removed addon gives the same items another place in the collection.
@@ -272,11 +311,17 @@ export function createSportsFeed(options: {
     const query = client.catalog(entry.addon, entry.catalog.type, entry.catalog.id, extra, {
       // Pages after the first are for this launch only, like searches.
       persist: skip === 0 && !track.genre,
-      policy: entry.view === 'live' ? SPORTS_LIVE_POLICY : SPORTS_POLICY,
+      policy: policyOf(entry),
       lane,
     });
-    track.pages.push({ skip, query, unsubscribe: query.subscribe(schedule) });
+    track.pages.push({ skip, query, unsubscribe: query.subscribe(schedule), asked: now() });
     query.load();
+  }
+
+  function ask(page: Page, again = false) {
+    page.asked = now();
+    if (again) page.query.retry();
+    else page.query.load();
   }
 
   function trackFor(entry: SportsCatalog, genre?: string): Track {
@@ -299,13 +344,17 @@ export function createSportsFeed(options: {
 
   /** Reads a page once its data is here, or again when it was refreshed. */
   function readPage(track: Track, page: Page): PageRead | undefined {
-    const data = page.query.get().data;
+    const state = page.query.get();
+    const data = state.data;
     if (!data) {
       // Asked again after its copy expired (6 hours without hints): the old copy is not shown.
       delete page.read;
+      delete page.answered;
       return undefined;
     }
     if (page.read && page.read.data === data) return page.read;
+    // A copy from storage shown while a new one is asked for is at least this old.
+    page.answered = state.stale ? now() - policyOf(track.entry).freshFor : now();
     // A refreshed page can bring more, or less: whether to page on is worked out again.
     if (page.read && track.genre === undefined) delete track.stopped;
     const ctx = context(track);
@@ -326,7 +375,11 @@ export function createSportsFeed(options: {
           continue;
         }
         listingCache.set(item, { context: key, listing });
-        if (memory && isEvent(listing)) memory.note(ctx.addonId, item.id, listing.kickOff);
+        if (memory && isEvent(listing)) {
+          // A clock-only time is remembered once its day is known (noteClocks).
+          const own = listing.kickOff?.source === 'clock' ? undefined : listing.kickOff;
+          memory.note(ctx.addonId, item.id, own);
+        }
       }
       if (listing.kind === 'placeholder') continue;
       listings.push(listing);
@@ -363,33 +416,60 @@ export function createSportsFeed(options: {
     return ids.size;
   }
 
-  function sorted(track: Track): boolean {
+  /**
+   * Whether a page's copy is shown. One no longer followed is left out once
+   * it is past its policy's 6 hours: nothing asks for it again, so the query
+   * never finds it expired (docs/PLAN.md, Fetching and paging).
+   */
+  function shown(track: Track, page: Page): boolean {
+    if (!page.read) return false;
+    if (followed.has(page) || page.answered === undefined) return true;
+    const { freshFor, revalidateFor } = policyOf(track.entry);
+    return now() - page.answered < freshFor + revalidateFor;
+  }
+
+  /** The catalog's listings across the pages shown, in the addon's order. */
+  function trackListings(track: Track): TrackListings {
+    const reads = track.pages.map((page) => (shown(track, page) ? page.read : undefined));
+    const known = track.listings;
+    if (known && known.reads.length === reads.length && known.reads.every((r, i) => r === reads[i]))
+      return known;
+    const read: Listing[] = [];
+    for (const pageRead of reads) {
+      if (pageRead) for (const listing of pageRead.listings) read.push(listing);
+    }
+    // Clock-only times are on the addon's day until the list wraps past midnight
+    // (docs/PLAN.md, Time, live and finished).
+    track.listings = { reads, read, listings: rollClockWraps(read, track.entry.zone) };
+    return track.listings;
+  }
+
+  function sorted(listings: readonly Listing[]): boolean {
     let previous: number | undefined;
     let pairs = 0;
     let backwards = 0;
-    for (const page of track.pages) {
-      for (const listing of page.read?.listings ?? []) {
-        const at = listing.kickOff?.at;
-        if (at === undefined || !isEvent(listing)) continue;
-        if (previous !== undefined) {
-          pairs++;
-          // Live-first lists start with matches already under way: an hour's slack.
-          if (at < previous - HOUR) backwards++;
-        }
-        previous = at;
+    for (const listing of listings) {
+      const at = listing.kickOff?.at;
+      if (at === undefined || !isEvent(listing)) continue;
+      if (previous !== undefined) {
+        pairs++;
+        // Live-first lists start with matches already under way: an hour's slack.
+        if (at < previous - HOUR) backwards++;
       }
+      previous = at;
     }
     return pairs >= 2 && backwards * 10 <= pairs;
   }
 
   /** The catalog lists by kick-off and its last page already reaches past the day on screen. */
   function pastDay(track: Track, day: SportsDay): boolean {
-    if (!sorted(track)) return false;
+    const { listings } = trackListings(track);
+    if (!sorted(listings)) return false;
     const end = day === 'live' ? now() + LIVE_HORIZON_MS : localDayStart(addDays(day, 1));
-    const last = track.pages[track.pages.length - 1]?.read;
+    const lastCount = track.pages[track.pages.length - 1]?.read?.listings.length ?? 0;
     let latest: number | undefined;
-    for (const listing of last?.listings ?? []) {
-      const at = listing.kickOff?.at;
+    for (let i = Math.max(0, listings.length - lastCount); i < listings.length; i++) {
+      const at = listings[i]!.kickOff?.at;
       if (at !== undefined && (latest === undefined || at > latest)) latest = at;
     }
     return latest !== undefined && latest >= end;
@@ -520,78 +600,107 @@ export function createSportsFeed(options: {
     return picked;
   }
 
-  /** The probe with `skip` failed: the catalog does not page, and its first page stays. */
+  /** The probe with `skip` was refused: the catalog does not page, and its first page stays. */
   function dropProbe(track: Track) {
     track.pages.pop()!.unsubscribe();
     track.stopped = 'unpaged';
     openGenres(track);
   }
 
-  function advance(): boolean {
-    let loading = false;
-    if (wanted === null) return loading;
-    const rechecking = recheck;
-    recheck = false;
+  /** The catalogs followed for what is on screen, with their genre pages, in the order to ask. */
+  function followedTracks(): Track[] {
+    const out: Track[] = [];
     for (const entry of active()) {
       const track = trackFor(entry);
-      const followers: Track[] = [track];
-      if (track.genresOpened) {
-        for (const genre of entry.genres.slice(0, MAX_GENRES))
-          followers.push(trackFor(entry, genre));
-      }
-      for (const current of followers) {
-        if (current.pages.length === 0) addPage(current, 0);
-        if (rechecking) {
-          // load() asks only when the copy is no longer fresh: 2 minutes for live catalogs,
-          // 15 for the rest (docs/PLAN.md, Fetching and paging). A catalog that failed
-          // waits for Try again, unless it is a live one.
-          for (const page of light ? current.pages.slice(0, 1) : current.pages) {
-            const state = page.query.get();
-            const failed = state.status === 'error' && !(state.error instanceof DroppedError);
-            if (!failed || entry.view === 'live') page.query.load();
-          }
+      out.push(track);
+      if (!track.genresOpened) continue;
+      for (const genre of entry.genres.slice(0, MAX_GENRES)) out.push(trackFor(entry, genre));
+    }
+    return out;
+  }
+
+  /** The pages a track follows: the first only for the Live sport row. */
+  function followedPages(track: Track): Page[] {
+    return light ? track.pages.slice(0, 1) : track.pages;
+  }
+
+  /**
+   * Asks again the pages on screen whose copy is no longer fresh: load() asks
+   * only then, 2 minutes for live catalogs and 15 for the rest (docs/PLAN.md,
+   * Fetching and paging), and never sooner than REFRESH_EVERY_MS after the
+   * last answer. A page that could not answer is asked again that long after
+   * it was last asked, so a down addon holds no request slot for long.
+   */
+  function recheckPages() {
+    if (wanted === null) return;
+    const time = now();
+    for (const track of followedTracks()) {
+      for (const page of followedPages(track)) {
+        const { status, error } = page.query.get();
+        if (status === 'loading') continue;
+        // Dropped before it reached the addon: asked now.
+        if (!(error instanceof DroppedError)) {
+          const since = error ? time - page.asked : time - (page.answered ?? page.asked);
+          const wait = error ? policyOf(track.entry).freshFor : REFRESH_EVERY_MS;
+          // A clock that went back asks now.
+          if (since >= 0 && since < wait) continue;
         }
-        // A page can come from the cache already loaded, and so never call back:
-        // its next page is decided at once (bounded by MAX_PAGES).
-        for (;;) {
-          const last = current.pages[current.pages.length - 1]!;
-          const page = last.query.get();
-          if (page.status === 'idle') {
-            last.query.load();
-            loading = true;
-            break;
-          }
-          if (page.status === 'loading') {
-            loading = true;
-            break;
-          }
-          if (page.status === 'error') {
-            // Dropped when the screen closed: asked again now it is back.
-            if (page.error instanceof DroppedError) {
-              last.query.load();
-              loading = true;
-            } else if (
-              !light &&
-              current.probed &&
-              !current.pageable &&
-              current.pages.length === 2
-            ) {
-              // Addons that do not expect `skip` may answer it with an error.
-              dropProbe(current);
-              continue;
-            }
-            break;
-          }
-          if (page.error instanceof DroppedError && page.stale) last.query.load();
-          readPage(current, last);
-          if (light || entry.view === 'replays' || current.genre !== undefined) break;
-          const count = current.pages.length;
-          decide(current, wanted);
-          if (current.pages.length === count) break;
-        }
-        // An earlier page asked again after its copy expired has nothing to show yet either.
-        if (current.pages.some((page) => page.query.get().status === 'loading')) loading = true;
+        ask(page);
       }
+    }
+  }
+
+  function advance(): boolean {
+    let loading = false;
+    followed.clear();
+    if (wanted === null) return loading;
+    for (const current of followedTracks()) {
+      const { entry } = current;
+      if (current.pages.length === 0) addPage(current, 0);
+      for (const page of followedPages(current)) followed.add(page);
+      // A page can come from the cache already loaded, and so never call back:
+      // its next page is decided at once (bounded by MAX_PAGES).
+      for (;;) {
+        const last = current.pages[current.pages.length - 1]!;
+        const page = last.query.get();
+        if (page.status === 'idle') {
+          ask(last);
+          loading = true;
+          break;
+        }
+        if (page.status === 'loading') {
+          loading = true;
+          break;
+        }
+        if (page.status === 'error') {
+          // Dropped when the screen closed: asked again now it is back.
+          if (page.error instanceof DroppedError) {
+            ask(last);
+            loading = true;
+          } else if (
+            !light &&
+            current.probed &&
+            !current.pageable &&
+            current.pages.length === 2 &&
+            !mayPass(page.error)
+          ) {
+            // Addons that do not expect `skip` may refuse it. One that did not answer in
+            // time stays a failed page, asked again by Try again or the next recheck.
+            dropProbe(current);
+            continue;
+          }
+          break;
+        }
+        if (page.error instanceof DroppedError && page.stale) ask(last);
+        readPage(current, last);
+        if (light || entry.view === 'replays' || current.genre !== undefined) break;
+        const count = current.pages.length;
+        decide(current, wanted);
+        if (current.pages.length === count) break;
+        followed.add(current.pages[current.pages.length - 1]!);
+      }
+      // An earlier page asked again after its copy expired has nothing to show yet either.
+      if (current.pages.some((page) => page.query.get().status === 'loading')) loading = true;
     }
     return loading;
   }
@@ -602,8 +711,8 @@ export function createSportsFeed(options: {
    * one between two close kick-offs gets the earlier, unsure, so it is placed
    * in Live now (docs/PLAN.md, Time, live and finished).
    */
-  function withEstimates(track: Track, listings: Listing[]): Listing[] {
-    if (!sorted(track)) return listings;
+  function withEstimates(listings: readonly Listing[]): readonly Listing[] {
+    if (!sorted(listings)) return listings;
     const out = listings.slice();
     let previous: number | undefined;
     for (let i = 0; i < out.length; i++) {
@@ -645,6 +754,7 @@ export function createSportsFeed(options: {
 
   /** A new refresh: a new round of meta lookups, and those that failed are asked again. */
   function allowLookups() {
+    lookupsAt = now();
     metaCount.clear();
     metaFailed.forEach((key) => metaAsked.delete(key));
     metaFailed.clear();
@@ -717,26 +827,39 @@ export function createSportsFeed(options: {
     }
   }
 
+  /** Clock-only kick-offs are remembered once their day is known, and again if it changes. */
+  function noteClocks({ read, listings }: TrackListings) {
+    if (!memory) return;
+    for (let i = 0; i < read.length; i++) {
+      const listing = read[i]!;
+      const kickOff = listings[i]!.kickOff;
+      if (listing.kickOff?.source !== 'clock' || kickOff?.at === undefined || !isEvent(listing))
+        continue;
+      if (notedClocks.get(listing) === kickOff.at) continue;
+      notedClocks.set(listing, kickOff.at);
+      memory.note(listing.source.addonId, listing.source.id, kickOff);
+    }
+  }
+
   function update() {
     const loading = advance();
     const listings: Listing[] = [];
     const failed: string[] = [];
     const activeKeys = new Set(active().map((entry) => entry.key));
     tracks.forEach((track) => {
-      const own: Listing[] = [];
-      for (const page of track.pages) {
-        const read = readPage(track, page);
-        if (read) for (const listing of read.listings) own.push(listing);
-      }
-      for (const listing of withEstimates(track, own)) listings.push(listing);
-      // Only the catalog's own first page names the addon: later pages, the skip probe and
-      // genre pages come with that page already on screen.
-      const page = track.genre === undefined ? track.pages[0]?.query.get() : undefined;
-      if (
-        page?.status === 'error' &&
-        !(page.error instanceof DroppedError) &&
-        activeKeys.has(track.entry.key)
-      ) {
+      for (const page of track.pages) readPage(track, page);
+      const own = trackListings(track);
+      noteClocks(own);
+      for (const listing of withEstimates(own.listings)) listings.push(listing);
+      // Any page followed that could not answer and has nothing older to show names its
+      // addon, so Try again is offered and asks it. A refused skip probe is gone by now.
+      const broken = track.pages.some((page) => {
+        const state = page.query.get();
+        return (
+          followed.has(page) && state.status === 'error' && !(state.error instanceof DroppedError)
+        );
+      });
+      if (broken) {
         const name = track.entry.addon.manifest.name;
         if (failed.indexOf(name) === -1) failed.push(name);
       }
@@ -771,6 +894,20 @@ export function createSportsFeed(options: {
   function stopTimer() {
     stopRefresh?.();
     stopRefresh = undefined;
+  }
+
+  /**
+   * On a timer while sport is on screen. Nothing is rebuilt unless a page
+   * answers or a new round of meta lookups begins.
+   */
+  function tick() {
+    if (wanted === null) return;
+    recheckPages();
+    const since = now() - lookupsAt;
+    if (since >= REFRESH_EVERY_MS || since < 0) {
+      allowLookups();
+      schedule();
+    }
   }
 
   const feed: SportsFeed = {
@@ -822,9 +959,9 @@ export function createSportsFeed(options: {
         schedule();
         return;
       }
-      if (!stopRefresh) stopRefresh = timers.every(REFRESH_EVERY_MS, () => feed.refresh());
+      if (!stopRefresh) stopRefresh = timers.every(CHECK_EVERY_MS, tick);
       // What went stale while sport was away is asked now, not at the next tick.
-      recheck = true;
+      recheckPages();
       if (back) allowLookups();
       update();
     },
@@ -832,14 +969,14 @@ export function createSportsFeed(options: {
     retry() {
       tracks.forEach((track) => {
         for (const page of track.pages) {
-          if (page.query.get().status === 'error') page.query.retry();
+          if (page.query.get().status === 'error') ask(page, true);
         }
       });
     },
 
     refresh() {
       if (wanted === null) return;
-      recheck = true;
+      recheckPages();
       allowLookups();
       schedule();
     },

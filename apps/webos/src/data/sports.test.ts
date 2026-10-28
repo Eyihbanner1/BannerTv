@@ -124,6 +124,21 @@ describe('an addon set up again with other settings', () => {
     expect(JSON.stringify(saved.get('sports.evidence'))).not.toContain('ab12cd34ef56');
   });
 
+  it('keeps the kick-offs it saw, under its new id', async () => {
+    const { sports, collection } = await start([before]);
+    const at = Date.parse('2026-10-28T20:00:00Z');
+    sports.kickoffs.note(before.manifest.id, 'x:0', { at, sure: true, source: 'released' });
+    await sports.kickoffs.flush();
+
+    collection.set({ ready: true, addons: [after] });
+    expect(sports.kickoffs.get(after.manifest.id, 'x:0')?.at).toBe(at);
+    expect(sports.kickoffs.get(before.manifest.id, 'x:0')).toBeUndefined();
+    await sports.kickoffs.flush();
+    const rows = JSON.stringify(saved.get('sports.kickoffs'));
+    expect(rows).toContain(after.manifest.id);
+    expect(rows).not.toContain('ab12cd34ef56');
+  });
+
   it('forgets everything about an addon removed', async () => {
     const { sports, collection } = await start([before]);
     sports.setSportsSetting(before, 'yes');
@@ -167,5 +182,32 @@ describe('events read from a search of a sports addon', () => {
     expect(sports.eventsFromItems(addon, catalogOf(addon, 'football'), [item])[0]?.kickOff).toEqual(
       event?.kickOff,
     );
+  });
+
+  it('reads clock times past midnight on the next day, as the Sports screen does', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const items = [
+      ['Arsenal vs Chelsea', '22:00'],
+      ['Celtic vs Rangers', '23:45'],
+      ['Ajax vs PSV', '00:30'],
+    ].map(([name, releaseInfo], i) =>
+      parseMetaPreview({ id: `x:${i}`, type: 'tv', name, releaseInfo })!,
+    );
+
+    const events = sports.eventsFromItems(addon, catalogOf(addon, 'search'), items);
+    const kickOff = (id: string) =>
+      events.find((event) => event.sources.some((source) => source.id === id))?.kickOff?.at;
+    expect([kickOff('x:0'), kickOff('x:1'), kickOff('x:2')]).toEqual([
+      Date.parse('2026-10-28T22:00:00Z'),
+      Date.parse('2026-10-28T23:45:00Z'),
+      Date.parse('2026-10-29T00:30:00Z'),
+    ]);
   });
 });

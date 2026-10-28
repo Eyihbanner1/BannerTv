@@ -15,6 +15,7 @@ import {
   type Matcher,
   needsEvidence,
   readListing,
+  rollClockWraps,
   type SportEvent,
   type SportsCatalog,
   sportsCatalogFilter,
@@ -236,8 +237,7 @@ function followCollection(before: readonly InstalledAddon[], now: readonly Insta
 
 /** What was kept about an addon, under the id it came back with. */
 function moveAddon(from: string, to: string): void {
-  // The kick-off memory cannot move an addon's items yet, so they go.
-  kickoffs.forget(from);
+  kickoffs.move(from, to);
   const setting = settings[from];
   if (setting) {
     const next = { ...settings };
@@ -459,7 +459,8 @@ export function eventsFromItems(
     }
   }
   try {
-    return buildEvents(listings, {
+    // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
+    return buildEvents(rollClockWraps(listings, zone), {
       matcher: sportsMatcher.get(),
       remembered: (addonId, id) => kickoffs.get(addonId, id),
     });

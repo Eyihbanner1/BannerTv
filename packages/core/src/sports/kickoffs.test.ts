@@ -123,3 +123,65 @@ describe('kick-off memory over days', () => {
     expect(memory.get('a', 'x')?.at).toBe(NOW);
   });
 });
+
+describe('an addon set up again under another id', () => {
+  const OLD = 'org.example.sports.ab12cd34ef56';
+  const NEW = 'org.example.sports.99887766aabb';
+
+  it('keeps its kick-offs and first-seen under the new id', async () => {
+    const store = memoryKeyValueStore();
+    let time = NOW;
+    const memory = createKickoffMemory({ store, timers, now: () => time });
+    memory.note(OLD, 'ev:1', { at: NOW + HOUR, sure: true, source: 'released' });
+    memory.note(OLD, 'ev:2', undefined);
+    memory.note('other.addon', 'ev:1', { at: NOW, sure: true, source: 'released' });
+    time = NOW + 2 * HOUR;
+    memory.move(OLD, NEW);
+    // The new install lists the match as LIVE, with no time.
+    memory.note(NEW, 'ev:1', undefined);
+    expect(memory.get(NEW, 'ev:1')).toEqual({ at: NOW + HOUR, sure: true, source: 'remembered' });
+    expect(memory.firstSeen(NEW, 'ev:2')).toBe(NOW);
+    expect(memory.get(OLD, 'ev:1')).toBeUndefined();
+    expect(memory.firstSeen(OLD, 'ev:2')).toBeUndefined();
+    expect(memory.get('other.addon', 'ev:1')?.at).toBe(NOW);
+    await memory.flush();
+    const next = createKickoffMemory({ store, timers, now: () => time });
+    await next.load();
+    expect(next.get(NEW, 'ev:1')?.at).toBe(NOW + HOUR);
+    expect(next.firstSeen(OLD, 'ev:2')).toBeUndefined();
+  });
+
+  it('lets what the new id holds win, keeping the earlier first-seen', () => {
+    let time = NOW;
+    const memory = createKickoffMemory({ timers, now: () => time });
+    memory.note(OLD, 'ev:1', { at: NOW + HOUR, sure: true, source: 'released' });
+    memory.note(OLD, 'ev:2', { at: NOW + HOUR, sure: true, source: 'released' });
+    time = NOW + 2 * HOUR;
+    memory.note(NEW, 'ev:1', { at: NOW + 3 * HOUR, sure: true, source: 'released' });
+    memory.note(NEW, 'ev:2', undefined);
+    memory.move(OLD, NEW);
+    expect(memory.get(NEW, 'ev:1')?.at).toBe(NOW + 3 * HOUR);
+    expect(memory.firstSeen(NEW, 'ev:1')).toBe(NOW);
+    // Seen by the new id with no time of its own: the old kick-off stands.
+    expect(memory.get(NEW, 'ev:2')?.at).toBe(NOW + HOUR);
+  });
+
+  it('moves and forgets what storage still held when that comes in later', async () => {
+    const store = memoryKeyValueStore();
+    const first = createKickoffMemory({ store, timers, now: () => NOW });
+    first.note(OLD, 'ev:1', { at: NOW + HOUR, sure: true, source: 'released' });
+    first.note('gone.addon', 'ev:9', { at: NOW, sure: true, source: 'released' });
+    await first.flush();
+    const second = createKickoffMemory({ store, timers, now: () => NOW });
+    second.move(OLD, NEW);
+    second.forget('gone.addon');
+    await second.load();
+    expect(second.get(NEW, 'ev:1')?.at).toBe(NOW + HOUR);
+    expect(second.get(OLD, 'ev:1')).toBeUndefined();
+    expect(second.get('gone.addon', 'ev:9')).toBeUndefined();
+    await second.flush();
+    const stored = JSON.stringify(await store.get('sports.kickoffs'));
+    expect(stored).not.toContain('gone.addon');
+    expect(stored).not.toContain(OLD);
+  });
+});

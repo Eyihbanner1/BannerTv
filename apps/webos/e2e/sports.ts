@@ -128,6 +128,13 @@ export const MATCHES = {
     genres: ['Football'],
     releaseInfo: '29 Oct 2026 · 20:00 WET',
   },
+  /** A full match on demand, listed only where a journey's catalogs answer with it. */
+  replay: {
+    id: 'tsport:replay-chelsea-arsenal',
+    name: 'Chelsea vs Arsenal (Full match replay)',
+    genres: ['Football', 'Premier League'],
+    released: at('2026-10-25T16:30:00Z'),
+  },
 } satisfies Record<string, Match>;
 
 /** Not matches: they never reach a row. */
@@ -178,6 +185,13 @@ export interface SportsOptions {
   liveEvents?: Promise<void>;
   /** Installs Test Sports first, before Cinemeta. */
   sportsFirst?: boolean;
+  /**
+   * Installs More Sports before Test Sports, so a request sent to every addon
+   * that could answer for Test Sports' ids asks More Sports first.
+   */
+  moreSportsFirst?: boolean;
+  /** The live catalog's own cache hint: its answers are fresh for this many seconds. */
+  liveMaxAge?: number;
   /** Answers for particular catalog paths of Test Sports, e.g. `sport/live`. Undefined falls through. */
   catalogs?: Record<string, (route: Route, extra: string) => Promise<void> | undefined>;
   /** While this gives a promise, Test Sports' catalogs answer only once it settles. */
@@ -215,6 +229,16 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
     official: false,
     fetchedAt: 0,
   };
+  const more = options.moreSports
+    ? [
+        {
+          transportUrl: MORE_SPORTS_URL,
+          manifest: MORE_SPORTS_MANIFEST,
+          official: false,
+          fetchedAt: 0,
+        },
+      ]
+    : [];
   const addons = [
     ...(options.sportsFirst ? [sports] : []),
     {
@@ -223,17 +247,7 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
       official: true,
       fetchedAt: 0,
     },
-    ...(options.sportsFirst ? [] : [sports]),
-    ...(options.moreSports
-      ? [
-          {
-            transportUrl: MORE_SPORTS_URL,
-            manifest: MORE_SPORTS_MANIFEST,
-            official: false,
-            fetchedAt: 0,
-          },
-        ]
-      : []),
+    ...(options.sportsFirst ? [] : options.moreSportsFirst ? [...more, sports] : [sports, ...more]),
     {
       transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
       manifest: subtitles,
@@ -294,7 +308,11 @@ export async function mockSports(page: Page, options: SportsOptions = {}): Promi
       const answered = options.catalogs?.[`${type}/${id}`]?.(route, extra);
       if (answered) return answered;
       const skip = Number(/skip=(\d+)/.exec(extra)?.[1] ?? 0);
-      if (id === 'live') return json(route, { metas: [arsenal, celtic].map((m) => item(m)) });
+      if (id === 'live') {
+        const metas = [arsenal, celtic].map((m) => item(m));
+        const age = options.liveMaxAge;
+        return json(route, age === undefined ? { metas } : { metas, cacheMaxAge: age });
+      }
       if (id === 'today') {
         // Fifty to a page, so the screen pages by events; it ends at 110.
         const all = [barnsley, arsenal, celtic, city, ...NOT_MATCHES, lakers];

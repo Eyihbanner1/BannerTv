@@ -186,16 +186,26 @@ describe('merging', () => {
     expect(merged[1]!.sources).toHaveLength(1);
   });
 
-  it('merges unsure times within 90 minutes', () => {
-    const merged = events([
+  it('merges unsure times within 90 minutes, and sure ones only within 15', () => {
+    const celtic = (
+      releaseInfo: string,
+    ): Array<[Record<string, unknown>, Partial<CatalogContext>?]> => [
       [{ name: 'Celtic vs Rangers', genres: ['Football'], releaseInfo: '28 Oct 2026 · 19:45 UTC' }],
       [
-        { name: 'Celtic vs Rangers', genres: ['Football'], releaseInfo: '28 Oct 2026 21:00' },
+        { name: 'Celtic vs Rangers', genres: ['Football'], releaseInfo },
         { addonIndex: 1, addonId: 'b' },
       ],
-    ]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]!.kickOff?.sure).toBe(true);
+    ];
+    // 21:00 CEST is 19:00 UTC, in a zone an abbreviation only suggests: 45 minutes apart.
+    const unsure = events(celtic('28 Oct 2026 21:00 CEST'));
+    expect(unsure).toHaveLength(1);
+    expect(unsure[0]!.kickOff).toMatchObject({
+      at: Date.parse('2026-10-28T19:45:00Z'),
+      sure: true,
+    });
+    expect(events(celtic('28 Oct 2026 · 19:00 UTC'))).toHaveLength(2);
+    // 23:30 CEST is 21:30 UTC: more than 90 minutes on.
+    expect(events(celtic('28 Oct 2026 23:30 CEST'))).toHaveLength(2);
   });
 
   it('keeps game numbers apart', () => {
@@ -479,20 +489,92 @@ describe('replays', () => {
 });
 
 describe('team badges', () => {
-  it('carries the badges an addon sent to the side they belong to', () => {
-    const rows: Array<[Record<string, unknown>, Partial<CatalogContext>]> = [
-      [{ name: 'Los Angeles Lakers vs Portland Trail Blazers', genres: ['Basketball'] }, {}],
+  const LAKERS = 'https://img.example/lakers.png';
+  const BLAZERS = 'https://img.example/blazers.png';
+
+  it('carries the badges an addon sends with its teams to the event', () => {
+    const [event] = events([
       [
-        { name: 'Portland Trail Blazers vs Los Angeles Lakers', genres: ['Basketball'] },
+        {
+          name: 'Los Angeles Lakers vs Portland Trail Blazers',
+          genres: ['Basketball'],
+          team1: { name: 'Los Angeles Lakers', logo: LAKERS },
+          team2: { name: 'Portland Trail Blazers', logo: BLAZERS },
+        },
+      ],
+    ]);
+    expect(event!.home).toBe('Los Angeles Lakers');
+    expect(event!.homeLogo).toBe(LAKERS);
+    expect(event!.awayLogo).toBe(BLAZERS);
+  });
+
+  it('puts a badge on the side its name is, when the name gives the sides', () => {
+    // One team sent, and an "Away at Home" name: the badge is the away side's.
+    const [event] = events([
+      [
+        {
+          name: 'Portland Trail Blazers at Los Angeles Lakers',
+          genres: ['Basketball'],
+          team1: { name: 'Portland Trail Blazers', logo: BLAZERS },
+        },
+      ],
+    ]);
+    expect(event!.home).toBe('Los Angeles Lakers');
+    expect(event!.homeLogo).toBeUndefined();
+    expect(event!.awayLogo).toBe(BLAZERS);
+  });
+
+  it('carries the badges of a copy that names the teams the other way round', () => {
+    const [event] = events([
+      [{ name: 'Los Angeles Lakers vs Portland Trail Blazers', genres: ['Basketball'] }],
+      [
+        {
+          name: 'Portland Trail Blazers vs Los Angeles Lakers',
+          genres: ['Basketball'],
+          team1: { name: 'Portland Trail Blazers', logo: BLAZERS },
+          team2: { name: 'Los Angeles Lakers', logo: LAKERS },
+        },
         { addonIndex: 1, addonId: 'b' },
       ],
-    ];
-    const listings = rows.map(([fields, ctx]) => readListing(item(fields), context(ctx), NOW));
-    listings[1]!.source.homeLogo = 'https://img.example/blazers.png';
-    listings[1]!.source.awayLogo = 'https://img.example/lakers.png';
-    const [event] = buildEvents(listings, { matcher });
+    ]);
+    expect(event!.sources).toHaveLength(2);
     expect(event!.home).toBe('Los Angeles Lakers');
-    expect(event!.homeLogo).toBe('https://img.example/lakers.png');
-    expect(event!.awayLogo).toBe('https://img.example/blazers.png');
+    expect(event!.homeLogo).toBe(LAKERS);
+    expect(event!.awayLogo).toBe(BLAZERS);
+  });
+
+  it('drops a badge whose name is neither side', () => {
+    const [event] = events([
+      [
+        {
+          name: 'Los Angeles Lakers vs Portland Trail Blazers',
+          genres: ['Basketball'],
+          team1: { name: 'Boston Celtics', logo: LAKERS },
+        },
+      ],
+    ]);
+    expect(event!.homeLogo).toBeUndefined();
+    expect(event!.awayLogo).toBeUndefined();
+  });
+});
+
+describe('the sport the addon gives', () => {
+  it('takes a catalog per sport over a name that is itself a sport', () => {
+    // A darts catalog's "Grand Prix" is darts; a name alone would say motor sport.
+    const [darts] = events([[{ name: 'World Grand Prix', genres: [] }, { sport: 'darts' }]]);
+    expect(darts!.sport).toBe('darts');
+    const [racing] = events([[{ name: 'Horse Racing', genres: ['Sports'] }]]);
+    expect(racing!.sport).toBe('other');
+  });
+
+  it('takes the sport of the genre page the item was asked from', () => {
+    // StremVerse lists "Indian Super League" with no genres, on its genre=Football page.
+    const [onPage] = events([
+      [{ name: 'Indian Super League', genres: [] }, { genreOption: 'Football' }],
+    ]);
+    expect(onPage!.sport).toBe('football');
+    // The same item on the page with every sport says nothing of its sport.
+    const [onLive] = events([[{ name: 'Indian Super League', genres: [] }]]);
+    expect(onLive!.sport).toBe('other');
   });
 });

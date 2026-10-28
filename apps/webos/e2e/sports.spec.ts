@@ -208,7 +208,9 @@ test('Sports groups the day by competition and works out live from kick-off time
   const errors = watchErrors(page);
   let held: Promise<void> | undefined;
   let release = () => undefined as void;
-  const { requests } = await startWithSports(page, { held: () => held });
+  // The live catalog says its copy is fresh for half a minute: it is still asked at
+  // most every 2 minutes.
+  const { requests } = await startWithSports(page, { held: () => held, liveMaxAge: 30 });
   await openSection(page, 'sports');
   await expectFocus(page, 'sports-day-1');
   await expect(page.locator('[data-focus-key="sports-day-1"]')).toHaveText('Today');
@@ -261,6 +263,20 @@ test('Sports groups the day by competition and works out live from kick-off time
   await page.waitForTimeout(500);
   expect(again()).toEqual(refreshed);
 
+  // With answers coming, nothing is asked for 2 minutes after the last answer, however
+  // often the clock ticks. Then the live catalog is asked again, once; the others stay
+  // fresh for 15 minutes.
+  const answered = requests.all.length;
+  const since = () =>
+    requests.all.slice(answered).filter((request) => request.includes('/catalog/'));
+  await page.clock.fastForward(90 * 1000);
+  await page.waitForTimeout(500);
+  expect(since()).toEqual([]);
+  await page.clock.fastForward(40 * 1000);
+  await expect.poll(since).toEqual(['sports /bannertv/catalog/sport/live.json']);
+  await page.waitForTimeout(500);
+  expect(since()).toEqual(['sports /bannertv/catalog/sport/live.json']);
+
   // Live now holds only what is live or about to start.
   await press(page, 'ArrowUp', `${EFL_CUP}-tile-1`);
   await press(page, 'ArrowUp', 'sports-day-1');
@@ -284,7 +300,12 @@ test('a match plays from the addon that listed it, and leaves nothing in Continu
   page,
 }) => {
   const errors = watchErrors(page);
-  const { requests, playback } = await startWithSports(page, { moreSports: true });
+  // More Sports claims the same type and ids, and comes first: a request sent to every
+  // addon that could answer would ask it first.
+  const { requests, playback } = await startWithSports(page, {
+    moreSports: true,
+    moreSportsFirst: true,
+  });
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
   await press(page, 'Enter', 'event-watch');
@@ -299,8 +320,7 @@ test('a match plays from the addon that listed it, and leaves nothing in Continu
     )
     .toBe(true);
   expect(playback.media).toContain('/match-1080p.webm');
-  // More Sports claims the same type and ids, but it never listed this match:
-  // it is asked for neither its meta nor its streams.
+  // More Sports never listed this match: it is asked for neither its meta nor its streams.
   expect(requests.streams.every((request) => request.indexOf('sports ') === 0)).toBe(true);
   expect(requests.streams).toContain('sports sport/tsport:arsenal-brighton');
   expect(
@@ -315,6 +335,78 @@ test('a match plays from the addon that listed it, and leaves nothing in Continu
   await expect(page.locator('[data-row-key="home-continue"]')).toHaveCount(0);
   expect(JSON.stringify((await readKv(page, 'progress')) ?? [])).not.toContain('tsport');
   expect(JSON.stringify((await readKv(page, 'played')) ?? [])).not.toContain('tsport');
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('a replay keeps its place, but Home neither shows it to continue nor asks any addon about it', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { replay } = MATCHES;
+  // More Sports claims the replay's type and id, and comes first: a request sent to every
+  // addon that could answer would ask it first.
+  const { requests, playback } = await startWithSports(page, {
+    moreSports: true,
+    moreSportsFirst: true,
+    catalogs: {
+      'sport/today': (route) => answer(route, [{ ...replay, type: 'sport' }]),
+      'sport/football': (route) => answer(route, []),
+    },
+  });
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await expect(sportsRows(page).last()).toHaveText('Replays');
+  // Down past More Sports' Try again and the matches to the replay.
+  let focused = '';
+  for (let n = 0; n < 10 && !focused.startsWith('sports-row-replays-'); n++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    focused = await focusedKey(page);
+  }
+  expect(focused).toBe('sports-row-replays-tile-0');
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(() =>
+      page
+        .locator('video:not([aria-hidden])')
+        .evaluate((video: HTMLVideoElement) => !video.paused && video.currentTime > 1),
+    )
+    .toBe(true);
+  expect(playback.media).toContain('/match-1080p.webm');
+
+  // Its place is kept to resume, marked to stay off the row.
+  const kept = async () =>
+    ((await readKv(page, 'progress')) as Array<Record<string, unknown>> | undefined) ?? [];
+  await expect
+    .poll(async () => (await kept()).filter((entry) => entry.videoId === replay.id))
+    .toEqual([expect.objectContaining({ metaId: replay.id, type: 'sport', continueRow: false })]);
+  const played = await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((video: HTMLVideoElement) => video.currentTime);
+  await pressBack(page);
+  await expectFocus(page, 'event-watch');
+  await pressBack(page);
+  await expectFocus(page, 'sports-row-replays-tile-0');
+  await pressBack(page);
+  await expectFocus(page, 'sports-day-1');
+  // Where it was left, give or take the last clock reading.
+  const position = (await kept()).find((entry) => entry.videoId === replay.id)?.position;
+  expect(position).toBeGreaterThan(played - 1);
+
+  // Home shows no card for it, and asks no addon for its page or streams.
+  const asked = requests.all.length;
+  await pressBack(page);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page.locator('[data-row-key="home-continue"]')).toHaveCount(0);
+  expect(requests.all.slice(asked).filter((request) => request.includes(replay.id))).toEqual([]);
+  expect(JSON.stringify((await readKv(page, 'played')) ?? [])).not.toContain('tsport');
+  // Its page and streams came only from the addon that listed it.
+  expect(
+    requests.all.filter((request) => /^more \/bannertv\/(meta|stream)\//.test(request)),
+  ).toEqual([]);
+  expect(requests.streams).toEqual([`sports sport/${replay.id}`]);
   expect(realErrors(errors)).toEqual([]);
 });
 

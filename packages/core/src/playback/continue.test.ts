@@ -836,6 +836,16 @@ describe('continueWatching', () => {
     expect(tv.items()).toEqual([]);
   });
 
+  it('leaves out a video kept only to resume, such as a sports replay, card or not', async () => {
+    const tv = await watching();
+    tv.play(movie('tt1', 600), 1, filmCard());
+    tv.play({ ...movie('tt2', 600), continueRow: false }, 2, filmCard('tt2'));
+    tv.play({ ...episode('tt9:1:2', 1200), continueRow: false }, 3, episodeCard('tt9:1:2'));
+    tv.play({ ...movie('tt3', 600), continueRow: false }, 4);
+
+    expect(tv.items().map((item) => item.preview.id)).toEqual(['tt1']);
+  });
+
   it('leaves out a title whose last video has no card', async () => {
     const tv = await watching();
     tv.play(episode('tt9:1:1', 600), 1, episodeCard('tt9:1:1'));

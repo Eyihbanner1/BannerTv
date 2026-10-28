@@ -141,6 +141,13 @@ function dropSharedSportWord(sides: [Side, Side]): [Side, Side] {
   }) as [Side, Side];
 }
 
+/** Whether a team name the addon sent is this side, its shared sport word dropped or not. */
+function isSide(name: string, which: Side, sport: Sport | undefined): boolean {
+  if (side(name, sport).key === which.key) return true;
+  const plain = name.replace(SHARED_SPORT_WORD, '');
+  return plain !== name && side(plain, sport).key === which.key;
+}
+
 function addCompetition(
   list: Listing['competitions'],
   text: string | undefined,
@@ -165,12 +172,18 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
   const clean = cleanTitle(item.name);
   const kind = itemKind(item, context, clean.title);
   const hints = item.sport ?? {};
-  // A name with no teams that is itself a sport ("Horse Racing", "Formula 1: Mexican Grand
-  // Prix") says more than the tag an addon put on it.
+  // A genre option or a catalog per sport gives the sport (docs/PLAN.md, Grouping, layer 1).
+  // After it, a name with no teams that is itself a sport ("Horse Racing", "Formula 1:
+  // Mexican Grand Prix") says more than the tag an addon put on the item.
+  const genreSport =
+    context.genreOption !== undefined && isSportLabel(context.genreOption)
+      ? sportOf(context.genreOption)
+      : undefined;
   const titleSport = splitTeams(clean.title) === undefined ? sportOf(clean.title) : undefined;
   const addonSport =
-    titleSport ??
+    genreSport ??
     context.sport ??
+    titleSport ??
     genres.map(sportOf).filter((sport) => sport !== undefined)[0] ??
     sportOf(hints.category);
 
@@ -227,6 +240,20 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
     delete listing.sides;
     delete listing.separator;
     listing.teamsTrusted = false;
+  }
+  if (listing.sides) {
+    // A badge goes to the side whose name it came with: with one team sent, the sides come
+    // from the name, where "Away at Home" puts them the other way round.
+    const sides = listing.sides;
+    const badges: Array<[string | undefined, string | undefined]> = [
+      [hints.home, hints.homeLogo],
+      [hints.away, hints.awayLogo],
+    ];
+    for (const [name, logo] of badges) {
+      if (name === undefined || logo === undefined) continue;
+      if (isSide(name, sides[0], addonSport)) source.homeLogo = logo;
+      else if (isSide(name, sides[1], addonSport)) source.awayLogo = logo;
+    }
   }
   const sequence = sequenceNumber(clean.title);
   if (sequence) listing.sequence = sequence;
@@ -285,26 +312,36 @@ const HOUR = 60 * 60 * 1000;
  * listings in the order the addon sent them, across its pages.
  */
 export function rollClockWraps(listings: readonly Listing[], zone: string | undefined): Listing[] {
-  const out = listings.slice();
-  const wraps: number[] = [];
+  // Days on, by place in the list, for the clock-only times.
+  const shifts: number[] = [];
+  // Pages overlap by a few items, and by more once a live list has moved on: a repeat is
+  // the same match on its first copy's day, and no step in the order.
+  const shiftOf = new Map<string, number>();
   let previous: number | undefined;
-  for (let i = 0; i < out.length; i++) {
-    const kickOff = out[i]!.kickOff;
+  let wraps = 0;
+  for (let i = 0; i < listings.length; i++) {
+    const listing = listings[i]!;
+    const kickOff = listing.kickOff;
     if (kickOff?.source !== 'clock' || kickOff.at === undefined) continue;
+    const repeat = shiftOf.get(listing.source.id);
+    if (repeat !== undefined) {
+      shifts[i] = repeat;
+      continue;
+    }
     if (previous !== undefined && kickOff.at < previous - HOUR) {
-      if (kickOff.at > previous - 12 * HOUR) return out;
-      wraps.push(i);
+      if (kickOff.at > previous - 12 * HOUR) return listings.slice();
+      wraps++;
     }
     previous = kickOff.at;
+    shiftOf.set(listing.source.id, wraps);
+    shifts[i] = wraps;
   }
-  let days = 0;
-  for (let i = 0; i < out.length && wraps.length > 0; i++) {
-    if (i === wraps[days]) days++;
-    const listing = out[i]!;
+  if (wraps === 0) return listings.slice();
+  return listings.map((listing, i) => {
+    const days = shifts[i];
     const kickOff = listing.kickOff;
-    if (days === 0 || kickOff?.source !== 'clock' || kickOff.at === undefined) continue;
+    if (!days || kickOff?.at === undefined) return listing;
     const at = nextDayAt(kickOff.at, zone, days);
-    if (at !== undefined) out[i] = { ...listing, kickOff: { ...kickOff, at } };
-  }
-  return out;
+    return at === undefined ? listing : { ...listing, kickOff: { ...kickOff, at } };
+  });
 }

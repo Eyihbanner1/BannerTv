@@ -169,6 +169,17 @@ describe('the public sports addons, as captured', () => {
     expect(find('Liverpool FC vs Chelsea').competition.key).toBe('eng.league-cup');
   });
 
+  it('takes the sport of the genre page an item was asked from', () => {
+    // StremVerse sends "Indian Super League" with no genres; its genre=Football page says it.
+    const onPage = listingsOf(3, 'stremverse_live_events', stremverseFootball, 'Football');
+    const league = onPage.filter((listing) => listing.title === 'Indian Super League');
+    expect(league.length).toBeGreaterThan(0);
+    for (const listing of league) expect(listing.addonSport).toBe('football');
+    const [event] = buildEvents(league, { matcher });
+    expect(event!.sport).toBe('football');
+    expect(event!.competition.name).toBe('Other football');
+  });
+
   it('gives youth sides their own row', () => {
     expect(find('Manchester United U18 vs Burnley U18').competition.name).toBe('Youth football');
   });
