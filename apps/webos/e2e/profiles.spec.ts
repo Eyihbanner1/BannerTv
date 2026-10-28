@@ -190,6 +190,44 @@ test('opening BannerTV again from the launcher asks who is watching when the pro
   expect(errors).toEqual([]);
 });
 
+test("Back pressed while Home still reads the profile's rows stays in the app", async ({
+  page,
+}) => {
+  // Holds the read of Home's row settings until the journey lets it go.
+  await page.addInitScript(() => {
+    const w = window as Window & { releaseLayout?: () => void; exitRequested?: boolean };
+    const released = new Promise<void>((resolve) => (w.releaseLayout = resolve));
+    window.addEventListener('bannertv:exit', () => (w.exitRequested = true));
+    const get = IDBObjectStore.prototype.get;
+    const setSuccess = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
+    IDBObjectStore.prototype.get = function (this: IDBObjectStore, query: IDBValidKey) {
+      const request = get.call(this, query);
+      if (query !== 'homeLayout') return request;
+      Object.defineProperty(request, 'onsuccess', {
+        set(handler: (this: IDBRequest, event: Event) => void) {
+          setSuccess.call(request, (event: Event) => {
+            void released.then(() => handler.call(request, event));
+          });
+        },
+      });
+      return request;
+    };
+  });
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expect(page.getByRole('navigation')).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => (window as Window & { releaseLayout?: () => void }).releaseLayout?.());
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  expect(
+    await page.evaluate(() => (window as Window & { exitRequested?: boolean }).exitRequested),
+  ).toBeUndefined();
+});
+
 test('a kids profile sees Family rows only, no Addons, a short Settings, and no unsuitable title', async ({
   page,
 }) => {

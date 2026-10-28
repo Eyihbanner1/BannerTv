@@ -251,6 +251,10 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           sentChanges.some((s) => s.id === change.id && s.op === change.op);
         let outbox = current.outbox.filter((change) => !done(change));
         const saved = new Set(current.items.map((item) => item.id));
+        // remove() takes a title's waiting addition out of the outbox; a title
+        // dropped only to keep My List under its limit leaves it there.
+        const removedHere = (id: string) =>
+          !saved.has(id) && !current.outbox.some((c) => c.id === id && c.op === 'add');
         let synced = current.synced;
         for (const change of sentChanges) {
           synced = synced.filter((id) => id !== change.id);
@@ -258,7 +262,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           synced = synced.concat(change.id);
           // Taken off here while the addition was on its way: it is on Trakt's list
           // now, so the removal goes there too, or the next sync would bring it back.
-          if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
+          if (removedHere(change.id) && !outbox.some((c) => c.id === change.id)) {
             outbox = queue(outbox, { op: 'remove', id: change.id, type: change.type });
           }
         }
@@ -319,9 +323,14 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           items.push(item);
           have.add(entry.id);
         }
+        const kept = newestFirst(items).slice(0, MAX_LIBRARY_ITEMS);
+        // A title that does not fit is not sent to Trakt only to be dropped here.
+        const fits = new Set(kept.map((item) => item.id));
         return {
-          items: newestFirst(items).slice(0, MAX_LIBRARY_ITEMS),
-          outbox,
+          items: kept,
+          outbox: outbox.filter(
+            (change) => change.op !== 'add' || fits.has(change.id) || pending.has(change.id),
+          ),
           synced: Array.from(remoteIds),
         };
       });

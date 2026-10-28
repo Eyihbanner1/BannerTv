@@ -182,10 +182,11 @@ export function HomeScreen() {
   // On Home, Back first returns to the first row. Only from there does it exit.
   // Genre rows share the first row's key as a prefix, so match its tiles exactly.
   // Before Home's first focus, Back stays in the app and focus lands as it would
-  // have, not on a row Continue Watching is about to come above.
+  // have, not on a row Continue Watching is about to come above. That includes
+  // while the profile's rows are still being read and none is drawn yet.
   useBack('screen', () => {
     const first = rows[0];
-    if (firstRowKey && !focusReady) return true;
+    if (!focusReady) return true;
     if (!firstRowKey || focusedKey().indexOf(`${firstRowKey}-tile-`) === 0) {
       return false;
     }

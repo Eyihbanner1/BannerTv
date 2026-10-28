@@ -141,6 +141,18 @@ describe('createLibrary', () => {
     expect(library.outbox()).toEqual([{ op: 'remove', id: 'x', type: 'movie' }]);
   });
 
+  it('sends no removal for a title only dropped to keep the limit', async () => {
+    const time = clock();
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: time.now });
+    for (let i = 0; i <= MAX_LIBRARY_ITEMS; i++) {
+      time.tick();
+      await library.add(preview(`t${i}`));
+    }
+    expect(library.has('t0')).toBe(false);
+    await library.sent(library.outbox().slice());
+    expect(library.outbox()).toEqual([]);
+  });
+
   it('leaves no removal for the next account after signing out', async () => {
     const library = createLibrary({ storage: memoryKeyValueStore() });
     await library.add(preview('a'));
@@ -216,6 +228,22 @@ describe('mergeRemote', () => {
     await library.mergeRemote([{ id: 'kept', type: 'movie', name: 'Kept', addedAt: 1 }]);
     expect(library.items().map((i) => i.id)).toEqual(['fresh', 'kept']);
     expect(library.outbox()).toEqual([{ op: 'add', id: 'fresh', type: 'movie' }]);
+  });
+
+  it("queues nothing for a title that does not fit beside Trakt's list", async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 1 });
+    await library.add(preview('old'));
+    // Signed out, then in to an account whose list is full of newer titles.
+    await library.forgetRemote();
+    const remote = Array.from({ length: MAX_LIBRARY_ITEMS }, (_, i) => ({
+      id: `tt${i}`,
+      type: 'movie' as const,
+      name: `T${i}`,
+      addedAt: 10 + i,
+    }));
+    await library.mergeRemote(remote);
+    expect(library.has('old')).toBe(false);
+    expect(library.outbox()).toEqual([]);
   });
 
   it('applies removals made on Trakt, but not over a newer change here', async () => {

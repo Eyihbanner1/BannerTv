@@ -1,6 +1,7 @@
 import { createPersisted, type Persisted } from '../persisted';
 import type { KeyValueStore } from '../storage';
 import type { BoardRow } from './board';
+import { installIdOf } from './collection';
 
 const KEY = 'homeLayout';
 /** Rows remembered at most, shown or hidden. */
@@ -24,16 +25,6 @@ export function rowIdentity(row: BoardRow): string {
   return [row.addon.manifest.id, row.type, row.catalog.id, genre ? genre[1] : ''].join('|');
 }
 
-/** A short name for one install, so the layout never keeps its manifest URL, which can hold keys. */
-function installTag(transportUrl: string): string {
-  // FNV-1a: stable across launches, and the same for every profile.
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < transportUrl.length; index++) {
-    hash = Math.imul(hash ^ transportUrl.charCodeAt(index), 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
-}
-
 interface RowNames {
   /** What the layout saves for the row now. */
   id: string;
@@ -44,7 +35,7 @@ interface RowNames {
 /**
  * The same addon installed twice with different settings gives rows with the
  * same identity. While both are installed, each such row is told apart by
- * its install, which moving addons does not change. Settings saved under the
+ * its install, which moving addons or setting one up again does not change. Settings saved under the
  * shared identity keep applying to both until one of them is changed, and an
  * install left on its own keeps the settings it had as one of two.
  */
@@ -58,7 +49,7 @@ function rowNames(rows: readonly BoardRow[]): Map<BoardRow, RowNames> {
   const names = new Map<BoardRow, RowNames>();
   for (const row of rows) {
     const base = rowIdentity(row);
-    const own = `${base}#${installTag(row.addon.transportUrl)}`;
+    const own = `${base}#${installIdOf(row.addon)}`;
     let id = copies.get(base)! > 1 ? own : base;
     // An addon that lists one catalog twice: the later one is numbered.
     for (let count = 2; taken.has(id); count++) id = `${own}-${count}`;

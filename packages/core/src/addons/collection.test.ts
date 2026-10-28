@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../http';
 import { memoryKeyValueStore } from '../storage';
-import { createAddonCollection, InstallError, type StoredAddon } from './collection';
+import { createAddonCollection, InstallError, installIdOf, type StoredAddon } from './collection';
 import { CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
 
 const EXTRA_URL = 'https://addon.example.com/conf/manifest.json';
@@ -91,6 +91,18 @@ describe('createAddonCollection', () => {
     expect(urls(collection)).toEqual([configured, ...DEFAULT_ADDONS.map((a) => a.transportUrl)]);
     const saved = (await storage.get('addons')) as StoredAddon[];
     expect(saved.map((a) => a.transportUrl)).toEqual(urls(collection));
+    // It is the same install, by a name that does not give its address away.
+    const first = installIdOf({ ...collection.get().addons[0]!, transportUrl: EXTRA_URL });
+    expect(saved[0]!.installId).toBe(first);
+    expect(saved[0]!.installId).not.toContain('example');
+    const reloaded = createAddonCollection({
+      storage,
+      fetchJson: vi.fn(),
+      defaults: DEFAULT_ADDONS,
+    });
+    await reloaded.load();
+    expect(installIdOf(reloaded.get().addons[0]!)).toBe(first);
+    expect(saved.slice(1).every((a) => a.installId === undefined)).toBe(true);
 
     // Settings that match an addon already in the list update that one instead.
     await collection.install(CINEMETA_URL, { replaces: configured });

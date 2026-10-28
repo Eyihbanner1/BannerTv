@@ -13,6 +13,27 @@ export interface InstalledAddon {
   official: boolean;
   /** When the manifest was fetched, in ms since 1970. 0 for a copy bundled with the app. */
   fetchedAt: number;
+  /**
+   * Names this install while its settings change, for when the same addon is
+   * installed twice. Read it with installIdOf: it is missing until the
+   * address first changes.
+   */
+  installId?: string;
+}
+
+/** A short tag for an address, so what is saved about an install never holds the address, which can hold keys. */
+function addressTag(url: string): string {
+  // FNV-1a: the same on every launch.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < url.length; index++) {
+    hash = Math.imul(hash ^ url.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/** A name for this install that stays when it is set up again: a tag of the address it was first installed from. */
+export function installIdOf(addon: InstalledAddon): string {
+  return addon.installId ?? addressTag(addon.transportUrl);
 }
 
 /** How an addon is kept in storage: the manifest as the addon sent it, re-read at every launch. */
@@ -21,6 +42,7 @@ export interface StoredAddon {
   manifest: unknown;
   official: boolean;
   fetchedAt: number;
+  installId?: string;
 }
 
 export interface CollectionState {
@@ -74,12 +96,16 @@ function idStem(id: string): string {
 
 function readStored(value: StoredAddon): InstalledAddon | undefined {
   try {
-    return {
+    const addon: InstalledAddon = {
       transportUrl: value.transportUrl,
       manifest: parseManifest(value.manifest),
       official: value.official === true,
       fetchedAt: typeof value.fetchedAt === 'number' ? value.fetchedAt : 0,
     };
+    if (typeof value.installId === 'string' && value.installId !== '') {
+      addon.installId = value.installId;
+    }
+    return addon;
   } catch {
     return undefined;
   }
@@ -109,12 +135,18 @@ export function createAddonCollection(options: {
   }
 
   function save(addons: readonly InstalledAddon[]) {
-    const stored: StoredAddon[] = addons.map((addon) => ({
-      transportUrl: addon.transportUrl,
-      manifest: raw.get(addon.transportUrl),
-      official: addon.official,
-      fetchedAt: addon.fetchedAt,
-    }));
+    const stored: StoredAddon[] = addons.map((addon) => {
+      const item: StoredAddon = {
+        transportUrl: addon.transportUrl,
+        manifest: raw.get(addon.transportUrl),
+        official: addon.official,
+        fetchedAt: addon.fetchedAt,
+      };
+      // Only an install whose address changed needs its name kept.
+      const id = installIdOf(addon);
+      if (id !== addressTag(addon.transportUrl)) item.installId = id;
+      return item;
+    });
     storage.set(STORAGE_KEY, stored).catch(() => undefined);
   }
 
@@ -188,6 +220,9 @@ export function createAddonCollection(options: {
         fetchedAt: now(),
       };
       const replaced = current.find((a) => a !== existing && a.transportUrl === options.replaces);
+      // Set up again on its settings page, it is the same install: Home rows keep its settings.
+      if (existing?.installId) addon.installId = existing.installId;
+      else if (!existing && replaced) addon.installId = installIdOf(replaced);
       let next: InstalledAddon[];
       if (existing) {
         next = current.map((a) => (a === existing ? addon : a)).filter((a) => a !== replaced);

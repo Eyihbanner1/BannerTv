@@ -2,7 +2,7 @@ import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { memoryKeyValueStore } from '../storage';
 import { buildBoard } from './board';
-import type { InstalledAddon } from './collection';
+import { type InstalledAddon, installIdOf } from './collection';
 import { DEFAULT_ADDONS } from './defaults';
 import {
   arrangeBoard,
@@ -139,6 +139,19 @@ describe('Home layout', () => {
       // Shown again on its own: nothing of it stays hidden.
       const shown = setRowHidden(onlyEnglish, layout, base, false);
       expect(shown.hidden).toEqual([]);
+    });
+
+    it('keeps a copy set up again with new settings as it was', () => {
+      const layout = setRowHidden(twice, EMPTY_LAYOUT, idOf(twice, english.transportUrl), true);
+      // The collection carries the install's name over to its new address.
+      const configured = {
+        ...english,
+        transportUrl: 'https://shorts.example/en-gb/manifest.json',
+        installId: installIdOf(english),
+      };
+      const after = buildBoard([...cinemeta, shorts, configured]);
+      expect(arrangeBoard(after, layout)).not.toContain(trendingOf(after, configured.transportUrl));
+      expect(arrangeBoard(after, layout)).toContain(trendingOf(after, shorts.transportUrl));
     });
 
     it('keeps what was saved for addons that are not installed', () => {
