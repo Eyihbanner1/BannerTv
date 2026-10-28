@@ -42,7 +42,7 @@ Phase 2 makes BannerTV play. The plan asked for a stream picker, a remote-driven
 - Most viewers press Watch and get a picture. When the guess is wrong, the next stream starts by itself, and All streams is one press away.
 - On a fast connection a 4K web release wins over a 4K remux until a remux the viewer picks plays ten minutes without buffering; after that the limit has risen and remuxes rank by quality again.
 - Asking addons on a focus rest costs requests the viewer may never use. The rest delay, the five-minute cache and the never-on-Home rule keep that small; the link test is the costly part and is the first thing to turn off if the floor TV struggles.
-- Embedded subtitles in direct-play files are still missing. The Lab tests the webOS media pipeline's Luna calls (`subscribe` for the track list, `setSubtitleEnable` and `selectTrack` by `mediaId`), which Lampa, Stremio and Nuvio use. LG does not document them, and on webOS 25 selecting a text track has frozen HLS playback. On the webOS 22 TV they answer OK and list the tracks but draw no subtitle (see below), so the player does not use them and the subtitle menu offers addon subtitles.
+- Embedded subtitles in direct-play files are still missing. The Lab tests the webOS media pipeline's Luna calls (`subscribe` for the track list, `setSubtitleEnable` and `selectTrack` by `mediaId`), which Lampa, Stremio and Nuvio use. LG does not document them, and on webOS 25 selecting a text track has frozen HLS playback. On the webOS 22 TV they answer OK and list the tracks but drew no subtitle in two runs (see below), so the player does not use them and the subtitle menu offers addon subtitles.
 - ASS styling, positioning and karaoke are Phase 5 (JASSUB on webOS 6+). Torrents and proxy-header streams wait for the Phase 5 streaming server.
 - The LG demo addon's adaptive HLS needs nothing special: the TV's player takes it, and hls.js takes over if it has subtitle or audio renditions.
 
@@ -83,9 +83,18 @@ The combined run on 28 October 2026 with build 7949e01 (Agent Hub message 1256, 
   - `unsubscribe` answered `returnValue: false`. The media service writes "No Error" into every answer, failures included, so only `returnValue` counts. It failed because the Lab had already closed its subscription before asking; the Lab now asks first, and notes error codes and any answer that is not a plain success.
 - **Changed after the run.** On the first launch after the update, Continue Watching had no title cards yet, so Home opened on the first catalog row and the row arrived above it. In the first 3 s after launch, Home now waits for cards still being fetched before placing focus, so it opens on the row. The wait ends early when no answer is still to come or the viewer uses the remote; that press only shows where focus is, as on any screen with nothing focused, and a tile the pointer moved onto keeps focus. After that, a row that arrives late still leaves focus where it is.
 
+The confirmation run later on 28 October 2026 with build 6cfc07d (Agent Hub message 1259, saved as `phase2/confirm-tv-results-6cfc07d.md` in the project files) checked those changes:
+
+- **Passed.**
+  - Home opened on the first Continue Watching tile 0.9 to 1.1 s after launch, three times out of three, with nothing focused before it.
+  - OK pressed during launch opened nothing, and Back pressed then did not leave the app.
+  - The Lab ran to the end with `unsubscribe` answering OK. Subtitle tracks 0 and 1 again drew nothing, so the player keeps to addon subtitles on webOS 22.
+  - Resume on Dune, addon subtitles ("version 2 of 5"), Back to the tile played, and Up Next into the next episode.
+- **Changed after the run.** Back pressed before saved progress had been read moved focus to the first catalog row, and 140 ms later Home's first focus moved it on to Continue Watching. Until Home has placed its first focus, Back now stays in the app and leaves focus to land there.
+
 Still to check on the TV:
 
-1. A stream that keeps buffering steps down by itself, and the hint on a stream picked by hand (neither happened in the 28 October run).
+1. A stream that keeps buffering steps down by itself, and the hint on a stream picked by hand (neither happened in either run on 28 October).
 2. A live stream: it opens at the live edge, saves no progress and offers no Up Next (no installed addon had a live catalogue).
 3. A Shaka DASH stream, a DTS or TrueHD stream played on purpose, and 4K over HLS with the lifted `adaptiveStreaming` cap.
 4. On webOS 5 (floor TV, when bought): hls.js with its worker, Shaka, and whether link testing can be turned on.

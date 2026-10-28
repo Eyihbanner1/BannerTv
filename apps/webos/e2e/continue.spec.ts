@@ -631,6 +631,57 @@ test('Back pressed while Home waits for a card does not leave the app', async ({
   expect(await exitRequested(page)).toBeUndefined();
 });
 
+/** Holds the app's read of saved progress until the returned function is called, as on a busy TV. */
+async function holdProgressRead(page: Page): Promise<() => Promise<void>> {
+  await page.addInitScript(() => {
+    const w = window as Window & { releaseProgress?: () => void };
+    const released = new Promise<void>((resolve) => (w.releaseProgress = resolve));
+    const get = IDBObjectStore.prototype.get;
+    const setSuccess = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
+    IDBObjectStore.prototype.get = function (this: IDBObjectStore, query: IDBValidKey) {
+      const request = get.call(this, query);
+      if (query !== 'progress') return request;
+      Object.defineProperty(request, 'onsuccess', {
+        set(handler: (this: IDBRequest, event: Event) => void) {
+          setSuccess.call(request, (event: Event) => {
+            void released.then(() => handler.call(request, event));
+          });
+        },
+      });
+      return request;
+    };
+  });
+  return () =>
+    page.evaluate(() => (window as Window & { releaseProgress?: () => void }).releaseProgress?.());
+}
+
+test('Back pressed while Home still reads saved progress stays in the app, and focus lands only on Continue watching', async ({
+  page,
+}) => {
+  const focusKeys = await recordFocus(page);
+  const releaseProgress = await holdProgressRead(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [MOVIE_PART_WAY],
+    played: [card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' })],
+  });
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await watchExit(page);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  // Nothing is shown focused on a row that Continue Watching is about to come above.
+  expect(await focusKeys()).toEqual([]);
+
+  await releaseProgress();
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${CONTINUE_ROW}-tile-0`]);
+  expect(await exitRequested(page)).toBeUndefined();
+});
+
 test('a tile the pointer moves onto while Home waits for a card keeps focus', async ({ page }) => {
   const focusKeys = await recordFocus(page);
   const answer = await openWaitingForCard(page);
