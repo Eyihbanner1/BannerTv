@@ -177,3 +177,40 @@ export {
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
+export {
+  createTraktAccount,
+  TRAKT_REFRESH_BEFORE_MS,
+  type TraktAccount,
+  type TraktAccountState,
+} from './integrations/trakt/account';
+export {
+  createDeviceSignIn,
+  type DeviceSignIn,
+  type DeviceSignInOptions,
+  type DeviceSignInState,
+} from './integrations/trakt/device';
+export {
+  metaIdFromIds,
+  type TraktIds,
+  traktIds,
+  type TraktTarget,
+  traktTarget,
+} from './integrations/trakt/ids';
+export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
+export {
+  createTraktSync,
+  TRAKT_RECENT_SHOW_MS,
+  type TraktSync,
+  type TraktSyncOptions,
+  type TraktSyncResult,
+} from './integrations/trakt/sync';
+export {
+  readTraktAnswer,
+  TraktError,
+  type TraktErrorKind,
+  type TraktMethod,
+  type TraktRequest,
+  type TraktResponse,
+  type TraktSend,
+  type TraktTimers,
+} from './integrations/trakt/transport';
