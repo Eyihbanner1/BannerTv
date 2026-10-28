@@ -29,7 +29,7 @@ BannerTV is a media centre that shows and plays what addons return. Apart from i
 
 - **Cinemeta**, for film and series titles, artwork and details.
 - **OpenSubtitles v3**, for subtitles.
-- **BannerTV Demo**, which streams Blender open movies under Creative Commons Attribution licences, so every playback step below can be tested with legal content.
+- **BannerTV Demo**, three short films from the Blender Foundation under Creative Commons Attribution licences (Big Buck Bunny, Spring and Wing It!), so every playback step below can be tested with legal content. It comes first, so its films fill the top of Home.
 
 No account, login or payment is needed. The TV must be online.
 
@@ -42,13 +42,14 @@ No account, login or payment is needed. The TV must be online.
 | Back | Close the top menu or dialog, then go back a screen. On Home it returns to the TV's launcher on webOS 5 and shows the TV's exit prompt on webOS 6 and newer (see scenario 9) |
 | Magic Remote pointer | Hover moves focus, click activates, the wheel scrolls rows |
 | Play, Pause, Stop, Rewind, Fast forward | Player transport **(Phase 2)** |
+| Blue | Opens audio and subtitles in the player **(Phase 2)** |
 
 ## Scenarios
 
 ### 1. First launch
 
 1. Open BannerTV from the launcher. The splash appears, then the welcome screen.
-2. The welcome explains that BannerTV doesn't host any content and that the user is responsible for the addons they add.
+2. The welcome says Cinemeta and BannerTV Demo are already added, and shows this notice: "Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV doesn't host or provide any films or series. Everything else comes from the addons you add, and you're responsible for the addons you choose."
 3. Choose **Start browsing**. Home opens. The welcome does not appear on later launches.
 4. Alternatively, choose **Add an addon** on the welcome screen. The Add an addon window opens (scenario 7); closing it goes to Home.
 
@@ -66,26 +67,26 @@ No account, login or payment is needed. The TV must be online.
 
 ### 4. Playing a film (Phase 2)
 
-1. Open **Home**, find the **BannerTV Demo** row and open a film, for example *Sintel*.
-2. Choose **Watch**, then a stream from the list. Playback starts.
-3. Press OK to show the controls. Left and Right seek 10 seconds. Up opens audio and subtitle choices; choose English subtitles.
+1. Open **Home**. The first row, **Blender open movies**, is BannerTV Demo's (once a film has been watched, **Continue watching** sits above it); open a film, for example *Big Buck Bunny*.
+2. Choose **Watch**. BannerTV picks a stream and playback starts; **All streams** shows the full list instead.
+3. Press OK: playback pauses and the controls show, with focus on **Play**. (With the controls hidden, Left and Right seek 10 seconds.) Move right to **Audio and subtitles** and press OK, or press the Blue key at any time. Under **Subtitles**, choose **English** or **Korean** (both marked BannerTV Demo). The films have no dialogue, so these are test tracks: a numbered line shows for 6 seconds every 30 seconds ("Subtitle check 3 of 20 / This line uses your subtitle size and colour."). Press the remote's Play key so the film carries on, then choose **Subtitle style** at the bottom of the same panel and change **Size** and **Colour** with Left and Right: the line on screen, or the next one, uses the new style.
 4. Press Back to leave the player. Open the film again: BannerTV offers **Resume** from where it stopped.
 
 ### 5. Search
 
 1. Open **Search** from the menu. Press OK on the search box to open the TV keyboard.
-2. Type "sintel", or use the microphone key to say it. Results appear by type.
+2. Type "bunny", or use the microphone key to say it. Results appear by type, including *Big Buck Bunny* from BannerTV Demo.
 3. Open a result. The search appears under recent searches next time.
 
 ### 6. Discover
 
-1. Open **Discover**. Change the type, catalogue and genre pickers.
-2. Scroll the poster grid. More titles load near the end.
+1. Open **Discover**. It opens on BannerTV Demo's **Blender open movies** catalogue: three films and no genre picker. Change the catalogue to one of Cinemeta's, such as **Popular · Cinemeta**, or the type to **Series**, and the genre picker appears; change it too.
+2. On a Cinemeta catalogue, scroll the poster grid. More titles load near the end.
 
 ### 7. Adding an addon
 
 1. Open **Addons**, then **Add an addon**.
-2. Type this test address with the TV keyboard: `DEMO_ADDON_URL` (the Demo addon's manifest; remove it first from the Addons list to test adding it again).
+2. Type this test address with the TV keyboard: `https://demo.bannertv.workers.dev/manifest.json` (the Demo addon's manifest; remove BannerTV Demo from the Addons list first to test adding it again).
 3. Or scan the QR code with a phone, paste the same address on the page that opens, and send it. The address appears on the TV; choose **Add**. The code lasts 10 minutes; **New code** gets another.
 4. The addon appears in the list and its rows appear on Home.
 
@@ -117,7 +118,7 @@ No account, login or payment is needed. The TV must be online.
 
 ## Appendix: notes for LG QA
 
-- BannerTV hosts no content. What appears depends on the addons installed; the store build comes with Cinemeta, OpenSubtitles v3 and BannerTV Demo.
+- Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV hosts no content. What appears depends on the addons installed; the store build comes with BannerTV Demo (first), Cinemeta and OpenSubtitles v3.
 - The About screen shows an optional QR code to an external donation page. It opens on a phone and unlocks nothing in the app.
 - **(Phase 3)** Addons marked as adult are hidden by default, and showing them needs the PIN (scenario 12). Remove this line and scenario 12 if the submitted build doesn't have the filter.
 

@@ -57,14 +57,14 @@ Items 34 and 35 weren't captured in the research; read them in the form.
 | --- | --- | --- | --- |
 | 41 | Change language | Only if the app has a language setting | N/A in v1 (English only) |
 | 42 | Sound | | Phase 2 |
-| 43 | Play contents | Playback throttled to 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, plus an IPv6 network; quality adapts and buffering isn't constant | Phase 2. The Demo addon needs adaptive HLS with a rung well under 512 kbps, on a host reachable over IPv6 |
+| 43 | Play contents | Playback throttled to 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, plus an IPv6 network; quality adapts and buffering isn't constant | Phase 2. The Demo addon is adaptive HLS in five sizes, from 288p (peak about 313 kbps) to 1080p, so the 512 kbps test has a size with room to spare and faster links step up towards 1080p. `workers.dev` answers over IPv6; check it from Korea before submitting (DEMO_ADDON.md on PR #8, Deploying, step 7) |
 | 44 | Full and original screen | Switching works, if offered | N/A unless a zoom option is added |
 | 45 | Playback controls | Play, Pause, Stop, Fast forward, Rewind, Seek, Previous, Next by arrows and pointer; remote media keys do the same as the buttons; sound in sync | Phase 2 |
 | 46 | Replay | Playing again after the end | Phase 2 |
 | 47 | Real-time streaming | Live streams start without delay | N/A unless live addon streams are offered for testing |
-| 48 | Subtitles | Shown, and subtitle settings (colour, size) apply | Phase 2 |
+| 48 | Subtitles | Shown, and subtitle settings (colour, size) apply | Phase 2. Each Demo film has English and Korean "Subtitle check" tracks with a numbered line every 30 seconds, since the films have no dialogue; the player's Subtitle style changes size and colour |
 | 49 | Resume | Resume from history | Phase 2 (the `mediaOption` start position works on webOS 22) |
-| 50 | SD to UHD | Each resolution plays | Phase 2, with the Demo addon's renditions |
+| 50 | SD to UHD | Each resolution plays | Phase 2. Each Demo film is one adaptive stream from 288p to 1080p: the player moves between sizes as the connection changes (see item 43), and no Quality button appears for it. It has no 4K. Say both in Test Info: the lower sizes show under throttling, and UHD depends on the addon |
 | 51 | Codecs | Every codec the app claims | Phase 2. Declare only what the Demo addon has (H.264 and AAC) in Test Info |
 | 52 | DRM | For paid content | N/A, no DRM |
 | 53 | Factory reset | After a TV reset, the app installs, runs and plays | Test once before submitting |
@@ -75,4 +75,4 @@ Items 34 and 35 weren't captured in the research; read them in the form.
 - **Recommended:** buttons at least 75 x 75 px and text at least 20 px at 1920 x 1080 (BannerTV's smallest is 22 px, on the Addons screen's phone help), a loading cue rather than a black screen, the LG keyboard, an on-screen playback menu.
 - **Credentials:** no passwords, tokens, keys or credentials in the code or in file names; LG's rule list also flags names like `varname_pwd`. A scan of PR #4's package and Phase 2's bundle found none: the only matches are standard names in libraries (the Fetch API's `credentials` option, React's `password` input types, hls.js and Shaka Player settings such as `authorizationToken`) and the relay's run-time `secret` field. Explain those in the checklist's comments rather than renaming them, and ask LG (STORE.md, question 10). Addon addresses can carry a user's account key and sit in the app's IndexedDB; encrypt them with the Trakt token and PIN hash, or record here why the app's own sandbox is enough. See [data-safety.md](data-safety.md).
 - **Developer screens and permissions:** the Diagnostics and Playback lab screens and their test streams must not be in the store build. `requiredACG` must list every permission the store build uses, including `application.launcher` for trailers, and `systemconfig.query` only if it is kept (STORE.md, "App work the store needs", item 5).
-- **Content:** nothing sexual, violent, discriminatory, criminal, drug-related, gambling-related, or against a religion or nation. Testers see what Cinemeta and the Demo addon show, so the Demo addon's films should be suitable for all ages.
+- **Content:** nothing sexual, violent, discriminatory, criminal, drug-related, gambling-related, or against a religion or nation. Testers see what Cinemeta and the Demo addon show. The Demo's three films (Big Buck Bunny, Spring, Wing It!) are suitable for all ages and have no dialogue; Sintel was left out for an on-screen stabbing.

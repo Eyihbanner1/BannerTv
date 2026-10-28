@@ -6,7 +6,7 @@ The text and images for BannerTV's Seller Lounge entry, ready to paste: English 
 
 These keep the listing inside LG's content test and away from the UK anti-piracy complaints the plan warns about.
 
-- No film or series titles, posters, stills or logos that BannerTV doesn't own. Screenshots use the BannerTV Demo addon's Blender open movies only (Creative Commons Attribution).
+- No film or series titles, posters, stills or logos that BannerTV doesn't own. Screenshots show only the BannerTV Demo addon's three Blender Foundation films (Creative Commons Attribution), with the Demo's own artwork: frames from the films, with titles set in Urbanist. Never use Blender's own posters, logos or title designs, which their licences exclude.
 - No names of third-party stream addons, debrid services, torrents or "free films". BannerTV is described as a player for addons the user adds.
 - No "LG", "webOS" or "Stremio" in the app name, icon or screenshots. The long description names the addon format once, in plain text.
 - No claims that need proof, such as "the fastest" or "every addon".
@@ -34,11 +34,13 @@ The same as `title` in appinfo.json, which LG caps at 20 characters.
 > - Add an addon by typing its address, or send it from your phone with a QR code
 > - Built for LG TVs with webOS 5.0 or newer, including most 2020 models
 >
-> BannerTV works with addons that use the Stremio addon format. It doesn't host or provide any films or series: everything comes from the addons you add, and you're responsible for making sure you have the right to watch what they offer. Cinemeta, for titles and artwork, is included to get you started.
+> BannerTV works with addons that use the Stremio addon format. Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV doesn't host or provide any films or series. Everything else comes from the addons you add, and you're responsible for making sure you have the right to watch what they offer. BannerTV Demo and Cinemeta, for titles and artwork, are included to get you started.
 >
 > Free, with no adverts and no account.
+>
+> Films in the screenshots, from BannerTV Demo: Big Buck Bunny, (c) copyright 2008, Blender Foundation / www.bigbuckbunny.org, CC BY 3.0 (creativecommons.org/licenses/by/3.0). Spring, © Blender Foundation | cloud.blender.org/spring, and Wing It!, (CC) Blender Foundation | studio.blender.org, both CC BY 4.0 (creativecommons.org/licenses/by/4.0). Re-encoded for streaming by BannerTV. The Blender Foundation doesn't endorse BannerTV.
 
-About 900 characters. Notes:
+About 1,500 characters. Notes:
 
 - The playback line describes Phase 2. Remove it if the first store build ships before the player.
 - When Trakt sign-in ships, add this line before "Free, with no adverts": "BannerTV uses Trakt but is not endorsed or certified by Trakt." Trakt's API Use Policy asks for it in the store description.
@@ -56,9 +58,15 @@ If the app threads add `appDescription` to appinfo.json (60 characters at most, 
 
 ### Note for Tester (Test Info)
 
-> BannerTV is a media centre that plays what addons return; apart from its demo addon, it hosts no content of its own. Cinemeta (titles and artwork), OpenSubtitles v3 (subtitles) and BannerTV Demo (Blender open movies under Creative Commons Attribution licences) come preinstalled, so playback can be tested without adding anything: open Home, find the BannerTV Demo row and play any film. No account or payment is needed. The About screen has an optional donation QR code that opens an external page on a phone and unlocks nothing. Full steps are in the UX scenario.
+> BannerTV is a media centre that plays what addons return; apart from its demo addon, it hosts no content of its own. Cinemeta (titles and artwork), OpenSubtitles v3 (subtitles) and BannerTV Demo (three Blender Foundation films under Creative Commons Attribution licences) come preinstalled, so playback can be tested without adding anything: the first row on Home, "Blender open movies", comes from BannerTV Demo, and any of its films plays. Each film has English and Korean subtitle tracks that show a numbered "Subtitle check" line every 30 seconds, for testing subtitles and their size and colour settings; the films themselves have no dialogue. The demo films are adaptive HLS with H.264 video and AAC stereo sound, in sizes from 288p to 1080p. The player picks the size from the connection speed, so there is no manual quality choice for them. There is no 4K demo film: UHD playback depends on the addon a viewer adds. No account or payment is needed. The About screen has an optional donation QR code that opens an external page on a phone and unlocks nothing. Full steps are in the UX scenario.
 
 Add a line for each optional feature the submitted build has (Trakt sign-in with the test account, profiles and the PIN, the adult filter, which is on by default).
+
+### Player Specification (Test Info)
+
+Test Info asks for each item with the title of one asset that shows it (Red Bee's LG guide, cited in STORE.md):
+
+> DRM: none. Streaming protocol: HLS, Big Buck Bunny (BannerTV Demo). Video codec: H.264, Big Buck Bunny. Audio codec: AAC, Big Buck Bunny.
 
 ## Service info
 
@@ -96,16 +104,21 @@ All source files are in [`brand/`](../../brand/README.md). Checked on 27 October
 
 Take these on the TV, or from `pnpm dev` at 1920 x 1080 and scale to 1280 x 720 PNG, with **only the BannerTV Demo addon installed** (Cinemeta removed) so no third-party artwork appears. They need the Demo addon and the Phase 2 player, so they're the last thing made before submitting.
 
-1. **Home** (primary). Hero on a Blender open movie such as Sintel, a row of demo titles under it, focus visible on a tile.
-2. **Details.** A demo title with backdrop, synopsis and the Watch button focused.
-3. **Player.** A frame of a demo film with the controls showing and an English subtitle on screen.
-4. **Search.** The TV keyboard and results for a demo title.
-5. **Discover.** The poster grid of demo titles with the type and genre pickers.
+1. **Home** (primary). Hero on one of the Demo films, such as Spring, with the Demo's "Blender open movies" row under it and focus visible on a tile.
+2. **Details.** A Demo film with backdrop, synopsis and the Watch button focused.
+3. **Player.** A frame of a Demo film with the controls showing. The Demo's only subtitles are the "Subtitle check" test tracks, so leave subtitles off, or show the Subtitle style menu rather than a test line.
+4. **Search.** The TV keyboard and results for a Demo film, for example "bunny". The Demo answers searches itself.
+5. **Discover.** The Demo's three posters. Its catalogue lists no genres, so there's no genre picker with Cinemeta removed; if the grid looks too sparse, swap this shot for the Addons screen.
 6. **Add an addon.** The dialog with the six-character code and QR code. Show a placeholder address, never a real addon's.
 
 ## Credits the About screen must show
 
-- The Blender open movies in the Demo addon: each film's own credit line as Blender Studio publishes it (for example "© copyright Blender Foundation | www.sintel.org") and its Creative Commons Attribution licence. Check each film's licence before adding it.
+- The Demo addon's films, each with its credit line exactly as published, its licence and a link to the licence, "Re-encoded for streaming by BannerTV", and "The Blender Foundation doesn't endorse BannerTV":
+  - Big Buck Bunny: "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org", CC BY 3.0.
+  - Spring: "© Blender Foundation | cloud.blender.org/spring", CC BY 4.0.
+  - Wing It!: "(CC) Blender Foundation | studio.blender.org", CC BY 4.0.
+
+  The Demo addon already shows the credit in each film's Details and on the first line of its streams, and on its own page at `demo.bannertv.workers.dev`. If a film is added to `services/demo/films.json` later, check its licence and add it here and to the store description.
 - Urbanist font, SIL Open Font License 1.1.
 - TMDB, when enrichment ships: an approved TMDB logo, smaller than BannerTV's, and "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB."
 - Trakt, when sign-in ships: "BannerTV uses Trakt but is not endorsed or certified by Trakt." The Trakt logo is optional and follows Trakt's branding guide.

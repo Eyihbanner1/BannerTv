@@ -38,7 +38,7 @@
 
     <main id="main" class="wrap">
       <h1>Privacy policy</h1>
-      <p class="meta">Last updated <time datetime="2026-10-27">27 October 2026</time></p>
+      <p class="meta">Last updated <time datetime="2026-10-28">28 October 2026</time></p>
 
       <p class="lead">
         BannerTV has no accounts, no adverts and no tracking. Almost everything it knows stays on
@@ -48,14 +48,14 @@
       <h2 id="short">The short version</h2>
       <ul>
         <li>
-          Your settings, addons, recent searches and watch progress are stored on your TV, not sent
-          to me.
+          Your settings, addons, list of recent searches and watch progress are stored on your TV,
+          not sent to me.
         </li>
         <li>
-          When you browse or play, your TV talks straight to the addons you've added, to the sites
-          they point to and to a few services BannerTV uses for artwork. They see your IP address
-          and what you ask for. Apart from BannerTV's own demo addon, which keeps no logs, those
-          requests don't come to me.
+          When you browse, search or play, your TV talks straight to the addons you've added, to the
+          sites they point to and to a few services BannerTV uses for artwork. They see your IP
+          address and what you ask for, including what you type in Search. Apart from BannerTV's own
+          demo addon, which keeps no logs, those requests don't come to me.
         </li>
         <li>
           While you're adding an addon or changing its settings, a small relay I run lets you do it
@@ -159,11 +159,14 @@
 
       <h3 id="demo">The BannerTV Demo addon</h3>
       <p>
-        The demo addon lists a few Blender open movies, which are free to share under Creative
-        Commons licences, so there's always something legal to play. Its listings and films are
-        served from Cloudflare. When your TV browses or plays it, Cloudflare handles the connection,
-        including your IP address and the film your TV asks for, as my processor. I keep no request
-        logs for the demo addon, so I can't see who watches what.
+        The demo addon offers three short films from the Blender Foundation, which are free to share
+        under Creative Commons licences, so there's always something legal to play. A Cloudflare
+        Worker at <code>demo.bannertv.workers.dev</code> serves its listings, films, artwork and
+        subtitles. When your TV browses, searches or plays it, Cloudflare handles the connection as
+        my processor. That includes your IP address, the film or file your TV asks for and, when you
+        search, the words you type, which are part of the request's address. The addon uses those
+        words only to pick matching films from its three, and keeps nothing: request logs, traces
+        and log exports are all turned off, so I can't see who watches or searches for what.
       </p>
 
       <h3 id="artwork-streams">Artwork, streams and subtitles</h3>
@@ -276,8 +279,8 @@
         <li>No adverts, analytics, tracking pixels or advertising identifiers.</li>
         <li>No selling, renting or sharing of personal data.</li>
         <li>
-          No profiles of what you watch. What you browse and play goes from your TV to the services
-          that provide it, not to me, and the demo addon I run keeps no logs.
+          No profiles of what you watch. What you browse, search for and play goes from your TV to
+          the services that provide it, not to me, and the demo addon I run keeps no logs.
         </li>
       </ul>
 
@@ -333,8 +336,8 @@
               </td>
             </tr>
             <tr>
-              <td>Connections to the demo addon</td>
-              <td>Not logged by me</td>
+              <td>Connections to the demo addon, including searches</td>
+              <td>Not logged or kept by me</td>
             </tr>
             <tr>
               <td>Crash reports</td>

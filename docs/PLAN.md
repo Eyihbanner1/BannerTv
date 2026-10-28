@@ -6,7 +6,7 @@ Oct 26, 2026 · @Eyitayo
 
 ## Summary
 
-BannerTV is a webOS-native media center that plays content from Stremio-compatible addons, with Nuvio-style extras (Trakt sync, profiles, a customizable home screen) built for the LG remote from day one. It hosts no content itself: users install addon URLs, and BannerTV browses, resolves and plays what those addons return.
+BannerTV is a webOS-native media center that plays content from Stremio-compatible addons, with Nuvio-style extras (Trakt sync, profiles, a customizable home screen) built for the LG remote from day one. It hosts no content of its own, apart from the BannerTV Demo addon's three Creative Commons films: users install addon URLs, and BannerTV browses, resolves and plays what those addons return.
 
 **Goals**
 
@@ -49,7 +49,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | --- | --- | --- | --- | --- |
 | Addons | Install addon by manifest URL | Yes | Yes, same addons and config | Phase 1. Typed on screen, or sent from a phone via QR pairing |
 | Addons | Configurable addons (settings page per addon) | Yes, opens a web page | Yes | Phase 1. Show the addon's configure URL as a QR code, phone returns the configured manifest URL |
-| Addons | Preinstalled defaults | Cinemeta, OpenSubtitles, more | Its own defaults | Phase 1. Cinemeta and OpenSubtitles v3, both removable |
+| Addons | Preinstalled defaults | Cinemeta, OpenSubtitles, more | Its own defaults | Phase 1. Cinemeta and OpenSubtitles v3; PR #8 adds BannerTV Demo first. All removable |
 | Addons | Addon catalogs (browse community addons) | Yes | Plugin repos by URL or QR | Phase 3 |
 | Addons | Scraper plugins outside the addon protocol | No | Yes | Not planned. Addon protocol only, which keeps the store review simple |
 | Browse | Home board, one row per catalog | Yes | Yes, plus Modern, Grid and Classic layouts | Phase 1 rows with a hero banner. Phase 3 reorder and hide rows |
@@ -561,12 +561,12 @@ BannerTV ships through two channels: the LG Content Store for everyone, and GitH
 
 **Making the app reviewable**
 
-BannerTV has no content of its own, so a tester who opens it needs something legal to play. The store build preinstalls Cinemeta for metadata and a small first-party "BannerTV Demo" addon that streams public-domain and Creative Commons films (for example the Blender open movies). The UX scenario document walks the tester through browsing, playing, subtitles and adding an addon by URL.
+BannerTV has no content of its own, so a tester who opens it needs something legal to play. The store build preinstalls a small first-party "BannerTV Demo" addon, first in the list, with three Creative Commons films from the Blender Foundation, then Cinemeta for metadata and OpenSubtitles v3 for subtitles. The Demo is described in `docs/DEMO_ADDON.md` (PR #8). The UX scenario document walks the tester through browsing, playing, subtitles and adding an addon by URL.
 
 **Store build rules**
 
 - No third-party stream addons preinstalled or promoted. Users add addons by URL themselves, the same model Stremio uses in the LG store.
-- A first-run notice that BannerTV hosts no content and that users are responsible for the addons they install.
+- A first-run notice that, apart from BannerTV Demo, BannerTV hosts no content and that users are responsible for the addons they install.
 - The adult-content filter is on by default.
 - No debrid screens in the first store submission: it is built with `debrid=off`. Link only can follow in an update after LG has answered question 11. The referral screen comes only after LG has answered in writing, the provider has agreed in writing and the legal review is done (see Debrid accounts and referral links).
 
