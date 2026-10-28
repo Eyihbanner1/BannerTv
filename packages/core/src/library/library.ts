@@ -5,6 +5,7 @@ import type { Listener } from '../store';
 
 const KEY = 'library';
 export const MAX_LIBRARY_ITEMS = 1000;
+const IMDB = /^tt\d+$/;
 
 /** A saved title: what a tile needs, so the Library opens without asking any addon. */
 export interface LibraryItem {
@@ -71,7 +72,10 @@ export interface Library {
   refresh(item: MetaPreview): Promise<void>;
   /** Changes made on the TV that Trakt has not been told about, oldest first. */
   outbox(): readonly LibraryChange[];
-  /** Forgets changes Trakt now has. */
+  /**
+   * Forgets changes Trakt now has. A title taken off here while its addition
+   * was on its way gets a removal queued, since Trakt has it now.
+   */
   sent(changes: readonly LibraryChange[]): Promise<void>;
   /**
    * Brings in Trakt's list: what was added there is added here, what was
@@ -245,11 +249,18 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       return state.update((current) => {
         const done = (change: LibraryChange) =>
           sentChanges.some((s) => s.id === change.id && s.op === change.op);
-        const outbox = current.outbox.filter((change) => !done(change));
+        let outbox = current.outbox.filter((change) => !done(change));
+        const saved = new Set(current.items.map((item) => item.id));
         let synced = current.synced;
         for (const change of sentChanges) {
           synced = synced.filter((id) => id !== change.id);
-          if (change.op === 'add') synced = synced.concat(change.id);
+          if (change.op !== 'add') continue;
+          synced = synced.concat(change.id);
+          // Taken off here while the addition was on its way: it is on Trakt's list
+          // now, so the removal goes there too, or the next sync would bring it back.
+          if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
+            outbox = queue(outbox, { op: 'remove', id: change.id, type: change.type });
+          }
         }
         if (outbox.length === current.outbox.length && synced === current.synced) return current;
         return { ...current, outbox, synced };
@@ -259,13 +270,22 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       return state.update((current) => {
         const pending = new Map(current.outbox.map((change) => [change.id, change]));
         const before = new Set(current.synced);
-        const saved = new Set(current.items.map((item) => item.id));
-        const known = (id: string) => saved.has(id) || before.has(id) || pending.has(id);
+        const saved = new Map(current.items.map((item) => [item.id, item.type]));
+        // A film and a show can share a TMDB number, so an id the TV knows is the
+        // same title only when it is of the same type. The ids synced keep no
+        // type, so of those only an IMDb id, which names one title, counts.
+        const known = (id: string, type: ContentType) => {
+          const local = saved.get(id) ?? pending.get(id)?.type;
+          if (local !== undefined) return local === type;
+          return before.has(id) && IMDB.test(id);
+        };
         // Trakt names a title by every id it has; here it goes by the one the TV used.
         const remoteIds = new Set<string>();
         const listed: RemoteLibraryItem[] = [];
         for (const entry of remote) {
-          const local = [entry.id].concat(entry.otherIds ?? []).filter(known);
+          const local = [entry.id]
+            .concat(entry.otherIds ?? [])
+            .filter((id) => known(id, entry.type));
           if (local.length === 0) local.push(entry.id);
           local.forEach((id) => remoteIds.add(id));
           listed.push({ ...entry, id: local[0] ?? entry.id });

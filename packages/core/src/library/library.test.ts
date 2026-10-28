@@ -117,6 +117,30 @@ describe('createLibrary', () => {
     expect(library.outbox()).toEqual([{ op: 'remove', id: 'b', type: 'movie' }]);
   });
 
+  it('sends the removal of a title taken off while its addition was on its way', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore() });
+    await library.add(preview('x'));
+    const sending = library.outbox().slice();
+    await library.remove('x');
+    expect(library.outbox()).toEqual([]);
+    // Trakt took the addition, so the removal has to go there too.
+    await library.sent(sending);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'x', type: 'movie' }]);
+    // A pull before the removal goes keeps it off.
+    await library.mergeRemote([{ id: 'x', type: 'movie', name: 'X', addedAt: 1 }]);
+    expect(library.has('x')).toBe(false);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'x', type: 'movie' }]);
+
+    // Taken off and saved again on the way: it stays, and nothing more is sent.
+    await library.add(preview('y'));
+    const again = library.outbox().filter((change) => change.id === 'y');
+    await library.remove('y');
+    await library.add(preview('y'));
+    await library.sent(again);
+    expect(library.has('y')).toBe(true);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'x', type: 'movie' }]);
+  });
+
   it('leaves no removal for the next account after signing out', async () => {
     const library = createLibrary({ storage: memoryKeyValueStore() });
     await library.add(preview('a'));
@@ -254,6 +278,55 @@ describe('mergeRemote', () => {
     await library.mergeRemote(remote);
     expect(library.items().map((i) => i.id)).toEqual(['tt0234215']);
     expect(library.outbox()).toEqual([{ op: 'remove', id: 'tmdb:603', type: 'movie' }]);
+  });
+
+  it('tells a film from a show that shares its TMDB number', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 1000 });
+    await library.add(preview('tmdb:603', { type: 'series', name: 'A show' }));
+    const film = {
+      id: 'tt0133093',
+      otherIds: ['tmdb:603'],
+      type: 'movie',
+      name: 'The Matrix',
+      addedAt: 5,
+    };
+    const ids = () =>
+      library
+        .items()
+        .map((i) => i.id)
+        .sort();
+    // The film on Trakt's list is no sign that Trakt has the show.
+    await library.mergeRemote([film]);
+    expect(ids()).toEqual(['tmdb:603', 'tt0133093']);
+    expect(library.get('tt0133093')).toMatchObject({ type: 'movie', name: 'The Matrix' });
+    expect(library.outbox()).toEqual([{ op: 'add', id: 'tmdb:603', type: 'series' }]);
+
+    await library.sent(library.outbox());
+    const show = {
+      id: 'tt9000603',
+      otherIds: ['tmdb:603'],
+      type: 'series',
+      name: 'A show',
+      addedAt: 4,
+    };
+    await library.mergeRemote([film, show]);
+    expect(ids()).toEqual(['tmdb:603', 'tt0133093']);
+    expect(library.outbox()).toEqual([]);
+
+    // The show taken off Trakt goes from My List, though the film still has its number.
+    await library.mergeRemote([film]);
+    expect(ids()).toEqual(['tt0133093']);
+  });
+
+  it('takes no TMDB id from the last sync for a title of another type', async () => {
+    const storage = memoryKeyValueStore();
+    // A show on Trakt's list by its TMDB id at the last sync, no longer in My List.
+    await storage.set('library', { items: [], outbox: [], synced: ['tmdb:603'] });
+    const library = createLibrary({ storage });
+    await library.mergeRemote([
+      { id: 'tt0133093', otherIds: ['tmdb:603'], type: 'movie', name: 'The Matrix', addedAt: 5 },
+    ]);
+    expect(library.items().map((i) => i.id)).toEqual(['tt0133093']);
   });
 
   it('forgets the sync state on sign-out and keeps the titles', async () => {

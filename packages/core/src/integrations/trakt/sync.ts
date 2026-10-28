@@ -39,8 +39,8 @@ export interface TraktSyncOptions {
   /** The profile's store, where the last activity times are kept. */
   storage: KeyValueStore;
   targets: {
-    /** forMeta tells which of a title's ids the profile's progress is kept under. */
-    progress: Pick<ProgressStore, 'load' | 'merge' | 'forMeta'>;
+    /** get and recent tell which of a title's ids the profile's progress is kept under. */
+    progress: Pick<ProgressStore, 'load' | 'merge' | 'get' | 'recent'>;
     library: Pick<Library, 'load' | 'outbox' | 'sent' | 'mergeRemote' | 'forgetRemote'>;
     watched: Pick<WatchedSet, 'replace'>;
   };
@@ -87,22 +87,42 @@ function readState(saved: unknown): SyncState {
   return { times };
 }
 
+/** The profile's progress, as far as choosing a title's id needs it. */
+type Kept = Pick<ProgressStore, 'get' | 'forMeta'>;
+
 /**
- * Of the ids Trakt gives a title, the first the profile already uses, else
- * the first (its IMDb id when there is one).
+ * Of the ids Trakt gives a title, the one the profile's progress has it
+ * under: the one with this very video (`videoOf` names it under an id),
+ * else the one played latest, else the first (its IMDb id when there is
+ * one). Only progress of the title's own type counts, since a film and a
+ * show can share a TMDB number.
  */
-function chooseId(ids: readonly string[], inUse: (metaId: string) => boolean): string | undefined {
-  for (const id of ids) {
-    if (inUse(id)) return id;
+function chooseId(
+  ids: readonly string[],
+  type: 'movie' | 'series',
+  kept: Kept,
+  videoOf?: (metaId: string) => string,
+): string | undefined {
+  if (videoOf) {
+    for (const id of ids) {
+      if (kept.get(videoOf(id))?.type === type) return id;
+    }
   }
-  return ids[0];
+  let chosen: string | undefined;
+  let latest = -1;
+  for (const id of ids) {
+    // Most recent first.
+    const newest = kept.forMeta(id).filter((entry) => entry.type === type)[0];
+    if (newest && newest.updatedAt > latest) {
+      chosen = id;
+      latest = newest.updatedAt;
+    }
+  }
+  return chosen ?? ids[0];
 }
 
-/** A paused film or episode from sync/playback, as progress, under the id `inUse` picks. */
-function pausedEntry(
-  value: unknown,
-  inUse: (metaId: string) => boolean,
-): ProgressEntry | undefined {
+/** A paused film or episode from sync/playback, as progress, under the id the profile uses. */
+function pausedEntry(value: unknown, kept: Kept): ProgressEntry | undefined {
   const item = record(value);
   const percent = item?.progress;
   const updatedAt = time(item?.paused_at);
@@ -112,18 +132,22 @@ function pausedEntry(
   let minutes: number | undefined;
   if (item?.type === 'movie') {
     const movie = record(item.movie);
-    metaId = chooseId(metaIdsFromIds(movie?.ids), inUse);
+    metaId = chooseId(metaIdsFromIds(movie?.ids), 'movie', kept, (id) => id);
     videoId = metaId;
     minutes = positive(movie?.runtime);
   } else if (item?.type === 'episode') {
     const show = record(item.show);
     const episode = record(item.episode);
-    metaId = chooseId(metaIdsFromIds(show?.ids), inUse);
     const season = whole(episode?.season);
     const number = whole(episode?.number);
-    if (metaId && season !== undefined && number !== undefined) {
-      videoId = `${metaId}:${season}:${number}`;
-    }
+    const numbered = season !== undefined && number !== undefined;
+    metaId = chooseId(
+      metaIdsFromIds(show?.ids),
+      'series',
+      kept,
+      numbered ? (id) => `${id}:${season}:${number}` : undefined,
+    );
+    if (metaId && numbered) videoId = `${metaId}:${season}:${number}`;
     // An episode Trakt has no length for takes its show's.
     minutes = positive(episode?.runtime) ?? positive(show?.runtime);
   }
@@ -141,25 +165,24 @@ function pausedEntry(
 }
 
 interface WatchedShows {
-  /** Each episode under every id of its show, since the TV may know the show by either. */
+  /** Each episode under the id its show goes by here. */
   videoIds: string[];
+  /** The same episodes under the show's other ids, since the TV may know the show by either. */
+  otherVideoIds: string[];
   /** The latest episode of each show watched lately, as finished progress. */
   finished: ProgressEntry[];
 }
 
-function watchedShows(
-  items: readonly unknown[],
-  since: number,
-  inUse: (metaId: string) => boolean,
-): WatchedShows {
+function watchedShows(items: readonly unknown[], since: number, kept: Kept): WatchedShows {
   const videoIds: string[] = [];
+  const otherVideoIds: string[] = [];
   const finished: ProgressEntry[] = [];
   for (const value of items) {
     const item = record(value);
     const show = record(item?.show);
     const ids = metaIdsFromIds(show?.ids);
-    const metaId = chooseId(ids, inUse);
-    if (!metaId) continue;
+    // `:{season}:{episode}` of each episode watched.
+    const episodes: string[] = [];
     let latest: { at: number; season: number; number: number } | undefined;
     for (const seasonValue of list(item?.seasons)) {
       const season = whole(record(seasonValue)?.number);
@@ -168,7 +191,7 @@ function watchedShows(
         const episode = record(episodeValue);
         const number = whole(episode?.number);
         if (number === undefined) continue;
-        for (const id of ids) videoIds.push(`${id}:${season}:${number}`);
+        episodes.push(`:${season}:${number}`);
         const at = time(episode?.last_watched_at);
         if (at === undefined) continue;
         // Episodes marked watched together share a time: the furthest one is the latest.
@@ -179,6 +202,13 @@ function watchedShows(
             (season > latest.season || (season === latest.season && number > latest.number)));
         if (isLater) latest = { at, season, number };
       }
+    }
+    const last = latest && `:${latest.season}:${latest.number}`;
+    const metaId = chooseId(ids, 'series', kept, last ? (id) => id + last : undefined);
+    if (!metaId) continue;
+    for (const id of ids) {
+      const into = id === metaId ? videoIds : otherVideoIds;
+      for (const episode of episodes) into.push(id + episode);
     }
     const minutes = positive(show?.runtime);
     if (!latest || minutes === undefined || latest.at < since) continue;
@@ -192,7 +222,7 @@ function watchedShows(
       watched: true,
     });
   }
-  return { videoIds, finished };
+  return { videoIds, otherVideoIds, finished };
 }
 
 function watchlistItem(value: unknown, kind: 'movie' | 'show'): RemoteLibraryItem | undefined {
@@ -303,8 +333,24 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     return result;
   }
 
-  /** Whether the profile's progress has anything under this title id. Load progress first. */
-  const hasProgress = (metaId: string) => progress.forMeta(metaId).length > 0;
+  /**
+   * The profile's progress as it is now, each title's entries gathered in one
+   * pass: a long watched history would otherwise go through all of them for
+   * every title. Load progress first.
+   */
+  function keptNow(): Kept {
+    const byMeta = new Map<string, ProgressEntry[]>();
+    // Most recent first, as forMeta gives them.
+    for (const entry of progress.recent()) {
+      const ofMeta = byMeta.get(entry.metaId);
+      if (ofMeta) ofMeta.push(entry);
+      else byMeta.set(entry.metaId, [entry]);
+    }
+    return {
+      get: (videoId) => progress.get(videoId),
+      forMeta: (metaId) => byMeta.get(metaId) ?? [],
+    };
+  }
 
   function wait(seconds: number): Promise<void> {
     return new Promise((resolve) => {
@@ -324,9 +370,10 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   async function syncPaused(mine: number) {
     const paused = await getList('/sync/playback?extended=full');
     await progress.load().catch(() => undefined);
+    const kept = keptNow();
     const entries: ProgressEntry[] = [];
     for (const item of paused) {
-      const entry = pausedEntry(item, hasProgress);
+      const entry = pausedEntry(item, kept);
       if (entry) entries.push(entry);
     }
     check(mine);
@@ -337,14 +384,22 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     const movies = await getList('/sync/watched/movies');
     const shows = await getList('/sync/watched/shows?extended=full');
     await progress.load().catch(() => undefined);
-    // Each film under every id it has, since the TV may know it by either.
+    const kept = keptNow();
+    // Each film under the id it goes by here, and again under its others, since
+    // the TV may know it by either.
     const videoIds: string[] = [];
+    const otherVideoIds: string[] = [];
     for (const item of movies) {
-      for (const id of metaIdsFromIds(record(record(item)?.movie)?.ids)) videoIds.push(id);
+      const ids = metaIdsFromIds(record(record(item)?.movie)?.ids);
+      const chosen = chooseId(ids, 'movie', kept, (id) => id);
+      for (const id of ids) (id === chosen ? videoIds : otherVideoIds).push(id);
     }
-    const episodes = watchedShows(shows, now() - TRAKT_RECENT_SHOW_MS, hasProgress);
+    const episodes = watchedShows(shows, now() - TRAKT_RECENT_SHOW_MS, kept);
     check(mine);
-    await watched.replace(videoIds.concat(episodes.videoIds));
+    // The set keeps only so many: every title's own id goes first, so only other ids fall off.
+    await watched.replace(
+      videoIds.concat(episodes.videoIds, otherVideoIds, episodes.otherVideoIds),
+    );
     if (episodes.finished.length > 0) await progress.merge(episodes.finished);
   }
 

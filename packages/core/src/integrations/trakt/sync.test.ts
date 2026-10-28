@@ -2,7 +2,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { createLibrary, type Library } from '../../library/library';
 import { createProgressStore } from '../../playback/progress';
-import { createWatchedSet } from '../../playback/watched';
+import { createWatchedSet, type WatchedSet } from '../../playback/watched';
 import { memoryKeyValueStore } from '../../storage';
 import { createStore } from '../../store';
 import type { TraktAccountState } from './account';
@@ -413,7 +413,12 @@ async function flush() {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-function setup(options: { library?: (library: Library) => Library } = {}) {
+function setup(
+  options: {
+    library?: (library: Library) => Library;
+    watched?: (watched: WatchedSet) => WatchedSet;
+  } = {},
+) {
   const storage = memoryKeyValueStore();
   const clock = { now: NOW };
   const now = () => clock.now;
@@ -434,7 +439,11 @@ function setup(options: { library?: (library: Library) => Library } = {}) {
   const sync = createTraktSync({
     account,
     storage,
-    targets: { progress, library: options.library ? options.library(library) : library, watched },
+    targets: {
+      progress,
+      library: options.library ? options.library(library) : library,
+      watched: options.watched ? options.watched(watched) : watched,
+    },
     now,
     timers,
   });
@@ -968,6 +977,131 @@ describe('createTraktSync', () => {
       updatedAt: stoppedAt,
     });
     expect(progress.resumeAt('tt0372784')).toBe(1800);
+  });
+
+  it('keeps one resume point for an episode played by its TMDB id when its show has progress by both', async () => {
+    const { sync, server, progress, clock } = setup();
+    // The first sync puts Breaking Bad's progress under its IMDb id.
+    await sync.run();
+    expect(progress.forMeta('tt0903747')).not.toEqual([]);
+    // Then the TV plays 1x1 from a TMDB catalogue, and stops there.
+    const stoppedAt = NOW + 60_000;
+    clock.now = stoppedAt;
+    progress.record({
+      metaId: 'tmdb:1396',
+      type: 'series',
+      videoId: 'tmdb:1396:1:1',
+      position: 1080,
+      duration: 2700,
+    });
+    clock.now = NOW + 120_000;
+    // Trakt sends that stop back: 40% of its 58 minutes.
+    server.playback.push({
+      progress: 40,
+      paused_at: new Date(stoppedAt + 1000).toISOString(),
+      id: 41,
+      type: 'episode',
+      episode: {
+        season: 1,
+        number: 1,
+        title: 'Pilot',
+        ids: { trakt: 73, tvdb: 349232, imdb: 'tt0959621', tmdb: 62085 },
+        runtime: 58,
+      },
+      show: { title: 'Breaking Bad', year: 2008, ids: BREAKING_BAD, runtime: 45 },
+    });
+    touch(server.activities, 'episodes.paused_at');
+
+    expect(await sync.run()).toBe('done');
+    expect(progress.get('tt0903747:1:1')).toBeUndefined();
+    expect(progress.get('tmdb:1396:1:1')).toMatchObject({
+      position: 1080,
+      duration: 2700,
+      updatedAt: stoppedAt,
+    });
+    expect(progress.resumeAt('tmdb:1396:1:1')).toBe(1080);
+    // The episode paused on Trakt before stays under the id the first sync gave it.
+    expect(progress.get('tt0903747:1:3')).toMatchObject({ metaId: 'tt0903747' });
+    expect(progress.get('tmdb:1396:1:3')).toBeUndefined();
+  });
+
+  it('brings a paused film in by its IMDb id when only a show has progress under its TMDB number', async () => {
+    const { sync, server, progress, clock } = setup();
+    clock.now = Date.parse('2026-10-27T10:00:00.000Z');
+    // TMDB counts films and shows separately, so a show can be 603 too.
+    progress.record({
+      metaId: 'tmdb:603',
+      type: 'series',
+      videoId: 'tmdb:603:1:1',
+      position: 600,
+      duration: 2700,
+    });
+    clock.now = NOW;
+    server.playback.push({
+      progress: 50,
+      paused_at: '2026-10-27T21:00:00.000Z',
+      id: 40,
+      type: 'movie',
+      movie: { ...THE_MATRIX, runtime: 136 },
+    });
+
+    expect(await sync.run()).toBe('done');
+    expect(progress.get('tt0133093')).toMatchObject({
+      metaId: 'tt0133093',
+      type: 'movie',
+      duration: 136 * 60,
+    });
+    expect(progress.get('tmdb:603')).toBeUndefined();
+    expect(progress.get('tmdb:603:1:1')).toMatchObject({ position: 600, duration: 2700 });
+  });
+
+  it("lists every title's own id among the watched ticks before its other ids", async () => {
+    const replaced: (readonly string[])[] = [];
+    const { sync, progress, clock } = setup({
+      watched: (watched) => ({
+        ...watched,
+        replace(videoIds) {
+          replaced.push(videoIds);
+          return watched.replace(videoIds);
+        },
+      }),
+    });
+    clock.now = Date.parse('2026-10-27T10:00:00.000Z');
+    progress.record({
+      metaId: 'tmdb:1396',
+      type: 'series',
+      videoId: 'tmdb:1396:1:1',
+      position: 2700,
+      duration: 2820,
+    });
+    clock.now = NOW;
+
+    await sync.run();
+    // The set keeps so many from the start, so a long history loses only ids the TV does not use.
+    expect(replaced).toEqual([
+      [
+        'tt0468569',
+        'tmdb:1234567',
+        'tmdb:1396:1:1',
+        'tmdb:1396:1:2',
+        'tt0306414:1:1',
+        'tt0306414:1:2',
+        'tt11280740:0:1',
+        'tt11280740:1:1',
+        'tt11280740:1:9',
+        'tt11280740:1:2',
+        'tt0000008:1:1',
+        'tmdb:155',
+        'tt0903747:1:1',
+        'tt0903747:1:2',
+        'tmdb:1438:1:1',
+        'tmdb:1438:1:2',
+        'tmdb:95396:0:1',
+        'tmdb:95396:1:1',
+        'tmdb:95396:1:9',
+        'tmdb:95396:1:2',
+      ],
+    ]);
   });
 
   it('sends no removal for a title saved and taken off before signing in', async () => {
