@@ -1,6 +1,7 @@
 import {
   type BoardRow,
   buildBoard,
+  hiddenRowIds,
   moveRow,
   orderedRows,
   rowIdentities,
@@ -38,7 +39,7 @@ export function HomeRowsScreen() {
   const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
   const ids = useMemo(() => rowIdentities(board), [board]);
   const rows = useMemo(() => orderedRows(board, layout), [board, layout]);
-  const hidden = new Set(layout.hidden);
+  const hidden = useMemo(() => hiddenRowIds(board, layout), [board, layout]);
   const [focused, setFocused] = useState(0);
   useScreenFocus(rows.length > 0 ? `${lineKey(rows[0]!)}-up` : undefined, collection.ready);
 
@@ -109,7 +110,9 @@ export function HomeRowsScreen() {
           focusKey={`${key}-show`}
           label={isHidden ? t('homeRows.showLabel', { name }) : t('homeRows.hideLabel', { name })}
           onFocus={onFocus}
-          onPress={() => void homeLayout.update((current) => setRowHidden(current, id, !isHidden))}
+          onPress={() =>
+            void homeLayout.update((current) => setRowHidden(board, current, id, !isHidden))
+          }
         >
           {isHidden ? t('homeRows.show') : t('homeRows.hide')}
         </Button>

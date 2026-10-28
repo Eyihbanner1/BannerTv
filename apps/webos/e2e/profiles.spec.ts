@@ -149,6 +149,47 @@ test('a locked profile asks for its PIN, says when it is wrong, and waits after 
   expect(tries.main!.lockedUntil).toBeGreaterThan(Date.now());
 });
 
+test('opening BannerTV again from the launcher asks who is watching when the profile has a PIN', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [main(lockedWith('2468')), { id: GUEST_ID, name: 'Guest', colour: 2 }],
+    lastId: 'main',
+    askAtLaunch: false,
+  });
+  // As on a TV that loses a storage write made just before a reload: the choice comes back.
+  await page.addInitScript(() => {
+    const lost = sessionStorage.getItem('test.lostChoice');
+    if (lost === null) return;
+    sessionStorage.removeItem('test.lostChoice');
+    sessionStorage.setItem('bannertv.profile', lost);
+  });
+  const relaunch = () => page.evaluate(() => document.dispatchEvent(new Event('webOSRelaunch')));
+  await page.goto(APP_URL);
+  // Main was used last, but its PIN means the picker asks.
+  await expectFocusLabel(page, 'Main, PIN');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await typeDigits(page, '2468');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+  await page.evaluate(() => sessionStorage.setItem('test.lostChoice', 'main'));
+  await relaunch();
+  await expectFocusLabel(page, 'Main, PIN');
+  expect(page.url()).not.toContain('#');
+
+  // Guest has no PIN, so opening the app again carries on where it was.
+  await press(page, 'ArrowRight', `profile-${GUEST_ID}`);
+  await page.keyboard.press('Enter');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await relaunch();
+  await page.waitForTimeout(300);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  expect(errors).toEqual([]);
+});
+
 test('a kids profile sees Family rows only, no Addons, a short Settings, and no unsuitable title', async ({
   page,
 }) => {

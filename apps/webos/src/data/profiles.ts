@@ -22,18 +22,49 @@ const SESSION_KEY = 'bannertv.profile';
 // storage writes over in batches, so a write made just before a reload can
 // be missing after it, and the address always arrives.
 const HASH_PREFIX = '#profile=';
+// A relaunch that asks who is watching again says so in the address too, as
+// its removal of the session's choice can be missing after the reload.
+const ASK_HASH = '#ask';
 
-/** The profile a switch reloaded the app for, taken out of the address. */
-function takeSwitchedProfile(): string | null {
+/** What a reload asked for in the address (a switch or a question), taken out of it. */
+function takeReloadHash(): string {
   try {
     const { hash, pathname, search } = window.location;
-    if (hash.indexOf(HASH_PREFIX) !== 0) return null;
+    if (hash !== ASK_HASH && hash.indexOf(HASH_PREFIX) !== 0) return '';
     history.replaceState(null, '', pathname + search);
+    return hash;
+  } catch {
+    return '';
+  }
+}
+
+/** The profile a switch named in the address it reloaded. */
+function switchedProfile(hash: string): string | null {
+  if (hash.indexOf(HASH_PREFIX) !== 0) return null;
+  try {
     return decodeURIComponent(hash.slice(HASH_PREFIX.length));
   } catch {
     return null;
   }
 }
+
+/** The profile chosen earlier in this run, or none. */
+function sessionChoice(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function forgetSessionChoice(): void {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Without sessionStorage nothing outlives the reload anyway.
+  }
+}
+
 /** Main's name until it is renamed. Saved data rather than UI text, so it is not translated. */
 export const MAIN_NAME = 'Main';
 
@@ -60,20 +91,15 @@ profiles.subscribe(() => save(profiles.get()));
 /**
  * Who is watching, or null while the picker waits for an answer. With one
  * profile it is always Main; otherwise the profile chosen earlier in this run
- * (before a switch reloaded the app), or, with the picker turned off, the
- * last profile used unless a PIN guards it.
+ * (before a switch reloaded the app) unless a relaunch asked again, or,
+ * with the picker turned off, the last profile used unless a PIN guards it.
  */
 function initialChoice(state: ProfilesState): string | null {
-  const switched = takeSwitchedProfile();
+  const hash = takeReloadHash();
+  if (hash === ASK_HASH) forgetSessionChoice();
   if (state.profiles.length === 1) return MAIN_PROFILE_ID;
-  let session: string | null = switched;
-  if (session === null) {
-    try {
-      session = sessionStorage.getItem(SESSION_KEY);
-    } catch {
-      session = null;
-    }
-  }
+  let session = switchedProfile(hash);
+  if (session === null && hash !== ASK_HASH) session = sessionChoice();
   if (session && state.profiles.some((p) => p.id === session)) return session;
   if (state.askAtLaunch) return null;
   const last = state.profiles.find((p) => p.id === state.lastId);
@@ -239,11 +265,8 @@ export function askAgainOnRelaunch(): void {
   const state = profiles.get();
   if (state.profiles.length < 2) return;
   if (!state.askAtLaunch && !activeProfile()?.pin) return;
-  try {
-    sessionStorage.removeItem(SESSION_KEY);
-  } catch {
-    // Without sessionStorage nothing outlives the reload anyway.
-  }
+  forgetSessionChoice();
+  window.location.hash = ASK_HASH.slice(1);
   window.location.reload();
 }
 

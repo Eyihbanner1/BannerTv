@@ -24,32 +24,72 @@ export function rowIdentity(row: BoardRow): string {
   return [row.addon.manifest.id, row.type, row.catalog.id, genre ? genre[1] : ''].join('|');
 }
 
+/** A short name for one install, so the layout never keeps its manifest URL, which can hold keys. */
+function installTag(transportUrl: string): string {
+  // FNV-1a: stable across launches, and the same for every profile.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < transportUrl.length; index++) {
+    hash = Math.imul(hash ^ transportUrl.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+interface RowNames {
+  /** What the layout saves for the row now. */
+  id: string;
+  /** Every name the layout may hold for it: its install's first, then the shared one. */
+  known: string[];
+}
+
 /**
- * Each board row's identity. The same addon installed twice with different
- * settings gives rows with the same identity; the second and later ones get
- * `#2`, `#3` and so on, in the board's order, so each row is moved and hidden
- * on its own.
+ * The same addon installed twice with different settings gives rows with the
+ * same identity. While both are installed, each such row is told apart by
+ * its install, which moving addons does not change. Settings saved under the
+ * shared identity keep applying to both until one of them is changed, and an
+ * install left on its own keeps the settings it had as one of two.
  */
-export function rowIdentities(rows: readonly BoardRow[]): Map<BoardRow, string> {
-  const seen = new Map<string, number>();
-  const ids = new Map<BoardRow, string>();
+function rowNames(rows: readonly BoardRow[]): Map<BoardRow, RowNames> {
+  const copies = new Map<string, number>();
   for (const row of rows) {
     const base = rowIdentity(row);
-    const count = (seen.get(base) ?? 0) + 1;
-    seen.set(base, count);
-    ids.set(row, count === 1 ? base : `${base}#${count}`);
+    copies.set(base, (copies.get(base) ?? 0) + 1);
   }
+  const taken = new Set<string>();
+  const names = new Map<BoardRow, RowNames>();
+  for (const row of rows) {
+    const base = rowIdentity(row);
+    const own = `${base}#${installTag(row.addon.transportUrl)}`;
+    let id = copies.get(base)! > 1 ? own : base;
+    // An addon that lists one catalog twice: the later one is numbered.
+    for (let count = 2; taken.has(id); count++) id = `${own}-${count}`;
+    taken.add(id);
+    names.set(row, { id, known: id === own || id === base ? [own, base] : [id] });
+  }
+  return names;
+}
+
+/** Each board row's identity, to save in the layout: unique on the board, and the same after addons move. */
+export function rowIdentities(rows: readonly BoardRow[]): Map<BoardRow, string> {
+  const ids = new Map<BoardRow, string>();
+  rowNames(rows).forEach((names, row) => ids.set(row, names.id));
   return ids;
 }
 
 /** Every row, hidden ones too, in the chosen order: rows the layout has not seen follow in the board's order. */
 export function orderedRows(rows: readonly BoardRow[], layout: HomeLayout): BoardRow[] {
   if (layout.order.length === 0) return rows.slice();
-  const ids = rowIdentities(rows);
+  const names = rowNames(rows);
   const rank = new Map(layout.order.map((id, index) => [id, index]));
+  const rankOf = (row: BoardRow) => {
+    for (const id of names.get(row)!.known) {
+      const found = rank.get(id);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
   // Chromium 68 sorts unstably, so ties fall back to the board's order by hand.
   return rows
-    .map((row, index) => ({ row, index, rank: rank.get(ids.get(row)!) }))
+    .map((row, index) => ({ row, index, rank: rankOf(row) }))
     .sort((a, b) => {
       if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank || a.index - b.index;
       if (a.rank !== undefined) return -1;
@@ -59,12 +99,23 @@ export function orderedRows(rows: readonly BoardRow[], layout: HomeLayout): Boar
     .map(({ row }) => row);
 }
 
+/** The identities (from rowIdentities) of the board's hidden rows. */
+export function hiddenRowIds(rows: readonly BoardRow[], layout: HomeLayout): Set<string> {
+  const ids = new Set<string>();
+  if (layout.hidden.length === 0) return ids;
+  const hidden = new Set(layout.hidden);
+  rowNames(rows).forEach((names) => {
+    if (names.known.some((id) => hidden.has(id))) ids.add(names.id);
+  });
+  return ids;
+}
+
 /** The rows Home draws: the chosen order, without hidden rows. */
 export function arrangeBoard(rows: readonly BoardRow[], layout: HomeLayout): BoardRow[] {
   const ordered = orderedRows(rows, layout);
-  if (layout.hidden.length === 0) return ordered;
+  const hidden = hiddenRowIds(rows, layout);
+  if (hidden.size === 0) return ordered;
   const ids = rowIdentities(rows);
-  const hidden = new Set(layout.hidden);
   return ordered.filter((row) => !hidden.has(ids.get(row)!));
 }
 
@@ -111,11 +162,23 @@ export function moveRow(
   return { order, hidden: layout.hidden };
 }
 
-export function setRowHidden(layout: HomeLayout, id: string, hidden: boolean): HomeLayout {
-  const isHidden = layout.hidden.indexOf(id) !== -1;
-  if (isHidden === hidden) return layout;
-  return {
-    order: layout.order,
-    hidden: hidden ? layout.hidden.concat(id) : layout.hidden.filter((row) => row !== id),
-  };
+/**
+ * The layout with row `id` (from rowIdentities) hidden or shown. The board's
+ * hidden rows are saved by their identities now; rows of addons not
+ * installed keep what was saved for them.
+ */
+export function setRowHidden(
+  rows: readonly BoardRow[],
+  layout: HomeLayout,
+  id: string,
+  hidden: boolean,
+): HomeLayout {
+  const now = hiddenRowIds(rows, layout);
+  if (now.has(id) === hidden) return layout;
+  if (hidden) now.add(id);
+  else now.delete(id);
+  const onBoard = new Set<string>();
+  rowNames(rows).forEach((names) => names.known.forEach((known) => onBoard.add(known)));
+  const elsewhere = layout.hidden.filter((row) => !onBoard.has(row));
+  return { order: layout.order, hidden: elsewhere.concat(Array.from(now)) };
 }

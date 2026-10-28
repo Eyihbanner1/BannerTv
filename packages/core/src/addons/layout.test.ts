@@ -8,6 +8,8 @@ import {
   arrangeBoard,
   createHomeLayout,
   EMPTY_LAYOUT,
+  hiddenRowIds,
+  type HomeLayout,
   moveRow,
   orderedRows,
   rowIdentities,
@@ -61,30 +63,89 @@ describe('Home layout', () => {
     // Already first: nothing to do.
     expect(moveRow(board, layout, trending, -1)).toBe(layout);
 
-    layout = setRowHidden(layout, ids[0]!, true);
-    expect(setRowHidden(layout, ids[0]!, true)).toBe(layout);
+    layout = setRowHidden(board, layout, ids[0]!, true);
+    expect(setRowHidden(board, layout, ids[0]!, true)).toBe(layout);
     const shown = names(arrangeBoard(board, layout));
     expect(shown).not.toContain(ids[0]);
     expect(names(orderedRows(board, layout))).toContain(ids[0]);
-    layout = setRowHidden(layout, ids[0]!, false);
+    layout = setRowHidden(board, layout, ids[0]!, false);
     expect(names(arrangeBoard(board, layout))).toContain(ids[0]);
+    expect(layout.hidden).toEqual([]);
   });
 
-  it('tells apart two installs of one addon, to move and hide each on its own', () => {
+  describe('one addon installed twice', () => {
+    const base = 'com.example.shorts|movie|trending|';
     const english = { ...shorts, transportUrl: 'https://shorts.example/en/manifest.json' };
     const twice = buildBoard([...cinemeta, shorts, english]);
-    const both = rowIdentities(twice);
-    const trending = twice.filter((row) => row.catalog.id === 'trending');
-    expect(trending.map((row) => both.get(row))).toEqual([
-      'com.example.shorts|movie|trending|',
-      'com.example.shorts|movie|trending|#2',
-    ]);
-    let layout = setRowHidden(EMPTY_LAYOUT, 'com.example.shorts|movie|trending|#2', true);
-    expect(arrangeBoard(twice, layout)).toContain(trending[0]);
-    expect(arrangeBoard(twice, layout)).not.toContain(trending[1]);
-    layout = moveRow(twice, EMPTY_LAYOUT, 'com.example.shorts|movie|trending|#2', -1);
-    const order = orderedRows(twice, layout);
-    expect(order.indexOf(trending[1]!)).toBe(order.indexOf(trending[0]!) - 1);
+    const trendingOf = (rows: ReturnType<typeof buildBoard>, url: string) =>
+      rows.find((row) => row.catalog.id === 'trending' && row.addon.transportUrl === url)!;
+    const idOf = (rows: ReturnType<typeof buildBoard>, url: string) =>
+      rowIdentities(rows).get(trendingOf(rows, url))!;
+
+    it('names each copy by its install, without its address', () => {
+      const first = idOf(twice, shorts.transportUrl);
+      const second = idOf(twice, english.transportUrl);
+      expect(first).not.toBe(second);
+      for (const id of [first, second]) {
+        expect(id.indexOf(`${base}#`)).toBe(0);
+        expect(id).not.toContain('shorts.example');
+      }
+      const ids = Array.from(rowIdentities(twice).values());
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('moves and hides each copy on its own, whichever is installed first', () => {
+      let layout = setRowHidden(twice, EMPTY_LAYOUT, idOf(twice, english.transportUrl), true);
+      expect(arrangeBoard(twice, layout)).toContain(trendingOf(twice, shorts.transportUrl));
+      expect(arrangeBoard(twice, layout)).not.toContain(trendingOf(twice, english.transportUrl));
+      // The addons swap places in Addons: the hidden one is still the English one.
+      const swapped = buildBoard([...cinemeta, english, shorts]);
+      expect(arrangeBoard(swapped, layout)).toContain(trendingOf(swapped, shorts.transportUrl));
+      expect(arrangeBoard(swapped, layout)).not.toContain(
+        trendingOf(swapped, english.transportUrl),
+      );
+
+      layout = moveRow(twice, EMPTY_LAYOUT, idOf(twice, english.transportUrl), -1);
+      const order = orderedRows(swapped, layout);
+      expect(order.indexOf(trendingOf(swapped, english.transportUrl))).toBe(
+        order.indexOf(trendingOf(swapped, shorts.transportUrl)) - 1,
+      );
+    });
+
+    it('keeps settings saved for the addon on both copies until one is changed', () => {
+      let layout: HomeLayout = { order: [base], hidden: [base] };
+      expect(hiddenRowIds(twice, layout)).toEqual(
+        new Set([idOf(twice, shorts.transportUrl), idOf(twice, english.transportUrl)]),
+      );
+      expect(orderedRows(twice, layout).slice(0, 2)).toEqual([
+        trendingOf(twice, shorts.transportUrl),
+        trendingOf(twice, english.transportUrl),
+      ]);
+      layout = setRowHidden(twice, layout, idOf(twice, english.transportUrl), false);
+      expect(arrangeBoard(twice, layout)).toContain(trendingOf(twice, english.transportUrl));
+      expect(arrangeBoard(twice, layout)).not.toContain(trendingOf(twice, shorts.transportUrl));
+      expect(layout.hidden).toEqual([idOf(twice, shorts.transportUrl)]);
+    });
+
+    it('lets a copy left on its own keep what it had, and the other copy keep nothing of it', () => {
+      const layout = setRowHidden(twice, EMPTY_LAYOUT, idOf(twice, english.transportUrl), true);
+      const onlyEnglish = buildBoard([...cinemeta, english]);
+      const onlyFirst = buildBoard([...cinemeta, shorts]);
+      expect(idOf(onlyEnglish, english.transportUrl)).toBe(base);
+      expect(arrangeBoard(onlyEnglish, layout)).not.toContain(
+        trendingOf(onlyEnglish, english.transportUrl),
+      );
+      expect(arrangeBoard(onlyFirst, layout)).toContain(trendingOf(onlyFirst, shorts.transportUrl));
+      // Shown again on its own: nothing of it stays hidden.
+      const shown = setRowHidden(onlyEnglish, layout, base, false);
+      expect(shown.hidden).toEqual([]);
+    });
+
+    it('keeps what was saved for addons that are not installed', () => {
+      const layout = { order: [], hidden: ['com.other|movie|top|'] };
+      const hidden = setRowHidden(twice, layout, idOf(twice, shorts.transportUrl), true);
+      expect(hidden.hidden).toEqual(['com.other|movie|top|', idOf(twice, shorts.transportUrl)]);
+    });
   });
 
   it('puts rows it has not seen after the ones it has', () => {
@@ -100,7 +161,7 @@ describe('Home layout', () => {
     const store = createHomeLayout({ storage });
     await store.load();
     expect(store.get()).toEqual({ order: ['a', 'b'], hidden: [] });
-    await store.update((layout) => setRowHidden(layout, 'b', true));
+    await store.update((layout) => setRowHidden([], layout, 'b', true));
     expect(await storage.get('homeLayout')).toEqual({ order: ['a', 'b'], hidden: ['b'] });
   });
 });

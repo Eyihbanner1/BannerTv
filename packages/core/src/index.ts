@@ -3,6 +3,7 @@ export {
   arrangeBoard,
   createHomeLayout,
   EMPTY_LAYOUT,
+  hiddenRowIds,
   type HomeLayout,
   type HomeLayoutStore,
   moveRow,
