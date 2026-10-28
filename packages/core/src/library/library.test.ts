@@ -88,6 +88,8 @@ describe('createLibrary', () => {
     const library = createLibrary({ storage: memoryKeyValueStore() });
     await library.add(preview('a'));
     await library.add(preview('b'));
+    // a is on Trakt's list, so taking it off here is a change for Trakt.
+    await library.sent([{ op: 'add', id: 'a', type: 'movie' }]);
     await library.remove('a');
     await library.remove('missing');
     expect(library.items().map((i) => i.id)).toEqual(['b']);
@@ -97,6 +99,34 @@ describe('createLibrary', () => {
     ]);
     await library.sent([{ op: 'add', id: 'b', type: 'movie' }]);
     expect(library.outbox()).toEqual([{ op: 'remove', id: 'a', type: 'movie' }]);
+  });
+
+  it('queues no removal for a title Trakt never had, and drops its waiting addition', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore() });
+    // Saved and taken off again before any Trakt account was signed in.
+    await library.add(preview('a'));
+    await library.remove('a');
+    expect(library.outbox()).toEqual([]);
+
+    // On Trakt's list, then taken off here, added again and taken off again.
+    await library.add(preview('b'));
+    await library.sent(library.outbox());
+    await library.remove('b');
+    await library.add(preview('b'));
+    await library.remove('b');
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'b', type: 'movie' }]);
+  });
+
+  it('leaves no removal for the next account after signing out', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore() });
+    await library.add(preview('a'));
+    await library.add(preview('b'));
+    await library.sent(library.outbox());
+    await library.remove('a');
+    await library.forgetRemote();
+    expect(library.outbox()).toEqual([]);
+    await library.remove('b');
+    expect(library.outbox()).toEqual([]);
   });
 
   it('fills in a title from Trakt without moving it', async () => {
@@ -195,6 +225,35 @@ describe('mergeRemote', () => {
       { op: 'remove', id: 'c', type: 'movie' },
       { op: 'add', id: 'b', type: 'movie' },
     ]);
+  });
+
+  it('keeps a title under the id My List saved it by when Trakt gives another as well', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 1000 });
+    await library.add(preview('tmdb:603', { name: 'The Matrix' }));
+    await library.sent(library.outbox());
+    // Trakt lists it by both ids, as it does every title it has both for.
+    const remote = [
+      { id: 'tt0133093', otherIds: ['tmdb:603'], type: 'movie', name: 'The Matrix', addedAt: 5 },
+      { id: 'tt0234215', otherIds: ['tmdb:604'], type: 'movie', name: 'Reloaded', addedAt: 4 },
+    ];
+    await library.mergeRemote(remote);
+    expect(library.items().map((i) => i.id)).toEqual(['tmdb:603', 'tt0234215']);
+    expect(library.get('tmdb:603')).toEqual({
+      id: 'tmdb:603',
+      type: 'movie',
+      name: 'The Matrix',
+      addedAt: 1000,
+    });
+    expect(library.outbox()).toEqual([]);
+    await library.mergeRemote(remote);
+    expect(library.items().map((i) => i.id)).toEqual(['tmdb:603', 'tt0234215']);
+
+    // Synced under the TV's id, so taking it off here sends that id, and a pull before it goes keeps it off.
+    await library.remove('tmdb:603');
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'tmdb:603', type: 'movie' }]);
+    await library.mergeRemote(remote);
+    expect(library.items().map((i) => i.id)).toEqual(['tt0234215']);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'tmdb:603', type: 'movie' }]);
   });
 
   it('forgets the sync state on sign-out and keeps the titles', async () => {

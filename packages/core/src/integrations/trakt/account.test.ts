@@ -333,6 +333,43 @@ describe('createTraktAccount', () => {
     },
   );
 
+  it.each([
+    [401, 'invalid_client'],
+    [400, 'unauthorized_client'],
+  ])(
+    "keeps the sign-in when Trakt answers a refresh with %i %s, about BannerTV's client",
+    async (status, code) => {
+      const trakt = fakeTrakt((request) => {
+        if (request.path === '/oauth/token') return ok({ error: code }, status);
+        return request.path === '/stale' ? ok(null, 401) : ok({});
+      });
+      const { account, clock, storage } = await signedIn(trakt);
+      trakt.requests.length = 0;
+      clock.now = NOW + DAY - 30 * 60 * 1000;
+
+      // The access token still has half an hour, so calls go on with it.
+      expect(await account.call('GET', '/sync/last_activities')).toEqual({ status: 200, data: {} });
+      expect(paths(trakt.requests)).toEqual([
+        'POST /oauth/token -',
+        'GET /sync/last_activities access-1',
+      ]);
+      // A 401 on a call, then the refresh turned down: the call fails, and the sign-in stays.
+      const error = await failure(account.call('GET', '/stale'));
+      expect(error.kind).toBe('other');
+      expect(error.message).not.toMatch(/access-|refresh-/);
+      expect(account.get()).toEqual(SEAN);
+      expect(await storage.get('trakt')).toEqual({
+        tokens: { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: NOW + DAY },
+        username: 'sean',
+      });
+
+      // Run out: nothing to go on with, but the viewer is not signed out.
+      clock.now = NOW + DAY + 1;
+      expect((await failure(account.call('GET', '/sync/last_activities'))).kind).toBe('other');
+      expect(account.get()).toEqual(SEAN);
+    },
+  );
+
   it('carries on with a token that has time left when no refresh can be had', async () => {
     const trakt = fakeTrakt((request) =>
       request.path === '/oauth/token'

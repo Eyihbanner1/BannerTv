@@ -113,6 +113,19 @@ function sameState(a: TraktAccountState, b: TraktAccountState): boolean {
 
 const signedOut = () => new TraktError('signedOut', 'Not signed in to Trakt');
 
+/**
+ * Token errors about BannerTV's own client, such as a client secret that is
+ * wrong or was changed. They say nothing about the viewer's sign-in.
+ */
+const CLIENT_ERRORS = ['invalid_client', 'unauthorized_client'];
+
+/** Whether Trakt's answer to a refresh turns down the viewer's sign-in (`invalid_grant`, say). */
+function refusesGrant(response: TraktResponse): boolean {
+  if (response.status !== 400 && response.status !== 401) return false;
+  const error = text(record(response.data)?.error);
+  return error === undefined || CLIENT_ERRORS.indexOf(error) === -1;
+}
+
 /** One profile's Trakt sign-in, kept in its key-value store. Tokens are never logged. */
 export function createTraktAccount(options: {
   storage: KeyValueStore;
@@ -155,7 +168,8 @@ export function createTraktAccount(options: {
       body: { refresh_token: from.refreshToken },
     });
     const fresh = isOk(response.status) ? readTokens(response.data, now()) : undefined;
-    const refused = response.status === 400 || response.status === 401;
+    // A client error keeps the tokens, so a call can go on with an access token that has time left.
+    const refused = refusesGrant(response);
     if (!fresh && !refused) {
       throw new TraktError('other', `Trakt could not refresh the sign-in (${response.status})`);
     }

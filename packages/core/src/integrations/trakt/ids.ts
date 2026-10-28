@@ -51,11 +51,20 @@ export function traktTarget(
   return { show: { ids }, episode: { season: Number(episode[1]), number: Number(episode[2]) } };
 }
 
+/**
+ * Every meta id a title Trakt lists goes by: its IMDb id, then `tmdb:<id>`.
+ * Trakt sends both for most titles, and the TV may have saved either.
+ */
+export function metaIdsFromIds(ids: unknown): string[] {
+  const raw = record(ids);
+  const found: string[] = [];
+  if (!raw) return found;
+  if (typeof raw.imdb === 'string' && IMDB.test(raw.imdb)) found.push(raw.imdb);
+  if (isTmdbId(raw.tmdb)) found.push(`tmdb:${raw.tmdb}`);
+  return found;
+}
+
 /** The meta id for a title Trakt lists: its IMDb id, else `tmdb:<id>`. */
 export function metaIdFromIds(ids: unknown): string | undefined {
-  const raw = record(ids);
-  if (!raw) return undefined;
-  if (typeof raw.imdb === 'string' && IMDB.test(raw.imdb)) return raw.imdb;
-  if (isTmdbId(raw.tmdb)) return `tmdb:${raw.tmdb}`;
-  return undefined;
+  return metaIdsFromIds(ids)[0];
 }

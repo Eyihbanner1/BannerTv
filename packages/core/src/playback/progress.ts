@@ -8,6 +8,11 @@ export const WATCHED_FRACTION = 0.9;
 export const MIN_RESUME_SECONDS = 30;
 /** Resuming this close to the end would only show the credits, so it starts over instead. */
 export const END_SECONDS = 60;
+/**
+ * Trakt keeps progress as a rounded percentage. Within this share of the
+ * video's own place it is the same place, as when the TV's stop comes back.
+ */
+const SAME_PLACE_FRACTION = 0.01;
 const KEY = 'progress';
 
 export interface ProgressEntry {
@@ -49,6 +54,9 @@ export interface ProgressStore {
   /**
    * Brings in progress made elsewhere (Trakt): each entry replaces the
    * video's own only when it is newer. A video watched here stays watched.
+   * When the TV knows the video's length, an entry's place is read as a
+   * share of the video and put onto that length, and one within about a
+   * percentage point of the TV's own place leaves it as it is.
    * Resolves with how many entries were taken.
    */
   merge(entries: readonly ProgressEntry[]): Promise<number>;
@@ -257,10 +265,19 @@ export function createProgressStore(options: {
       if (!loaded) return 0;
       let taken = 0;
       for (const value of incoming) {
-        const entry = readEntry(value);
+        let entry = readEntry(value);
         if (!entry) continue;
         const own = entries.get(entry.videoId);
         if (own && own.updatedAt >= entry.updatedAt) continue;
+        if (own && own.duration > 0 && entry.duration > 0) {
+          // Trakt's length for a video is its runtime, not the stream's: a share
+          // of it lands somewhere else in the stream the TV plays.
+          const share = Math.min(entry.position / entry.duration, 1);
+          const same = Math.abs(share - own.position / own.duration) <= SAME_PLACE_FRACTION;
+          // Most often the TV's own stop coming back. One finished elsewhere still counts.
+          if (same && (own.watched || !entry.watched)) continue;
+          entry = { ...entry, position: share * own.duration, duration: own.duration };
+        }
         entries.set(entry.videoId, own?.watched ? { ...entry, watched: true } : entry);
         taken += 1;
       }

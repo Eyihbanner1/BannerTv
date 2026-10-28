@@ -213,6 +213,7 @@ export {
 } from './integrations/trakt/device';
 export {
   metaIdFromIds,
+  metaIdsFromIds,
   type TraktIds,
   traktIds,
   type TraktTarget,

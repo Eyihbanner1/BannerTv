@@ -262,14 +262,29 @@ const THE_BEAR = {
   year: 2022,
   ids: { trakt: 190914, slug: 'the-bear', tvdb: 397172, imdb: 'tt14452776', tmdb: 136315 },
 };
+const THE_MATRIX = {
+  title: 'The Matrix',
+  year: 1999,
+  ids: { trakt: 481, slug: 'the-matrix-1999', imdb: 'tt0133093', tmdb: 603 },
+};
 
 const ok = (data: unknown, status = 200): TraktResponse => ({ status, data });
 
 type Answer = TraktResponse | Promise<TraktResponse>;
 
+interface Ids {
+  imdb?: string;
+  tmdb?: number;
+}
+
 interface WatchlistBody {
-  movies: { ids: { imdb?: string; tmdb?: number } }[];
-  shows: { ids: { imdb?: string; tmdb?: number } }[];
+  movies: { ids: Ids }[];
+  shows: { ids: Ids }[];
+}
+
+/** Whether two sets of ids name the same title, as Trakt matches them. */
+function sameTitle(a: Ids, b: Ids) {
+  return (a.imdb !== undefined && a.imdb === b.imdb) || (a.tmdb !== undefined && a.tmdb === b.tmdb);
 }
 
 /** Moves one time in a last_activities answer on, as Trakt does when that part changes. */
@@ -295,6 +310,8 @@ function fakeTrakt() {
     },
     /** Ids Trakt does not know yet. */
     unknown: new Set<string>(),
+    /** Titles Trakt knows every id of, and lists with all of them however they were added. */
+    catalogue: [THE_MATRIX] as { ids: Ids }[],
     overrides: new Map<string, () => Answer>(),
     calls: [] as { method: TraktMethod; path: string; body?: unknown }[],
     changes: 0,
@@ -334,13 +351,17 @@ function fakeTrakt() {
         for (const { ids } of body[kind]) {
           const id = ids.imdb ?? `tmdb:${ids.tmdb}`;
           const sameId = (item: unknown) => {
-            const title = (item as Record<string, { ids: { imdb?: string; tmdb?: number } }>)[key];
-            return title !== undefined && (title.ids.imdb ?? `tmdb:${title.ids.tmdb}`) === id;
+            const title = (item as Record<string, { ids: Ids }>)[key];
+            return title !== undefined && sameTitle(title.ids, ids);
           };
           if (server.unknown.has(id)) {
             notFound[kind].push({ ids });
           } else if (op === 'add' && !server.watchlist[kind].some(sameId)) {
-            const title = { title: `Title ${id}`, year: 2020, ids: { trakt: 5000, ...ids } };
+            const title = server.catalogue.find((known) => sameTitle(known.ids, ids)) ?? {
+              title: `Title ${id}`,
+              year: 2020,
+              ids: { trakt: 5000, ...ids },
+            };
             server.watchlist[kind].push(listed(9, key, title, new Date(NOW).toISOString()));
             counts[kind] += 1;
           } else if (op === 'remove' && server.watchlist[kind].some(sameId)) {
@@ -821,6 +842,189 @@ describe('createTraktSync', () => {
       { movies: [{ ids: { imdb: 'tt0137523' } }], shows: [] },
     ]);
     expect(library.outbox()).toEqual([]);
+  });
+
+  it('keeps a title saved by its TMDB id when Trakt lists it by its IMDb id as well', async () => {
+    const { sync, server, library, calls, forget } = setup();
+    await library.add(preview('tmdb:603', 'movie', 'The Matrix'));
+    expect(await sync.run()).toBe('done');
+    // Sent by the id the TV saved, then listed by both.
+    expect(server.calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([
+      { movies: [{ ids: { tmdb: 603 } }], shows: [] },
+    ]);
+    expect(server.watchlist.movies.map((item) => (item as { movie: unknown }).movie)).toContain(
+      THE_MATRIX,
+    );
+    expect(library.has('tmdb:603')).toBe(true);
+    expect(library.has('tt0133093')).toBe(false);
+    expect(library.outbox()).toEqual([]);
+
+    touch(server.activities, 'watchlist.updated_at', '2026-10-28T11:00:00Z');
+    forget();
+    expect(await sync.run()).toBe('done');
+    expect(calls()).toContain('GET /sync/watchlist/movies');
+    expect(library.has('tmdb:603')).toBe(true);
+    expect(library.has('tt0133093')).toBe(false);
+    expect(server.calls.filter((call) => call.method === 'POST')).toEqual([]);
+
+    // Taken off here: Trakt is told by the same id, and takes it off.
+    await library.remove('tmdb:603');
+    forget();
+    await sync.pushLibrary();
+    expect(server.calls).toEqual([
+      {
+        method: 'POST',
+        path: '/sync/watchlist/remove',
+        body: { movies: [{ ids: { tmdb: 603 } }], shows: [] },
+      },
+    ]);
+    expect(server.watchlist.movies.map((item) => (item as { movie: unknown }).movie)).not.toContain(
+      THE_MATRIX,
+    );
+  });
+
+  it('brings progress and watched ticks in under the TMDB ids the TV plays by', async () => {
+    const { sync, server, progress, watched, clock } = setup();
+    clock.now = Date.parse('2026-10-27T10:00:00.000Z');
+    progress.record({
+      metaId: 'tmdb:603',
+      type: 'movie',
+      videoId: 'tmdb:603',
+      position: 600,
+      duration: 8100,
+    });
+    progress.record({
+      metaId: 'tmdb:1396',
+      type: 'series',
+      videoId: 'tmdb:1396:1:1',
+      position: 2700,
+      duration: 2820,
+    });
+    clock.now = NOW;
+    const pausedAt = '2026-10-27T21:00:00.000Z';
+    server.playback.push({
+      progress: 50,
+      paused_at: pausedAt,
+      id: 40,
+      type: 'movie',
+      movie: { ...THE_MATRIX, runtime: 136 },
+    });
+
+    expect(await sync.run()).toBe('done');
+
+    // Watched to half way elsewhere since: on the TV's own id and length.
+    expect(progress.get('tmdb:603')).toMatchObject({
+      metaId: 'tmdb:603',
+      position: 4050,
+      duration: 8100,
+      updatedAt: Date.parse(pausedAt),
+    });
+    expect(progress.get('tt0133093')).toBeUndefined();
+    // Another episode of a show the TV has progress in, under the show's id there.
+    expect(progress.get('tmdb:1396:1:3')).toMatchObject({ metaId: 'tmdb:1396', duration: 48 * 60 });
+    expect(progress.get('tt0903747:1:3')).toBeUndefined();
+    // The show's latest episode watched, as finished, goes there too.
+    expect(progress.get('tmdb:1396:1:2')).toMatchObject({ metaId: 'tmdb:1396', watched: true });
+    expect(progress.get('tt0903747:1:2')).toBeUndefined();
+    // A title the TV has never played comes in by its IMDb id.
+    expect(progress.get('tt0372784')).toMatchObject({ metaId: 'tt0372784' });
+
+    // Ticks are under every id, whichever the TV knows a title by.
+    for (const id of [
+      'tt0468569',
+      'tmdb:155',
+      'tmdb:1234567',
+      'tt0903747:1:1',
+      'tmdb:1396:1:1',
+      'tt0903747:1:2',
+      'tmdb:1396:1:2',
+      'tt11280740:1:9',
+      'tmdb:95396:1:9',
+    ]) {
+      expect(watched.has(id)).toBe(true);
+    }
+    expect(watched.has('tmdb:272')).toBe(false);
+  });
+
+  it("does not move the resume point when the TV's own stop comes back from Trakt", async () => {
+    const { sync, server, progress, clock } = setup();
+    const stoppedAt = Date.parse('2026-10-27T20:15:03.000Z');
+    clock.now = stoppedAt;
+    progress.record({
+      metaId: 'tt0372784',
+      type: 'movie',
+      videoId: 'tt0372784',
+      position: 1800,
+      duration: 2520,
+    });
+    clock.now = NOW;
+    // What the stop scrobble left: 71.43%, a second later, which on Trakt's 140 minutes is 6000 s.
+    server.playback[0] = { ...(server.playback[0] as object), progress: 71.43 };
+
+    expect(await sync.run()).toBe('done');
+    expect(progress.get('tt0372784')).toMatchObject({
+      position: 1800,
+      duration: 2520,
+      updatedAt: stoppedAt,
+    });
+    expect(progress.resumeAt('tt0372784')).toBe(1800);
+  });
+
+  it('sends no removal for a title saved and taken off before signing in', async () => {
+    const { sync, server, state, library, forget } = setup();
+    state.set({ status: 'signedOut' });
+    await flush();
+    await library.add(preview('tt1104001', 'movie', 'TRON: Legacy'));
+    await library.remove('tt1104001');
+    await sync.pushLibrary();
+    expect(library.outbox()).toEqual([]);
+
+    // The account signed in to has it on its watchlist, put there elsewhere.
+    state.set({ status: 'signedIn' });
+    forget();
+    expect(await sync.run()).toBe('done');
+    expect(server.calls.filter((call) => call.method === 'POST')).toEqual([]);
+    expect(library.has('tt1104001')).toBe(true);
+  });
+
+  it('holds a push asked for during a watchlist pull until the pull is in', async () => {
+    const { sync, server, library, calls } = setup();
+    await sync.run();
+    let asked!: () => void;
+    const askedFor = new Promise<void>((resolve) => (asked = resolve));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    server.overrides.set('GET /sync/watchlist/movies', () => {
+      // The list as it was when asked for, answered later.
+      const movies = server.watchlist.movies.slice();
+      asked();
+      return held.then(() => ok(movies));
+    });
+    touch(server.activities, 'watchlist.updated_at');
+    const run = sync.run();
+    await askedFor;
+
+    await library.add(preview('tt0111161', 'movie', 'The Shawshank Redemption'));
+    const pushed = sync.pushLibrary();
+    await flush();
+    expect(calls().slice(-1)).toEqual(['GET /sync/watchlist/movies']);
+
+    release();
+    await Promise.all([run, pushed]);
+    expect(await run).toBe('done');
+    expect(calls().slice(-3)).toEqual([
+      'GET /sync/watchlist/movies',
+      'GET /sync/watchlist/shows',
+      'POST /sync/watchlist',
+    ]);
+    expect(library.has('tt0111161')).toBe(true);
+    expect(library.outbox()).toEqual([]);
+
+    // The next pull finds it on Trakt's list, and keeps it.
+    server.overrides.clear();
+    touch(server.activities, 'watchlist.updated_at', '2026-10-28T11:00:00Z');
+    await sync.run();
+    expect(library.has('tt0111161')).toBe(true);
   });
 
   it('forgets the sync when the profile signs out', async () => {

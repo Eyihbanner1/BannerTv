@@ -31,6 +31,11 @@ export interface LibraryChange {
 /** A title as Trakt's watchlist lists it. */
 export interface RemoteLibraryItem {
   id: string;
+  /**
+   * Other ids Trakt gives the same title, such as `tmdb:603` beside
+   * `tt0133093`. One My List already uses is taken in place of `id`.
+   */
+  otherIds?: string[];
   type: ContentType;
   name: string;
   releaseInfo?: string;
@@ -54,6 +59,10 @@ export interface Library {
   /** Most recently added first. */
   items(): readonly LibraryItem[];
   add(item: MetaPreview): Promise<void>;
+  /**
+   * Takes a title out. Trakt is told only when the title is on its list as
+   * far as the TV knows; otherwise any addition still waiting is dropped.
+   */
   remove(id: string): Promise<void>;
   /**
    * Fills in a saved title's name and artwork from a fresh answer, for titles
@@ -69,6 +78,7 @@ export interface Library {
    * removed there (it was in Trakt's list at the last sync and is not now)
    * is removed here, unless the TV has a newer change of its own waiting in
    * the outbox. Titles saved here that Trakt never had are queued to be sent.
+   * A title goes by whichever of its ids My List already uses.
    */
   mergeRemote(remote: readonly RemoteLibraryItem[]): Promise<void>;
   /** Forgets the sync state, for signing out of Trakt. The titles stay. */
@@ -202,10 +212,15 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       return state.update((current) => {
         const item = current.items.find((i) => i.id === id);
         if (!item) return current;
+        // A title Trakt's list never had has nothing there to take off. Removing it
+        // anyway would reach whichever account signs in next, and take theirs.
+        const onTrakt = current.synced.indexOf(id) !== -1;
         return {
           ...current,
           items: current.items.filter((i) => i.id !== id),
-          outbox: queue(current.outbox, { op: 'remove', id, type: item.type }),
+          outbox: onTrakt
+            ? queue(current.outbox, { op: 'remove', id, type: item.type })
+            : current.outbox.filter((change) => change.id !== id),
         };
       });
     },
@@ -244,7 +259,17 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       return state.update((current) => {
         const pending = new Map(current.outbox.map((change) => [change.id, change]));
         const before = new Set(current.synced);
-        const remoteIds = new Set(remote.map((item) => item.id));
+        const saved = new Set(current.items.map((item) => item.id));
+        const known = (id: string) => saved.has(id) || before.has(id) || pending.has(id);
+        // Trakt names a title by every id it has; here it goes by the one the TV used.
+        const remoteIds = new Set<string>();
+        const listed: RemoteLibraryItem[] = [];
+        for (const entry of remote) {
+          const local = [entry.id].concat(entry.otherIds ?? []).filter(known);
+          if (local.length === 0) local.push(entry.id);
+          local.forEach((id) => remoteIds.add(id));
+          listed.push({ ...entry, id: local[0] ?? entry.id });
+        }
         let outbox = current.outbox;
         const items: LibraryItem[] = [];
         for (const item of current.items) {
@@ -260,7 +285,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           }
         }
         const have = new Set(items.map((item) => item.id));
-        for (const entry of remote) {
+        for (const entry of listed) {
           if (have.has(entry.id)) continue;
           // Removed here and not sent yet: the removal goes to Trakt instead.
           if (pending.get(entry.id)?.op === 'remove') continue;

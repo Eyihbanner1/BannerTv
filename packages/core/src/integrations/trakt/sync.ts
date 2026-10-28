@@ -4,7 +4,7 @@ import type { ProgressEntry, ProgressStore } from '../../playback/progress';
 import type { WatchedSet } from '../../playback/watched';
 import type { KeyValueStore } from '../../storage';
 import type { TraktAccount } from './account';
-import { metaIdFromIds, type TraktIds, traktIds } from './ids';
+import { metaIdsFromIds, type TraktIds, traktIds } from './ids';
 import { list, positive, record, text, time, whole } from './read';
 import {
   isOk,
@@ -39,7 +39,8 @@ export interface TraktSyncOptions {
   /** The profile's store, where the last activity times are kept. */
   storage: KeyValueStore;
   targets: {
-    progress: Pick<ProgressStore, 'merge'>;
+    /** forMeta tells which of a title's ids the profile's progress is kept under. */
+    progress: Pick<ProgressStore, 'load' | 'merge' | 'forMeta'>;
     library: Pick<Library, 'load' | 'outbox' | 'sent' | 'mergeRemote' | 'forgetRemote'>;
     watched: Pick<WatchedSet, 'replace'>;
   };
@@ -86,8 +87,22 @@ function readState(saved: unknown): SyncState {
   return { times };
 }
 
-/** A paused film or episode from sync/playback, as progress. */
-function pausedEntry(value: unknown): ProgressEntry | undefined {
+/**
+ * Of the ids Trakt gives a title, the first the profile already uses, else
+ * the first (its IMDb id when there is one).
+ */
+function chooseId(ids: readonly string[], inUse: (metaId: string) => boolean): string | undefined {
+  for (const id of ids) {
+    if (inUse(id)) return id;
+  }
+  return ids[0];
+}
+
+/** A paused film or episode from sync/playback, as progress, under the id `inUse` picks. */
+function pausedEntry(
+  value: unknown,
+  inUse: (metaId: string) => boolean,
+): ProgressEntry | undefined {
   const item = record(value);
   const percent = item?.progress;
   const updatedAt = time(item?.paused_at);
@@ -97,13 +112,13 @@ function pausedEntry(value: unknown): ProgressEntry | undefined {
   let minutes: number | undefined;
   if (item?.type === 'movie') {
     const movie = record(item.movie);
-    metaId = metaIdFromIds(movie?.ids);
+    metaId = chooseId(metaIdsFromIds(movie?.ids), inUse);
     videoId = metaId;
     minutes = positive(movie?.runtime);
   } else if (item?.type === 'episode') {
     const show = record(item.show);
     const episode = record(item.episode);
-    metaId = metaIdFromIds(show?.ids);
+    metaId = chooseId(metaIdsFromIds(show?.ids), inUse);
     const season = whole(episode?.season);
     const number = whole(episode?.number);
     if (metaId && season !== undefined && number !== undefined) {
@@ -126,20 +141,26 @@ function pausedEntry(value: unknown): ProgressEntry | undefined {
 }
 
 interface WatchedShows {
+  /** Each episode under every id of its show, since the TV may know the show by either. */
   videoIds: string[];
   /** The latest episode of each show watched lately, as finished progress. */
   finished: ProgressEntry[];
 }
 
-function watchedShows(items: readonly unknown[], since: number): WatchedShows {
+function watchedShows(
+  items: readonly unknown[],
+  since: number,
+  inUse: (metaId: string) => boolean,
+): WatchedShows {
   const videoIds: string[] = [];
   const finished: ProgressEntry[] = [];
   for (const value of items) {
     const item = record(value);
     const show = record(item?.show);
-    const metaId = metaIdFromIds(show?.ids);
+    const ids = metaIdsFromIds(show?.ids);
+    const metaId = chooseId(ids, inUse);
     if (!metaId) continue;
-    let latest: { videoId: string; at: number; season: number; number: number } | undefined;
+    let latest: { at: number; season: number; number: number } | undefined;
     for (const seasonValue of list(item?.seasons)) {
       const season = whole(record(seasonValue)?.number);
       if (season === undefined) continue;
@@ -147,8 +168,7 @@ function watchedShows(items: readonly unknown[], since: number): WatchedShows {
         const episode = record(episodeValue);
         const number = whole(episode?.number);
         if (number === undefined) continue;
-        const videoId = `${metaId}:${season}:${number}`;
-        videoIds.push(videoId);
+        for (const id of ids) videoIds.push(`${id}:${season}:${number}`);
         const at = time(episode?.last_watched_at);
         if (at === undefined) continue;
         // Episodes marked watched together share a time: the furthest one is the latest.
@@ -157,7 +177,7 @@ function watchedShows(items: readonly unknown[], since: number): WatchedShows {
           at > latest.at ||
           (at === latest.at &&
             (season > latest.season || (season === latest.season && number > latest.number)));
-        if (isLater) latest = { videoId, at, season, number };
+        if (isLater) latest = { at, season, number };
       }
     }
     const minutes = positive(show?.runtime);
@@ -165,7 +185,7 @@ function watchedShows(items: readonly unknown[], since: number): WatchedShows {
     finished.push({
       metaId,
       type: 'series',
-      videoId: latest.videoId,
+      videoId: `${metaId}:${latest.season}:${latest.number}`,
       position: minutes * 60,
       duration: minutes * 60,
       updatedAt: latest.at,
@@ -178,7 +198,7 @@ function watchedShows(items: readonly unknown[], since: number): WatchedShows {
 function watchlistItem(value: unknown, kind: 'movie' | 'show'): RemoteLibraryItem | undefined {
   const item = record(value);
   const title = record(item?.[kind]);
-  const id = metaIdFromIds(title?.ids);
+  const [id, ...otherIds] = metaIdsFromIds(title?.ids);
   if (!id) return undefined;
   const entry: RemoteLibraryItem = {
     id,
@@ -187,6 +207,8 @@ function watchlistItem(value: unknown, kind: 'movie' | 'show'): RemoteLibraryIte
     name: text(title?.title) ?? id,
     addedAt: time(item?.listed_at) ?? 0,
   };
+  // My List picks the id it already uses.
+  if (otherIds.length > 0) entry.otherIds = otherIds;
   const year = whole(title?.year);
   if (year) entry.releaseInfo = String(year);
   return entry;
@@ -198,8 +220,7 @@ function notFound(data: unknown): Set<string> {
   const raw = record(record(data)?.not_found);
   for (const kind of ['movies', 'shows']) {
     for (const value of list(raw?.[kind])) {
-      const id = metaIdFromIds(record(value)?.ids);
-      if (id) missing.add(id);
+      for (const id of metaIdsFromIds(record(value)?.ids)) missing.add(id);
     }
   }
   return missing;
@@ -232,6 +253,9 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   let running: Promise<TraktSyncResult> | undefined;
   let pushing: Promise<boolean> | undefined;
   let pushNext: Promise<boolean> | undefined;
+  // Pushes and watchlist pulls take turns: a push that lands while a pull is
+  // asking Trakt would be undone by the older list the pull then brings in.
+  let turn: Promise<unknown> = Promise.resolve();
 
   let signedIn = account.get().status === 'signedIn';
   account.subscribe(() => {
@@ -269,6 +293,19 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     return data;
   }
 
+  /**
+   * Runs `task` once every push and pull asked for before it has finished.
+   * Never called from inside one, which would wait for itself.
+   */
+  function inTurn<T>(task: () => Promise<T>): Promise<T> {
+    const result = turn.then(task);
+    turn = result.catch(() => undefined);
+    return result;
+  }
+
+  /** Whether the profile's progress has anything under this title id. Load progress first. */
+  const hasProgress = (metaId: string) => progress.forMeta(metaId).length > 0;
+
   function wait(seconds: number): Promise<void> {
     return new Promise((resolve) => {
       timers.setTimeout(() => resolve(), seconds * 1000);
@@ -285,9 +322,11 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   }
 
   async function syncPaused(mine: number) {
+    const paused = await getList('/sync/playback?extended=full');
+    await progress.load().catch(() => undefined);
     const entries: ProgressEntry[] = [];
-    for (const item of await getList('/sync/playback?extended=full')) {
-      const entry = pausedEntry(item);
+    for (const item of paused) {
+      const entry = pausedEntry(item, hasProgress);
       if (entry) entries.push(entry);
     }
     check(mine);
@@ -297,17 +336,19 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   async function syncWatched(mine: number) {
     const movies = await getList('/sync/watched/movies');
     const shows = await getList('/sync/watched/shows?extended=full');
+    await progress.load().catch(() => undefined);
+    // Each film under every id it has, since the TV may know it by either.
     const videoIds: string[] = [];
     for (const item of movies) {
-      const id = metaIdFromIds(record(record(item)?.movie)?.ids);
-      if (id) videoIds.push(id);
+      for (const id of metaIdsFromIds(record(record(item)?.movie)?.ids)) videoIds.push(id);
     }
-    const episodes = watchedShows(shows, now() - TRAKT_RECENT_SHOW_MS);
+    const episodes = watchedShows(shows, now() - TRAKT_RECENT_SHOW_MS, hasProgress);
     check(mine);
     await watched.replace(videoIds.concat(episodes.videoIds));
     if (episodes.finished.length > 0) await progress.merge(episodes.finished);
   }
 
+  /** Brings in the watchlist. Call it in turn with pushes (inTurn), so none lands during it. */
   async function pullWatchlist(mine: number) {
     const movies = await getList('/sync/watchlist/movies');
     const shows = await getList('/sync/watchlist/shows');
@@ -381,7 +422,7 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   /** One push at a time; one asked for during a push runs after it, for what came since. */
   function push(): Promise<boolean> {
     if (!pushing) {
-      pushing = sendOutbox().finally(() => {
+      pushing = inTurn(sendOutbox).finally(() => {
         pushing = undefined;
       });
       return pushing;
@@ -404,7 +445,7 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     let pushed = await pushOrFail();
     if (!changed) return { pulled: true, pushed };
     try {
-      await pullWatchlist(mine);
+      await inTurn(() => pullWatchlist(mine));
     } catch (error) {
       if (isSignedOutError(error)) throw error;
       return { pulled: false, pushed };

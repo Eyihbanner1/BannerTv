@@ -8,7 +8,8 @@ export const MAX_WATCHED = 50000;
 
 /**
  * What Trakt says a profile has watched, by video id: a film's id, or an
- * episode's `{imdbId}:{season}:{episode}`. Replaced whole at each sync.
+ * episode's `{metaId}:{season}:{episode}`, under each id Trakt gives the
+ * title (its IMDb id and `tmdb:<id>`). Replaced whole at each sync.
  * Videos watched on this TV are marked by their saved progress instead.
  */
 export interface WatchedSet {
