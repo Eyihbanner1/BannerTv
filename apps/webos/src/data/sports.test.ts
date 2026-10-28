@@ -285,7 +285,7 @@ describe('a match opened from its catalog in Discover', () => {
     expect(atOf(first[0]!)).toBe(Date.parse('2026-10-28T23:30:00Z'));
   });
 
-  it('reads a page added after midnight as of the list it follows', async () => {
+  it('reads a list opened again or grown after midnight as of its first read', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(new Date('2026-10-28T23:50:00Z'));
     const addon = install(
@@ -298,21 +298,32 @@ describe('a match opened from its catalog in Discover', () => {
       parseMetaPreview({ id, type: 'tv', name: `Home ${id} vs Away ${id}`, releaseInfo })!;
     const football = catalogOf(addon, 'football');
     const atOf = (item: MetaPreview) => sports.eventForItem(addon, football, item)?.kickOff?.at;
-    const first = [tile('a', '23:00'), tile('b', '23:45'), tile('c', '00:15')];
-    sports.prepareItems(addon, football, first);
-    vi.runAllTimers();
-    // At 00:05 the pager adds the next page after the same tiles.
-    vi.setSystemTime(new Date('2026-10-29T00:05:00Z'));
-    const grown = [...first, tile('d', '00:30'), tile('e', '01:00')];
-    sports.prepareItems(addon, football, grown);
-    vi.runAllTimers();
-    expect(grown.map(atOf)).toEqual([
-      Date.parse('2026-10-28T23:00:00Z'),
+    const first = ['19:45', '20:00', '22:00', '23:45', '00:15'].map((time, i) =>
+      tile(`t${i}`, time),
+    );
+    const tonight = [
+      Date.parse('2026-10-28T19:45:00Z'),
+      Date.parse('2026-10-28T20:00:00Z'),
+      Date.parse('2026-10-28T22:00:00Z'),
       Date.parse('2026-10-28T23:45:00Z'),
       Date.parse('2026-10-29T00:15:00Z'),
-      Date.parse('2026-10-29T00:30:00Z'),
-      Date.parse('2026-10-29T01:00:00Z'),
-    ]);
+    ];
+    sports.prepareItems(addon, football, first)();
+    sports.prepareItems(addon, football, first);
+    vi.runAllTimers();
+    expect(first.map(atOf)).toEqual(tonight);
+    // At 00:05 Discover opens again on the same cached tiles: read as of 23:50, they
+    // are still tonight's, where read now 19:45 would be this evening's.
+    vi.setSystemTime(new Date('2026-10-29T00:05:00Z'));
+    sports.prepareItems(addon, football, []);
+    sports.prepareItems(addon, football, [...first]);
+    vi.runAllTimers();
+    expect(first.map(atOf)).toEqual(tonight);
+    // The pager adds the next page after the same tiles.
+    const grown = [...first, tile('t5', '00:30')];
+    sports.prepareItems(addon, football, grown);
+    vi.runAllTimers();
+    expect(grown.map(atOf)).toEqual([...tonight, Date.parse('2026-10-29T00:30:00Z')]);
   });
 
   it('reads a tile of a one-tile list alone, not as an earlier list had its id', async () => {

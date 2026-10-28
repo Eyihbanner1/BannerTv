@@ -71,6 +71,11 @@ export interface KickOff {
   /** False for times read in a zone BannerTV had to assume, or estimated. */
   sure: boolean;
   source: KickOffSource;
+  /**
+   * For a clock-only time, the zone it was read in: a name, or "UTC+05:30".
+   * Its calendar holds the day the time belongs to (dayEvidence).
+   */
+  zone?: string;
 }
 
 /** One item as one addon listed it. Never holds the addon's address, which can carry a key. */

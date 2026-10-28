@@ -463,11 +463,7 @@ export function createSportsFeed(options: {
     track.listings = {
       reads,
       read,
-      listings: rollClockWraps(
-        read,
-        track.entry.zone,
-        memory && dayEvidence(memory, now(), track.entry.zone),
-      ),
+      listings: rollClockWraps(read, track.entry.zone, memory && dayEvidence(memory, now())),
     };
     return track.listings;
   }

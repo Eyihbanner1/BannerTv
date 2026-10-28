@@ -112,25 +112,25 @@ const EVIDENCE_UNTIL_HOUR = 6;
 /**
  * The remembered kick-offs that can settle the day of a clock-only time
  * (rollClockWraps): those of matches first seen today, or yesterday until
- * 06:00 this morning in the addon's zone. An id listed again on later days
- * (the next day of a Test, an addon that numbers its matches by place) says
- * nothing about which day its list is.
+ * 06:00 this morning, in the zone the clock is read in (the addon's, or the
+ * one it names). An id listed again on later days (the next day of a Test,
+ * an addon that numbers its matches by place) says nothing about which day
+ * its list is.
  */
 export function dayEvidence(
   memory: KickoffMemory,
   now: number,
-  zone: string | undefined,
-): (listing: { source: { addonId: string; id: string } }) => number | undefined {
-  // Most of a page is first seen in the same minute.
-  const until = new Map<number, number>();
-  return ({ source }) => {
+): (listing: { source: { addonId: string; id: string }; kickOff?: KickOff }) => number | undefined {
+  // Most of a page is first seen in the same minute, in the same zone.
+  const until = new Map<string, number>();
+  return ({ source, kickOff }) => {
     const seen = memory.firstSeen(source.addonId, source.id);
     if (seen === undefined) return undefined;
-    const minute = Math.floor(seen / 60000);
-    let end = until.get(minute);
+    const key = `${kickOff?.zone ?? ''} ${Math.floor(seen / 60000)}`;
+    let end = until.get(key);
     if (end === undefined) {
-      end = morningAfter(seen, zone, EVIDENCE_UNTIL_HOUR);
-      until.set(minute, end);
+      end = morningAfter(seen, kickOff?.zone, EVIDENCE_UNTIL_HOUR);
+      until.set(key, end);
     }
     return now < end ? memory.get(source.addonId, source.id)?.at : undefined;
   };

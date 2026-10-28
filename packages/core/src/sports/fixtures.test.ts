@@ -201,6 +201,7 @@ describe('the public sports addons, as captured', () => {
       at: Date.parse('2026-10-28T02:00:00Z'),
       sure: true,
       source: 'clock',
+      zone: 'UTC-03:00',
     });
   });
 

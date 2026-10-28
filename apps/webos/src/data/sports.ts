@@ -488,7 +488,7 @@ export function eventsFromItems(
     // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
     const now = Date.now();
     const listings = readItems(reading.context, items, now);
-    return build(rollClockWraps(listings, reading.zone, dayEvidence(kickoffs, now, reading.zone)));
+    return build(rollClockWraps(listings, reading.zone, dayEvidence(kickoffs, now)));
   } catch {
     return [];
   }
@@ -530,6 +530,8 @@ export function prepareItems(
 ): () => void {
   const reading = SPORTS_IN_BUILD ? readingOf(addon, catalog) : undefined;
   let state = prepared.get(catalog);
+  // Discover opening again, before its first page: what was read of the list stays.
+  if (reading && items.length === 0) return () => undefined;
   if (!reading || items.length < 2) {
     // A tile of a list this short is read alone (eventForItem).
     if (state?.timer !== undefined) window.clearTimeout(state.timer);
@@ -567,7 +569,7 @@ export function prepareItems(
     for (const item of items) if (!tiles.has(item.id)) tiles.set(item.id, item);
     const placed = new Map<string, { item: MetaPreview; listing: Listing }>();
     try {
-      const evidence = dayEvidence(kickoffs, current.now, reading.zone);
+      const evidence = dayEvidence(kickoffs, current.now);
       for (const listing of rollClockWraps(current.listings, reading.zone, evidence)) {
         const item = tiles.get(listing.source.id);
         if (item && listing.kickOff?.source === 'clock' && !placed.has(listing.source.id)) {
@@ -611,7 +613,7 @@ export function eventForItem(
     try {
       listing =
         (known?.item === item ? known.listing : undefined) ??
-        rollClockWraps([listing], reading.zone, dayEvidence(kickoffs, now, reading.zone))[0] ??
+        rollClockWraps([listing], reading.zone, dayEvidence(kickoffs, now))[0] ??
         listing;
     } catch {
       // The tile's own reading stands.

@@ -316,6 +316,14 @@ function instant(
   return Date.UTC(year, month - 1, day, hours, minutes) - (zone.offset ?? 0) * MINUTE;
 }
 
+/** A Zone as zoneOffset reads it: its name, or its offset as "UTC+05:30". */
+function zoneName(zone: Zone): string {
+  if (zone.name) return zone.name;
+  const offset = zone.offset ?? 0;
+  const minutes = Math.abs(offset);
+  return `UTC${offset < 0 ? '-' : '+'}${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
 export interface TimeContext {
   now: number;
   /** The zone the addon's install address names, if any. */
@@ -374,7 +382,9 @@ export function readClock(text: string, context: TimeContext): KickOff | undefin
     instant(year, month, day, hours, minutes, zone);
   let at = on(today);
   if (at !== undefined && at > context.now + 20 * HOUR) at = on(shiftDate(today, -1));
-  return at === undefined ? undefined : { at, sure: zone.sure, source: 'clock' };
+  return at === undefined
+    ? undefined
+    : { at, sure: zone.sure, source: 'clock', zone: zoneName(zone) };
 }
 
 /**
@@ -401,11 +411,15 @@ export function nextDayAt(at: number, zone: string | undefined, days = 1): numbe
 }
 
 /**
- * `hour` o'clock on the calendar day after `at` in `zone`, the addon's, or
- * in UTC when no zone is known.
+ * `hour` o'clock on the calendar day after `at` in `zone`, the one a clock
+ * was read in, or on the TV's own clock with no zone.
  */
 export function morningAfter(at: number, zone: string | undefined, hour: number): number {
-  const named: Zone = zone ? { name: zone, sure: true } : { offset: 0, sure: true };
+  if (!zone) {
+    const date = new Date(at);
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, hour).getTime();
+  }
+  const named: Zone = { name: zone, sure: true };
   const [year, month, day] = shiftDate(dateIn(at, named), 1);
   return instant(year, month, day, hour, 0, named) ?? at + (24 + hour) * HOUR;
 }

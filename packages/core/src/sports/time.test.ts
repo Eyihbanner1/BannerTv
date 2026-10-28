@@ -7,6 +7,7 @@ import {
   localClock,
   localDate,
   localDayStart,
+  morningAfter,
   nextDayAt,
   readClock,
   readDatedText,
@@ -267,7 +268,7 @@ describe('a list of clock times that wraps past midnight', () => {
         memory.note(listing.source.addonId, listing.source.id, listing.kickOff);
       }
     }
-    return dayEvidence(memory, now, 'Europe/London');
+    return dayEvidence(memory, now);
   };
   /** A list seen at `seen` and read again at each of `later`, by what was seen. */
   const seenThenRead = (times: string[], seen: number, later: number[]) => {
@@ -319,6 +320,29 @@ describe('a list of clock times that wraps past midnight', () => {
     expect(first.slice(0, 2)).toEqual([at('2026-11-06T19:45:00Z'), at('2026-11-07T00:30:00Z')]);
     expect(first[7]).toBe(at('2026-11-07T20:00:00Z'));
     expect(later[0]).toEqual(first);
+  });
+
+  it('holds clocks that name their own zone until the morning there', () => {
+    // No zone in the address: "8:00 PM ET" is New York's evening, seen from a UK TV.
+    const items = matches(['7:00 PM ET', '8:00 PM ET', '10:30 PM ET']);
+    const seen = at('2026-11-04T21:00:00Z');
+    const first = rollClockWraps(read(items, seen, undefined), undefined);
+    expect(first[0]!.kickOff).toEqual({
+      at: at('2026-11-05T00:00:00Z'),
+      sure: false,
+      source: 'clock',
+      zone: 'America/New_York',
+    });
+    const reread = (now: number) =>
+      kickOffs(
+        rollClockWraps(read(items, now, undefined), undefined, evidenceOf([[first, seen]], now)),
+      );
+    // 05:30 in New York, long after 06:00 in the UK: still Wednesday night's.
+    expect(reread(at('2026-11-05T10:30:00Z'))).toEqual(kickOffs(first));
+    // 06:30 in New York: the addon's current day.
+    expect(reread(at('2026-11-05T11:30:00Z'))).toEqual(
+      kickOffs(first).map((time) => time! + 24 * HOUR),
+    );
   });
 
   it('holds a list seen late on its evening only until the next morning', () => {
@@ -586,6 +610,27 @@ describe('a list of clock times that wraps past midnight', () => {
       ...days,
       ...days,
     ]);
+  });
+});
+
+describe('the morning after', () => {
+  it("is on the addon's calendar, clock changes included", () => {
+    // 14:00 on Wednesday in Los Angeles is already Wednesday night in UTC.
+    expect(morningAfter(at('2026-11-04T22:00:00Z'), 'America/Los_Angeles', 6)).toBe(
+      at('2026-11-05T14:00:00Z'),
+    );
+    expect(morningAfter(at('2027-03-27T21:00:00Z'), 'Europe/London', 6)).toBe(
+      at('2027-03-28T05:00:00Z'),
+    );
+    expect(morningAfter(at('2026-10-31T21:00:00Z'), 'UTC-03:00', 6)).toBe(
+      at('2026-11-01T09:00:00Z'),
+    );
+  });
+
+  it("is on the TV's own clock when the address names no zone", () => {
+    // The tests run as a UK TV.
+    expect(morningAfter(at('2026-10-31T21:00:00Z'), undefined, 6)).toBe(at('2026-11-01T06:00:00Z'));
+    expect(morningAfter(at('2027-03-27T21:00:00Z'), undefined, 6)).toBe(at('2027-03-28T05:00:00Z'));
   });
 });
 
