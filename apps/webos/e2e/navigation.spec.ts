@@ -337,6 +337,63 @@ test('Home still works with every tuning switch at its leanest', async ({ page }
   await expectFocus(page, `${FIRST_ROW}-tile-3`);
 });
 
+test('the earlier sliding look still works from tuning', async ({ page }) => {
+  const earlier = {
+    motion: 'slide',
+    zoom: 'animate',
+    heroBusyMs: 250,
+    heroArt: 'large',
+    heroPan: true,
+    mips: true,
+  };
+  await page.addInitScript(
+    (value) => localStorage.setItem('bannertv.tuning', value),
+    JSON.stringify(earlier),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('html')).not.toHaveClass(/tune-/);
+  await expect(page.locator('[data-row-key] > div > div').first()).toHaveCSS(
+    'transition-property',
+    'transform',
+  );
+
+  for (let n = 1; n <= 3; n++) await press(page, 'ArrowRight', `${FIRST_ROW}-tile-${n}`);
+  for (const row of HOME_ROWS.slice(1, 5)) await press(page, 'ArrowDown', `${row}-tile-0`);
+  await expectFocusInView(page);
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-3`);
+});
+
+test('quick presses all count, and a held arrow moves at most once per 100 ms', async ({
+  page,
+}) => {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+  // Presses a busy TV delivers together, after a pause, are not dropped.
+  for (let n = 0; n < 3; n++) await page.keyboard.press('ArrowRight');
+  await expectFocus(page, `${FIRST_ROW}-tile-3`);
+  for (let n = 0; n < 3; n++) await page.keyboard.press('ArrowDown');
+  await expectFocus(page, `${HOME_ROWS[3]}-tile-0`);
+  for (let n = 0; n < 3; n++) await page.keyboard.press('ArrowUp');
+  await expectFocus(page, `${FIRST_ROW}-tile-3`);
+  await expectFocusInView(page);
+
+  // Key repeat from a held arrow is still held back.
+  await page.waitForTimeout(150);
+  const started = Date.now();
+  await page.keyboard.down('ArrowLeft');
+  for (let n = 0; n < 4; n++) await page.keyboard.down('ArrowLeft');
+  const held = Date.now() - started;
+  await page.keyboard.up('ArrowLeft');
+  await page.waitForTimeout(200);
+  const key = await page.locator('[data-focused="true"]').getAttribute('data-focus-key');
+  const moved = 3 - Number(/-tile-(\d+)$/.exec(key ?? '')?.[1]);
+  expect(moved).toBeGreaterThanOrEqual(1);
+  expect(moved).toBeLessThanOrEqual(1 + Math.floor(held / 100));
+});
+
 test('on a TV, Back on the root screen calls platformBack', async ({ page }) => {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown> & { platformBackCalls?: number };

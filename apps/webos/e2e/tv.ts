@@ -4,7 +4,7 @@ import { expect, type Page } from '@playwright/test';
 
 export const APP_URL = pathToFileURL(resolve(import.meta.dirname, '../dist/index.html')).href;
 
-// Spatial navigation drops key presses closer together than 100 ms, like a held key.
+// A person's pace between presses. Quicker presses all count too; a journey tests that.
 const KEY_GAP_MS = 120;
 
 /** Collects page errors and console errors, which should stay empty. */

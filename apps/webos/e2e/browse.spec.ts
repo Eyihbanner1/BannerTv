@@ -190,11 +190,23 @@ test.describe('on a 4K TV', () => {
       /\/poster\/medium\/tt/,
     );
     const hero = page.locator('section[aria-label="Elephants Dream"]');
-    await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/large\/tt/);
+    // Metahub's medium backdrop is already 1920x1080.
+    await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/medium\/tt/);
     await expect(hero.locator('img').last()).toHaveAttribute('src', /\/logo\/large\/tt/);
     // Wide tiles already get enough pixels from the medium backdrop.
     await expect(
       page.locator('[data-focus-key="home-0-movie-imdbrating-tile-0"] img').first(),
     ).toHaveAttribute('src', /\/background\/medium\/tt/);
+  });
+
+  test('the hero can still ask for large backdrops from tuning', async ({ page }) => {
+    await mockAddons(page);
+    await page.addInitScript(() =>
+      localStorage.setItem('bannertv.tuning', JSON.stringify({ heroArt: 'large' })),
+    );
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    const hero = page.locator('section[aria-label="Elephants Dream"]');
+    await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/large\/tt/);
   });
 });
