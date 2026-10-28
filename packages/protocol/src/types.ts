@@ -79,6 +79,27 @@ export interface MetaPreview {
   genres: string[];
   /** YouTube IDs. */
   trailers: string[];
+  /**
+   * As the addon sent it, not normalised: sports addons put kick-off times
+   * here, and a time with seconds set tells a fetch time from a kick-off.
+   */
+  released?: string;
+  /** Fields only sports addons send, read by packages/core/src/sports. */
+  sport?: SportHints;
+}
+
+/** Non-standard fields seen on sports addons' items (docs/PLAN.md, Sports addons). */
+export interface SportHints {
+  /** A start time under another key (`eventStart`, `startTime`): ISO text or epoch digits. */
+  start?: string;
+  home?: string;
+  away?: string;
+  /** A non-standard `isLive`. */
+  live?: boolean;
+  /** A non-standard `category`, usually the sport. */
+  category?: string;
+  /** A `league`, `competition` or `tournament` field. */
+  league?: string;
 }
 
 export interface Video {
