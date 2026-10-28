@@ -113,8 +113,10 @@ export function useContinueItems(): ContinueItem[] | null {
   );
   const items = useSyncExternalStore(subscribe, snapshot);
   const [loaded, setLoaded] = useState(false);
-  // The wait ends at the cap, when no answer is still to come, or as soon as
-  // the viewer uses the remote, so a press is never lost to it.
+  // The wait ends at the cap, when no answer is still to come, or when the
+  // viewer uses the remote. A press then shows where focus is, as on a screen
+  // with nothing focused: the wait ends after the press is handled, so OK
+  // never presses a tile that was not shown focused, nor Back leaves the app.
   const [waited, setWaited] = useState(() => sinceLaunch() >= CARD_WAIT_MS);
   useEffect(() => {
     if (waited) return;
@@ -124,7 +126,9 @@ export function useContinueItems(): ContinueItem[] | null {
       onCardAnswer(() => {
         if (!cardsMissing()) stop();
       }),
-      onActivity(stop),
+      onActivity(() => {
+        setTimeout(stop, 0);
+      }),
     ];
     return () => {
       clearTimeout(timer);

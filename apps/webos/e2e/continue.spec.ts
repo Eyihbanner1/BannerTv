@@ -572,10 +572,8 @@ test('a title lookup that fails at launch does not hold Home: it opens on the ca
   await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
 });
 
-test('a key pressed while Home waits for a card ends the wait, and the row then leaves focus alone', async ({
-  page,
-}) => {
-  const focusKeys = await recordFocus(page);
+/** Opens Home with saved progress whose card lookup waits for the returned function. */
+async function openWaitingForCard(page: Page): Promise<() => void> {
   await mockAddons(page);
   await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
   await mockPlayback(page);
@@ -587,24 +585,144 @@ test('a key pressed while Home waits for a card ends the wait, and the row then 
   });
   await page.goto(APP_URL);
   await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  return answer;
+}
+
+test('an arrow pressed while Home waits for a card shows focus where Home opens, and the row then leaves it alone', async ({
+  page,
+}) => {
+  const focusKeys = await recordFocus(page);
+  const answer = await openWaitingForCard(page);
   expect(await focusKeys()).toEqual([]);
 
-  // The press ends the wait: Home places focus there and then, and the press
-  // carries on from it as it would from Home's opening place.
+  // As on any screen with nothing focused, the press shows where focus is.
   await page.keyboard.press('ArrowDown');
-  await expect
-    .poll(async () => (await focusKeys())[0]?.[1] ?? Infinity)
-    .toBeLessThan(WELL_BEFORE_CAP_MS);
-  const focused = page.locator('[data-focused="true"]');
-  await expect(focused).toHaveAttribute('data-focus-key', /^home-0-(movie|series)-top-tile-0$/);
-  const key = (await focused.getAttribute('data-focus-key'))!;
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  const shown = await focusKeys();
+  expect(shown.map(([key]) => key)).toEqual([`${FIRST_ROW}-tile-0`]);
+  expect(shown[0]![1]).toBeLessThan(WELL_BEFORE_CAP_MS);
 
   answer();
   await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
     'aria-label',
     'Big Buck Bunny, 2008',
   );
-  await expectFocus(page, key);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+});
+
+test('OK pressed while Home waits for a card opens nothing it did not show focused', async ({
+  page,
+}) => {
+  await openWaitingForCard(page);
+  await page.keyboard.press('Enter');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await page.waitForTimeout(500);
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveCount(0);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+});
+
+test('Back pressed while Home waits for a card does not leave the app', async ({ page }) => {
+  await openWaitingForCard(page);
+  await watchExit(page);
+  // A real key press, which the browser hands to each listener in turn (Escape counts as Back).
+  await page.keyboard.press('Escape');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await page.waitForTimeout(500);
+  expect(await exitRequested(page)).toBeUndefined();
+});
+
+/** Holds the app's read of one stored value until the returned function is called, as on a busy TV. */
+async function holdRead(page: Page, key: string): Promise<() => Promise<void>> {
+  await page.addInitScript((held) => {
+    const w = window as Window & { releaseRead?: () => void };
+    const released = new Promise<void>((resolve) => (w.releaseRead = resolve));
+    const get = IDBObjectStore.prototype.get;
+    const setSuccess = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
+    IDBObjectStore.prototype.get = function (this: IDBObjectStore, query: IDBValidKey) {
+      const request = get.call(this, query);
+      if (query !== held) return request;
+      Object.defineProperty(request, 'onsuccess', {
+        set(handler: (this: IDBRequest, event: Event) => void) {
+          setSuccess.call(request, (event: Event) => {
+            void released.then(() => handler.call(request, event));
+          });
+        },
+      });
+      return request;
+    };
+  }, key);
+  return () =>
+    page.evaluate(() => (window as Window & { releaseRead?: () => void }).releaseRead?.());
+}
+
+test('Back pressed while Home still reads saved progress stays in the app, and focus lands only on Continue watching', async ({
+  page,
+}) => {
+  const focusKeys = await recordFocus(page);
+  const releaseProgress = await holdRead(page, 'progress');
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [MOVIE_PART_WAY],
+    played: [card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' })],
+  });
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await watchExit(page);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  // Nothing is shown focused on a row that Continue Watching is about to come above.
+  expect(await focusKeys()).toEqual([]);
+
+  await releaseProgress();
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${CONTINUE_ROW}-tile-0`]);
+  expect(await exitRequested(page)).toBeUndefined();
+});
+
+test('Back pressed while the addon list is still being read stays in the app', async ({ page }) => {
+  const focusKeys = await recordFocus(page);
+  const releaseAddons = await holdRead(page, 'addons');
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expect(page.locator('[data-focus-key="rail-home"]')).toBeVisible();
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toHaveCount(0);
+  await watchExit(page);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  expect(await exitRequested(page)).toBeUndefined();
+  expect(await focusKeys()).toEqual([]);
+
+  await releaseAddons();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${FIRST_ROW}-tile-0`]);
+  expect(await exitRequested(page)).toBeUndefined();
+});
+
+test('a tile the pointer moves onto while Home waits for a card keeps focus', async ({ page }) => {
+  const focusKeys = await recordFocus(page);
+  const answer = await openWaitingForCard(page);
+  const tile = page.locator(`[data-focus-key="${SERIES_ROW}-tile-2"]`);
+  const box = await tile.boundingBox();
+  if (!box) throw new Error('tile 2 of the second row is not drawn');
+  await page.mouse.move(10, 10);
+  // Straight there, crossing nothing; the second row's top edge shows at the bottom of the screen.
+  await page.mouse.move(box.x + box.width / 2, box.y + 8);
+  await expectFocus(page, `${SERIES_ROW}-tile-2`);
+  // Home's own first focus does not take it away once the wait is over.
+  await page.waitForTimeout(500);
+  await expectFocus(page, `${SERIES_ROW}-tile-2`);
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${SERIES_ROW}-tile-2`]);
+
+  answer();
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    'Big Buck Bunny, 2008',
+  );
+  await expectFocus(page, `${SERIES_ROW}-tile-2`);
 });
 
 test('an episode played from a catalog row brings the row in above it, and the focused tile stays in view', async ({
