@@ -1,0 +1,77 @@
+{
+  "_id": "5bb3bd2e0e0a2633a7006b2b",
+  "air_date": "2018-10-01",
+  "episodes": [
+    {
+      "air_date": "2018-10-01",
+      "episode_number": 1,
+      "episode_type": "standard",
+      "id": 1575006,
+      "name": "Magic Xylophone",
+      "overview": "Bluey and Bingo fight over a magic xylophone that can freeze their dad.",
+      "production_code": "",
+      "runtime": 7,
+      "season_number": 1,
+      "show_id": 82728,
+      "still_path": "/tIxl4RsQ8dKI2aw4HvDgiqY4V8q.jpg",
+      "vote_average": 8.0,
+      "vote_count": 5,
+      "crew": [
+        {
+          "job": "Director",
+          "department": "Directing",
+          "credit_id": "5bb3be0b0e0a2633ab006be1",
+          "adult": false,
+          "gender": 2,
+          "id": 2263548,
+          "known_for_department": "Directing",
+          "name": "Joe Brumm",
+          "original_name": "Joe Brumm",
+          "popularity": 1.2,
+          "profile_path": null
+        }
+      ],
+      "guest_stars": []
+    },
+    {
+      "air_date": "2018-10-01",
+      "episode_number": 2,
+      "episode_type": "standard",
+      "id": 1575007,
+      "name": "Hospital",
+      "overview": "Bluey and Dad play hospital. Dad is the patient and he has some very odd ailments.",
+      "production_code": "",
+      "runtime": 7,
+      "season_number": 1,
+      "show_id": 82728,
+      "still_path": "/oTSxJ0n7ZxA6Uw5kHUe4D3XchW1.jpg",
+      "vote_average": 7.5,
+      "vote_count": 4,
+      "crew": [],
+      "guest_stars": []
+    },
+    {
+      "air_date": "2018-10-02",
+      "episode_number": 3,
+      "episode_type": "standard",
+      "id": 1575008,
+      "name": "Keepy Uppy",
+      "overview": "",
+      "production_code": "",
+      "runtime": 7,
+      "season_number": 1,
+      "show_id": 82728,
+      "still_path": null,
+      "vote_average": 0.0,
+      "vote_count": 0,
+      "crew": [],
+      "guest_stars": []
+    }
+  ],
+  "name": "Season 1",
+  "overview": "",
+  "id": 109185,
+  "poster_path": "/oU5QyJ1MT1Nf1fBdX4hPzcRk3Ro.jpg",
+  "season_number": 1,
+  "vote_average": 8.4
+}
