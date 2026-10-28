@@ -8,6 +8,8 @@ const luna = vi.hoisted(() => ({
   /** The mediaId of each subscription, in order, and those cancelled. */
   subscribed: [] as string[],
   cancelled: [] as string[],
+  /** How many subscriptions had been cancelled when each call was made. */
+  cancelledAtCall: [] as number[],
   /** Whether the pipeline describes the file to a subscription on this mediaId. */
   describes: (() => true) as (mediaId: string) => boolean,
   /** What the media service answers every call with... */
@@ -26,6 +28,7 @@ vi.mock('../platform/webos', async (importOriginal) => {
     lunaCall: (uri: string, params: Record<string, unknown>) => {
       luna.calls.push(uri);
       luna.mediaIds.push(params.mediaId);
+      luna.cancelledAtCall.push(luna.cancelled.length);
       const answer = luna.answers[uri.slice(uri.lastIndexOf('/') + 1)] ?? luna.answer;
       return lunaFailed(answer)
         ? Promise.reject(new LunaError(uri, answer))
@@ -85,6 +88,7 @@ beforeEach(() => {
   luna.mediaIds = [];
   luna.subscribed = [];
   luna.cancelled = [];
+  luna.cancelledAtCall = [];
   luna.describes = () => true;
   luna.answer = {};
   luna.answers = {};
@@ -182,17 +186,42 @@ describe('runEmbeddedTracksTest', () => {
     expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
   });
 
-  it('takes "No Error" from unsubscribe as no error, and notes the answer as it came', async () => {
+  it('asks to unsubscribe while the subscription is still open, then closes it', async () => {
     luna.answer = { returnValue: true };
-    // The TV flagged its unsubscribe answer as a failure, with the text "No Error".
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    const at = luna.calls.findIndex((uri) => uri.endsWith('/unsubscribe'));
+    expect(luna.cancelledAtCall[at]).toBe(0);
+    expect(luna.cancelled).toEqual(['media-1']);
+    expect(notes).toContain('unsubscribe "" : ok');
+    expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
+  });
+
+  it('notes a refused unsubscribe as the failure it is, and still finishes', async () => {
+    luna.answer = { returnValue: true };
+    // The media service fills in "No Error" whatever the outcome.
     luna.answers.unsubscribe = { returnValue: false, errorCode: 0, errorText: 'No Error' };
     const notes: string[] = [];
     runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
     await vi.advanceTimersByTimeAsync(60000);
-    expect(notes).toContain('setSubtitleEnable true : ok');
-    expect(notes).toContain('unsubscribe "" : ok (returnValue false, errorCode 0, No Error)');
-    expect(notes.some((line) => line.includes('com.webos.media/unsubscribe:'))).toBe(false);
+    expect(notes).toContain(
+      'unsubscribe: luna://com.webos.media/unsubscribe: No Error (errorCode 0)',
+    );
+    expect(luna.cancelled).toEqual(['media-1']);
     expect(notes[notes.length - 1]).toBe('Embedded tracks test done');
+  });
+
+  it('stops at subtitles on when the media service refuses them, whatever its text says', async () => {
+    luna.answer = { returnValue: true };
+    luna.answers.setSubtitleEnable = { returnValue: false, errorCode: 0, errorText: 'No Error' };
+    const notes: string[] = [];
+    runEmbeddedTracksTest(video as unknown as HTMLVideoElement, (line) => notes.push(line));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(notes).toContain(
+      'setSubtitleEnable: luna://com.webos.media/setSubtitleEnable: No Error (errorCode 0)',
+    );
+    expect(luna.calls.some((uri) => uri.endsWith('/selectTrack'))).toBe(false);
   });
 
   it('notes the error code of a call that fails', async () => {

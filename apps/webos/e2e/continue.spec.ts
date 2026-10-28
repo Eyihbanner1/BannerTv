@@ -502,17 +502,17 @@ test('when the row arrives above the focused catalog row, the rows slide to keep
   await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');
 });
 
-test('progress with no card yet, as after an update: Home waits a moment for it and opens on the row', async ({
-  page,
-}) => {
-  const errors = watchErrors(page);
-  // Every key focus lands on, from the first frame on.
+/**
+ * Notes every key focus lands on from the first frame on, with the page's
+ * clock (milliseconds since it started loading) when it did.
+ */
+async function recordFocus(page: Page): Promise<() => Promise<Array<[string, number]>>> {
   await page.addInitScript(() => {
-    const w = window as Window & { focusKeys?: string[] };
-    const keys: string[] = (w.focusKeys = []);
+    const w = window as Window & { focusKeys?: Array<[string, number]> };
+    const keys: Array<[string, number]> = (w.focusKeys = []);
     new MutationObserver(() => {
       const key = document.querySelector('[data-focused="true"]')?.getAttribute('data-focus-key');
-      if (key && keys[keys.length - 1] !== key) keys.push(key);
+      if (key && keys[keys.length - 1]?.[0] !== key) keys.push([key, performance.now()]);
     }).observe(document, {
       subtree: true,
       childList: true,
@@ -520,6 +520,20 @@ test('progress with no card yet, as after an update: Home waits a moment for it 
       attributeFilter: ['data-focused'],
     });
   });
+  return () =>
+    page.evaluate(
+      () => (window as Window & { focusKeys?: Array<[string, number]> }).focusKeys ?? [],
+    );
+}
+
+/** How long Home waits at most at launch for a title's card (CARD_WAIT_MS is 3 s). */
+const WELL_BEFORE_CAP_MS = 2500;
+
+test('progress with no card yet, as after an update: Home waits a moment for it and opens on the row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const focusKeys = await recordFocus(page);
   await mockAddons(page);
   await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
   await mockPlayback(page);
@@ -533,12 +547,64 @@ test('progress with no card yet, as after an update: Home waits a moment for it 
   await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
   await expectFocusLabel(page, 'Big Buck Bunny, 2008');
   // Focus went nowhere else first.
-  expect(
-    await page.evaluate(() => (window as Window & { focusKeys?: string[] }).focusKeys),
-  ).toEqual([`${CONTINUE_ROW}-tile-0`]);
+  expect((await focusKeys()).map(([key]) => key)).toEqual([`${CONTINUE_ROW}-tile-0`]);
   await expect(page.locator('section[aria-label="Big Buck Bunny"]:visible')).toBeVisible();
   await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
   expect(errors).toEqual([]);
+});
+
+test('a title lookup that fails at launch does not hold Home: it opens on the catalogs at once', async ({
+  page,
+}) => {
+  const focusKeys = await recordFocus(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
+  await mockPlayback(page);
+  await page.route(/^https:\/\/v3-cinemeta\.strem\.io\/meta\//, (route) =>
+    route.fulfill({ status: 404, body: '' }),
+  );
+  await page.goto(APP_URL);
+
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  const [first] = await focusKeys();
+  expect(first?.[0]).toBe(`${FIRST_ROW}-tile-0`);
+  expect(first?.[1]).toBeLessThan(WELL_BEFORE_CAP_MS);
+  await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
+});
+
+test('a key pressed while Home waits for a card ends the wait, and the row then leaves focus alone', async ({
+  page,
+}) => {
+  const focusKeys = await recordFocus(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { progress: [MOVIE_PART_WAY] });
+  await mockPlayback(page);
+  let answer!: () => void;
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await page.route(/^https:\/\/v3-cinemeta\.strem\.io\/meta\//, async (route) => {
+    await answered;
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  expect(await focusKeys()).toEqual([]);
+
+  // The press ends the wait: Home places focus there and then, and the press
+  // carries on from it as it would from Home's opening place.
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(async () => (await focusKeys())[0]?.[1] ?? Infinity)
+    .toBeLessThan(WELL_BEFORE_CAP_MS);
+  const focused = page.locator('[data-focused="true"]');
+  await expect(focused).toHaveAttribute('data-focus-key', /^home-0-(movie|series)-top-tile-0$/);
+  const key = (await focused.getAttribute('data-focus-key'))!;
+
+  answer();
+  await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    'Big Buck Bunny, 2008',
+  );
+  await expectFocus(page, key);
 });
 
 test('an episode played from a catalog row brings the row in above it, and the focused tile stays in view', async ({

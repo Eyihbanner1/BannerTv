@@ -184,8 +184,9 @@ export function runEmbeddedTracksTest(video: HTMLVideoElement, note: Note): () =
     await call('selectTrack', { mediaId, type: 'audio', index: 1 });
     await watch('after audio 1');
     if (stopped) return;
-    unsubscribe();
+    // The media service only finds a subscription still open, so it is asked first.
     await call('unsubscribe', { mediaId });
+    unsubscribe();
     say('Embedded tracks test done');
   };
 

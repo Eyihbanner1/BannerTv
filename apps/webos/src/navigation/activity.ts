@@ -8,8 +8,18 @@ const CLASS = 'is-browsing';
 export const IDLE_AFTER_MS = 3000;
 
 let timer: ReturnType<typeof setTimeout> | undefined;
+const listeners = new Set<() => void>();
+
+/** Tells `listener` each time the remote is used. */
+export function onActivity(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 export function markActivity(): void {
+  listeners.forEach((listener) => listener());
   const root = document.documentElement;
   if (!root.classList.contains(CLASS)) root.classList.add(CLASS);
   clearTimeout(timer);

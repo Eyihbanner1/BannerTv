@@ -7,8 +7,9 @@ import { push } from '../../app/router';
 import { useScreenSlot } from '../../app/screen-slot';
 import { Row } from '../../components/Row';
 import type { TileExtra } from '../../components/Tile';
-import { cardsMissing, fillPlayedCards } from '../../data/continue';
+import { cardsMissing, fillPlayedCards, onCardAnswer } from '../../data/continue';
 import { playedVideos, progress } from '../../data/playback';
+import { onActivity } from '../../navigation/activity';
 import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 
 /** The row's key on Home, beside the catalog rows' keys. */
@@ -17,7 +18,9 @@ export const CONTINUE_FOCUS_KEY = `home-${CONTINUE_ROW_KEY}`;
 const HOUR_MS = 60 * 60 * 1000;
 /** How long after launch Home waits for a tile whose card is still being fetched. */
 const CARD_WAIT_MS = 3000;
-const launchedAt = Date.now();
+// A steady clock, so the TV setting its time just after power-on cannot stretch the wait.
+const launchedAt = performance.now();
+const sinceLaunch = () => performance.now() - launchedAt;
 
 const sameTitles = (a: readonly ContinueItem[], b: readonly ContinueItem[]) =>
   a.length === b.length &&
@@ -110,11 +113,23 @@ export function useContinueItems(): ContinueItem[] | null {
   );
   const items = useSyncExternalStore(subscribe, snapshot);
   const [loaded, setLoaded] = useState(false);
-  const [waited, setWaited] = useState(() => Date.now() - launchedAt >= CARD_WAIT_MS);
+  // The wait ends at the cap, when no answer is still to come, or as soon as
+  // the viewer uses the remote, so a press is never lost to it.
+  const [waited, setWaited] = useState(() => sinceLaunch() >= CARD_WAIT_MS);
   useEffect(() => {
     if (waited) return;
-    const timer = setTimeout(() => setWaited(true), CARD_WAIT_MS - (Date.now() - launchedAt));
-    return () => clearTimeout(timer);
+    const stop = () => setWaited(true);
+    const timer = setTimeout(stop, CARD_WAIT_MS - sinceLaunch());
+    const undo = [
+      onCardAnswer(() => {
+        if (!cardsMissing()) stop();
+      }),
+      onActivity(stop),
+    ];
+    return () => {
+      clearTimeout(timer);
+      undo.forEach((off) => off());
+    };
   }, [waited]);
   useEffect(() => {
     let live = true;

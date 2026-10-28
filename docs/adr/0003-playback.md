@@ -80,8 +80,8 @@ The combined run on 28 October 2026 with build 7949e01 (Agent Hub message 1256, 
   - No crash, console error or out-of-memory kill.
 - **Lab Luna test: run to the end, no subtitle drawn.**
   - Opened again, the pipeline listed 8 subtitle tracks and 2 audio tracks. `setSubtitleEnable` and `selectTrack` text 0 and 1 answered OK and the clock kept moving, but no subtitle appeared on the picture. The audio switch was heard.
-  - `unsubscribe` flagged a failure with the text "No Error". The Luna wrapper now takes "No Error" at its word, and the Lab notes any answer that is not a plain success as it came.
-- **Changed after the run.** On the first launch after the update, Continue Watching had no title cards yet, so Home opened on the first catalog row and the row arrived above it. In the first 3 s after launch, Home now waits for those cards before placing focus, so it opens on the row. After that, a row that arrives late still leaves focus where it is.
+  - `unsubscribe` answered `returnValue: false`. The media service writes "No Error" into every answer, failures included, so only `returnValue` counts. It failed because the Lab had already closed its subscription before asking; the Lab now asks first, and notes error codes and any answer that is not a plain success.
+- **Changed after the run.** On the first launch after the update, Continue Watching had no title cards yet, so Home opened on the first catalog row and the row arrived above it. In the first 3 s after launch, Home now waits for cards still being fetched before placing focus, so it opens on the row. The wait ends early when no answer is still to come or the viewer presses a key. After that, a row that arrives late still leaves focus where it is.
 
 Still to check on the TV:
 
