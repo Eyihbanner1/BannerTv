@@ -57,7 +57,7 @@ Items 34 and 35 weren't captured in the research; read them in the form.
 | --- | --- | --- | --- |
 | 41 | Change language | Only if the app has a language setting | N/A in v1 (English only) |
 | 42 | Sound | | Phase 2 |
-| 43 | Play contents | Playback throttled to 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, plus an IPv6 network; quality adapts and buffering isn't constant | Phase 2. The Demo addon is adaptive HLS in five sizes, from 288p (peak about 313 kbps) to 1080p, so the 512 kbps test has a size with room to spare and faster links step up towards 1080p. `workers.dev` answers over IPv6; check it from Korea before submitting (DEMO_ADDON.md on PR #8, Deploying, step 7) |
+| 43 | Play contents | Playback throttled to 512 kbps, 1 Mbps, 7 Mbps and 17.5 Mbps, twice each, plus an IPv6 network; quality adapts and buffering isn't constant | Phase 2. The Demo addon is adaptive HLS in five sizes, from 288p to 1080p. With a fifth of the link kept spare, each of LG's four speeds has a size that fits (measured peaks: 288p 326 to 338 kbps, 360p 536 to 572, 720p 3,490 to 3,798, 1080p 5,834 to 6,712), and the player's own estimate picks between them, stepping up towards 1080p. `demo.bannertv.workers.dev` answered over IPv6 and from Korea on 28 October; Korean speeds varied, so re-check with Globalping before submitting (DEMO_ADDON.md on PR #8, Deploying) |
 | 44 | Full and original screen | Switching works, if offered | N/A unless a zoom option is added |
 | 45 | Playback controls | Play, Pause, Stop, Fast forward, Rewind, Seek, Previous, Next by arrows and pointer; remote media keys do the same as the buttons; sound in sync | Phase 2 |
 | 46 | Replay | Playing again after the end | Phase 2 |
