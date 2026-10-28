@@ -187,3 +187,14 @@ export {
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
+export {
+  createTmdbClient,
+  TMDB_POLICY,
+  type TmdbClient,
+  type TmdbClientOptions,
+  type TmdbDetails,
+  type TmdbEpisode,
+  type TmdbImageSize,
+  tmdbImageUrl,
+  type TmdbPerson,
+} from './integrations/tmdb/client';
