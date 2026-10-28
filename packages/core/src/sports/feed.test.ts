@@ -12,6 +12,7 @@ import type { Timers } from '../timers';
 import { catalogView, isSportsCatalog, sportsCatalogs } from './detect';
 import { createSportsFeed, FULL_PAGE, MAX_GENRES, MAX_PAGES } from './feed';
 import { createKickoffMemory } from './kickoffs';
+import { localDate } from './time';
 import { eventState } from './view';
 
 const NOW = Date.parse('2026-10-28T12:00:00Z');
@@ -29,8 +30,11 @@ interface FakeCatalog {
   genres?: string[];
   /** A response other than the page, for crash tests. */
   answer?: (url: string) => Promise<unknown>;
-  /** Answers any page asked with `skip` with an error, as addons that do not expect it may. */
-  rejectSkip?: boolean;
+  /**
+   * Answers any page asked with `skip` with an error, as addons that do not
+   * expect it may: 404, or the status given.
+   */
+  rejectSkip?: boolean | number;
 }
 
 function match(n: number, at: number, extra: Record<string, unknown> = {}) {
@@ -109,7 +113,8 @@ function fakeAddon(name: string, catalogs: FakeCatalog[], options: { base?: stri
       if (key && value !== undefined) extra[key] = decodeURIComponent(value);
     }
     if (catalog.rejectSkip && extra.skip !== undefined) {
-      return Promise.reject(new HttpError('status', 'Not found', 404));
+      const status = catalog.rejectSkip === true ? 404 : catalog.rejectSkip;
+      return Promise.reject(new HttpError('status', `Status ${status}`, status));
     }
     const skip = Number(extra.skip ?? 0);
     const genre = extra.genre;
@@ -482,38 +487,41 @@ describe('paging by events', () => {
     expect(feed.get().more).toBe(false);
   });
 
-  it('keeps an addon that answers the skip probe with an error, and asks per genre', async () => {
-    const genres = ['League A', 'League B'];
-    const items = Array.from({ length: FULL_PAGE }, (_, n) =>
-      match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 2]!] }),
-    );
-    const fake = fakeAddon('Strict', [
-      {
-        id: 'football',
-        name: 'Football',
-        items,
-        pageSize: FULL_PAGE,
-        declareSkip: false,
-        rejectSkip: true,
-        genres,
-      },
-    ]);
-    const { feed, clock } = await setup([fake]);
-    feed.want(day());
-    await clock.advance(2000);
-    expect(feed.get().events).toHaveLength(FULL_PAGE);
-    expect(feed.get().failed).toEqual([]);
-    expect(fake.requests).toEqual([
-      '/catalog/sport/football.json',
-      `/catalog/sport/football/skip=${FULL_PAGE}.json`,
-      '/catalog/sport/football/genre=League%20A.json',
-      '/catalog/sport/football/genre=League%20B.json',
-    ]);
-    // Try again is for addons that did not answer: the guess is not asked again.
-    feed.retry();
-    await clock.advance(1000);
-    expect(fake.requests).toHaveLength(4);
-  });
+  it.each([404, 500])(
+    'keeps an addon that answers the skip probe with %i, and asks per genre',
+    async (status) => {
+      const genres = ['League A', 'League B'];
+      const items = Array.from({ length: FULL_PAGE }, (_, n) =>
+        match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 2]!] }),
+      );
+      const fake = fakeAddon('Strict', [
+        {
+          id: 'football',
+          name: 'Football',
+          items,
+          pageSize: FULL_PAGE,
+          declareSkip: false,
+          rejectSkip: status,
+          genres,
+        },
+      ]);
+      const { feed, clock } = await setup([fake]);
+      feed.want(day());
+      await clock.advance(2000);
+      expect(feed.get().events).toHaveLength(FULL_PAGE);
+      expect(feed.get().failed).toEqual([]);
+      expect(fake.requests).toEqual([
+        '/catalog/sport/football.json',
+        `/catalog/sport/football/skip=${FULL_PAGE}.json`,
+        '/catalog/sport/football/genre=League%20A.json',
+        '/catalog/sport/football/genre=League%20B.json',
+      ]);
+      // Try again is for addons that did not answer: the guess is not asked again.
+      feed.retry();
+      await clock.advance(1000);
+      expect(fake.requests).toHaveLength(4);
+    },
+  );
 });
 
 describe('request slots', () => {
@@ -992,6 +1000,49 @@ describe('clock-only times', () => {
     expect(memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
   });
 
+  it('keeps the same list on last night when it is seen after midnight', async () => {
+    const night = Date.parse('2026-10-29T01:00:00Z');
+    const items = ['20:00', '22:00', '23:45', '00:30', '02:00'].map((t, n) => clockMatch(n, t));
+    const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
+    const { feed, clock, memory } = await setup([fake], { now: () => night });
+    feed.want(localDate(night));
+    await clock.advance(1000);
+    const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
+    expect(event('ev:0').kickOff?.at).toBe(at('2026-10-28T20:00:00Z'));
+    expect(event('ev:2').kickOff?.at).toBe(at('2026-10-28T23:45:00Z'));
+    // Under way for half an hour, and an hour away: neither is tomorrow's.
+    expect(event('ev:3').kickOff?.at).toBe(at('2026-10-29T00:30:00Z'));
+    expect(event('ev:4').kickOff?.at).toBe(at('2026-10-29T02:00:00Z'));
+    expect(eventState(event('ev:4'), { now: night })).toBe('upcoming');
+    expect(memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
+  });
+
+  it('keeps a live-first list on its days around midnight, and live once a time turns LIVE', async () => {
+    let time = Date.parse('2026-10-29T00:20:00Z');
+    // 00:10 and last night's 23:50 are under way, live first; 00:30 and 01:00 are to come.
+    const items = ['00:10', '23:50', '00:30', '01:00'].map((t, n) => clockMatch(n, t));
+    const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
+    const { feed, clock, memory } = await setup([fake], { now: () => time });
+    feed.want(localDate(time));
+    await clock.advance(1000);
+    const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
+    expect(event('ev:1').kickOff?.at).toBe(at('2026-10-28T23:50:00Z'));
+    expect(eventState(event('ev:1'), { now: time })).toBe('live');
+    expect(event('ev:2').kickOff?.at).toBe(at('2026-10-29T00:30:00Z'));
+    expect(event('ev:3').kickOff?.at).toBe(at('2026-10-29T01:00:00Z'));
+    expect(memory.get(fake.addon.manifest.id, 'ev:2')?.at).toBe(at('2026-10-29T00:30:00Z'));
+    // The addon swaps the 00:30's time for LIVE once it starts: memory keeps its day.
+    time = Date.parse('2026-10-29T00:40:00Z');
+    items[2] = { ...items[2]!, releaseInfo: 'LIVE' };
+    feed.refresh();
+    await clock.advance(3 * 60 * 1000);
+    expect(event('ev:2').kickOff).toMatchObject({
+      at: at('2026-10-29T00:30:00Z'),
+      source: 'remembered',
+    });
+    expect(eventState(event('ev:2'), { now: time })).toBe('live');
+  });
+
   it('reads a wrap across pages, and stops paging once the list reaches tomorrow', async () => {
     // Every quarter of an hour from 17:00: the last two are at 00:00 and 00:15.
     const items = Array.from({ length: 30 }, (_, n) => {
@@ -1070,6 +1121,38 @@ describe('pages that could not answer', () => {
     await clock.advance(1000);
     expect(feed.get().events).toHaveLength(120);
     expect(feed.get().failed).toEqual([]);
+  });
+
+  it('gives up the skip probe when it does not answer twice, and asks per genre', async () => {
+    const genres = ['League A', 'League B'];
+    const items = Array.from({ length: FULL_PAGE }, (_, n) =>
+      match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 2]!] }),
+    );
+    const answer = (url: string) =>
+      skipOf(url) > 0
+        ? timedOut()
+        : Promise.resolve({
+            metas: items.filter((item) => {
+              const genre = /genre=([^/.]+)/.exec(url)?.[1];
+              return !genre || (item.genres as string[])[1] === decodeURIComponent(genre);
+            }),
+          });
+    const fake = fakeAddon('Slow', [
+      { id: 'football', name: 'Football', items: [], answer, declareSkip: false, genres },
+    ]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day());
+    await clock.advance(1000);
+    expect(feed.get().failed).toEqual(['Slow']);
+    feed.retry();
+    await clock.advance(1000);
+    expect(feed.get().failed).toEqual([]);
+    expect(feed.get().events).toHaveLength(FULL_PAGE);
+    expect(fake.requests.filter((r) => r.indexOf('skip=') !== -1)).toHaveLength(2);
+    expect(fake.requests.filter((r) => r.indexOf('genre=') !== -1)).toHaveLength(2);
+    feed.retry();
+    await clock.advance(1000);
+    expect(fake.requests.filter((r) => r.indexOf('skip=') !== -1)).toHaveLength(2);
   });
 
   it('asks catalogs that stopped answering no more often than a fresh copy, on ticks and day changes', async () => {

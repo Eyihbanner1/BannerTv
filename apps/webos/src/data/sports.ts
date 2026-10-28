@@ -417,21 +417,15 @@ export function itemSources(sources: readonly EventSource[]): ItemSource[] {
   return found;
 }
 
-/**
- * Events read from items of one sports catalog that Discover or a search
- * fetched, with the same rules as the Sports screen. Empty when nothing reads
- * as an event (channels, placeholders) or when the catalog is not a sports one.
- */
-export function eventsFromItems(
+/** How items of one sports catalog are read, or undefined when the catalog is not a sports one. */
+function readingOf(
   addon: InstalledAddon,
   catalog: ManifestCatalog,
-  items: readonly MetaPreview[],
-): SportEvent[] {
-  if (!SPORTS_IN_BUILD) return [];
+): { context: CatalogContext; zone?: string } | undefined {
   const { catalogs, searchLeaveOut } = sportsState.get();
   const entry = catalogs.find((e) => e.addon === addon && e.catalog === catalog);
   const searched = catalogAccepts(catalog, ['search']);
-  if (!entry && !(searched && searchLeaveOut?.(addon, catalog))) return [];
+  if (!entry && !(searched && searchLeaveOut?.(addon, catalog))) return undefined;
   const { addons } = addonCollection.get();
   const context: CatalogContext = {
     addonIndex: Math.max(0, addons.indexOf(addon)),
@@ -447,8 +441,12 @@ export function eventsFromItems(
   const zone =
     entry?.zone ??
     catalogs.find((e) => e.addon.transportUrl === addon.transportUrl && e.zone)?.zone;
-  if (zone) context.zone = zone;
-  const now = Date.now();
+  if (!zone) return { context };
+  context.zone = zone;
+  return { context, zone };
+}
+
+function readItems(context: CatalogContext, items: readonly MetaPreview[], now: number): Listing[] {
   const listings: Listing[] = [];
   for (const item of items) {
     try {
@@ -458,15 +456,83 @@ export function eventsFromItems(
       // One odd item never takes the rest with it.
     }
   }
+  return listings;
+}
+
+function build(listings: readonly Listing[]): SportEvent[] {
   try {
-    // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
-    return buildEvents(rollClockWraps(listings, zone), {
+    return buildEvents(listings, {
       matcher: sportsMatcher.get(),
       remembered: (addonId, id) => kickoffs.get(addonId, id),
     });
   } catch {
     return [];
   }
+}
+
+/**
+ * Events read from items of one sports catalog that Discover or a search
+ * fetched, with the same rules as the Sports screen. Empty when nothing reads
+ * as an event (channels, placeholders) or when the catalog is not a sports one.
+ */
+export function eventsFromItems(
+  addon: InstalledAddon,
+  catalog: ManifestCatalog,
+  items: readonly MetaPreview[],
+): SportEvent[] {
+  if (!SPORTS_IN_BUILD) return [];
+  const reading = readingOf(addon, catalog);
+  if (!reading) return [];
+  const now = Date.now();
+  try {
+    // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
+    return build(rollClockWraps(readItems(reading.context, items, now), reading.zone, now));
+  } catch {
+    return [];
+  }
+}
+
+// A Discover list read for its clock-only times, once per list: a press looks its tile up.
+const rolledLists = new WeakMap<
+  readonly MetaPreview[],
+  { addon: InstalledAddon; catalog: ManifestCatalog; byId: Map<string, Listing> }
+>();
+
+/**
+ * The match a tile of a sports catalog opens: the tile alone, as before,
+ * except that a clock-only time takes its day from the list the tile is in,
+ * so 00:30 after 23:45 is tomorrow's. None for a channel, or an item that is
+ * not a match.
+ */
+export function eventForItem(
+  addon: InstalledAddon,
+  catalog: ManifestCatalog,
+  items: readonly MetaPreview[],
+  item: MetaPreview,
+): SportEvent | undefined {
+  if (!SPORTS_IN_BUILD) return undefined;
+  const reading = readingOf(addon, catalog);
+  if (!reading) return undefined;
+  const now = Date.now();
+  let [listing] = readItems(reading.context, [item], now);
+  if (!listing) return undefined;
+  if (listing.kickOff?.source === 'clock') {
+    let rolled = rolledLists.get(items);
+    if (!rolled || rolled.addon !== addon || rolled.catalog !== catalog) {
+      const byId = new Map<string, Listing>();
+      try {
+        const listings = rollClockWraps(readItems(reading.context, items, now), reading.zone, now);
+        for (const one of listings) if (!byId.has(one.source.id)) byId.set(one.source.id, one);
+      } catch {
+        // The tile's own reading stands.
+      }
+      rolled = { addon, catalog, byId };
+      rolledLists.set(items, rolled);
+    }
+    listing = rolled.byId.get(item.id) ?? listing;
+  }
+  const [event] = build([listing]);
+  return event && event.kind !== 'channel' ? event : undefined;
 }
 
 /** The event as the feed has it now, for a page opened on an older copy. */

@@ -118,6 +118,8 @@ interface PageRead {
   items: string[];
   /** The ids of the events among them, in order. */
   events: string[];
+  /** When it was read, which settles the day of clock-only times. */
+  at: number;
 }
 
 interface Page {
@@ -150,6 +152,8 @@ interface Track {
   stopped?: StopReason;
   /** Asked once with `skip` although the catalog does not declare it. */
   probed: boolean;
+  /** The probe's failures with no answer at all, each counted once. */
+  probeMisses?: Error[];
   pageable: boolean;
   /** How the addon counts `skip`, once the second page shows it. */
   counting?: 'items' | 'events';
@@ -172,6 +176,20 @@ function sameCatalog(a: SportsCatalog, b: SportsCatalog): boolean {
 
 function isEvent(listing: Listing): boolean {
   return listing.kind === 'event' || listing.kind === 'replay';
+}
+
+/**
+ * The probe with `skip` asks what the addon never offered: any answer, an
+ * error page of any status included, is a refusal. Only no answer at all is
+ * asked again, and only once.
+ */
+function probeRefused(track: Track, error: Error | undefined): boolean {
+  const unanswered =
+    error instanceof HttpError && (error.kind === 'timeout' || error.kind === 'network');
+  if (!unanswered) return true;
+  const misses = track.probeMisses ?? (track.probeMisses = []);
+  if (misses.indexOf(error) === -1) misses.push(error);
+  return misses.length >= 2;
 }
 
 /** No answer in time, the server's own error, or too many asked: asking later may get one. */
@@ -385,7 +403,7 @@ export function createSportsFeed(options: {
       listings.push(listing);
       if (isEvent(listing)) events.push(item.id);
     }
-    page.read = { data, listings, items, events };
+    page.read = { data, listings, items, events, at };
     return page.read;
   }
 
@@ -435,12 +453,15 @@ export function createSportsFeed(options: {
     if (known && known.reads.length === reads.length && known.reads.every((r, i) => r === reads[i]))
       return known;
     const read: Listing[] = [];
+    let readAt = 0;
     for (const pageRead of reads) {
-      if (pageRead) for (const listing of pageRead.listings) read.push(listing);
+      if (!pageRead) continue;
+      for (const listing of pageRead.listings) read.push(listing);
+      readAt = Math.max(readAt, pageRead.at);
     }
-    // Clock-only times are on the addon's day until the list wraps past midnight
-    // (docs/PLAN.md, Time, live and finished).
-    track.listings = { reads, read, listings: rollClockWraps(read, track.entry.zone) };
+    // Clock-only times are on one day, the next after the list wraps past midnight,
+    // as of the latest read (docs/PLAN.md, Time, live and finished).
+    track.listings = { reads, read, listings: rollClockWraps(read, track.entry.zone, readAt) };
     return track.listings;
   }
 
@@ -682,10 +703,11 @@ export function createSportsFeed(options: {
             current.probed &&
             !current.pageable &&
             current.pages.length === 2 &&
-            !mayPass(page.error)
+            probeRefused(current, page.error)
           ) {
-            // Addons that do not expect `skip` may refuse it. One that did not answer in
-            // time stays a failed page, asked again by Try again or the next recheck.
+            // Addons that do not expect `skip` may refuse it, with any status. One that did
+            // not answer in time stays a failed page, asked again by Try again or the next
+            // recheck, and is given up the second time.
             dropProbe(current);
             continue;
           }

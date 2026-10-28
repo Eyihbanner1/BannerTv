@@ -183,7 +183,7 @@ export interface SportsOptions {
    * once this settles.
    */
   liveEvents?: Promise<void>;
-  /** Installs Test Sports first, before Cinemeta. */
+  /** Installs the sports addons first, before Cinemeta. */
   sportsFirst?: boolean;
   /**
    * Installs More Sports before Test Sports, so a request sent to every addon
@@ -239,15 +239,16 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
         },
       ]
     : [];
+  const sportsAddons = options.moreSportsFirst ? [...more, sports] : [sports, ...more];
   const addons = [
-    ...(options.sportsFirst ? [sports] : []),
+    ...(options.sportsFirst ? sportsAddons : []),
     {
       transportUrl: 'https://v3-cinemeta.strem.io/manifest.json',
       manifest: cinemeta,
       official: true,
       fetchedAt: 0,
     },
-    ...(options.sportsFirst ? [] : options.moreSportsFirst ? [...more, sports] : [sports, ...more]),
+    ...(options.sportsFirst ? [] : sportsAddons),
     {
       transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
       manifest: subtitles,

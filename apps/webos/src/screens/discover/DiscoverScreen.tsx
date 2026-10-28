@@ -14,7 +14,7 @@ import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
-import { eventsFromItems, noteFirstPage } from '../../data/sports';
+import { eventForItem, noteFirstPage } from '../../data/sports';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
@@ -144,13 +144,14 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
   }, [source, genre, firstItems]);
 
   // A match in a sports catalog opens its event page, which asks only this addon.
+  const items = state.items;
   const onPress = useCallback(
     (item: MetaPreview) => {
-      const [event, ...more] = source ? eventsFromItems(source.addon, source.catalog, [item]) : [];
-      if (event && more.length === 0 && event.kind !== 'channel') push({ name: 'event', event });
+      const event = source ? eventForItem(source.addon, source.catalog, items, item) : undefined;
+      if (event) push({ name: 'event', event });
       else openDetails(item);
     },
-    [source],
+    [source, items],
   );
 
   const restored =

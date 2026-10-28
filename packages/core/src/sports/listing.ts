@@ -16,7 +16,7 @@ import {
   stripDecorations,
   teamKey,
 } from './text';
-import { nextDayAt, readKickOff } from './time';
+import { nextDayAt, readKickOff, wallClock } from './time';
 import type { CompetitionSource, EventSource, ItemKind, KickOff, Sport } from './types';
 
 /** What BannerTV knows about the catalog an item came from. */
@@ -300,48 +300,100 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
   return listing;
 }
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY_MINUTES = 24 * 60;
 
 /**
- * Clock-only times ("23:00") are read on the addon's current day. In a
- * catalog listed by kick-off, the list wraps past midnight where a clock goes
- * back by more than half a day ("22:00", "23:45", "00:30"): from there on the
- * times are the next day's, by the calendar in the addon's zone (docs/PLAN.md,
- * Time). A list whose clocks go back by less (beyond the hour live-first lists
- * allow) is not in kick-off order and is left as it is. Pass a catalog's
- * listings in the order the addon sent them, across its pages.
+ * The step from one clock-only time to the next on the wall clock, in
+ * minutes. A step back of up to an hour is one live-first lists make
+ * ("00:10", then "23:50" still on from last night). One back by more than
+ * half a day wraps past midnight ("23:45", "00:30"). Undefined for a step
+ * back between the two: the list is not in kick-off order.
  */
-export function rollClockWraps(listings: readonly Listing[], zone: string | undefined): Listing[] {
-  // Days on, by place in the list, for the clock-only times.
-  const shifts: number[] = [];
+function clockStep(from: number, to: number): number | undefined {
+  const forward = (((to - from) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  if (forward > 0 && DAY_MINUTES - forward <= 60) return forward - DAY_MINUTES;
+  if (to >= from || from - to > DAY_MINUTES / 2) return forward;
+  return undefined;
+}
+
+/**
+ * Clock-only times ("23:00") carry no date: readClock puts each on the
+ * addon's day, or last night when it is nearly a day away. In a catalog
+ * listed by kick-off, the steps from one to the next say how the list runs:
+ * where it wraps past midnight ("22:00", "23:45", "00:30") the times are the
+ * next day's, by the calendar in the addon's zone (docs/PLAN.md, Time). The
+ * whole list then goes on one run of days: from the first time's day, or a
+ * day earlier, whichever puts more of its times where readClock would put
+ * each alone, so a list still showing last night's matches after midnight
+ * stays on last night. A list that steps back by more than an hour (beyond
+ * the slack live-first lists need) and less than half a day is not in
+ * kick-off order, and is left as readClock placed it. Pass a catalog's
+ * listings in the order the addon sent them, across its pages, and the time
+ * they were read. With no zone, the clocks named their own, and UTC days are
+ * counted.
+ */
+export function rollClockWraps(
+  listings: readonly Listing[],
+  zone: string | undefined,
+  now: number,
+): Listing[] {
+  // Each clock-only time's day as placed, and its day in the list's own run of days.
+  const days: Array<{ placed: number; run: number } | undefined> = [];
   // Pages overlap by a few items, and by more once a live list has moved on: a repeat is
   // the same match on its first copy's day, and no step in the order.
-  const shiftOf = new Map<string, number>();
-  let previous: number | undefined;
-  let wraps = 0;
+  const runOf = new Map<string, number>();
+  // Minutes from the first time's midnight, and roughly when each falls, for the day to use.
+  const times: number[] = [];
+  let first: { at: number; day: number; minutes: number } | undefined;
+  let position = 0;
+  let previous = 0;
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i]!;
     const kickOff = listing.kickOff;
     if (kickOff?.source !== 'clock' || kickOff.at === undefined) continue;
-    const repeat = shiftOf.get(listing.source.id);
+    const wall = wallClock(kickOff.at, zone);
+    if (!wall) continue;
+    const repeat = runOf.get(listing.source.id);
     if (repeat !== undefined) {
-      shifts[i] = repeat;
+      days[i] = { placed: wall.day, run: repeat };
       continue;
     }
-    if (previous !== undefined && kickOff.at < previous - HOUR) {
-      if (kickOff.at > previous - 12 * HOUR) return listings.slice();
-      wraps++;
+    if (!first) {
+      first = { at: kickOff.at, day: wall.day, minutes: wall.minutes };
+      position = wall.minutes;
+    } else {
+      const step = clockStep(previous, wall.minutes);
+      if (step === undefined) return listings.slice();
+      position += step;
     }
-    previous = kickOff.at;
-    shiftOf.set(listing.source.id, wraps);
-    shifts[i] = wraps;
+    previous = wall.minutes;
+    const run = Math.floor(position / DAY_MINUTES);
+    runOf.set(listing.source.id, run);
+    days[i] = { placed: wall.day, run };
+    times.push(first.at + (position - first.minutes) * MINUTE);
   }
-  if (wraps === 0) return listings.slice();
+  if (!first) return listings.slice();
+  const start = first.day;
+  // From the first time's day as readClock placed it, unless a day earlier puts more of
+  // the list where readClock puts a lone time.
+  const near = (shift: number) => {
+    let count = 0;
+    for (const at of times) {
+      const placed = at + shift * 24 * HOUR;
+      if (placed > now - 4 * HOUR && placed <= now + 20 * HOUR) count++;
+    }
+    return count;
+  };
+  const shift = near(-1) > near(0) ? -1 : 0;
   return listings.map((listing, i) => {
-    const days = shifts[i];
+    const day = days[i];
     const kickOff = listing.kickOff;
-    if (!days || kickOff?.at === undefined) return listing;
-    const at = nextDayAt(kickOff.at, zone, days);
+    if (!day || kickOff?.at === undefined) return listing;
+    const move = start + shift + day.run - day.placed;
+    if (move === 0) return listing;
+    const at = nextDayAt(kickOff.at, zone, move);
     return at === undefined ? listing : { ...listing, kickOff: { ...kickOff, at } };
   });
 }

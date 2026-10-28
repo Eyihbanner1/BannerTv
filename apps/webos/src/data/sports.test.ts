@@ -211,3 +211,48 @@ describe('events read from a search of a sports addon', () => {
     ]);
   });
 });
+
+describe('a match opened from its catalog in Discover', () => {
+  it('reads the time with the list it is in, so 00:30 after 23:45 is tomorrow', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T23:30:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const items = [
+      ['Arsenal vs Chelsea', '22:00'],
+      ['Celtic vs Rangers', '23:45'],
+      ['Ajax vs PSV', '00:30'],
+    ].map(([name, releaseInfo], i) =>
+      parseMetaPreview({ id: `x:${i}`, type: 'tv', name, releaseInfo })!,
+    );
+    const football = catalogOf(addon, 'football');
+
+    const event = sports.eventForItem(addon, football, items, items[2]!);
+    expect(event?.sources[0]?.id).toBe('x:2');
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T00:30:00Z'));
+    // Alone, the same tile would be this morning's.
+    expect(sports.eventsFromItems(addon, football, [items[2]!])[0]?.kickOff?.at).toBe(
+      Date.parse('2026-10-28T00:30:00Z'),
+    );
+  });
+
+  it('opens the tile pressed, not an earlier one it would merge with', async () => {
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    // The home and away games of a season, neither dated.
+    const items = ['Arsenal vs Chelsea', 'Liverpool vs Everton', 'Chelsea vs Arsenal'].map(
+      (name, i) => parseMetaPreview({ id: `r:${i}`, type: 'tv', name })!,
+    );
+    const event = sports.eventForItem(addon, catalogOf(addon, 'football'), items, items[2]!);
+    expect(event?.sources.map((source) => source.id)).toEqual(['r:2']);
+    expect(event?.home).toBe('Chelsea');
+  });
+});
