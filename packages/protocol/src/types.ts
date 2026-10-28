@@ -94,6 +94,9 @@ export interface SportHints {
   start?: string;
   home?: string;
   away?: string;
+  /** The `logo` of a `{ name, logo }` team, an http(s) address of the addon's choosing. */
+  homeLogo?: string;
+  awayLogo?: string;
   /** A non-standard `isLive`. */
   live?: boolean;
   /** A non-standard `category`, usually the sport. */

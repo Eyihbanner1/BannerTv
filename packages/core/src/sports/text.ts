@@ -1,3 +1,5 @@
+import { sortStable } from './sort';
+
 /**
  * Reading sports items' text: folding names for comparison, taking live
  * markers and scores off titles, and finding the two teams. Every pattern
@@ -161,8 +163,9 @@ const LIVE_PREFIX =
   /^(?:live now|live|en vivo|ao vivo|en direct|in diretta|diretta|vivo)\b\s*(?:[:·|•\-–—!]\s*)?/i;
 const LIVE_WORD =
   /^(?:live|live now|🔴\s*live|en vivo|ao vivo|en direct|in diretta|diretta|vivo)$/i;
-// A score, "2-1", "2 - 1" or "(2-1)", at the end, or a match minute "67'".
-const TRAILING_SCORE = /\s*(?:\(\s*\d{1,3}\s*[-–:]\s*\d{1,3}\s*\)|\d{1,3}\s*[-–]\s*\d{1,3})\s*$/;
+// A score, "2-1", "2 - 1" or "(2-1)", at the end, or a match minute "67'". Whole
+// numbers only: "NBA 2025-26" is a season, not "NBA 2" and a score of 025-26.
+const TRAILING_SCORE = /\s*(?:\(\s*\d{1,3}\s*[-–:]\s*\d{1,3}\s*\)|\b\d{1,3}\s*[-–]\s*\d{1,3})\s*$/;
 
 /** Whether a short label (releaseInfo, a name prefix) says the event is live. */
 export function isLiveLabel(text: string | undefined): boolean {
@@ -239,10 +242,14 @@ const AT = /\s+(?:@|at)\s+/i;
 const DASH = /\s+[-–]\s+/;
 
 function prefixAndSide(text: string): { prefix?: string; side: string } {
-  // "Country - Competition : Home" or "Competition: Home".
+  // "Country - Competition : Home" or "Competition: Home". A competition can end in a
+  // number ("Ligue 1: Paris Saint-Germain", "UFC 310: Pantoja"); a time ("19:45: Celtic") is
+  // no competition, so it is dropped with the colon.
   const colon = /^(.*\S)\s*:\s+(\S.*)$/.exec(text);
-  if (colon && !/\d$/.test(colon[1]!)) return { prefix: colon[1]!.trim(), side: colon[2]!.trim() };
-  return { side: text.trim() };
+  if (!colon) return { side: text.trim() };
+  const prefix = colon[1]!.trim();
+  const side = colon[2]!.trim();
+  return /^\d{1,2}[:.]\d{2}$/.test(prefix) ? { side } : { prefix, side };
 }
 
 function suffixAndSide(text: string): { side: string; suffix?: string } {
@@ -300,16 +307,30 @@ export function dropRanking(side: string): string {
   return side.replace(/^#?\d{1,2}\s+(?=\D)/, '').trim();
 }
 
-/** "Game 2", "Day 3", "Leg 2", "Race 1" in a title: copies merge only with the same number. */
+const SEQUENCE =
+  /\b(game|day|leg|race|match|test|odi|t20i?)\s*#?(\d{1,2})\b|\b(\d{1,2})(?:st|nd|rd|th)\s+(test|odi|t20i?|game|day|leg)\b/gi;
+// More numbers than this in one name is junk, not a match.
+const MAX_SEQUENCE_PARTS = 3;
+
+/**
+ * "Game 2", "Day 3", "Leg 2", "Race 1" in a title: copies merge only with the
+ * same numbers. Every one counts, so "1st Test Day 1" and "1st Test Day 2" are
+ * two days of one Test ("day1-test1", "day2-test1"), in either order.
+ */
 export function sequenceNumber(text: string): string | undefined {
-  const match =
-    /\b(game|day|leg|race|match|test|odi|t20i?)\s*#?(\d{1,2})\b|\b(\d{1,2})(?:st|nd|rd|th)\s+(test|odi|t20i?|game|day|leg)\b/i.exec(
-      text,
-    );
-  if (!match) return undefined;
-  return match[1]
-    ? `${match[1].toLowerCase()}${match[2]}`
-    : `${match[4]!.toLowerCase()}${match[3]}`;
+  const parts: string[] = [];
+  SEQUENCE.lastIndex = 0;
+  for (let match = SEQUENCE.exec(text); match; match = SEQUENCE.exec(text)) {
+    const part = match[1]
+      ? `${match[1].toLowerCase()}${match[2]}`
+      : `${match[4]!.toLowerCase()}${match[3]}`;
+    if (parts.indexOf(part) !== -1) continue;
+    parts.push(part);
+    if (parts.length === MAX_SEQUENCE_PARTS) break;
+  }
+  SEQUENCE.lastIndex = 0;
+  if (parts.length === 0) return undefined;
+  return sortStable(parts, (a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('-');
 }
 
 /** A `League:`, `Competition:` or `Tournament:` line in a description. */

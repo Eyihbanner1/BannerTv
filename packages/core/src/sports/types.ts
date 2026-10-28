@@ -85,6 +85,13 @@ export interface EventSource {
   name: string;
   poster?: string;
   background?: string;
+  /**
+   * Team badges the addon sent with the item (`team1: { name, logo }`), for
+   * its home and away sides as the listing reads them. For the event page
+   * only: fixture tiles draw no images, and no badge is ever bundled.
+   */
+  homeLogo?: string;
+  awayLogo?: string;
   catalogId: string;
 }
 
@@ -136,6 +143,15 @@ export interface SportEvent {
   sources: EventSource[];
   /** Normalised team names, for search and merging. */
   teamKeys: string[];
+  /**
+   * The two sides with their youth, reserve and women's marks and any game
+   * number, either order: the same for the match and its replays. Other
+   * meetings of the same sides share it too, and are told apart by their dates.
+   */
+  matchKey?: string;
+  /** The badges an addon sent for the home and away sides, for the event page only. */
+  homeLogo?: string;
+  awayLogo?: string;
   /**
    * The competition the addon named, when the row groups by sport instead
    * (every sport but football and the four US leagues): "IPL", "ATP Paris".

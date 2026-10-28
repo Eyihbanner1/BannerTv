@@ -42,7 +42,8 @@ export function eventState(event: SportEvent, options: ViewOptions): EventState 
     return Math.floor(firstSeen / DAY) === Math.floor(now / DAY) ? 'live-unknown' : 'ended';
   }
   if (kickOff?.date !== undefined) {
-    return kickOff.date < new Date(now).toISOString().slice(0, 10) ? 'ended' : 'upcoming';
+    // A day is the TV's calendar day, as in the day strip.
+    return kickOff.date < localDate(now) ? 'ended' : 'upcoming';
   }
   return now - firstSeen > NO_TIME_LIMIT_MS ? 'ended' : 'no-time';
 }

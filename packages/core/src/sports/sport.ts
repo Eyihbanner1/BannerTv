@@ -24,9 +24,13 @@ const SPORT_WORDS: ReadonlyArray<readonly [RegExp, Sport]> = [
   [/\bbaseball\b|\bmlb\b/, 'baseball'],
   [/\btennis\b|\batp\b|\bwta\b/, 'tennis'],
   [/\bcricket\b|\bipl\b|\bt20i?\b|\bodi\b|\bbig bash\b/, 'cricket'],
-  [/\brugby\b|\bnrl\b|\bsuper league\b|\bsix nations\b/, 'rugby'],
+  // Not "Super League": football has Indian, Chinese, Swiss and Greek ones.
+  [/\brugby\b|\bnrl\b|\bsix nations\b/, 'rugby'],
   // Before motor sport's "racing": no row of its own, but never motor sport.
   [/\bhorse racing\b|\bgreyhounds?\b|\bequestrian\b|\bhorse\b/, 'other'],
+  // Before motor sport's "grand prix": "PDC World Grand Prix", "World Grand Prix Snooker".
+  [/\bdarts\b|\bpdc\b/, 'darts'],
+  [/\bsnooker\b|\bbilliards?\b|\bpool\b/, 'snooker'],
   [
     /\bmotor ?sports?\b|\bformula 1\b|\bformula one\b|\bf1\b|\bmotogp\b|\bnascar\b|\bindycar\b|\bracing\b|\bwrc\b|\bgrand prix\b/,
     'motorsport',
@@ -37,8 +41,6 @@ const SPORT_WORDS: ReadonlyArray<readonly [RegExp, Sport]> = [
     'boxing',
   ],
   [/\bgolf\b|\bpga\b|\bliv golf\b|\bryder cup\b/, 'golf'],
-  [/\bdarts\b|\bpdc\b/, 'darts'],
-  [/\bsnooker\b|\bbilliards?\b|\bpool\b/, 'snooker'],
 ];
 
 /** The sport a name, genre or category names, if any. */

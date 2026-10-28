@@ -1,11 +1,15 @@
+import { parseMetaPreview } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
+import { type Listing, readListing, rollClockWraps } from './listing';
 import {
   addDays,
   localClock,
   localDate,
   localDayStart,
+  nextDayAt,
   readClock,
   readDatedText,
+  readDateOnly,
   readKickOff,
   readReleased,
   readStartKey,
@@ -33,12 +37,41 @@ describe('dated text', () => {
     );
   });
 
-  it('marks abbreviations unsure, and a missing zone too unless the addon names one', () => {
+  it('marks abbreviations unsure, and places no time without a zone', () => {
     expect(readDatedText('Oct 28, 2026 8:00 PM ET', { now: NOW })?.sure).toBe(false);
-    const bare = readDatedText('28 Oct 2026 20:00', { now: NOW });
-    expect(bare).toMatchObject({ at: at('2026-10-28T20:00:00Z'), sure: false });
+    // No zone written and none from the addon: none is assumed, so the time stays out of Live now.
+    expect(readDatedText('28 Oct 2026 20:00', { now: NOW })).toBeUndefined();
+    expect(readDatedText('Oct 28, 2026 8:00 PM', { now: NOW })).toBeUndefined();
     const zoned = readDatedText('28 Oct 2026 20:00', { now: NOW, zone: 'America/New_York' });
     expect(zoned).toMatchObject({ at: at('2026-10-29T00:00:00Z'), sure: true });
+  });
+
+  it('keeps the date of a time it cannot place', () => {
+    for (const text of ['28 Oct 2026 20:00', 'Oct 28, 2026 8:00 PM', '28/10/2026 20:00']) {
+      expect(readKickOff({ releaseInfo: text, name: 'x', replay: false }, { now: NOW })).toEqual({
+        date: '2026-10-28',
+        sure: true,
+        source: 'date-only',
+      });
+    }
+    expect(readDateOnly('Oct 32, 2026 8:00 PM')).toBeUndefined();
+  });
+
+  it('reads no zone from a word after the time', () => {
+    const moscow = { now: NOW, zone: 'Europe/Moscow' };
+    for (const text of ['28 Oct 2026 20:00\nZenit vs Spartak', '28 Oct 2026 20:00 Zagreb']) {
+      expect(readDatedText(text, moscow)).toEqual({
+        at: at('2026-10-28T17:00:00Z'),
+        sure: true,
+        source: 'dated-text',
+      });
+    }
+    // French "et", not Eastern Time.
+    expect(
+      readDatedText('28 oct. 2026 20:00 et 22:00', { now: NOW, zone: 'Europe/Paris' }),
+    ).toMatchObject({ at: at('2026-10-28T19:00:00Z'), sure: true });
+    expect(readDatedText('2026-10-28T20:00:00Z', moscow)?.at).toBe(at('2026-10-28T20:00:00Z'));
+    expect(readDatedText('28 Oct 2026 20:00 UTC+1', moscow)?.at).toBe(at('2026-10-28T19:00:00Z'));
   });
 
   it('reads nothing from text without a date and time', () => {
@@ -59,15 +92,89 @@ describe('clock times', () => {
     );
   });
 
-  it('takes the day nearest to now', () => {
-    const lateEvening = at('2026-10-28T23:30:00Z');
-    expect(readClock('00:30', { now: lateEvening, zone: 'UTC' })?.at).toBe(
-      at('2026-10-29T00:30:00Z'),
+  it("keeps the addon's day, where finished matches stay listed", () => {
+    // This morning's match seen late in the evening is this morning's, not tomorrow's.
+    const lateEvening = at('2026-10-28T22:30:00Z');
+    expect(readClock('10:00', { now: lateEvening, zone: 'Europe/London' })?.at).toBe(
+      at('2026-10-28T10:00:00Z'),
     );
+    expect(readClock('00:30', { now: lateEvening, zone: 'UTC' })?.at).toBe(
+      at('2026-10-28T00:30:00Z'),
+    );
+    // Nearly a day away: last night's, still listed.
     const afterMidnight = at('2026-10-29T00:30:00Z');
     expect(readClock('23:00', { now: afterMidnight, zone: 'UTC' })?.at).toBe(
       at('2026-10-28T23:00:00Z'),
     );
+  });
+
+  it('goes back a day by the calendar across the clock change', () => {
+    // UK clocks go forward on 28 March 2027. Monday 00:30 BST is 23:30 UTC on Sunday.
+    const mondayAfter = at('2027-03-28T23:30:00Z');
+    expect(readClock('23:00', { now: mondayAfter, zone: 'Europe/London' })?.at).toBe(
+      at('2027-03-28T22:00:00Z'),
+    );
+  });
+
+  it('moves a time on by calendar days in the zone', () => {
+    // 02:30 GMT on Saturday is 02:30 BST on Sunday, 23 hours later.
+    expect(nextDayAt(at('2027-03-27T02:30:00Z'), 'Europe/London')).toBe(at('2027-03-28T01:30:00Z'));
+    // 03:00 BST on Saturday is 03:00 GMT on Sunday, 25 hours later.
+    expect(nextDayAt(at('2026-10-24T02:00:00Z'), 'Europe/London')).toBe(at('2026-10-25T03:00:00Z'));
+    expect(nextDayAt(at('2026-10-28T23:00:00Z'), undefined, 2)).toBe(at('2026-10-30T23:00:00Z'));
+  });
+});
+
+describe('a list of clock times that wraps past midnight', () => {
+  let counter = 0;
+  function clocks(times: string[], now: number, zone: string): Listing[] {
+    return times.map((releaseInfo) => {
+      const item = parseMetaPreview({
+        id: `c${counter++}`,
+        type: 'tv',
+        name: `Home ${counter} vs Away ${counter}`,
+        releaseInfo,
+      });
+      if (!item) throw new Error('not an item');
+      const context = {
+        addonIndex: 0,
+        addonId: 'test.clocks',
+        transportUrl: 'https://clocks.example/manifest.json',
+        catalogId: 'today',
+        replays: false,
+        channels: false,
+        zone,
+      };
+      return readListing(item, context, now);
+    });
+  }
+  const kickOffs = (listings: Listing[]) => listings.map((listing) => listing.kickOff?.at);
+
+  it('puts the times after the wrap on the next day', () => {
+    const evening = at('2026-10-28T21:00:00Z');
+    const listed = clocks(['22:00', '23:45', '00:30', '02:00'], evening, 'Europe/London');
+    expect(kickOffs(listed)[2]).toBe(at('2026-10-28T00:30:00Z'));
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2026-10-28T22:00:00Z'),
+      at('2026-10-28T23:45:00Z'),
+      at('2026-10-29T00:30:00Z'),
+      at('2026-10-29T02:00:00Z'),
+    ]);
+  });
+
+  it('counts the next day by the calendar across the clock change', () => {
+    const saturday = at('2027-03-27T22:00:00Z');
+    const listed = clocks(['23:30', '02:30'], saturday, 'Europe/London');
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2027-03-27T23:30:00Z'),
+      at('2027-03-28T01:30:00Z'),
+    ]);
+  });
+
+  it('leaves a list that is not in kick-off order as it is', () => {
+    const evening = at('2026-10-28T21:00:00Z');
+    const listed = clocks(['20:00', '15:00', '00:30'], evening, 'Europe/London');
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual(kickOffs(listed));
   });
 });
 
@@ -165,6 +272,35 @@ describe('zone from an install address', () => {
     // {"key":"SECRET-KEY-123","timezone":"America/New_York"}, base64url.
     const encoded = 'eyJrZXkiOiJTRUNSRVQtS0VZLTEyMyIsInRpbWV6b25lIjoiQW1lcmljYS9OZXdfWW9yayJ9';
     expect(zoneFromAddress(`https://addon.test/${encoded}/manifest.json`)).toBe('America/New_York');
+  });
+
+  it('reads one from percent-encoded base64 settings', () => {
+    // {"timezone":"Europe/London","key":"???"}: its base64 holds "/" and "=" padding.
+    const encoded = 'eyJ0aW1lem9uZSI6IkV1cm9wZS9Mb25kb24iLCJrZXkiOiI%2FPz8ifQ%3D%3D';
+    expect(zoneFromAddress(`https://addon.test/${encoded}/manifest.json`)).toBe('Europe/London');
+  });
+
+  it('reads a UTC offset as that offset, never as plain UTC', () => {
+    expect(zoneFromAddress('https://addon.test/tz=UTC-3/manifest.json')).toBe('UTC-03:00');
+    expect(zoneFromAddress('https://addon.test/timezone=GMT%2B5%3A30/manifest.json')).toBe(
+      'UTC+05:30',
+    );
+    // {"timezone":"UTC-03:00","key":"abc"}, base64.
+    const encoded = 'eyJ0aW1lem9uZSI6IlVUQy0wMzowMCIsImtleSI6ImFiYyJ9';
+    expect(zoneFromAddress(`https://addon.test/${encoded}/manifest.json`)).toBe('UTC-03:00');
+    expect(zoneFromAddress('https://addon.test/timezone=Etc%2FGMT%2B3/manifest.json')).toBe(
+      'Etc/GMT+3',
+    );
+    expect(zoneFromAddress('https://addon.test/tz=UTC/manifest.json')).toBe('UTC');
+    expect(zoneFromAddress('https://addon.test/tz=UTC%2B0/manifest.json')).toBe('UTC');
+    expect(zoneFromAddress('https://addon.test/tz=UTC%2B25/manifest.json')).toBeUndefined();
+    expect(zoneFromAddress('https://addon.test/tz=UTCX/manifest.json')).toBeUndefined();
+    // MeteGol-style 23:00 in UTC-3 is 02:00 UTC the next day.
+    const evening = { now: at('2026-10-28T20:00:00Z'), zone: 'UTC-03:00' };
+    expect(readClock('23:00', evening)?.at).toBe(at('2026-10-29T02:00:00Z'));
+    expect(readClock('23:00', { ...evening, zone: 'Etc/GMT+3' })?.at).toBe(
+      at('2026-10-29T02:00:00Z'),
+    );
   });
 
   it('gives nothing for an unknown or missing zone', () => {

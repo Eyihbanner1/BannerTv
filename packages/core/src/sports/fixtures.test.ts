@@ -1,4 +1,9 @@
-import { type MetaPreview, parseCatalogResponse, parseManifest } from '@bannertv/protocol';
+import {
+  type MetaPreview,
+  parseCatalogResponse,
+  parseManifest,
+  parseMetaPreview,
+} from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import type { InstalledAddon } from '../addons/collection';
 import data from './data/sports-data.json';
@@ -84,6 +89,7 @@ function listingsOf(
   json: unknown,
   genre?: string,
   suffix = '',
+  zone = entryFor(addon, catalogId).zone,
 ): Listing[] {
   const entry = entryFor(addon, catalogId);
   const metas: MetaPreview[] = parseCatalogResponse(json, entry.catalog.type).metas;
@@ -99,7 +105,7 @@ function listingsOf(
         replays: entry.view === 'replays',
         channels: entry.view === 'channels',
         genreOption: genre,
-        zone: entry.zone,
+        zone,
       },
       NOW,
     ),
@@ -168,8 +174,23 @@ describe('the public sports addons, as captured', () => {
   });
 
   it('keeps clock-only times unknown when the addon names no zone', () => {
-    const metegol = events.filter((e) => e.sources.every((s) => s.addonIndex === 2));
-    for (const event of metegol) expect(event.kickOff?.source).not.toBe('clock');
+    // MeteGol sends only "23:00", in a zone set in its settings (UTC-3 by default); this
+    // install address names none.
+    expect(entryFor(2, 'deportes').zone).toBeUndefined();
+    const metegol = listingsOf(2, 'deportes', metegolDeportes);
+    expect(metegol).toHaveLength(4);
+    for (const listing of metegol) expect(listing.kickOff).toBeUndefined();
+    // Where its matches merge with another addon's, that copy's time is shown.
+    const merged = events.filter((e) => e.sources.some((s) => s.addonIndex === 2));
+    expect(merged.length).toBeGreaterThan(0);
+    for (const event of merged) expect(event.kickOff?.source).not.toBe('clock');
+    // With a zone, the same items do get a time.
+    const zoned = listingsOf(2, 'deportes', metegolDeportes, undefined, '', 'UTC-03:00');
+    expect(zoned[0]!.kickOff).toEqual({
+      at: Date.parse('2026-10-28T02:00:00Z'),
+      sure: true,
+      source: 'clock',
+    });
   });
 
   it('builds every day of the strip with safe keys and no empty rows', () => {
@@ -192,6 +213,50 @@ describe('the public sports addons, as captured', () => {
     const groups = buildDay(events, '2026-10-28', { now: NOW, matcher });
     expect(groups[0]!.competition.key).toBe('eng.league-cup');
     expect(groups.map((g) => g.competition.key).indexOf('sco.1')).toBe(1);
+  });
+});
+
+describe('names the captures do not have, with the bundled dictionary', () => {
+  let counter = 0;
+  function listing(fields: Record<string, unknown>, addonIndex: number): Listing {
+    const item = parseMetaPreview({ id: `x${counter++}`, type: 'tv', ...fields });
+    if (!item) throw new Error('not an item');
+    return readListing(
+      item,
+      {
+        addonIndex,
+        addonId: `test.${addonIndex}`,
+        transportUrl: `https://addon-${addonIndex}.example/manifest.json`,
+        catalogId: 'live',
+        replays: false,
+        channels: false,
+      },
+      NOW,
+    );
+  }
+
+  it('reads a competition ending in a number in front of the teams, and merges the match', () => {
+    const released = '2026-10-28T20:00:00.000Z';
+    const built = buildEvents(
+      [
+        listing({ name: 'Ligue 1: Paris Saint-Germain vs Marseille', released }, 0),
+        listing({ name: 'Paris Saint-Germain vs Olympique de Marseille', released }, 1),
+      ],
+      { matcher },
+    );
+    expect(built).toHaveLength(1);
+    expect(built[0]!.home).toBe('Paris Saint-Germain');
+    expect(built[0]!.competition).toMatchObject({ key: 'fra.1', source: 'name-prefix' });
+    expect(built[0]!.sources).toHaveLength(2);
+  });
+
+  it('takes a stage in front of the teams as the round, not a competition', () => {
+    const game = listing({ name: 'Game 7: Los Angeles Lakers vs Boston Celtics' }, 0);
+    expect(game.round).toBe('Game 7');
+    expect(game.competitions).toEqual([]);
+    const [event] = buildEvents([game], { matcher });
+    expect(event!.home).toBe('Los Angeles Lakers');
+    expect(event!.competition).toMatchObject({ key: 'nba', round: 'Game 7' });
   });
 });
 

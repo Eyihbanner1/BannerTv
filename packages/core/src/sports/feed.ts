@@ -1,5 +1,6 @@
 import type { ExtraArg, MetaDetail, MetaPreview } from '@bannertv/protocol';
 import type { AddonClient } from '../addons/client';
+import { HttpError } from '../http';
 import { DroppedError, type Lane } from '../lane';
 import type { CachePolicy, Query } from '../query';
 import { createStore, type Store } from '../store';
@@ -12,7 +13,7 @@ import { type CatalogContext, type Listing, readListing } from './listing';
 import { sportOf } from './sport';
 import { cleanTitle } from './text';
 import { addDays, localDate, localDayStart, readKickOff } from './time';
-import type { SportEvent, SportsDay } from './types';
+import type { EventSource, SportEvent, SportsDay } from './types';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -41,7 +42,7 @@ export const MAX_PAGES = 10;
 export const MAX_ITEMS = 600;
 /** Genre pages asked for one catalog that cannot page. */
 export const MAX_GENRES = 12;
-/** Meta pages asked per addon for live items with no time at all. */
+/** Meta pages asked per addon and refresh for live items with no time at all. */
 export const META_LOOKUPS = 20;
 /** Replay catalogs asked per addon: one addon has seventy. */
 export const REPLAY_CATALOGS = 2;
@@ -50,6 +51,12 @@ export const REFRESH_EVERY_MS = 2 * MINUTE;
 const REBUILD_DELAY_MS = 30;
 /** A live-first catalog is past the Live day once its kick-offs are this far ahead. */
 const LIVE_HORIZON_MS = HOUR;
+/**
+ * A LIVE item with no time gets its earlier neighbour's kick-off only when
+ * the two around it are this close, so its live window cannot end long
+ * before the match does.
+ */
+export const LIVE_ESTIMATE_SPAN_MS = HOUR;
 
 export interface SportsFeedState {
   /** Every event so far, merged across catalogs and addons. */
@@ -83,7 +90,10 @@ export interface SportsFeed extends Pick<Store<SportsFeedState>, 'get' | 'subscr
   want(day: SportsDay | null, options?: WantOptions): void;
   /** Asks the catalogs that failed again. */
   retry(): void;
-  /** Asks live catalogs again when their copy is no longer fresh. Called on a timer while wanted. */
+  /**
+   * Asks the catalogs on screen again when their copy is no longer fresh,
+   * and allows a new round of meta lookups. Called on a timer while wanted.
+   */
   refresh(): void;
   /** When BannerTV first saw an event, for the limits on events with no time. */
   firstSeen(event: SportEvent): number | undefined;
@@ -92,9 +102,12 @@ export interface SportsFeed extends Pick<Store<SportsFeedState>, 'get' | 'subscr
 
 interface PageRead {
   data: readonly MetaPreview[];
+  /** Every item but placeholders and items that could not be read. */
   listings: Listing[];
-  /** Ids this page brought that earlier pages of its catalog had not. */
-  fresh: number;
+  /** The ids of every item as the addon sent them, placeholders included, for how it counts. */
+  items: string[];
+  /** The ids of the events among them, in order. */
+  events: string[];
 }
 
 interface Page {
@@ -118,10 +131,6 @@ interface Track {
   /** How the addon counts `skip`, once the second page shows it. */
   counting?: 'items' | 'events';
   genresOpened: boolean;
-  /** Ids this catalog has sent, in order, and which of them were events. */
-  ids: string[];
-  eventIds: string[];
-  seen: Set<string>;
 }
 
 /** The same catalog of the same install, asked the same way, whatever the objects. */
@@ -139,6 +148,27 @@ function sameCatalog(a: SportsCatalog, b: SportsCatalog): boolean {
 
 function isEvent(listing: Listing): boolean {
   return listing.kind === 'event' || listing.kind === 'replay';
+}
+
+/** No answer in time, or the server's own error: asking again later may get one. */
+function mayPass(error: Error | undefined): boolean {
+  if (!(error instanceof HttpError)) return false;
+  return error.kind === 'timeout' || error.kind === 'network' || (error.status ?? 0) >= 500;
+}
+
+/** What a listing depends on besides its item: it is read again when any of it changes. */
+function contextKey(ctx: CatalogContext): string {
+  return [
+    ctx.addonIndex,
+    ctx.addonId,
+    ctx.transportUrl,
+    ctx.catalogId,
+    ctx.replays,
+    ctx.channels,
+    ctx.sport ?? '',
+    ctx.genreOption ?? '',
+    ctx.zone ?? '',
+  ].join('\n');
 }
 
 const VIEW_ORDER: Record<SportsCatalog['view'], number> = {
@@ -190,11 +220,21 @@ export function createSportsFeed(options: {
   let scheduled = false;
   let disposed = false;
   let stopRefresh: (() => void) | undefined;
-  const listingCache = new WeakMap<MetaPreview, Listing>();
-  /** Meta pages asked so far, per addon id, and which items they were for. */
+  /** Set by refresh() and by want(): the next pass asks again what is no longer fresh. */
+  let recheck = false;
+  /**
+   * Each item read once, until the catalog it came from changes: a moved or
+   * removed addon gives the same items another place in the collection.
+   */
+  const listingCache = new WeakMap<MetaPreview, { context: string; listing: Listing }>();
+  /** Meta pages asked since the last refresh, per addon id. */
   const metaCount = new Map<string, number>();
+  /** Items whose meta was asked, by addon id and item id. */
   const metaAsked = new Set<string>();
-  const metaLookups: Array<() => void> = [];
+  /** Of those, the ones that timed out or met a server error: asked again after the next refresh. */
+  const metaFailed = new Set<string>();
+  /** Lookups still waiting for an answer, by the same key, with the install they went to. */
+  const metaLookups = new Map<string, { transportUrl: string; stop: () => void }>();
   const more = new Set<string>();
 
   function context(track: Track): CatalogContext {
@@ -250,9 +290,6 @@ export function createSportsFeed(options: {
         probed: false,
         pageable: entry.pageable && genre === undefined,
         genresOpened: false,
-        ids: [],
-        eventIds: [],
-        seen: new Set(),
       };
       if (genre !== undefined) track.genre = genre;
       tracks.set(key, track);
@@ -263,14 +300,24 @@ export function createSportsFeed(options: {
   /** Reads a page once its data is here, or again when it was refreshed. */
   function readPage(track: Track, page: Page): PageRead | undefined {
     const data = page.query.get().data;
-    if (!data) return page.read;
+    if (!data) {
+      // Asked again after its copy expired (6 hours without hints): the old copy is not shown.
+      delete page.read;
+      return undefined;
+    }
     if (page.read && page.read.data === data) return page.read;
+    // A refreshed page can bring more, or less: whether to page on is worked out again.
+    if (page.read && track.genre === undefined) delete track.stopped;
     const ctx = context(track);
+    const key = contextKey(ctx);
     const at = now();
     const listings: Listing[] = [];
-    let fresh = 0;
+    const items: string[] = [];
+    const events: string[] = [];
     for (const item of data) {
-      let listing = listingCache.get(item);
+      items.push(item.id);
+      const cached = listingCache.get(item);
+      let listing = cached && cached.context === key ? cached.listing : undefined;
       if (!listing) {
         try {
           listing = readListing(item, ctx, at);
@@ -278,20 +325,42 @@ export function createSportsFeed(options: {
           // One odd item never takes the rest of the page with it.
           continue;
         }
-        listingCache.set(item, listing);
+        listingCache.set(item, { context: key, listing });
         if (memory && isEvent(listing)) memory.note(ctx.addonId, item.id, listing.kickOff);
       }
       if (listing.kind === 'placeholder') continue;
       listings.push(listing);
-      if (!track.seen.has(item.id)) {
-        track.seen.add(item.id);
-        track.ids.push(item.id);
-        fresh++;
-        if (isEvent(listing)) track.eventIds.push(item.id);
-      }
+      if (isEvent(listing)) events.push(item.id);
     }
-    page.read = { data, listings, fresh };
+    page.read = { data, listings, items, events };
     return page.read;
+  }
+
+  /**
+   * How many ids a page brought that the pages before it do not have, as
+   * they read now: a refreshed catalog may have dropped what they had.
+   */
+  function freshIn(track: Track, index: number): number {
+    const ids = new Set<string>();
+    for (let i = 0; i < index; i++) {
+      for (const listing of track.pages[i]!.read?.listings ?? []) ids.add(listing.source.id);
+    }
+    let fresh = 0;
+    for (const listing of track.pages[index]!.read?.listings ?? []) {
+      if (ids.has(listing.source.id)) continue;
+      ids.add(listing.source.id);
+      fresh++;
+    }
+    return fresh;
+  }
+
+  /** Ids across the catalog's pages as they read now. */
+  function itemCount(track: Track): number {
+    const ids = new Set<string>();
+    for (const page of track.pages) {
+      for (const listing of page.read?.listings ?? []) ids.add(listing.source.id);
+    }
+    return ids.size;
   }
 
   function sorted(track: Track): boolean {
@@ -341,20 +410,23 @@ export function createSportsFeed(options: {
 
   function nextSkip(track: Track): number {
     const last = track.pages[track.pages.length - 1]!;
-    const counted = track.counting === 'items' ? track.ids.length : track.eventIds.length;
+    const read = last.read!;
+    // Where the last page ends in the addon's list as it is now, counted the addon's way,
+    // so matches that left the top of a live list since do not push skip past others.
+    const counted = track.counting === 'items' ? read.items.length : read.events.length;
     // A couple of repeats are cheap; a skipped match is not (docs/PLAN.md, paging by events).
-    return Math.max(last.skip + 1, counted - 2);
+    return Math.max(last.skip + 1, last.skip + counted - 2);
   }
 
   /** After the second page: whether the addon's skip counts every item or only events. */
   function learnCounting(track: Track) {
     if (track.counting || track.pages.length < 2) return;
     const second = track.pages[1]!;
-    const firstId = second.query.get().data?.[0]?.id;
+    const firstId = second.read?.items[0];
     const first = track.pages[0]!.read;
     if (!firstId || !first) return;
-    const items = first.listings.map((listing) => listing.source.id);
-    const events = first.listings.filter(isEvent).map((listing) => listing.source.id);
+    // Every item the addon sent counts here, placeholders and unreadable ones too.
+    const { items, events } = first;
     if (items[second.skip] === firstId && events[second.skip] !== firstId) track.counting = 'items';
     else if (events[second.skip] === firstId) track.counting = 'events';
   }
@@ -365,7 +437,7 @@ export function createSportsFeed(options: {
     const last = pages[pages.length - 1]!;
     const read = last.read;
     if (!read) return;
-    if (pages.length > 1 && read.fresh === 0) {
+    if (pages.length > 1 && freshIn(track, pages.length - 1) === 0) {
       // Nothing new: the addon ignores skip, or the catalog is at its end.
       track.stopped = 'no-new';
       if (!track.pageable) openGenres(track);
@@ -375,7 +447,7 @@ export function createSportsFeed(options: {
       track.stopped = 'end';
       return;
     }
-    if (pages.length >= MAX_PAGES || track.ids.length >= MAX_ITEMS) {
+    if (pages.length >= MAX_PAGES || itemCount(track) >= MAX_ITEMS) {
       track.stopped = 'cap';
       return;
     }
@@ -448,9 +520,18 @@ export function createSportsFeed(options: {
     return picked;
   }
 
+  /** The probe with `skip` failed: the catalog does not page, and its first page stays. */
+  function dropProbe(track: Track) {
+    track.pages.pop()!.unsubscribe();
+    track.stopped = 'unpaged';
+    openGenres(track);
+  }
+
   function advance(): boolean {
     let loading = false;
     if (wanted === null) return loading;
+    const rechecking = recheck;
+    recheck = false;
     for (const entry of active()) {
       const track = trackFor(entry);
       const followers: Track[] = [track];
@@ -460,6 +541,16 @@ export function createSportsFeed(options: {
       }
       for (const current of followers) {
         if (current.pages.length === 0) addPage(current, 0);
+        if (rechecking) {
+          // load() asks only when the copy is no longer fresh: 2 minutes for live catalogs,
+          // 15 for the rest (docs/PLAN.md, Fetching and paging). A catalog that failed
+          // waits for Try again, unless it is a live one.
+          for (const page of light ? current.pages.slice(0, 1) : current.pages) {
+            const state = page.query.get();
+            const failed = state.status === 'error' && !(state.error instanceof DroppedError);
+            if (!failed || entry.view === 'live') page.query.load();
+          }
+        }
         // A page can come from the cache already loaded, and so never call back:
         // its next page is decided at once (bounded by MAX_PAGES).
         for (;;) {
@@ -479,6 +570,15 @@ export function createSportsFeed(options: {
             if (page.error instanceof DroppedError) {
               last.query.load();
               loading = true;
+            } else if (
+              !light &&
+              current.probed &&
+              !current.pageable &&
+              current.pages.length === 2
+            ) {
+              // Addons that do not expect `skip` may answer it with an error.
+              dropProbe(current);
+              continue;
             }
             break;
           }
@@ -489,12 +589,19 @@ export function createSportsFeed(options: {
           decide(current, wanted);
           if (current.pages.length === count) break;
         }
+        // An earlier page asked again after its copy expired has nothing to show yet either.
+        if (current.pages.some((page) => page.query.get().status === 'loading')) loading = true;
       }
     }
     return loading;
   }
 
-  /** Untimed matches between two of the same day, in a catalog sorted by kick-off, get that day. */
+  /**
+   * Until memory or the meta gives a time, in a catalog sorted by kick-off:
+   * an untimed match between two of the same day gets that day, and a LIVE
+   * one between two close kick-offs gets the earlier, unsure, so it is placed
+   * in Live now (docs/PLAN.md, Time, live and finished).
+   */
   function withEstimates(track: Track, listings: Listing[]): Listing[] {
     if (!sorted(track)) return listings;
     const out = listings.slice();
@@ -507,30 +614,55 @@ export function createSportsFeed(options: {
         previous = at;
         continue;
       }
-      if (listing.kickOff || listing.liveLabel || previous === undefined) continue;
+      if (listing.kickOff || previous === undefined) continue;
+      // A remembered time is better than any estimate, and grouping takes it.
+      const { source } = listing;
+      if (listing.liveLabel && memory?.get(source.addonId, source.id)) continue;
       let next: number | undefined;
       for (let j = i + 1; j < out.length && next === undefined; j++) {
         if (isEvent(out[j]!)) next = out[j]!.kickOff?.at;
       }
       if (next === undefined || localDate(next) !== localDate(previous)) continue;
-      out[i] = {
-        ...listing,
-        kickOff: { date: localDate(previous), sure: false, source: 'estimated' },
-      };
+      if (listing.liveLabel) {
+        if (next - previous > LIVE_ESTIMATE_SPAN_MS) continue;
+        out[i] = { ...listing, kickOff: { at: previous, sure: false, source: 'estimated' } };
+      } else {
+        out[i] = {
+          ...listing,
+          kickOff: { date: localDate(previous), sure: false, source: 'estimated' },
+        };
+      }
     }
     return out;
+  }
+
+  /** The install that listed an item, while it is still installed and in Sports. */
+  function installOf(source: EventSource): SportsCatalog | undefined {
+    return catalogs.find(
+      (c) => c.addon.transportUrl === source.transportUrl && c.addon.manifest.id === source.addonId,
+    );
+  }
+
+  /** A new refresh: a new round of meta lookups, and those that failed are asked again. */
+  function allowLookups() {
+    metaCount.clear();
+    metaFailed.forEach((key) => metaAsked.delete(key));
+    metaFailed.clear();
   }
 
   function lookUpMeta(listings: readonly Listing[]) {
     if (light || wanted === null) return;
     for (const listing of listings) {
-      if (listing.kind !== 'event' || !listing.liveLabel || listing.kickOff) continue;
+      if (listing.kind !== 'event' || !listing.liveLabel) continue;
+      // An estimate stands in only until the meta gives a time.
+      if (listing.kickOff && listing.kickOff.source !== 'estimated') continue;
       const { source } = listing;
       if (memory?.get(source.addonId, source.id)) continue;
       const asked = metaCount.get(source.addonId) ?? 0;
-      const key = `${source.addonIndex}\n${source.id}`;
+      const key = `${source.addonId}\n${source.id}`;
       if (asked >= META_LOOKUPS || metaAsked.has(key)) continue;
-      const entry = catalogs.find((c) => c.addonIndex === source.addonIndex);
+      // Only the install that listed the item is asked (docs/PLAN.md, Play and playback).
+      const entry = installOf(source);
       if (!entry) continue;
       metaCount.set(source.addonId, asked + 1);
       metaAsked.add(key);
@@ -539,12 +671,28 @@ export function createSportsFeed(options: {
         { lane },
       );
       let unsubscribe = () => undefined as void;
+      const finish = () => {
+        unsubscribe();
+        metaLookups.delete(key);
+      };
       const read = () => {
         const current = query.get();
-        if (current.status === 'error') unsubscribe();
+        if (current.status === 'error') {
+          finish();
+          if (current.error instanceof DroppedError) {
+            // Dropped before it started: its place goes back, and it is asked when sport is back.
+            metaAsked.delete(key);
+            metaCount.set(source.addonId, Math.max(0, (metaCount.get(source.addonId) ?? 0) - 1));
+          } else if (mayPass(current.error)) {
+            metaFailed.add(key);
+          }
+          return;
+        }
         const meta: MetaDetail | undefined = current.data;
         if (!meta) return;
-        unsubscribe();
+        finish();
+        // Removed while this ran: nothing more is kept about the addon.
+        if (!installOf(source)) return;
         const clean = cleanTitle(meta.name);
         const kickOff = readKickOff(
           {
@@ -562,8 +710,8 @@ export function createSportsFeed(options: {
           schedule();
         }
       };
+      metaLookups.set(key, { transportUrl: source.transportUrl, stop: () => unsubscribe() });
       unsubscribe = query.subscribe(read);
-      metaLookups.push(() => unsubscribe());
       query.load();
       read();
     }
@@ -581,8 +729,9 @@ export function createSportsFeed(options: {
         if (read) for (const listing of read.listings) own.push(listing);
       }
       for (const listing of withEstimates(track, own)) listings.push(listing);
-      const last = track.pages[track.pages.length - 1];
-      const page = last?.query.get();
+      // Only the catalog's own first page names the addon: later pages, the skip probe and
+      // genre pages come with that page already on screen.
+      const page = track.genre === undefined ? track.pages[0]?.query.get() : undefined;
       if (
         page?.status === 'error' &&
         !(page.error instanceof DroppedError) &&
@@ -642,6 +791,13 @@ export function createSportsFeed(options: {
         }
       });
       tracks = keep;
+      // A removed install's lookups write nothing after it is gone (docs/PLAN.md, Store and privacy).
+      metaLookups.forEach((lookup, key) => {
+        if (next.some((entry) => entry.addon.transportUrl === lookup.transportUrl)) return;
+        lookup.stop();
+        metaLookups.delete(key);
+        metaAsked.delete(key);
+      });
       more.forEach((key) => {
         if (!next.some((entry) => entry.key === key)) more.delete(key);
       });
@@ -657,6 +813,7 @@ export function createSportsFeed(options: {
     want(day, opts = {}) {
       const nextLight = day !== null && opts.light === true;
       if (day === wanted && nextLight === light) return;
+      const back = wanted === null;
       wanted = day;
       light = nextLight;
       if (day === null) {
@@ -666,22 +823,24 @@ export function createSportsFeed(options: {
         return;
       }
       if (!stopRefresh) stopRefresh = timers.every(REFRESH_EVERY_MS, () => feed.refresh());
+      // What went stale while sport was away is asked now, not at the next tick.
+      recheck = true;
+      if (back) allowLookups();
       update();
     },
 
     retry() {
       tracks.forEach((track) => {
-        const last = track.pages[track.pages.length - 1];
-        if (last?.query.get().status === 'error') last.query.retry();
+        for (const page of track.pages) {
+          if (page.query.get().status === 'error') page.query.retry();
+        }
       });
     },
 
     refresh() {
       if (wanted === null) return;
-      tracks.forEach((track) => {
-        // load() asks again only when the copy is no longer fresh.
-        if (track.entry.view === 'live') track.pages[0]?.query.load();
-      });
+      recheck = true;
+      allowLookups();
       schedule();
     },
 
@@ -703,7 +862,8 @@ export function createSportsFeed(options: {
         for (const page of track.pages) page.unsubscribe();
       });
       tracks.clear();
-      for (const unsubscribe of metaLookups.splice(0)) unsubscribe();
+      metaLookups.forEach((lookup) => lookup.stop());
+      metaLookups.clear();
     },
   };
   return feed;

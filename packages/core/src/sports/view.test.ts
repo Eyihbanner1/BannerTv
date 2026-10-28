@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Competition, KickOff, Sport, SportEvent } from './types';
 import { buildDay, dayCounts, dayStrip, eventState, searchEvents } from './view';
 import { createMatcher } from './dictionary';
 import mini from './fixtures/mini-data.json';
 import type { SportsData } from './types';
+import { localDate } from './time';
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse('2026-10-28T19:00:00Z');
@@ -67,6 +68,28 @@ describe('states', () => {
     const bare = event({});
     expect(eventState(bare, { now: NOW, firstSeen: () => NOW - HOUR })).toBe('no-time');
     expect(eventState(bare, { now: NOW, firstSeen: () => NOW - 49 * HOUR })).toBe('ended');
+  });
+
+  it("ends a date-only event at the TV's midnight, not at UTC midnight", () => {
+    try {
+      // 21:00 on 28 October in New York is already the 29th in UTC.
+      vi.stubEnv('TZ', 'America/New_York');
+      const evening = Date.parse('2026-10-29T01:00:00Z');
+      expect(localDate(evening)).toBe('2026-10-28');
+      const tonight = event({ date: '2026-10-28' });
+      expect(eventState(tonight, { now: evening })).toBe('upcoming');
+      expect(buildDay([tonight], '2026-10-28', { now: evening }).map((g) => g.title)).toEqual([
+        'Premier League',
+      ]);
+      // 08:00 on 29 October in Tokyo is still the 28th in UTC: yesterday's match is over.
+      vi.stubEnv('TZ', 'Asia/Tokyo');
+      const morning = Date.parse('2026-10-28T23:00:00Z');
+      expect(localDate(morning)).toBe('2026-10-29');
+      expect(eventState(event({ date: '2026-10-28' }), { now: morning })).toBe('ended');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(localDate(Date.parse('2026-10-29T01:00:00Z'))).toBe('2026-10-29');
   });
 });
 

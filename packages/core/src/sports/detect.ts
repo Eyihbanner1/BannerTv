@@ -107,7 +107,8 @@ export function needsEvidence(catalog: ManifestCatalog): boolean {
 /**
  * Whether a first page reads as sport: at least 3 items, and most of them
  * matches (`A vs B`, `A at B`) or live-labelled. Channels and placeholders
- * count against it.
+ * count against it, and so do dash names: "Artist - Title" and "UK - BBC One"
+ * are music and channels far more often than matches.
  */
 export function looksLikeSports(items: readonly MetaPreview[]): boolean {
   const sample = items.slice(0, 30);
@@ -115,8 +116,9 @@ export function looksLikeSports(items: readonly MetaPreview[]): boolean {
   let sporty = 0;
   for (const item of sample) {
     const clean = cleanTitle(item.name);
+    const split = splitTeams(clean.title);
     if (
-      splitTeams(clean.title) !== undefined ||
+      (split !== undefined && split.separator !== 'dash') ||
       clean.live ||
       isLiveLabel(item.releaseInfo) ||
       item.sport?.home !== undefined ||

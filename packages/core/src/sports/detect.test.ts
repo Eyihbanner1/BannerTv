@@ -62,6 +62,14 @@ describe('what a catalog holds', () => {
   it('gives no sport to a catalog that names two', () => {
     expect(catalogView(catalog('Fight (UFC, Boxing)', 'sports_fight'))).toEqual({ view: 'other' });
   });
+
+  it('reads darts and snooker grand prix as theirs, and no Super League as rugby', () => {
+    expect(catalogView(catalog('PDC World Grand Prix')).sport).toBe('darts');
+    expect(catalogView(catalog('World Grand Prix Snooker')).sport).toBe('snooker');
+    expect(catalogView(catalog('Mexican Grand Prix')).sport).toBe('motorsport');
+    expect(catalogView(catalog('Indian Super League')).sport).toBeUndefined();
+    expect(catalogView(catalog('Super League Rugby')).sport).toBe('rugby');
+  });
 });
 
 describe('which catalogs are sports catalogs', () => {
@@ -152,6 +160,22 @@ describe('first-page evidence', () => {
     expect(looksLikeSports(items('The Matrix', 'Heat', 'Alien', 'Arsenal vs Spurs'))).toBe(false);
     expect(looksLikeSports(items('Celtic vs Rangers', 'Arsenal v Spurs'))).toBe(false);
     expect(looksLikeSports([])).toBe(false);
+  });
+
+  it('counts no "Artist - Title" or "Country - Channel" name as a match', () => {
+    const music = items(
+      'Daft Punk - Around the World',
+      'Adele - Hello',
+      'Lofi Girl - beats to relax',
+      'Queen - Bohemian Rhapsody',
+      'The Weeknd - Blinding Lights',
+    );
+    expect(looksLikeSports(music)).toBe(false);
+    expect(looksLikeSports(items('UK - BBC One', 'US - CNN', 'UK - ITV1', 'FR - TF1'))).toBe(false);
+    const premieres = catalog('Upcoming Premieres', 'premieres', 'channel');
+    expect(
+      isSportsCatalog(cinemetaAddon, premieres, { evidence: () => looksLikeSports(music) }),
+    ).toBe(false);
   });
 
   it('is noted only for catalogs whose first page can change the answer', () => {

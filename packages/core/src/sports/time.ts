@@ -8,7 +8,6 @@ import type { KickOff } from './types';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
 
 const MONTHS: Record<string, number> = {
   jan: 1,
@@ -75,6 +74,17 @@ const ABBREVIATIONS: Record<string, number | string> = {
   EAT: 180,
 };
 
+/**
+ * A fixed offset as zoneFromAddress writes it, "UTC-03:00" (from a "UTC-3"
+ * setting), as minutes east of UTC. The engine needs no zone data for these.
+ */
+function fixedOffset(zone: string): number | undefined {
+  const match = /^UTC([+-])(\d{2}):(\d{2})$/.exec(zone);
+  if (!match || Number(match[2]) > 14 || Number(match[3]) > 59) return undefined;
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === '-' ? -minutes : minutes;
+}
+
 const formatters = new Map<string, Intl.DateTimeFormat | null>();
 
 function formatterFor(zone: string): Intl.DateTimeFormat | null {
@@ -103,12 +113,14 @@ function formatterFor(zone: string): Intl.DateTimeFormat | null {
 
 /** Whether this engine can convert times in the named zone. */
 export function knowsZone(zone: string): boolean {
-  return formatterFor(zone) !== null;
+  return fixedOffset(zone) !== undefined || formatterFor(zone) !== null;
 }
 
 /** Minutes east of UTC in `zone` at `at`, or undefined when the engine does not know the zone. */
 export function zoneOffset(zone: string, at: number): number | undefined {
   if (zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT') return 0;
+  const fixed = fixedOffset(zone);
+  if (fixed !== undefined) return fixed;
   const formatter = formatterFor(zone);
   if (!formatter) return undefined;
   const parts: Record<string, number> = {};
@@ -190,6 +202,15 @@ function dateIn(at: number, zone: Zone): [number, number, number] {
   return [shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate()];
 }
 
+/** The calendar date `days` after a year, month and day: by the calendar, never 24 hours a day. */
+function shiftDate(
+  [year, month, day]: [number, number, number],
+  days: number,
+): [number, number, number] {
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return [shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate()];
+}
+
 /** Hours and minutes from "19:45", "7.45pm", "10:00 PM". */
 function clockOf(hours: string, minutes: string, meridiem: string | undefined): [number, number] {
   let h = Number(hours);
@@ -202,8 +223,9 @@ function clockOf(hours: string, minutes: string, meridiem: string | undefined): 
   return [h, m];
 }
 
+// The zone after a time. "UTC", "GMT" and "Z" are whole words: "20:00 Zenit" names no zone.
 const ZONE_PART =
-  '(?:(UTC|GMT|Z)(?:\\s*([+-])\\s*(\\d{1,2})(?::?(\\d{2}))?)?|([+-])(\\d{2}):?(\\d{2})|\\(?([A-Za-z]+\\/[A-Za-z_]+(?:\\/[A-Za-z_]+)?)\\)?|\\b([A-Z]{2,5})\\b)?';
+  '(?:(UTC|GMT|Z)\\b(?:\\s*([+-])\\s*(\\d{1,2})(?::?(\\d{2}))?)?|([+-])(\\d{2}):?(\\d{2})|\\(?([A-Za-z]+\\/[A-Za-z_]+(?:\\/[A-Za-z_]+)?)\\)?|\\b([A-Z]{2,5})\\b)?';
 
 // "28 Oct 2026 · 20:00 UTC", "28 October 2026, 8:00 pm BST".
 const DAY_MONTH_YEAR = new RegExp(
@@ -256,7 +278,8 @@ function zoneFrom(match: RegExpExecArray, i: number): Zone | undefined {
     return { offset: sign === '-' ? -offset : offset, sure: true };
   }
   if (named) return knowsZone(named) ? { name: named, sure: true } : undefined;
-  if (abbreviation) {
+  // Written in capitals, or it is a word: "20:00 et 22:00" is French, not Eastern Time.
+  if (abbreviation && abbreviation === abbreviation.toUpperCase()) {
     const known = ABBREVIATIONS[abbreviation.toUpperCase()];
     if (typeof known === 'number') return { offset: known, sure: false };
     if (typeof known === 'string' && knowsZone(known)) return { name: known, sure: false };
@@ -290,7 +313,11 @@ function addonZone(context: TimeContext): Zone | undefined {
   return context.zone ? { name: context.zone, sure: true } : undefined;
 }
 
-/** A date and time written out in text, with or without a zone. */
+/**
+ * A date and time written out in text, in the zone it names or else the
+ * addon's. With neither, no zone is assumed and the time cannot be placed
+ * (docs/PLAN.md, Time): readDateOnly still gives its date.
+ */
 export function readDatedText(text: string, context: TimeContext): KickOff | undefined {
   const forms: Array<[RegExp, (m: RegExpExecArray) => [number, number, number] | undefined]> = [
     [DAY_MONTH_YEAR, (m) => [Number(m[3]), monthOf(m[2]!) ?? 0, Number(m[1])]],
@@ -306,8 +333,9 @@ export function readDatedText(text: string, context: TimeContext): KickOff | und
     const meridiem = pattern === ISO_LIKE ? undefined : match[6];
     const zoneIndex = pattern === ISO_LIKE ? 6 : 7;
     const [hours, minutes] = clockOf(match[4]!, match[5]!, meridiem);
-    // No zone written: the addon's own, else assume UTC and say it is unsure.
-    const zone = zoneFrom(match, zoneIndex) ?? addonZone(context) ?? { offset: 0, sure: false };
+    // No zone written: the addon's own, else nothing.
+    const zone = zoneFrom(match, zoneIndex) ?? addonZone(context);
+    if (!zone) continue;
     const at = instant(ymd[0], ymd[1], ymd[2], hours, minutes, zone);
     if (at === undefined) continue;
     return { at, sure: zone.sure, source: 'dated-text' };
@@ -323,19 +351,39 @@ export function readClock(text: string, context: TimeContext): KickOff | undefin
   // No zone is assumed: an unknown one leaves the time unknown (docs/PLAN.md, Time).
   const zone = zoneFrom(match, 4) ?? addonZone(context);
   if (!zone) return undefined;
-  // A clock has no date: today in the addon's zone, unless that is long gone
-  // ("00:30" seen at 23:30 is tomorrow's) or nearly a day away ("23:00" seen
-  // at 00:30 is last night's, still listed).
-  let shift = 0;
-  const on = (days: number) => {
-    const [year, month, day] = dateIn(context.now + days * DAY, zone);
-    return instant(year, month, day, hours, minutes, zone);
-  };
-  const today = on(0);
-  if (today !== undefined && today < context.now - 12 * HOUR) shift = 1;
-  else if (today !== undefined && today > context.now + 20 * HOUR) shift = -1;
-  const best = shift === 0 ? today : on(shift);
-  return best === undefined ? undefined : { at: best, sure: zone.sure, source: 'clock' };
+  // A clock has no date: the addon's current day in its zone, where finished matches
+  // stay listed, unless that is nearly a day away ("23:00" seen at 00:30 is last
+  // night's, still listed). rollClockWraps moves on a day where a list in kick-off
+  // order wraps past midnight.
+  const today = dateIn(context.now, zone);
+  const on = ([year, month, day]: [number, number, number]) =>
+    instant(year, month, day, hours, minutes, zone);
+  let at = on(today);
+  if (at !== undefined && at > context.now + 20 * HOUR) at = on(shiftDate(today, -1));
+  return at === undefined ? undefined : { at, sure: zone.sure, source: 'clock' };
+}
+
+/**
+ * The same wall-clock time `days` calendar days later in `zone`, the addon's,
+ * for a clock-only time in a list that wraps past midnight. With no zone the
+ * clock named its own offset, and every day there has 24 hours.
+ */
+export function nextDayAt(at: number, zone: string | undefined, days = 1): number | undefined {
+  const offset = zone ? zoneOffset(zone, at) : 0;
+  if (offset === undefined) return undefined;
+  const wall = new Date(at + offset * MINUTE);
+  const [year, month, day] = shiftDate(
+    [wall.getUTCFullYear(), wall.getUTCMonth() + 1, wall.getUTCDate()],
+    days,
+  );
+  return instant(
+    year,
+    month,
+    day,
+    wall.getUTCHours(),
+    wall.getUTCMinutes(),
+    zone ? { name: zone, sure: true } : { offset: 0, sure: true },
+  );
 }
 
 /** A clock with a day and month in an item's name ("⏰ 19:45 - 27/10"), in the addon's zone. */
@@ -379,6 +427,17 @@ export function readDateOnly(text: string): KickOff | undefined {
   if (named && month !== undefined) {
     return {
       date: `${named[3]}-${pad(month)}-${pad(Number(named[1]))}`,
+      sure: true,
+      source: 'date-only',
+    };
+  }
+  // "Oct 28, 2026 8:00 PM" with no zone to place the time in: its date.
+  const monthFirst = MONTH_DAY_YEAR.exec(text);
+  const monthOfFirst = monthFirst ? monthOf(monthFirst[1]!) : undefined;
+  const dayOfFirst = monthFirst ? Number(monthFirst[2]) : 0;
+  if (monthFirst && monthOfFirst !== undefined && dayOfFirst >= 1 && dayOfFirst <= 31) {
+    return {
+      date: `${monthFirst[3]}-${pad(monthOfFirst)}-${pad(dayOfFirst)}`,
       sure: true,
       source: 'date-only',
     };
@@ -533,21 +592,34 @@ export function zoneFromAddress(transportUrl: string): string | undefined {
       // Leave it as it was.
     }
     candidates.push(text);
-    // Settings are often base64 JSON in one path segment.
-    if (/^[A-Za-z0-9+/_-]{16,}={0,2}$/.test(segment)) {
+    // Settings are often base64 JSON in one path segment, percent-encoded when the
+    // base64 holds "+", "/" or "=" ("%2B", "%2F", "%3D"): tested once decoded.
+    if (/^[A-Za-z0-9+/_-]{16,}={0,2}$/.test(text)) {
       try {
-        candidates.push(decodeBase64(segment.replace(/-/g, '+').replace(/_/g, '/')));
+        candidates.push(decodeBase64(text.replace(/-/g, '+').replace(/_/g, '/')));
       } catch {
         // Not base64.
       }
     }
   }
   for (const text of candidates) {
+    // A named zone ("Europe/London", "Etc/GMT+3"), or UTC or GMT with an offset
+    // ("UTC-3", "UTC+05:30") or none: a plain "UTC" is never the start of "UTC-3".
     const match =
-      /(?:^|[^a-z])(?:timezone|time_zone|tz)"?\s*[:=]\s*"?([A-Za-z]+(?:\/[A-Za-z_+-]+){1,2}|UTC)/i.exec(
+      /(?:^|[^a-z])(?:timezone|time_zone|tz)"?\s*[:=]\s*"?(?:([A-Za-z]+(?:\/[A-Za-z0-9_+-]+){1,2})|(?:UTC|GMT)(?:\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?)?(?![A-Za-z0-9+-]))/i.exec(
         text,
       );
-    if (match && knowsZone(match[1]!)) return match[1];
+    if (!match) continue;
+    if (match[1] !== undefined) {
+      if (knowsZone(match[1])) return match[1];
+      continue;
+    }
+    if (match[2] === undefined) return 'UTC';
+    const hours = Number(match[3]);
+    const minutes = Number(match[4] ?? 0);
+    if (hours === 0 && minutes === 0) return 'UTC';
+    const fixed = `UTC${match[2]}${pad(hours)}:${pad(minutes)}`;
+    if (fixedOffset(fixed) !== undefined) return fixed;
   }
   return undefined;
 }

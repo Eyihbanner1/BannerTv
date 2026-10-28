@@ -144,7 +144,8 @@ export interface AddonClient {
   meta(type: ContentType, id: string): Query<MetaDetail>;
   /**
    * The meta of an item from the addon that listed it, and no other: sports
-   * ids can share a prefix across addons. Kept for this launch only.
+   * ids can share a prefix across addons. Kept for this launch only, and
+   * apart from the same request made through a lane.
    */
   metaFrom(source: ItemSource, options?: { lane?: Limiter }): Query<MetaDetail>;
   /**
@@ -237,7 +238,9 @@ export function createAddonClient(options: {
     metaFrom(source, options = {}) {
       const url = resourceUrl(source.addon.transportUrl, 'meta', source.type, source.id);
       const lane = options.lane;
-      return queries.query(`from:${url}`, {
+      // Apart from the same request made without the lane, as for catalogs: the event
+      // page's own request must not wait in the lane, nor fail when the lane drops.
+      return queries.query(lane ? `lane:from:${url}` : `from:${url}`, {
         policy: SOURCE_META_POLICY,
         persist: false,
         fetch: async () => {

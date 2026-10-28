@@ -1,10 +1,11 @@
 import { type MetaPreview, parseMetaPreview } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { createMatcher } from './dictionary';
-import { buildEvents } from './events';
+import { buildEvents, replayedKeys } from './events';
 import mini from './fixtures/mini-data.json';
 import { type CatalogContext, readListing } from './listing';
 import type { KickOff, SportsData } from './types';
+import { eventState } from './view';
 
 const NOW = Date.parse('2026-10-28T12:00:00Z');
 const matcher = createMatcher(mini as unknown as SportsData);
@@ -205,13 +206,39 @@ describe('merging', () => {
     expect(merged).toHaveLength(2);
   });
 
-  it('lists repeats of one name without teams once per catalog item, never merged', () => {
+  it('lists repeats of one name without teams once, with every item as a source', () => {
     const merged = events([
       [{ name: 'Formula 1: Mexican Grand Prix', genres: ['F1'] }],
       [{ name: 'Formula 1: Mexican Grand Prix', genres: ['F1'] }],
     ]);
-    expect(merged.length).toBeGreaterThanOrEqual(1);
-    expect(new Set(merged.map((e) => e.key)).size).toBe(merged.length);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.sources).toHaveLength(2);
+  });
+
+  it("keeps men's, women's and youth matches of the same clubs apart", () => {
+    const merged = events([
+      [
+        {
+          name: 'Arsenal vs Chelsea',
+          genres: ['Football'],
+          releaseInfo: '28 Oct 2026 · 20:00 UTC',
+        },
+      ],
+      [{ name: 'Arsenal Women vs Chelsea Women', genres: ['Football'] }, { addonIndex: 1 }],
+      [{ name: 'Arsenal U21 vs Chelsea U21', genres: ['Football'] }, { addonIndex: 2 }],
+      [{ name: 'Arsenal Ladies vs Chelsea Ladies', genres: ['Football'] }, { addonIndex: 3 }],
+      [{ name: 'Arsenal II vs Chelsea II', genres: ['Football'] }, { addonIndex: 4 }],
+    ]);
+    expect(merged.map((e) => e.sources.map((s) => s.addonIndex))).toEqual([[0], [1, 3], [2], [4]]);
+  });
+
+  it('merges a club whose own name ends in "II" with a copy that leaves it off', () => {
+    const merged = events([
+      [{ name: 'SSV Jeddeloh II vs Hertha BSC', genres: ['Football', 'DFB-Pokal'] }],
+      [{ name: 'SSV Jeddeloh vs Hertha BSC', genres: ['Football'] }, { addonIndex: 1 }],
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.competition.key).toBe('ger.cup');
   });
 
   it('drops channels and placeholders', () => {
@@ -255,5 +282,217 @@ describe('merging', () => {
     ]);
     expect(event!.sport).toBe('football');
     expect(event!.competition.key).toBe('eng.trophy');
+  });
+
+  it('takes a closed league over a wrong tag, but football clubs never over basketball', () => {
+    const [hockey, basketball] = events([
+      // An addon that tags its NHL games Fútbol.
+      [{ name: 'Canucks vs Ducks', genres: ['Fútbol'] }],
+      // Real Madrid and Inter play basketball too; only the NBA is in the dictionary for it.
+      [{ name: 'Real Madrid vs Inter', genres: ['Basketball'] }],
+    ]);
+    expect(hockey!.sport).toBe('ice-hockey');
+    expect(hockey!.competition.key).toBe('nhl');
+    expect(basketball!.sport).toBe('basketball');
+    expect(basketball!.competition.name).toBe('Other basketball');
+  });
+
+  it('takes the sport a named competition gives over the tag and over football clubs', () => {
+    const [tennis, euroleague, hockey, wsl] = events([
+      [
+        {
+          name: 'ATP Paris Masters: Jannik Sinner vs Carlos Alcaraz',
+          genres: ['Fútbol'],
+          releaseInfo: '28 Oct 2026 · 12:00 UTC',
+        },
+      ],
+      [{ name: 'EuroLeague: Real Madrid vs Inter', genres: ['Fútbol'] }],
+      // Two teams of one closed league settle it, whatever the addon calls the competition.
+      [
+        {
+          name: 'Canucks vs Ducks',
+          genres: ['Fútbol'],
+          description: 'League: Fútbol Internacional',
+        },
+      ],
+      [
+        {
+          name: 'Arsenal Women vs Manchester United Women',
+          genres: ['Football', "Women's Super League"],
+        },
+      ],
+    ]);
+    expect(tennis!.sport).toBe('tennis');
+    expect(tennis!.competition.name).toBe('Tennis');
+    expect(tennis!.note).toBe('ATP Paris Masters');
+    expect(euroleague!.sport).toBe('basketball');
+    expect(euroleague!.competition.name).toBe('Other basketball');
+    expect(euroleague!.note).toBe('EuroLeague');
+    expect(hockey!.sport).toBe('ice-hockey');
+    expect(wsl!.sport).toBe('football');
+    expect(wsl!.competition.key).toBe('eng.wsl');
+  });
+
+  it('reads the sport of a darts or football name, not of its "Grand Prix" or "Super League"', () => {
+    const [darts, isl] = events([
+      [{ name: 'PDC World Grand Prix', genres: ['Darts'] }, { sport: 'darts' }],
+      [{ name: 'Indian Super League', genres: ['Football'] }],
+    ]);
+    expect(darts!.sport).toBe('darts');
+    expect(isl!.sport).toBe('football');
+  });
+});
+
+describe('one team known', () => {
+  it('puts two youth sides in Youth football, whichever one is known', () => {
+    const [youth] = events([[{ name: 'Zrinjski U19 vs Rangers U19', genres: ['Football'] }]]);
+    expect(youth!.competition.name).toBe('Youth football');
+  });
+
+  it('keeps a senior side against an unknown youth side in its country group', () => {
+    const [trophy] = events([[{ name: 'Barnsley vs Wrexham U21', genres: ['Football'] }]]);
+    expect(trophy!.competition.name).toBe('English football');
+  });
+
+  it("puts a women's tie in Women's football, and a tie against a club from anywhere in Other", () => {
+    const [women, abroad, unknownCup] = events([
+      [{ name: 'Servette FC Chenois Feminin vs Arsenal', genres: ['Football'] }],
+      [{ name: 'Arsenal vs Gamba Osaka', genres: ['Football'] }],
+      [
+        {
+          name: 'OL Lyonnes vs Inter',
+          genres: ['Football'],
+          background: 'https://img.example/api/v1/unique-tournament/696/image',
+        },
+      ],
+    ]);
+    expect(women!.competition.name).toBe("Women's football");
+    expect(abroad!.competition.name).toBe('Other football');
+    expect(unknownCup!.competition.name).toBe('Other football');
+  });
+
+  it("reads a women's match from one side's mark, never as the men's league", () => {
+    const [derby] = events([
+      [{ name: 'Arsenal Women vs Manchester United', genres: ['Football', 'Premier League'] }],
+    ]);
+    expect(derby!.competition.name).toBe("English women's football");
+  });
+});
+
+describe('replays', () => {
+  const live = { addonIndex: 0, catalogId: 'live' };
+  const recaps = { addonIndex: 1, addonId: 'replays.addon', catalogId: 'recaps', replays: true };
+
+  it('ends only the match a replay is of, never a later meeting of the same sides', () => {
+    const built = events([
+      [
+        {
+          name: 'Toronto Blue Jays vs Los Angeles Dodgers',
+          genres: ['Baseball'],
+          released: '2026-10-28T00:00:00Z',
+        },
+        live,
+      ],
+      // Last meeting's replay, and tonight's: dated by the day, as replays are.
+      [
+        {
+          name: 'Toronto Blue Jays vs Los Angeles Dodgers',
+          genres: ['Baseball'],
+          released: '2026-10-25T00:00:00Z',
+        },
+        recaps,
+      ],
+    ]);
+    const game = built.find((e) => e.kind === 'event')!;
+    expect(replayedKeys(built).size).toBe(0);
+    expect(eventState(game, { now: Date.parse('2026-10-28T00:30:00Z') })).toBe('live');
+
+    const tonight = events([
+      [
+        {
+          name: 'Toronto Blue Jays vs Los Angeles Dodgers',
+          genres: ['Baseball'],
+          released: '2026-10-28T00:00:00Z',
+        },
+        live,
+      ],
+      [
+        {
+          name: 'Toronto Blue Jays vs Los Angeles Dodgers',
+          genres: ['Baseball'],
+          released: '2026-10-28T00:00:00Z',
+        },
+        recaps,
+      ],
+    ]);
+    expect(replayedKeys(tonight)).toEqual(new Set([tonight.find((e) => e.kind === 'event')!.key]));
+  });
+
+  it('keeps game numbers, an earlier game that day and women’s sides apart', () => {
+    const built = events([
+      [
+        {
+          name: 'Dodgers vs Yankees Game 2',
+          genres: ['Baseball'],
+          released: '2026-10-28T19:00:00Z',
+        },
+        live,
+      ],
+      [
+        {
+          name: 'Dodgers vs Yankees Game 1',
+          genres: ['Baseball'],
+          released: '2026-10-28T00:00:00Z',
+        },
+        recaps,
+      ],
+      [{ name: 'Celtic vs Rangers', genres: ['Football'], released: '2026-10-28T19:00:00Z' }, live],
+      // The first game of a double-header, at its own kick-off.
+      [
+        { name: 'Celtic vs Rangers', genres: ['Football'], released: '2026-10-28T13:00:00Z' },
+        recaps,
+      ],
+      [
+        { name: 'Arsenal vs Chelsea', genres: ['Football'], released: '2026-10-28T19:00:00Z' },
+        live,
+      ],
+      [
+        {
+          name: 'Arsenal Women vs Chelsea Women',
+          genres: ['Football'],
+          released: '2026-10-28T00:00:00Z',
+        },
+        recaps,
+      ],
+    ]);
+    expect(replayedKeys(built).size).toBe(0);
+    const ended = events([
+      [{ name: 'Celtic vs Rangers', genres: ['Football'], released: '2026-10-28T19:00:00Z' }, live],
+      // The same match, listed at its own kick-off an hour off.
+      [
+        { name: 'Celtic vs Rangers', genres: ['Football'], released: '2026-10-28T18:00:00Z' },
+        recaps,
+      ],
+    ]);
+    expect(replayedKeys(ended).size).toBe(1);
+  });
+});
+
+describe('team badges', () => {
+  it('carries the badges an addon sent to the side they belong to', () => {
+    const rows: Array<[Record<string, unknown>, Partial<CatalogContext>]> = [
+      [{ name: 'Los Angeles Lakers vs Portland Trail Blazers', genres: ['Basketball'] }, {}],
+      [
+        { name: 'Portland Trail Blazers vs Los Angeles Lakers', genres: ['Basketball'] },
+        { addonIndex: 1, addonId: 'b' },
+      ],
+    ];
+    const listings = rows.map(([fields, ctx]) => readListing(item(fields), context(ctx), NOW));
+    listings[1]!.source.homeLogo = 'https://img.example/blazers.png';
+    listings[1]!.source.awayLogo = 'https://img.example/lakers.png';
+    const [event] = buildEvents(listings, { matcher });
+    expect(event!.home).toBe('Los Angeles Lakers');
+    expect(event!.homeLogo).toBe('https://img.example/lakers.png');
+    expect(event!.awayLogo).toBe('https://img.example/blazers.png');
   });
 });

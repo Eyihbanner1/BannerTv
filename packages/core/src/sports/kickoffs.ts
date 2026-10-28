@@ -1,13 +1,20 @@
 import type { KeyValueStore } from '../storage';
 import type { Timers } from '../timers';
+import { sortStable } from './sort';
 import type { KickOff } from './types';
 
 const STORAGE_KEY = 'sports.kickoffs';
-const DAY = 24 * 60 * 60 * 1000;
-/** Kept this long after kick-off (or after first seen, with no kick-off). */
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+/**
+ * Kept this long after kick-off (or after first seen, with no kick-off), and
+ * after the addon last listed the item.
+ */
 export const KICKOFF_MEMORY_MS = 2 * DAY;
-/** At most this many items, newest first, so storage stays small. */
+/** At most this many items, most recently listed first, so storage stays small. */
 export const KICKOFF_MEMORY_MAX = 4000;
+/** When an item was last listed moves on in steps this long, so reading a page rarely writes. */
+export const LAST_SEEN_STEP_MS = HOUR;
 const SAVE_DELAY_MS = 2000;
 
 interface Entry {
@@ -16,10 +23,12 @@ interface Entry {
   sure: boolean;
   /** When BannerTV first saw the item. */
   seen: number;
+  /** When BannerTV last saw the addon list it, to within LAST_SEEN_STEP_MS. */
+  last: number;
 }
 
-/** As stored: [key, at or 0, date or '', sure, seen]. */
-type StoredEntry = [string, number, string, boolean, number];
+/** As stored: [key, at or 0, date or '', sure, seen, last seen]. Rows without the last are older. */
+type StoredEntry = [string, number, string, boolean, number, number];
 
 /**
  * What BannerTV saw of each sports item: when it first appeared, and its
@@ -62,12 +71,32 @@ export function createKickoffMemory(options: {
     const limit = now() - KICKOFF_MEMORY_MS;
     entries.forEach((entry, key) => {
       const date = entry.date ? Date.parse(`${entry.date}T23:59:59Z`) : undefined;
-      if ((entry.at ?? date ?? entry.seen) < limit && entry.seen < limit) entries.delete(key);
+      // Kept while the addon still lists the item: without its first-seen an untimed item
+      // would be new again, and without its kick-off a finished LIVE one live again.
+      if ((entry.at ?? date ?? entry.seen) < limit && entry.last < limit) entries.delete(key);
     });
     if (entries.size <= KICKOFF_MEMORY_MAX) return;
-    const newest = Array.from(entries.entries()).sort((a, b) => b[1].seen - a[1].seen);
+    const newest = sortStable(Array.from(entries.entries()), (a, b) => b[1].last - a[1].last);
     entries.clear();
     for (const [key, entry] of newest.slice(0, KICKOFF_MEMORY_MAX)) entries.set(key, entry);
+  }
+
+  /** Takes a kick-off the addon sent; true when the entry changed. */
+  function takeKickOff(entry: Entry, own: KickOff): boolean {
+    // A time beats a date; a sure time beats an unsure one; otherwise the latest wins.
+    if (own.at !== undefined) {
+      if (entry.at === own.at && entry.sure === own.sure) return false;
+      if (entry.at !== undefined && entry.sure && !own.sure) return false;
+      entry.at = own.at;
+      entry.sure = own.sure;
+      delete entry.date;
+      return true;
+    }
+    if (own.date !== undefined && entry.at === undefined && entry.date !== own.date) {
+      entry.date = own.date;
+      return true;
+    }
+    return false;
   }
 
   async function save() {
@@ -77,7 +106,7 @@ export function createKickoffMemory(options: {
     prune();
     const stored: StoredEntry[] = [];
     entries.forEach((entry, key) => {
-      stored.push([key, entry.at ?? 0, entry.date ?? '', entry.sure, entry.seen]);
+      stored.push([key, entry.at ?? 0, entry.date ?? '', entry.sure, entry.seen, entry.last]);
     });
     try {
       await store.set(STORAGE_KEY, stored);
@@ -102,19 +131,35 @@ export function createKickoffMemory(options: {
             value = undefined;
           }
           if (!Array.isArray(value)) return;
+          let merged = false;
           for (const row of value) {
             if (!Array.isArray(row) || typeof row[0] !== 'string' || typeof row[4] !== 'number') {
               continue;
             }
-            // What this launch already saw wins over what an earlier one did.
-            if (entries.has(row[0])) continue;
-            const entry: Entry = { sure: row[3] === true, seen: row[4] };
+            const seen: number = row[4];
+            const last = typeof row[5] === 'number' && row[5] > seen ? row[5] : seen;
+            const entry: Entry = { sure: row[3] === true, seen, last };
             if (typeof row[1] === 'number' && row[1] > 0) entry.at = row[1];
             if (typeof row[2] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row[2]))
               entry.date = row[2];
-            entries.set(row[0], entry);
+            const current = entries.get(row[0]);
+            if (!current) {
+              entries.set(row[0], entry);
+              continue;
+            }
+            // Noted before this read finished: the kick-off this launch saw wins, but the
+            // item was first seen in the earlier launch, and may have lost its time since.
+            merged = true;
+            if (seen < current.seen) current.seen = seen;
+            if (current.at === undefined && current.date === undefined) {
+              if (entry.at !== undefined) current.at = entry.at;
+              if (entry.date !== undefined) current.date = entry.date;
+              current.sure = entry.sure;
+            }
           }
           prune();
+          // A save made before this read finished held this launch's items only.
+          if (merged) changed();
         })();
       }
       return loading;
@@ -123,31 +168,22 @@ export function createKickoffMemory(options: {
     note(addonId, id, kickOff) {
       const key = keyOf(addonId, id);
       const entry = entries.get(key);
+      const time = now();
       const own =
         kickOff && kickOff.source !== 'estimated' && kickOff.source !== 'remembered'
           ? kickOff
           : undefined;
       if (!entry) {
-        const fresh: Entry = { sure: own?.sure ?? false, seen: now() };
+        const fresh: Entry = { sure: own?.sure ?? false, seen: time, last: time };
         if (own?.at !== undefined) fresh.at = own.at;
         else if (own?.date !== undefined) fresh.date = own.date;
         entries.set(key, fresh);
         changed();
         return;
       }
-      if (!own) return;
-      // A time beats a date; a sure time beats an unsure one; otherwise the latest wins.
-      if (own.at !== undefined) {
-        if (entry.at === own.at && entry.sure === own.sure) return;
-        if (entry.at !== undefined && entry.sure && !own.sure) return;
-        entry.at = own.at;
-        entry.sure = own.sure;
-        delete entry.date;
-        changed();
-      } else if (own.date !== undefined && entry.at === undefined && entry.date !== own.date) {
-        entry.date = own.date;
-        changed();
-      }
+      const listed = time - entry.last >= LAST_SEEN_STEP_MS;
+      if (listed) entry.last = time;
+      if ((own !== undefined && takeKickOff(entry, own)) || listed) changed();
     },
 
     get(addonId, id) {

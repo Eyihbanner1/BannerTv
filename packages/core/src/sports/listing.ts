@@ -16,7 +16,7 @@ import {
   stripDecorations,
   teamKey,
 } from './text';
-import { readKickOff } from './time';
+import { nextDayAt, readKickOff } from './time';
 import type { CompetitionSource, EventSource, ItemKind, KickOff, Sport } from './types';
 
 /** What BannerTV knows about the catalog an item came from. */
@@ -58,7 +58,7 @@ export interface Listing {
   separator?: Separator;
   /** The separator alone says these are teams (vs, or at in a US sport, or a dash in a team sport). */
   teamsTrusted: boolean;
-  /** "game2", "test1": copies merge only with the same number. */
+  /** "game2", "day2-test1": copies merge only with the same numbers. */
   sequence?: string;
   /** Competition names the item gives, best first. */
   competitions: Array<{ text: string; source: CompetitionSource }>;
@@ -84,6 +84,11 @@ const REPLAY = /\b(?:recap|replay|replays|highlights|full match|full game|catch 
 
 const STAGE =
   /\b(?:round|final|finals|semi|quarter|group|leg|matchday|week|day|test|odi|t20i?|stage|qualifying|qualifier|playoff|play-off|game|race|practice|sprint)\b/i;
+
+// A name prefix that is only a stage and its number ("Game 7: Lakers vs Celtics",
+// "Week 9: Bills at Chiefs"): the round, never a competition.
+const STAGE_PREFIX =
+  /^(?:(?:round|matchday|week|game|day|leg|race|match|stage)\s*#?\d{1,3}|\d{1,2}(?:st|nd|rd|th)\s+(?:round|leg|game|day|week|stage))$/i;
 
 const MAX_GENRES = 8;
 
@@ -231,7 +236,10 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
     addCompetition(listing.competitions, context.genreOption, 'genre-option');
   addCompetition(listing.competitions, hints.league, 'description');
   addCompetition(listing.competitions, competitionLine(item.description), 'description');
-  if (split?.prefix) addCompetition(listing.competitions, split.prefix, 'name-prefix');
+  if (split?.prefix) {
+    if (STAGE_PREFIX.test(split.prefix)) listing.round = split.prefix;
+    else addCompetition(listing.competitions, split.prefix, 'name-prefix');
+  }
   if (split?.suffix) {
     // "3rd T20I" is a stage; anything else may be a competition the dictionary knows.
     if (STAGE.test(split.suffix) || sequenceNumber(split.suffix)) listing.round = split.suffix;
@@ -263,4 +271,40 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
   );
   if (kickOff) listing.kickOff = kickOff;
   return listing;
+}
+
+const HOUR = 60 * 60 * 1000;
+
+/**
+ * Clock-only times ("23:00") are read on the addon's current day. In a
+ * catalog listed by kick-off, the list wraps past midnight where a clock goes
+ * back by more than half a day ("22:00", "23:45", "00:30"): from there on the
+ * times are the next day's, by the calendar in the addon's zone (docs/PLAN.md,
+ * Time). A list whose clocks go back by less (beyond the hour live-first lists
+ * allow) is not in kick-off order and is left as it is. Pass a catalog's
+ * listings in the order the addon sent them, across its pages.
+ */
+export function rollClockWraps(listings: readonly Listing[], zone: string | undefined): Listing[] {
+  const out = listings.slice();
+  const wraps: number[] = [];
+  let previous: number | undefined;
+  for (let i = 0; i < out.length; i++) {
+    const kickOff = out[i]!.kickOff;
+    if (kickOff?.source !== 'clock' || kickOff.at === undefined) continue;
+    if (previous !== undefined && kickOff.at < previous - HOUR) {
+      if (kickOff.at > previous - 12 * HOUR) return out;
+      wraps.push(i);
+    }
+    previous = kickOff.at;
+  }
+  let days = 0;
+  for (let i = 0; i < out.length && wraps.length > 0; i++) {
+    if (i === wraps[days]) days++;
+    const listing = out[i]!;
+    const kickOff = listing.kickOff;
+    if (days === 0 || kickOff?.source !== 'clock' || kickOff.at === undefined) continue;
+    const at = nextDayAt(kickOff.at, zone, days);
+    if (at !== undefined) out[i] = { ...listing, kickOff: { ...kickOff, at } };
+  }
+  return out;
 }

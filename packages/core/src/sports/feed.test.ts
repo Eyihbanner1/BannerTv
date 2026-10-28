@@ -1,4 +1,4 @@
-import { type ManifestCatalog, parseManifest } from '@bannertv/protocol';
+import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { createAddonClient } from '../addons/client';
 import type { InstalledAddon } from '../addons/collection';
@@ -7,11 +7,12 @@ import { HttpError } from '../http';
 import { createLane } from '../lane';
 import { createLimiter } from '../limiter';
 import { createQueryCache } from '../query';
-import { memoryKeyValueStore } from '../storage';
+import { type KeyValueStore, memoryKeyValueStore } from '../storage';
 import type { Timers } from '../timers';
-import { sportsCatalogs } from './detect';
-import { createSportsFeed, MAX_GENRES, MAX_PAGES } from './feed';
+import { catalogView, isSportsCatalog, sportsCatalogs } from './detect';
+import { createSportsFeed, FULL_PAGE, MAX_GENRES, MAX_PAGES } from './feed';
 import { createKickoffMemory } from './kickoffs';
+import { eventState } from './view';
 
 const NOW = Date.parse('2026-10-28T12:00:00Z');
 const HOUR = 60 * 60 * 1000;
@@ -28,6 +29,8 @@ interface FakeCatalog {
   genres?: string[];
   /** A response other than the page, for crash tests. */
   answer?: (url: string) => Promise<unknown>;
+  /** Answers any page asked with `skip` with an error, as addons that do not expect it may. */
+  rejectSkip?: boolean;
 }
 
 function match(n: number, at: number, extra: Record<string, unknown> = {}) {
@@ -45,6 +48,17 @@ function match(n: number, at: number, extra: Record<string, unknown> = {}) {
   };
 }
 
+/** A match whose time the addon replaced with LIVE. */
+function liveMatch(n: number) {
+  return {
+    id: `ev:${n}`,
+    type: 'sport',
+    name: `🔴 LIVE: Home ${n} vs Away ${n}`,
+    genres: ['Football'],
+    releaseInfo: 'LIVE',
+  };
+}
+
 function channel(n: number) {
   return {
     id: `leaf:ch-${n}`,
@@ -56,8 +70,8 @@ function channel(n: number) {
 }
 
 /** A sports addon served from memory, counting requests and how many run at once. */
-function fakeAddon(name: string, catalogs: FakeCatalog[]) {
-  const base = `https://${name.toLowerCase().replace(/\W+/g, '')}.example`;
+function fakeAddon(name: string, catalogs: FakeCatalog[], options: { base?: string } = {}) {
+  const base = options.base ?? `https://${name.toLowerCase().replace(/\W+/g, '')}.example`;
   const manifest = {
     id: `test.${name.toLowerCase().replace(/\W+/g, '')}`,
     version: '1.0.0',
@@ -94,6 +108,9 @@ function fakeAddon(name: string, catalogs: FakeCatalog[]) {
       const [key, value] = pair.split('=');
       if (key && value !== undefined) extra[key] = decodeURIComponent(value);
     }
+    if (catalog.rejectSkip && extra.skip !== undefined) {
+      return Promise.reject(new HttpError('status', 'Not found', 404));
+    }
     const skip = Number(extra.skip ?? 0);
     const genre = extra.genre;
     const size = catalog.pageSize ?? 20;
@@ -114,6 +131,38 @@ function fakeAddon(name: string, catalogs: FakeCatalog[]) {
     return Promise.resolve({ metas: list.slice(skip, skip + size) });
   };
   return { addon, requests, serve };
+}
+
+/** Answers the fake's meta pages with `reply`, which gets the item id. */
+function serveMeta(fake: ReturnType<typeof fakeAddon>, reply: (id: string) => Promise<unknown>) {
+  const pages = fake.serve;
+  fake.serve = (url) => {
+    const meta = /\/meta\/sport\/([^/]+)\.json$/.exec(url);
+    if (!meta || url.indexOf(fake.addon.transportUrl.replace(/manifest\.json$/, '')) !== 0) {
+      return pages(url);
+    }
+    const id = decodeURIComponent(meta[1]!);
+    fake.requests.push(`/meta/${id}`);
+    return reply(id);
+  };
+}
+
+/** Meta pages that give a kick-off once `release` is called. */
+function heldMeta(fake: ReturnType<typeof fakeAddon>, at: number) {
+  let release = () => undefined as void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  serveMeta(fake, (id) =>
+    held.then(() => ({
+      meta: { id, type: 'sport', name: 'x', released: new Date(at).toISOString() },
+    })),
+  );
+  return () => release();
+}
+
+function metaRequests(fake: ReturnType<typeof fakeAddon>): string[] {
+  return fake.requests.filter((r) => r.indexOf('/meta/') === 0);
 }
 
 function manualTimers() {
@@ -156,7 +205,7 @@ function manualTimers() {
 
 async function setup(
   addons: Array<ReturnType<typeof fakeAddon>>,
-  options: { now?: () => number; laneSize?: number } = {},
+  options: { now?: () => number; laneSize?: number; store?: KeyValueStore } = {},
 ) {
   let inFlight = 0;
   let maxInFlight = 0;
@@ -188,14 +237,14 @@ async function setup(
   const lane = createLane(options.laneSize ?? 2);
   const clock = manualTimers();
   const now = options.now ?? (() => NOW);
-  const memory = createKickoffMemory({ timers: clock.timers, now });
+  const memory = createKickoffMemory({ store: options.store, timers: clock.timers, now });
   const feed = createSportsFeed({ client, lane, memory, timers: clock.timers, now });
   const catalogs = sportsCatalogs(
     addons.map((a) => a.addon),
     { evidence: () => true },
   );
   feed.setCatalogs(catalogs);
-  return { feed, clock, lane, catalogs, maxInFlight: () => maxInFlight };
+  return { feed, clock, lane, memory, catalogs, maxInFlight: () => maxInFlight };
 }
 
 function day(offset = 0) {
@@ -245,7 +294,36 @@ describe('paging by events', () => {
     feed.want(day());
     await clock.advance(2000);
     expect(feed.get().events).toHaveLength(50);
-    expect(fake.requests.length).toBeLessThanOrEqual(MAX_PAGES);
+    // The second page starts one item on: skip counts items, so it jumps a page at a time.
+    expect(fake.requests).toEqual([
+      '/catalog/sport/football.json',
+      '/catalog/sport/football/skip=1.json',
+      '/catalog/sport/football/skip=19.json',
+      '/catalog/sport/football/skip=37.json',
+      '/catalog/sport/football/skip=55.json',
+      '/catalog/sport/football/skip=73.json',
+    ]);
+  });
+
+  it('learns that the addon counts every item when a placeholder comes first', async () => {
+    const items: Array<Record<string, unknown>> = [
+      { id: 'note:update', type: 'sport', name: 'Please update the addon for more', genres: [] },
+    ];
+    for (let n = 0; n < 30; n++) items.push(channel(n));
+    for (let n = 0; n < 50; n++) items.push(match(n, NOW + n * 60 * 1000));
+    const fake = fakeAddon('Counter', [{ id: 'football', name: 'Football', items, skip: 'items' }]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day());
+    await clock.advance(2000);
+    expect(feed.get().events).toHaveLength(50);
+    expect(fake.requests).toEqual([
+      '/catalog/sport/football.json',
+      '/catalog/sport/football/skip=1.json',
+      '/catalog/sport/football/skip=19.json',
+      '/catalog/sport/football/skip=37.json',
+      '/catalog/sport/football/skip=55.json',
+      '/catalog/sport/football/skip=73.json',
+    ]);
   });
 
   it('stops when the addon ignores skip and sends the first page again', async () => {
@@ -342,7 +420,7 @@ describe('paging by events', () => {
     expect(feed.get().events).toHaveLength(150);
   });
 
-  it('asks per genre when a full catalog cannot page, and says more may exist', async () => {
+  it('asks per genre, at most twelve, when a full catalog cannot page', async () => {
     const genres = Array.from({ length: 15 }, (_, n) => `League ${n}`);
     const items = Array.from({ length: 300 }, (_, n) =>
       match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 15]!] }),
@@ -364,7 +442,69 @@ describe('paging by events', () => {
     const genrePages = fake.requests.filter((r) => r.indexOf('genre=') !== -1);
     expect(genrePages).toHaveLength(MAX_GENRES);
     expect(feed.get().events.length).toBeGreaterThan(50);
+    // Twenty matches a genre: every genre page has them all.
     expect(feed.get().more).toBe(false);
+  });
+
+  it('says more may exist while a genre page is still full, for the catalogs on screen', async () => {
+    const genres = ['League A', 'League B', 'League C'];
+    const items = Array.from({ length: 300 }, (_, n) =>
+      match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 3]!] }),
+    );
+    const fake = fakeAddon('Crowded', [
+      { id: 'live', name: 'Live Now', items: [match(1000, NOW - HOUR)] },
+      {
+        id: 'football',
+        name: 'Football',
+        items,
+        pageSize: FULL_PAGE,
+        skip: 'ignore',
+        declareSkip: false,
+        genres,
+      },
+    ]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day());
+    await clock.advance(2000);
+    expect(fake.requests.filter((r) => r.indexOf('genre=') !== -1)).toHaveLength(3);
+    expect(feed.get().more).toBe(true);
+    // The Live sport row asks the live catalog only: the note is not for it.
+    feed.want('live', { light: true });
+    await clock.advance(1000);
+    expect(feed.get().more).toBe(false);
+  });
+
+  it('keeps an addon that answers the skip probe with an error, and asks per genre', async () => {
+    const genres = ['League A', 'League B'];
+    const items = Array.from({ length: FULL_PAGE }, (_, n) =>
+      match(n, NOW + n * 60 * 1000, { genres: ['Football', genres[n % 2]!] }),
+    );
+    const fake = fakeAddon('Strict', [
+      {
+        id: 'football',
+        name: 'Football',
+        items,
+        pageSize: FULL_PAGE,
+        declareSkip: false,
+        rejectSkip: true,
+        genres,
+      },
+    ]);
+    const { feed, clock } = await setup([fake]);
+    feed.want(day());
+    await clock.advance(2000);
+    expect(feed.get().events).toHaveLength(FULL_PAGE);
+    expect(feed.get().failed).toEqual([]);
+    expect(fake.requests).toEqual([
+      '/catalog/sport/football.json',
+      `/catalog/sport/football/skip=${FULL_PAGE}.json`,
+      '/catalog/sport/football/genre=League%20A.json',
+      '/catalog/sport/football/genre=League%20B.json',
+    ]);
+    // Try again is for addons that did not answer: the guess is not asked again.
+    feed.retry();
+    await clock.advance(1000);
+    expect(fake.requests).toHaveLength(4);
   });
 });
 
@@ -530,44 +670,291 @@ describe('live catalogs', () => {
     expect(fake.requests).toHaveLength(2);
   });
 
-  it('looks up the meta of a live match with no time, at most twenty per addon', async () => {
-    const items = Array.from({ length: 30 }, (_, n) => ({
-      id: `ev:${n}`,
-      type: 'sport',
-      name: `🔴 LIVE: Home ${n} vs Away ${n}`,
-      genres: ['Football'],
-      releaseInfo: 'LIVE',
-    }));
+  it('looks up the meta of a live match with no time, at most twenty per addon and refresh', async () => {
+    let time = NOW;
+    const items = Array.from({ length: 30 }, (_, n) => liveMatch(n));
     const fake = fakeAddon('Metas', [{ id: 'live', name: 'Live Now', items, pageSize: 50 }]);
-    const metaServe = fake.serve;
-    fake.serve = (url) => {
-      const meta = /\/meta\/sport\/([^/]+)\.json$/.exec(url);
-      if (meta && url.indexOf('metas.example') !== -1) {
-        fake.requests.push(`/meta/${decodeURIComponent(meta[1]!)}`);
-        return Promise.resolve({
-          meta: {
-            id: decodeURIComponent(meta[1]!),
-            type: 'sport',
-            name: 'x',
-            releaseInfo: '28 Oct 2026 · 11:15 UTC',
-          },
-        });
-      }
-      return metaServe(url);
-    };
-    const { feed, clock } = await setup([fake]);
+    serveMeta(fake, (id) =>
+      Promise.resolve({
+        meta: { id, type: 'sport', name: 'x', releaseInfo: '28 Oct 2026 · 11:15 UTC' },
+      }),
+    );
+    const { feed, clock } = await setup([fake], { now: () => time });
     feed.want('live');
     await clock.advance(2000);
-    expect(fake.requests.filter((r) => r.indexOf('/meta/') === 0)).toHaveLength(20);
-    const timed = feed.get().events.filter((event) => event.kickOff?.source === 'remembered');
-    expect(timed).toHaveLength(20);
-    expect(timed[0]!.kickOff?.at).toBe(Date.parse('2026-10-28T11:15:00Z'));
+    expect(metaRequests(fake)).toHaveLength(20);
+    const timed = () => feed.get().events.filter((e) => e.kickOff?.source === 'remembered');
+    expect(timed()).toHaveLength(20);
+    expect(timed()[0]!.kickOff?.at).toBe(Date.parse('2026-10-28T11:15:00Z'));
+    // The next refresh looks up the ten left.
+    time += 3 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(metaRequests(fake)).toHaveLength(30);
+    expect(timed()).toHaveLength(30);
+  });
+
+  it('asks a meta lookup that timed out again after the next refresh, not one the addon lacks', async () => {
+    let time = NOW;
+    let timeouts = 1;
+    const fake = fakeAddon('Slow', [
+      { id: 'live', name: 'Live Now', items: [liveMatch(1), liveMatch(2)] },
+    ]);
+    serveMeta(fake, (id) => {
+      if (id === 'ev:2') return Promise.reject(new HttpError('status', 'Not found', 404));
+      if (timeouts-- > 0) return Promise.reject(new HttpError('timeout', 'Timed out'));
+      return Promise.resolve({
+        meta: { id, type: 'sport', name: 'x', releaseInfo: '28 Oct 2026 · 11:15 UTC' },
+      });
+    });
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want('live');
+    await clock.advance(1000);
+    expect(metaRequests(fake)).toEqual(['/meta/ev:1', '/meta/ev:2']);
+    time += 3 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(metaRequests(fake)).toEqual(['/meta/ev:1', '/meta/ev:2', '/meta/ev:1']);
+    const ev1 = feed.get().events.find((e) => e.sources[0]!.id === 'ev:1');
+    expect(ev1?.kickOff?.source).toBe('remembered');
+  });
+
+  it('asks dropped meta lookups again when sport is back on screen', async () => {
+    const items = Array.from({ length: 10 }, (_, n) => liveMatch(n));
+    const fake = fakeAddon('Held', [{ id: 'live', name: 'Live Now', items }]);
+    const release = heldMeta(fake, NOW - HOUR);
+    const { feed, clock } = await setup([fake]);
+    feed.want('live');
+    await clock.advance(1000);
+    // Two lookups run and eight wait in the lane; the viewer opens an event page.
+    expect(metaRequests(fake)).toHaveLength(2);
+    feed.want(null);
+    await clock.advance(1000);
+    feed.want('live');
+    release();
+    await clock.advance(2000);
+    expect(new Set(metaRequests(fake)).size).toBe(10);
+    const timed = feed.get().events.filter((e) => e.kickOff?.source === 'remembered');
+    expect(timed).toHaveLength(10);
+  });
+
+  it('pages a live catalog again when it grows after its first visit', async () => {
+    let time = NOW;
+    const items = Array.from({ length: 5 }, (_, n) => match(n, NOW - 2 * HOUR + n * 2 * 60 * 1000));
+    const fake = fakeAddon('Growing', [{ id: 'live', name: 'Live Now', items }]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want('live');
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(5);
+    // Saturday evening: forty more kick off.
+    for (let n = 5; n < 45; n++) items.push(match(n, NOW - 2 * HOUR + n * 2 * 60 * 1000));
+    time += 3 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(feed.get().events).toHaveLength(45);
+    expect(fake.requests).toEqual([
+      '/catalog/sport/live.json',
+      '/catalog/sport/live.json',
+      '/catalog/sport/live/skip=18.json',
+      '/catalog/sport/live/skip=36.json',
+    ]);
+  });
+
+  it('pages a live catalog from where its first page ends now, after matches left the top', async () => {
+    let time = NOW;
+    const items = Array.from({ length: 60 }, (_, n) =>
+      match(n, NOW - 2 * HOUR + n * 2 * 60 * 1000),
+    );
+    const fake = fakeAddon('Shifting', [{ id: 'live', name: 'Live Now', items }]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    // Home's Live sport row asks the first page only.
+    feed.want('live', { light: true });
+    await clock.advance(1000);
+    // Five matches end and leave the list; the next refresh reads the first page again.
+    items.splice(0, 5);
+    time += 3 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(fake.requests).toEqual(['/catalog/sport/live.json', '/catalog/sport/live.json']);
+    feed.want('live');
+    await clock.advance(2000);
+    expect(fake.requests[2]).toBe('/catalog/sport/live/skip=18.json');
+    const ids = feed.get().events.map((event) => event.sources[0]!.id);
+    for (let n = 5; n < 60; n++) expect(ids).toContain(`ev:${n}`);
+  });
+
+  it('asks a stale live catalog again as soon as sport is back on screen', async () => {
+    let time = NOW;
+    const fake = fakeAddon('Back', [
+      { id: 'live', name: 'Live Now', items: [match(1, NOW - HOUR)] },
+    ]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want('live');
+    await clock.advance(1000);
+    // The viewer watches a match for ninety minutes, then presses Back.
+    feed.want(null);
+    time += 90 * 60 * 1000;
+    await clock.advance(90 * 60 * 1000);
+    expect(fake.requests).toHaveLength(1);
+    feed.want('live');
+    await clock.advance(1000);
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('places a LIVE match with no time between two close kick-offs in Live now', async () => {
+    const items = [
+      match(1, NOW - HOUR),
+      liveMatch(2),
+      match(3, NOW - 30 * 60 * 1000),
+      match(4, NOW + 30 * 60 * 1000),
+      // Too far apart to tell when this one started.
+      liveMatch(5),
+      match(6, NOW + 4 * HOUR),
+    ];
+    const fake = fakeAddon('Sorted', [{ id: 'football', name: 'Football', items }]);
+    const { feed, clock } = await setup([fake]);
+    feed.want('live', { light: true });
+    await clock.advance(1000);
+    const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
+    expect(event('ev:2').kickOff).toEqual({ at: NOW - HOUR, sure: false, source: 'estimated' });
+    expect(eventState(event('ev:2'), { now: NOW })).toBe('live');
+    expect(event('ev:5').kickOff).toBeUndefined();
   });
 });
 
-describe('detection input', () => {
-  it('needs no addon address to tell the addon apart', () => {
-    const catalog: ManifestCatalog = { type: 'sport', id: 'x', name: 'Football', extra: [] };
-    expect(catalog.name).toBe('Football');
+describe('catalogs that are not live', () => {
+  it('asks a catalog again once its copy is fifteen minutes old, while it is on screen', async () => {
+    let time = NOW;
+    const items = [match(1, NOW + HOUR)];
+    const fake = fakeAddon('Today', [{ id: 'football', name: 'Football', items }]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want(day());
+    await clock.advance(1000);
+    items.push(match(2, NOW + 2 * HOUR));
+    time += 10 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(fake.requests).toHaveLength(1);
+    time += 6 * 60 * 1000;
+    await clock.advance(2 * 60 * 1000);
+    expect(fake.requests).toHaveLength(2);
+    expect(feed.get().events).toHaveLength(2);
+  });
+
+  it('shows no copy older than six hours, and asks for a new one when sport is back', async () => {
+    let time = NOW;
+    let down = false;
+    const items = [match(1, NOW + 8 * HOUR)];
+    const fake = fakeAddon('Old', [
+      {
+        id: 'football',
+        name: 'Football',
+        items,
+        answer: () =>
+          down
+            ? Promise.reject(new HttpError('status', 'Server error', 500))
+            : Promise.resolve({ metas: items }),
+      },
+    ]);
+    const { feed, clock } = await setup([fake], { now: () => time });
+    feed.want(day());
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(1);
+    feed.want(null);
+    time += 7 * HOUR;
+    down = true;
+    feed.want(day());
+    await clock.advance(1000);
+    expect(fake.requests).toHaveLength(2);
+    expect(feed.get().events).toHaveLength(0);
+    expect(feed.get().failed).toEqual(['Old']);
+    down = false;
+    items.push(match(2, NOW + 9 * HOUR));
+    feed.retry();
+    await clock.advance(1000);
+    expect(feed.get().events).toHaveLength(2);
+  });
+});
+
+describe('addons that move or go', () => {
+  it('asks the meta of a live match only of the addon that listed it, after one above is removed', async () => {
+    const extra = fakeAddon('Extra', [
+      { id: 'football', name: 'Football', items: [match(9, NOW + HOUR)] },
+    ]);
+    const alpha = fakeAddon('Alpha', [
+      { id: 'live', name: 'Live Now', items: [liveMatch(1), liveMatch(2)] },
+    ]);
+    const beta = fakeAddon('Beta', [
+      { id: 'football', name: 'Football', items: [match(3, NOW + HOUR)] },
+    ]);
+    for (const fake of [alpha, beta]) {
+      serveMeta(fake, () => Promise.reject(new HttpError('status', 'Not found', 404)));
+    }
+    const { feed, clock } = await setup([extra, alpha, beta]);
+    feed.want('live', { light: true });
+    await clock.advance(1000);
+    feed.setCatalogs(sportsCatalogs([alpha.addon, beta.addon], { evidence: () => true }));
+    feed.want('live');
+    await clock.advance(1000);
+    expect(metaRequests(beta)).toEqual([]);
+    expect(metaRequests(alpha)).toEqual(['/meta/ev:1', '/meta/ev:2']);
+    const own = feed.get().events.filter((e) => e.sources[0]!.addonId === alpha.addon.manifest.id);
+    expect(own.map((e) => e.sources[0]!.addonIndex)).toEqual([0, 0]);
+  });
+
+  it('keeps nothing from a meta lookup that ends after its addon is removed', async () => {
+    const gone = fakeAddon('Gone', [{ id: 'live', name: 'Live Now', items: [liveMatch(1)] }]);
+    const release = heldMeta(gone, NOW - HOUR);
+    const { feed, clock, memory } = await setup([gone]);
+    feed.want('live');
+    await clock.advance(1000);
+    expect(metaRequests(gone)).toHaveLength(1);
+    // Removed in Addons settings while its lookup runs, as the app does it.
+    memory.forget(gone.addon.manifest.id);
+    feed.setCatalogs([]);
+    release();
+    await clock.advance(1000);
+    expect(memory.get(gone.addon.manifest.id, 'ev:1')).toBeUndefined();
+    expect(memory.firstSeen(gone.addon.manifest.id, 'ev:1')).toBeUndefined();
+  });
+});
+
+describe('addon addresses', () => {
+  it('tell sports catalogs apart without the address, which nothing keeps', async () => {
+    const SECRET = 'k3y-0f-the-v1ewer';
+    const catalogs = (): FakeCatalog[] => [
+      { id: 'football', name: 'Football', items: [match(1, NOW + HOUR)] },
+      { id: 'live', name: 'Live Now', items: [liveMatch(2)] },
+      // An error that quotes the address it was for.
+      {
+        id: 'upcoming',
+        name: 'Upcoming',
+        items: [],
+        answer: (url) => Promise.reject(new HttpError('status', `Not found: ${url}`, 404)),
+      },
+    ];
+    const plain = fakeAddon('Keyed', catalogs());
+    const keyed = fakeAddon('Keyed', catalogs(), { base: `https://keyed.example/${SECRET}` });
+    // The same addon installed with a key in its address answers the same.
+    const describeAll = (addon: InstalledAddon) =>
+      addon.manifest.catalogs.map((catalog) => [
+        isSportsCatalog(addon, catalog),
+        catalogView(catalog),
+      ]);
+    expect(describeAll(keyed.addon)).toEqual(describeAll(plain.addon));
+    const shape = (addon: InstalledAddon) =>
+      sportsCatalogs([addon]).map(({ key, view, pageable, genres }) => ({
+        key,
+        view,
+        pageable,
+        genres,
+      }));
+    expect(shape(keyed.addon)).toEqual(shape(plain.addon));
+
+    const store = memoryKeyValueStore();
+    const { feed, clock, memory } = await setup([keyed], { store });
+    feed.want('live');
+    await clock.advance(2000);
+    expect(feed.get().events).toHaveLength(2);
+    expect(feed.get().failed).toEqual(['Keyed']);
+    await memory.flush();
+    const stored = JSON.stringify(await store.get('sports.kickoffs'));
+    expect(stored).toContain(keyed.addon.manifest.id);
+    expect(stored).not.toContain(SECRET);
   });
 });
