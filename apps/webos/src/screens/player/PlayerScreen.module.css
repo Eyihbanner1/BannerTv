@@ -1,0 +1,367 @@
+/* The player covers the whole screen, rail included. The picture shows through it. */
+.player {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+}
+
+/*
+ * The video sits in the page body, outside the scaled app, at 0,0 and the
+ * window's full size with no transform: the LG store requires it, and webOS
+ * starts its screensaver over a video it does not see as full screen.
+ */
+.video {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: #000;
+}
+
+.surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  outline: none;
+}
+
+/* Starting: the title's own artwork with a slow shimmer, never a bare spinner. */
+.waiting {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--bt-bg);
+}
+
+.waitingArt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: cover;
+  opacity: 0.55;
+}
+
+.waiting::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  background: linear-gradient(0deg, rgba(11, 8, 21, 0.9) 0%, rgba(11, 8, 21, 0) 55%);
+}
+
+.shimmer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 960px;
+  height: 1080px;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(255, 255, 255, 0) 80%
+  );
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-960px);
+  }
+  to {
+    transform: translateX(1920px);
+  }
+}
+
+/* The 2020 TVs draw the gradient sweep slowly; a gentle pulse costs less. */
+:global(.low-power) .shimmer {
+  width: 1920px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: pulse 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.waitingTitle {
+  position: absolute;
+  left: var(--bt-safe-x);
+  bottom: 120px;
+  width: 1100px;
+  z-index: 1;
+}
+
+.waitingLogo {
+  display: block;
+  max-width: 640px;
+  max-height: 200px;
+  margin-bottom: 16px;
+}
+
+.spinner {
+  position: absolute;
+  top: 476px;
+  left: 896px;
+  width: 128px;
+  height: 128px;
+  box-sizing: border-box;
+  border: 8px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--bt-accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toast {
+  position: absolute;
+  top: 64px;
+  left: 560px;
+  width: 800px;
+  margin: 0;
+  padding: 20px 32px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  background: rgba(11, 8, 21, 0.85);
+  color: var(--bt-text);
+  font: var(--bt-text-body);
+  text-align: center;
+  z-index: 2;
+}
+
+/* Controls fade rather than unmount, so focus can land on them at once. */
+.controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--bt-motion) ease-out,
+    visibility 0s linear var(--bt-motion);
+}
+
+.controlsShown {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--bt-motion) ease-out;
+}
+
+.top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 320px;
+  padding: 56px var(--bt-safe-x) 0;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.title {
+  margin: 0;
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.facts {
+  margin: 16px 0 0;
+}
+
+.fact {
+  display: inline-block;
+  margin-right: 12px;
+  padding: 4px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.bottom {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1920px;
+  padding: 120px var(--bt-safe-x) 64px;
+  box-sizing: border-box;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.seek {
+  display: flex;
+  align-items: center;
+  height: 64px;
+  margin-bottom: 32px;
+  padding: 0 16px;
+  border-radius: 16px;
+}
+
+.seekFocused {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.time {
+  width: 140px;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  text-align: center;
+}
+
+.bar {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  margin: 0 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.seekFocused .bar {
+  height: 12px;
+}
+
+.played {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--bt-accent);
+}
+
+.scrubbed {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.thumb {
+  position: absolute;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.buttons {
+  white-space: nowrap;
+}
+
+.buttons > div {
+  margin-right: 24px;
+}
+
+/* Up Next sits over the credits, bottom right, above the controls. */
+.upNext {
+  position: absolute;
+  right: var(--bt-safe-x);
+  bottom: 96px;
+  width: 760px;
+  padding: 32px;
+  box-sizing: border-box;
+  border-radius: 24px;
+  background: rgba(11, 8, 21, 0.92);
+  box-shadow: 0 24px 96px rgba(0, 0, 0, 0.6);
+  z-index: 3;
+}
+
+.upNextThumb {
+  display: block;
+  width: 696px;
+  height: 260px;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.upNextLabel {
+  margin: 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.upNextTitle {
+  margin: 8px 0 24px;
+  font: var(--bt-text-title);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upNextButtons > div {
+  margin-right: 20px;
+}
+
+.panelTitle {
+  margin: 0 0 16px;
+  font: var(--bt-text-heading);
+}
+
+.panelHint {
+  margin: 0 0 16px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.problemTitle {
+  margin: 0 0 24px;
+  font: var(--bt-text-heading);
+}
+
+.problemMessage {
+  margin: 0 0 16px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.problemActions {
+  margin-top: 40px;
+}
+
+.problemActions > div {
+  margin: 0 20px 20px 0;
+}

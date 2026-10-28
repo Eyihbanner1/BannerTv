@@ -10,12 +10,22 @@ export const IDLE_AFTER_MS = 3000;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let lastAt = 0;
 let gap = Infinity;
+const listeners = new Set<() => void>();
+
+/** Tells `listener` each time the remote is used. */
+export function onActivity(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 /** Called for each key press, and each pointer move onto something new. */
 export function markActivity(): void {
   const now = Date.now();
   gap = now - lastAt;
   lastAt = now;
+  listeners.forEach((listener) => listener());
   const root = document.documentElement;
   if (!root.classList.contains(CLASS)) root.classList.add(CLASS);
   clearTimeout(timer);

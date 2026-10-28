@@ -35,6 +35,8 @@ body {
 
 #root {
   position: relative;
+  /* Above the player's video, which sits outside it in the body. */
+  z-index: 1;
   width: 1920px;
   height: 1080px;
   overflow: hidden;

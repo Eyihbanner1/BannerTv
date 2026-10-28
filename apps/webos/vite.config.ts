@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { vendorScripts } from './build/vendor-scripts.ts';
 import { webosPackage } from './build/webos-package.ts';
+import { VENDOR_SCRIPTS } from './src/player/engines/vendor.ts';
 
 const root = import.meta.dirname;
 
@@ -10,6 +12,7 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
+    vendorScripts(VENDOR_SCRIPTS),
     webosPackage({
       metaDir: resolve(root, 'webos-meta'),
       brandDir: resolve(root, '../../brand/webos'),

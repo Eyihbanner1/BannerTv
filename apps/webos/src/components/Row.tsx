@@ -17,7 +17,7 @@ import { focusedKey } from '../navigation/spatial';
 import { canSlide } from '../platform/input-mode';
 import { tuning } from '../platform/tuning';
 import { Button } from './Button';
-import { MoreTile, Tile, type TileShape } from './Tile';
+import { MoreTile, Tile, type TileExtra, type TileShape } from './Tile';
 import styles from './Row.module.css';
 
 /** Tile pitch and how many fit across the 1704 px the row shows. */
@@ -77,6 +77,13 @@ interface RowProps {
   onItemPress: (item: MetaPreview) => void;
   /** Adds a last tile that opens the whole catalog. */
   onSeeAll?: () => void;
+  /** Per item, in the same order: a progress bar and a short note on the tile. */
+  extras?: ReadonlyArray<TileExtra | undefined>;
+  /**
+   * When this changes, the row scrolls to the position remembered for it,
+   * for a row whose titles move about while the screen is hidden.
+   */
+  scrollKey?: unknown;
 }
 
 /**
@@ -87,8 +94,20 @@ interface RowProps {
  * decoding and memory down on 2020 TVs.
  */
 export const Row = memo(function Row(props: RowProps) {
-  const { focusKey, title, tag, shape, items, error, onRetry, onItemFocus, onItemPress, onSeeAll } =
-    props;
+  const {
+    focusKey,
+    title,
+    tag,
+    shape,
+    items,
+    error,
+    onRetry,
+    onItemFocus,
+    onItemPress,
+    onSeeAll,
+    extras,
+    scrollKey,
+  } = props;
   const { t } = useTranslation();
   const { step, visible } = ROW_GEOMETRY[shape];
   const seeAll = onSeeAll !== undefined && items !== null && items.length > 0 && !error;
@@ -117,6 +136,14 @@ export const Row = memo(function Row(props: RowProps) {
     },
     [focusKey],
   );
+
+  // Before paint, so the remembered tile is drawn by the time focus lands on it.
+  const lastScrollKey = useRef(scrollKey);
+  useLayoutEffect(() => {
+    if (lastScrollKey.current === scrollKey) return;
+    lastScrollKey.current = scrollKey;
+    setAnchor(recallScroll(focusKey));
+  }, [scrollKey, focusKey]);
 
   // Tiles get handlers that never change, so moving along the row redraws the
   // two tiles whose focus changed, not every tile.
@@ -200,6 +227,7 @@ export const Row = memo(function Row(props: RowProps) {
         index={index}
         loadingLabel={loadingLabel}
         left={index * step}
+        extra={extras ? extras[index] : undefined}
         onTileFocus={onTileFocus}
         onTilePress={onTilePress}
       />,

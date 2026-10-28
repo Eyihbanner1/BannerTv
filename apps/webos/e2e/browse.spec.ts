@@ -111,9 +111,12 @@ test('a series opens on season 1, and seasons switch as focus moves', async ({ p
   await expect(page.locator('[data-focus-key="details-season-2"]')).toHaveText('Specials');
 
   await press(page, 'ArrowDown', 'details-episodes-0');
-  await press(page, 'Enter', 'details-episodes-0');
-  await expect(page.getByText('Choosing a stream arrives in Phase 2')).toBeVisible();
+  // No stream addon is installed, so the player says so.
+  await press(page, 'Enter', 'player-problem-streams');
+  await expect(page.getByText('No stream could play')).toBeVisible();
 
+  await pressBack(page);
+  await expectFocus(page, 'details-episodes-0');
   await pressBack(page);
   await expectFocus(page, `${SERIES_ROW}-tile-0`);
 });

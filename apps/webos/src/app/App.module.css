@@ -26,3 +26,10 @@
 .slot:global(.screen-covered) {
   visibility: hidden;
 }
+
+/* The player covers the rail as well: the slot reaches back to the screen's left edge.
+   The section screen under it keeps its size, so going back does not lay it out again. */
+.fullScreen {
+  left: calc(-1 * var(--bt-rail-collapsed));
+  width: 1920px;
+}

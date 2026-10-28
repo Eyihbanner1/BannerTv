@@ -1,0 +1,2005 @@
+{
+  "_meta": {
+    "generated": "2026-10-27",
+    "count": 62,
+    "provenance": {
+      "copied": "Verbatim from a captured real addon response (StremThru's extractor tests) or from the SDK docs. Account tokens were already replaced with x's by the source.",
+      "derived": "Exact output format of that addon's current formatter code (linked), applied by hand to an invented release. Hashes, hosts and sizes are invented.",
+      "invented": "Shape from the SDK docs or stremio-core types; content invented."
+    },
+    "expect": "Hand-labelled parse a good parser should produce from name + description/title + behaviorHints.filename. hdr uses DV, HDR10+, HDR10, HDR, SDR; audio uses atmos, truehd, dts-hd-ma, dts-x, dts, ddp, dd, aac; availability is cached | uncached | p2p | direct | external | youtube | usenet. size.bytes uses size.base. Review before treating as golden.",
+    "_fixture": "Every stream carries a _fixture key; strip it before feeding a parser that rejects unknown keys.",
+    "scrubbed": "Path segments that look like account keys (20+ key-like characters, or runs of x placeholders, but not 40-character info hashes) and key/token/apikey query values are replaced with KEY."
+  },
+  "streams": [
+    {
+      "name": "Torrentio\n4k DV",
+      "title": "Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR\n👤 47 💾 40.33 GB ⚙️ TorrentGalaxy",
+      "infoHash": "e4f5d7a2f3dd6b7b1826bd77e316b6b5ba31eb72",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BluRay REMUX|hevc|DV",
+        "filename": "Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-4k-dv-remux",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L21-L28",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "40.33 GB",
+            "base": 1024,
+            "bytes": 43304007762
+          },
+          "seeders": 47,
+          "availability": "p2p",
+          "service": null,
+          "languages": []
+        }
+      }
+    },
+    {
+      "name": "Torrentio\nDVDRip",
+      "title": "A Simple Favor 2018 DVDRip x264 ESub [MW]\n👤 5 💾 864.57 MB ⚙️ ThePirateBay",
+      "infoHash": "387ccd318d583405bbadcec55b9b05029645dd1d",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|DVDRip|x264",
+        "filename": "A Simple Favor 2018 DVDRip x264 ESub [MW].mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-dvdrip-no-resolution",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L55-L63",
+        "expect": {
+          "resolution": null,
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "dvdrip",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "864.57 MB",
+            "base": 1024,
+            "bytes": 906567352
+          },
+          "seeders": 5,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "No resolution anywhere; the name's second line is the source. Treat as SD."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "X-Men Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nX-Men Complete 13 Movie Collection 2000-2020/08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ TorrentGalaxy\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
+      "infoHash": "a6a80257d62e53e55c877a7067ea5055129b462c",
+      "fileIdx": 89,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|h264",
+        "filename": "08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-1080p-pack-multisubs",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L87-L95",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "3.65 GB",
+            "base": 1024,
+            "bytes": 3919157658
+          },
+          "seeders": 20,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en", "ru", "fi"],
+          "notes": "Second line is the file inside a season/collection pack; the size is the file's size. 'Multi Subs' is about subtitles, not audio."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\n720p",
+      "title": "Deadpool (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Downloadhub\n👤 3 💾 934.8 MB ⚙️ 1337x\nDual Audio / 🇬🇧 / 🇮🇳",
+      "infoHash": "f5d0ab292f5a244a4b38efac9ae1f8d311179588",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|720p|BluRay|x264"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-720p-dual-audio",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L152-L157",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "934.8 MB",
+            "base": 1024,
+            "bytes": 980208845
+          },
+          "seeders": 3,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["dual", "en", "hi"],
+          "notes": "No fileIdx and no filename: Stremio picks the largest file."
+        }
+      }
+    },
+    {
+      "name": "[RD+] Torrentio\n4k DV | HDR",
+      "title": "Deadpool [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV]\n👤 16 💾 22.42 GB ⚙️ 1337x",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/c35ec8ad9f613d73782a898bece969efd6b98e0c/null/0/Deadpool%20%5B2016%5D%202160p%20Hybrid%20UHD%20BDRip%20DV%20HDR10%20x265%20TrueHD%20Atmos%207.1%20Kira%20%5BSEV%5D.mkv",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BDRip|x265|10bit|DV|HDR",
+        "filename": "Deadpool [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV].mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-rd-cached-4k-dv-hdr",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L199-L205",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "bdrip",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "22.42 GB",
+            "base": 1024,
+            "bytes": 24073291694
+          },
+          "seeders": 16,
+          "availability": "cached",
+          "service": "RD",
+          "languages": [],
+          "notes": "Name says 'HDR' but the title says HDR10: Torrentio collapses HDR10 to 'HDR'."
+        }
+      }
+    },
+    {
+      "name": "[RD+] Torrentio\n1080p",
+      "title": "X-Men Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nX-Men Complete 13 Movie Collection 2000-2020/08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ TorrentGalaxy\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/a6a80257d62e53e55c877a7067ea5055129b462c/null/89/08%20Deadpool%20-%20Action%202016%20Eng%20Rus%20Multi-Subs%201080p%20%5BH264-mp4%5D.mp4",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|h264",
+        "filename": "08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
+      },
+      "_fixture": {
+        "id": "torrentio-rd-cached-1080p-pack",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L238-L244",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "3.65 GB",
+            "base": 1024,
+            "bytes": 3919157658
+          },
+          "seeders": 20,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "ru", "fi"]
+        }
+      }
+    },
+    {
+      "name": "[RD download] Torrentio\n720p",
+      "title": "Deadpool (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Downloadhub\n👤 3 💾 934.8 MB ⚙️ 1337x\nDual Audio / 🇬🇧 / 🇮🇳",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/f5d0ab292f5a244a4b38efac9ae1f8d311179588/null/undefined/Deadpool%20(2016)%20720p%20BluRay%20x264%20%5BDual%20Audio%5D%20%5BHindi%20(Line%20Audio)%20-%20English%5D%20ESubs%20-%20Downloadhub",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|720p|BluRay|x264"
+      },
+      "_fixture": {
+        "id": "torrentio-rd-download-720p",
+        "addon": "Torrentio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_torrentio_test.go#L275-L280",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "934.8 MB",
+            "base": 1024,
+            "bytes": 980208845
+          },
+          "seeders": 3,
+          "availability": "uncached",
+          "service": "RD",
+          "languages": ["dual", "en", "hi"],
+          "notes": "Uncached: playing it makes the debrid service start downloading; the URL plays a 'downloading' placeholder video first."
+        }
+      }
+    },
+    {
+      "name": "[TORRENT🧲] Comet 1080p",
+      "description": "Deadpool 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv\n💿 BluRay|avc|DTS Lossy|AC3|3Li\n💾 7.29 GB 🔎 DMM\n🇪🇸",
+      "infoHash": "c359566eed1264fbe0482aae479cbe51c966d468",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "comet|c359566eed1264fbe0482aae479cbe51c966d468",
+        "videoSize": 7826122416,
+        "filename": "Deadpool 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv"
+      },
+      "_fixture": {
+        "id": "comet-v1-p2p-1080p",
+        "addon": "Comet (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_comet_test.go#L21-L29",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dts", "dd"],
+          "channels": null,
+          "size": {
+            "text": "7.29 GB",
+            "base": 1024,
+            "bytes": 7827577897
+          },
+          "seeders": null,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["es"],
+          "notes": "behaviorHints.videoSize gives exact bytes; prefer it over the text."
+        }
+      }
+    },
+    {
+      "name": "[PM⚡] Comet 2160p",
+      "description": "Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv\n💿 BluRay|SDR|hevc|AC3|5.1|10bit|PeruGuy\n💾 8.14 GB 🔎 MediaFusion|Knightcrawler\n🇬🇧/🇮🇳",
+      "url": "https://comet.elfhosted.com/KEY/playback/74315dd5d8a0a4e2b229914ad729887acedc396f/0/0/n/n/Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv?name=deadpool",
+      "behaviorHints": {
+        "bingeGroup": "comet|74315dd5d8a0a4e2b229914ad729887acedc396f",
+        "videoSize": 8734893087,
+        "filename": "Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv"
+      },
+      "_fixture": {
+        "id": "comet-v1-pm-cached-2160p-sdr",
+        "addon": "Comet (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_comet_test.go#L75-L82",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["SDR"],
+          "videoCodec": "hevc",
+          "source": "bluray",
+          "audio": ["dd"],
+          "channels": "5.1",
+          "size": {
+            "text": "8.14 GB",
+            "base": 1024,
+            "bytes": 8740258447
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "PM",
+          "languages": ["en", "hi"],
+          "notes": "The url contains raw spaces and brackets (not percent-encoded). 4K but SDR: do not treat 2160p as HDR."
+        }
+      }
+    },
+    {
+      "name": "[PM⬇️] Comet 2160p",
+      "description": "Black Snow S01 MULTi HDR 2160p WEB H265-BraD\n💿 WEB|HDR|hevc|BraD\n👤 0 💾 27.93 GB 🔎 MediaFusion|Zilean DMM",
+      "url": "https://comet.elfhosted.com/KEY/playback/e3cd01e301c4bd3bc7888b189ba6a3b8e0ac152d/0/n/1/2/Black Snow S01 MULTi HDR 2160p WEB H265-BraD?name=black%20snow",
+      "behaviorHints": {
+        "bingeGroup": "comet|e3cd01e301c4bd3bc7888b189ba6a3b8e0ac152d",
+        "videoSize": 29991714406,
+        "filename": "Black Snow S01 MULTi HDR 2160p WEB H265-BraD"
+      },
+      "_fixture": {
+        "id": "comet-v1-pm-uncached-2160p-series-pack",
+        "addon": "Comet (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_comet_test.go#L114-L121",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["HDR"],
+          "videoCodec": "hevc",
+          "source": "web",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "27.93 GB",
+            "base": 1024,
+            "bytes": 29989609144
+          },
+          "seeders": 0,
+          "availability": "uncached",
+          "service": "PM",
+          "languages": ["multi"],
+          "notes": "Season pack: 27.93 GB is the whole pack, not the episode. 0 seeders."
+        }
+      }
+    },
+    {
+      "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 2160P",
+      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Torlock",
+      "infoHash": "a3d11f4d97121a79f3e94b18a43e5b3e2f1853e1",
+      "fileIdx": 2,
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-|-ElfHosted-🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc-2160P",
+        "filename": "Deadpool.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
+        "videoSize": 37682583137
+      },
+      "_fixture": {
+        "id": "mediafusion-v1-p2p-2160p-dv-remux",
+        "addon": "MediaFusion (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L21-L29",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "35.09 GB",
+            "base": 1024,
+            "bytes": 37677600604
+          },
+          "seeders": null,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en", "it"],
+          "notes": "Language names written out ('English + Italian'), not flags. '⏳' here means P2P, not an uncached debrid link."
+        }
+      }
+    },
+    {
+      "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 720P",
+      "description": "📺 BluRay 🎞️ avc \n📦 983.4 MB 👤 30\n🌐 English + Hindi\n🔗 TheRARBG",
+      "infoHash": "2decf5e42220711acf7a2515ed14ee78f13413fe",
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc-720P",
+        "filename": "Deadpool 2016 x264 720p BluRay Eng Subs Dual Audio Hindi 5 1 English 5 1 Downloadhub",
+        "videoSize": 1031169664
+      },
+      "_fixture": {
+        "id": "mediafusion-v1-p2p-720p",
+        "addon": "MediaFusion (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L56-L63",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": [],
+          "channels": "5.1",
+          "size": {
+            "text": "983.4 MB",
+            "base": 1024,
+            "bytes": 1031169638
+          },
+          "seeders": 30,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en", "hi"]
+        }
+      }
+    },
+    {
+      "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 1080P",
+      "description": "📺 BluRay 🎞️ avc 🎵 Dolby Digital \n📦 2.43 GB / 33.48 GB \n🌐 English\n🔗 Zilean DMM",
+      "infoHash": "ce146cce125215f5e6615d2375ffa6a881c8eedd",
+      "fileIdx": 1,
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc 🎵 Dolby Digital-1080P",
+        "filename": "Sherlock S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvCinemas.mkv",
+        "videoSize": 2608894683
+      },
+      "_fixture": {
+        "id": "mediafusion-v1-p2p-1080p-dd-episode",
+        "addon": "MediaFusion (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L90-L98",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dd"],
+          "channels": "5.1",
+          "size": {
+            "text": "2.43 GB",
+            "base": 1024,
+            "bytes": 2609192632
+          },
+          "seeders": null,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en"],
+          "notes": "'2.43 GB / 33.48 GB' is file size / pack size: take the first."
+        }
+      }
+    },
+    {
+      "name": "MediaFusion | ElfHosted 🧲 RD ⚡️ 2160P",
+      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Torlock",
+      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/a3d11f4d97121a79f3e94b18a43e5b3e2f1853e1",
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-|-ElfHosted-🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc-2160P",
+        "filename": "Deadpool.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
+        "videoSize": 37682583137
+      },
+      "_fixture": {
+        "id": "mediafusion-v1-rd-cached-2160p-dv-remux",
+        "addon": "MediaFusion (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L143-L150",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "35.09 GB",
+            "base": 1024,
+            "bytes": 37677600604
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "it"],
+          "notes": "'⚡️' carries U+FE0F (variation selector); match both ⚡ and ⚡️."
+        }
+      }
+    },
+    {
+      "name": "MediaFusion | ElfHosted 🧲 RD ⚡️ 1080P",
+      "description": "📺 BluRay 🎞️ avc 🎵 Dolby Digital \n📦 2.43 GB / 33.48 GB \n🌐 English\n🔗 Zilean DMM",
+      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/ce146cce125215f5e6615d2375ffa6a881c8eedd/1/1/Sherlock%20S01%20E01%20BluRay%201080p%20English%20DD%205.1%20x264%20ESub%20-%20mkvCinemas.mkv",
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc 🎵 Dolby Digital-1080P",
+        "filename": "Sherlock S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvCinemas.mkv",
+        "videoSize": 2608894683
+      },
+      "_fixture": {
+        "id": "mediafusion-v1-rd-cached-1080p-episode",
+        "addon": "MediaFusion (older format)",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_mediafusion_test.go#L182-L189",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dd"],
+          "channels": "5.1",
+          "size": {
+            "text": "2.43 GB",
+            "base": 1024,
+            "bytes": 2609192632
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en"]
+        }
+      }
+    },
+    {
+      "name": "Peerflix 🇪🇸 4K",
+      "title": "Deadpool [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
+      "infoHash": "31e585c52409430634139d915aeb4ea0f74be287",
+      "fileIdx": 0,
+      "_fixture": {
+        "id": "peerflix-p2p-4k-spanish",
+        "addon": "Peerflix",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_peerflix_test.go#L21-L24",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": null,
+          "audio": ["dts"],
+          "channels": "5.1",
+          "size": {
+            "text": "20.38 GB",
+            "base": 1024,
+            "bytes": 21882858373
+          },
+          "seeders": 1,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["es", "en"],
+          "notes": "No behaviorHints at all. Stats line starts with two spaces. 'Ingles+Subs' contains '+' that is not a cache marker."
+        }
+      }
+    },
+    {
+      "name": "Peerflix 🇬🇧 720p",
+      "title": "Black Snow 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nBlack Snow 2023 S01E02 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 410.26 MB 🌐 Peerflix",
+      "infoHash": "fa7dfc675f81e573f5c99e776974df44e887ade5",
+      "fileIdx": 5,
+      "_fixture": {
+        "id": "peerflix-p2p-720p-episode",
+        "addon": "Peerflix",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_peerflix_test.go#L46-L49",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "410.26 MB",
+            "base": 1024,
+            "bytes": 430188790
+          },
+          "seeders": 89,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en"]
+        }
+      }
+    },
+    {
+      "name": "[RD download] Peerflix 🇪🇸 4K",
+      "title": "Deadpool [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
+      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/31e585c52409430634139d915aeb4ea0f74be287/null/0/Deadpool%20%5B4K%20UHD%202160p%20HEVC%20X265%5D%5BDTS%205.1%20Castellano%20DTS%205.1-Ingles%2BSubs%5D%5BES-EN%5D",
+      "_fixture": {
+        "id": "peerflix-rd-download-4k",
+        "addon": "Peerflix",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_peerflix_test.go#L91-L93",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": null,
+          "audio": ["dts"],
+          "channels": "5.1",
+          "size": {
+            "text": "20.38 GB",
+            "base": 1024,
+            "bytes": 21882858373
+          },
+          "seeders": 1,
+          "availability": "uncached",
+          "service": "RD",
+          "languages": ["es", "en"]
+        }
+      }
+    },
+    {
+      "name": "[RD+] Peerflix 🇬🇧 720p",
+      "title": "Black Snow 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nBlack Snow 2023 S01E01 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 381.53 MB 🌐 Peerflix",
+      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/fa7dfc675f81e573f5c99e776974df44e887ade5/null/0/Black%20Snow%202023%20S01E01%20720p%20WEB-DL%20HEVC%20x265%20BONE.mkv",
+      "_fixture": {
+        "id": "peerflix-rd-cached-720p-episode",
+        "addon": "Peerflix",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_peerflix_test.go#L119-L121",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "381.53 MB",
+            "base": 1024,
+            "bytes": 400063201
+          },
+          "seeders": 89,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en"]
+        }
+      }
+    },
+    {
+      "name": "🪐 ORION 📺 4K",
+      "title": "Deadpool & Wolverine [2024] 2160p UHD BDRip DV HDR10 x265 TrueHD Atmos 7 1 Kira [SEV] mkv\n💾26.6 GB 👤0 🎥h265 🔊7.1\n👂EN ☁️torlock",
+      "infoHash": "f0b4ba9bf31960b8920e9335ab07037f295bbf67",
+      "_fixture": {
+        "id": "orion-p2p-4k",
+        "addon": "Orion",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_orion_test.go#L21-L23",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "bdrip",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "26.6 GB",
+            "base": 1024,
+            "bytes": 28561532518
+          },
+          "seeders": 0,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en"],
+          "notes": "No space between emoji and value. '☁️' prefixes the indexer here; AIOStreams treats ☁️ as an uncached marker elsewhere, so do not use it for cache state."
+        }
+      }
+    },
+    {
+      "name": "🚀 ORION\n[Offcloud]",
+      "title": "Deadpool.&.Wolverine.(2024).(2160p.BluRay.x265.10bit.DV.HDR.TrueHD.Atmos.7.1.English. French. Spanish.r00t) [QxR]\n📺4K 💾22.8 GB 🎥h265 🔊7.1\n👂EN FR ES ☁️1337x",
+      "url": "https://orionoid.com/stream/KEY",
+      "behaviorHints": {
+        "notWebReady": true
+      },
+      "_fixture": {
+        "id": "orion-offcloud-4k",
+        "addon": "Orion",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_orion_test.go#L67-L72",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "bluray",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "22.8 GB",
+            "base": 1024,
+            "bytes": 24481313587
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "OC",
+          "languages": ["en", "fr", "es"],
+          "notes": "URL shortened from the original (the token part was 200+ x's). Resolution only in the description ('📺4K'), service written out as '[Offcloud]'."
+        }
+      }
+    },
+    {
+      "name": "[ED ⚡] \nDebridio 1080p",
+      "title": "Deadpool 2016 1080p BluRay x264 DTS-JYK\n⚡ 📺 1080p 💾 2.72 GB  ⚙️ ThePirateBay",
+      "url": "https://addon.debridio.com/play/movie/easydebrid/KEY/KEY/0f61c0478326c8e2f8a397f59d7917a0dc558718/Deadpool%202016%201080p%20BluRay%20x264%20DTS-JYK",
+      "_fixture": {
+        "id": "debridio-easydebrid-1080p",
+        "addon": "Debridio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_debridio_test.go#L21-L23",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dts"],
+          "channels": null,
+          "size": {
+            "text": "2.72 GB",
+            "base": 1024,
+            "bytes": 2920577761
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "ED",
+          "languages": [],
+          "notes": "Trailing space before the newline in name; double space before ⚙️."
+        }
+      }
+    },
+    {
+      "name": "[ED ⚡] \nDebridio 4k",
+      "title": "Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv\n⚡ 📺 4k 💾 5.55 GB  ⚙️ RARBG\n🌐 🇬🇧|🇮🇹",
+      "url": "https://addon.debridio.com/play/serie/easydebrid/KEY/KEY/76a1fa8d28d4c04b201803ab7262d037d295134f/tt9288030/3/7/Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "debridio-4k",
+        "filename": "Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv"
+      },
+      "_fixture": {
+        "id": "debridio-easydebrid-4k-episode",
+        "addon": "Debridio",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_extractor_debridio_test.go#L50-L56",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "5.55 GB",
+            "base": 1024,
+            "bytes": 5959267123
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "ED",
+          "languages": ["en", "it"],
+          "notes": "'H.265' with a dot; flags joined with '|'. Two path segments that looked like account tokens were replaced with x's here."
+        }
+      }
+    },
+    {
+      "name": "TPB+",
+      "description": "Interstellar.2014.UHD.BluRay.2160p.DTS-HD.MA.5.1.HEVC.REMUX-FraMeSToR\n📺 4k BluRay REMUX\n👤 99 💾 65.74 GB",
+      "infoHash": "0000000000000000000000000000000000000001",
+      "_fixture": {
+        "id": "tpb-plus-plain-name",
+        "addon": "TPB+",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/fallback_stream_extractor_test.go#L39-L40",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["dts-hd-ma"],
+          "channels": "5.1",
+          "size": {
+            "text": "65.74 GB",
+            "base": 1024,
+            "bytes": 70587787510
+          },
+          "seeders": 99,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "Source keeps only name/description; infoHash is a placeholder. '+' in 'TPB+' is part of the addon name, NOT a cache marker."
+        }
+      }
+    },
+    {
+      "name": "Brazuca\n4k",
+      "description": "Interstelar.2014.1080p.60fps.BluRay.H264.AC3.5.1.DUAL-RICKSZ\n👤 0 💾 24.42 GB ⚙️ OndeBaixa\nDual Audio / 🇺🇸 / 🇧🇷",
+      "infoHash": "0000000000000000000000000000000000000002",
+      "_fixture": {
+        "id": "brazuca-name-disagrees-with-title",
+        "addon": "Brazuca Torrents",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/fallback_stream_extractor_test.go#L59-L60",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dd"],
+          "channels": "5.1",
+          "size": {
+            "text": "24.42 GB",
+            "base": 1024,
+            "bytes": 26220775342
+          },
+          "seeders": 0,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["dual", "en", "pt-BR"],
+          "notes": "Name says 4k, release says 1080p (StremThru's test expects 1080p). Placeholder infoHash. 🇺🇸 for English, 🇧🇷 for Portuguese."
+        }
+      }
+    },
+    {
+      "name": "SK/CZ Torrents\n1080p",
+      "description": "Hodina zmizení / Weapons (2025)(CZ)[1080p] = CSFD 76%\n👤 76 💾 2.3 GB 🗣 SK/CZ",
+      "infoHash": "0000000000000000000000000000000000000003",
+      "_fixture": {
+        "id": "skcz-torrents-1080p",
+        "addon": "SK/CZ Torrents",
+        "provenance": "copied",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/fallback_stream_extractor_test.go#L20-L21",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "2.3 GB",
+            "base": 1024,
+            "bytes": 2469606195
+          },
+          "seeders": 76,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["sk", "cs"],
+          "notes": "Placeholder infoHash. '/' in the addon name and title; no codec/source info at all."
+        }
+      }
+    },
+    {
+      "url": "http://distribution.bbb3d.renderfarming.net/video/mp4/bbb_sunflower_1080p_30fps_normal.mp4",
+      "_fixture": {
+        "id": "sdk-example-direct-mp4",
+        "addon": "SDK example (plain direct link)",
+        "provenance": "copied",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/requests/defineStreamHandler.md#basic-example",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": null,
+          "seeders": null,
+          "availability": "direct",
+          "service": null,
+          "languages": [],
+          "notes": "No name, no description: show the addon's manifest name and the URL's file name. Plain http: (webOS loads it; mixed content is not an issue from file://). Resolution only in the file name."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\n4k HDR10+",
+      "title": "The.Bear.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb\n👤 212 💾 6.84 GB ⚙️ EZTV",
+      "infoHash": "9b1b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "tracker:udp://open.stealth.si:80/announce",
+        "dht:9b1b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|HDR10+|NTb",
+        "filename": "The.Bear.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb.mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-4k-hdr10plus-web",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/stream_info.rs#L15-L62",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["HDR10+"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "6.84 GB",
+            "base": 1024,
+            "bytes": 7344394076
+          },
+          "seeders": 212,
+          "availability": "p2p",
+          "service": null,
+          "languages": []
+        }
+      }
+    },
+    {
+      "name": "[TB+] Torrentio\n1080p",
+      "title": "Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX\n👤 388 💾 2.91 GB ⚙️ TorrentGalaxy",
+      "url": "https://torrentio.strem.fun/resolve/torbox/KEY/5d41402abc4b2a76b9719d911017c592aaaaaaaa/null/0/Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|FLUX",
+        "filename": "Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-tb-cached-1080p-web-atmos",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/providers/mod.rs#L506-L526",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web-dl",
+          "audio": ["ddp", "atmos"],
+          "channels": "5.1",
+          "size": {
+            "text": "2.91 GB",
+            "base": 1024,
+            "bytes": 3124588708
+          },
+          "seeders": 388,
+          "availability": "cached",
+          "service": "TB",
+          "languages": [],
+          "notes": "Current Torrentio puts cached links under {host}/resolve/{moch}/... ; older captures use {host}/{moch}={token}/... ."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\nCAM",
+      "title": "Thunderbolts 2025 1080p CAMRip x264 AAC-NOGRP\n👤 1532 💾 1.42 GB ⚙️ 1337x",
+      "infoHash": "1f2e3d4c5b6a79881726354a4b5c6d7e8f901234",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|CAM|x264"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-cam",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/stream_info.rs#L80-L92",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "cam",
+          "audio": ["aac"],
+          "channels": null,
+          "size": {
+            "text": "1.42 GB",
+            "base": 1024,
+            "bytes": 1524713390
+          },
+          "seeders": 1532,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "CAM wins over resolution in Torrentio's name. Sort last / warn."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\nTeleSync",
+      "title": "Thunderbolts.2025.720p.HDTS.x264.AAC-GRP\n👤 640 💾 948.2 MB ⚙️ TorrentGalaxy",
+      "infoHash": "2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|TeleSync|x264"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-telesync",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/stream_info.rs#L80-L92",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "telesync",
+          "audio": ["aac"],
+          "channels": null,
+          "size": {
+            "text": "948.2 MB",
+            "base": 1024,
+            "bytes": 994259763
+          },
+          "seeders": 640,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "HDTS/TS/TELESYNC all normalise to 'TeleSync'. A bare 'TS' token can also be the MPEG-TS container (.ts)."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\n480p",
+      "title": "Friends.S05E08.480p.DVDRip.x264.AAC2.0-mSD\n👤 41 💾 158.7 MB ⚙️ EZTV",
+      "infoHash": "3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "bingeGroup": "torrentio|480p|mSD",
+        "filename": "Friends.S05E08.480p.DVDRip.x264.AAC2.0-mSD.mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-480p-sd",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/stream_info.rs#L15-L62",
+        "expect": {
+          "resolution": "480p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "dvdrip",
+          "audio": ["aac"],
+          "channels": "2.0",
+          "size": {
+            "text": "158.7 MB",
+            "base": 1024,
+            "bytes": 166409011
+          },
+          "seeders": 41,
+          "availability": "p2p",
+          "service": null,
+          "languages": []
+        }
+      }
+    },
+    {
+      "name": "[PM+] Torrentio\n4k HDR",
+      "title": "Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP\n👤 57 💾 3.12 GB ⚙️ TorrentGalaxy",
+      "url": "https://torrentio.strem.fun/resolve/premiumize/KEY/4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f/null/0/Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|HDR|GRP",
+        "filename": "Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "torrentio-pm-cached-4k-av1",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/providers/mod.rs#L506-L526",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["HDR"],
+          "videoCodec": "av1",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "3.12 GB",
+            "base": 1024,
+            "bytes": 3350074491
+          },
+          "seeders": 57,
+          "availability": "cached",
+          "service": "PM",
+          "languages": [],
+          "notes": "AV1: warn on TVs without an AV1 decoder."
+        }
+      }
+    },
+    {
+      "name": "Torrentio\n1080p",
+      "title": "Dune.Part.Two.2024.MULTi.1080p.BluRay.DTS-HD.MA.7.1.x264-GRP\n👤 95 💾 18.06 GB ⚙️ YggTorrent\nMulti Audio / 🇬🇧 / 🇫🇷 / 🇩🇪",
+      "infoHash": "5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|1080p|BluRay|x264"
+      },
+      "_fixture": {
+        "id": "torrentio-p2p-multi-audio-dtshd",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/domain/languages.rs#L1-L47",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dts-hd-ma"],
+          "channels": "7.1",
+          "size": {
+            "text": "18.06 GB",
+            "base": 1024,
+            "bytes": 19391777341
+          },
+          "seeders": 95,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["multi", "en", "fr", "de"]
+        }
+      }
+    },
+    {
+      "name": "[AD download] Torrentio\n4k DV | HDR",
+      "title": "Blade.Runner.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP\n👤 23 💾 71.9 GB ⚙️ TorrentGalaxy",
+      "url": "https://torrentio.strem.fun/resolve/alldebrid/KEY/6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091/null/undefined/Blade.Runner.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP",
+      "behaviorHints": {
+        "bingeGroup": "torrentio|4k|BluRay REMUX|hevc|DV|HDR"
+      },
+      "_fixture": {
+        "id": "torrentio-ad-download-4k-dovi-dtsx",
+        "addon": "Torrentio",
+        "provenance": "derived",
+        "source": "https://github.com/TheBeastLT/torrentio-scraper/blob/f47ed9be507c12ab5fecc74e37f50ea6e0d14dd3/addon/crates/addon/src/providers/mod.rs#L528-L553",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["dts-x"],
+          "channels": "7.1",
+          "size": {
+            "text": "71.9 GB",
+            "base": 1024,
+            "bytes": 77202037146
+          },
+          "seeders": 23,
+          "availability": "uncached",
+          "service": "AD",
+          "languages": [],
+          "notes": "'DoVi' spelling; DTS:X written 'DTS-X'. Name shows 'DV | HDR'."
+        }
+      }
+    },
+    {
+      "name": "knightcrawler\n1080p",
+      "title": "The.Batman.2022.1080p.BluRay.DD5.1.x264-GRP\n💾 12.4 GB",
+      "infoHash": "7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "tracker:udp://open.stealth.si:80/announce",
+        "dht:7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "knightcrawler|1080p|BluRay|x264"
+      },
+      "_fixture": {
+        "id": "knightcrawler-p2p-1080p-no-seeders",
+        "addon": "Knightcrawler",
+        "provenance": "derived",
+        "source": "https://github.com/Gabisonfire/knightcrawler/blob/594320ed63b2a0edc64ebf65f0b72d4e9e756184/src/addon/src/lib/streamInfo.js#L12-L52",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dd"],
+          "channels": "5.1",
+          "size": {
+            "text": "12.4 GB",
+            "base": 1024,
+            "bytes": 13314398618
+          },
+          "seeders": null,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "Torrentio fork: lower-case addon name, no seeders, no provider."
+        }
+      }
+    },
+    {
+      "name": "[RD+] knightcrawler\n4k DV | HDR10+",
+      "title": "Mad.Max.Fury.Road.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP\n💾 27.88 GB",
+      "url": "https://knightcrawler.example.org/realdebrid/KEY/8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3/null/0/Mad.Max.Fury.Road.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "knightcrawler|4k|BluRay|x265|10bit|DV|HDR10+"
+      },
+      "_fixture": {
+        "id": "knightcrawler-rd-cached-4k",
+        "addon": "Knightcrawler",
+        "provenance": "derived",
+        "source": "https://github.com/Gabisonfire/knightcrawler/blob/594320ed63b2a0edc64ebf65f0b72d4e9e756184/src/addon/src/moch/moch.js#L170-L185",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10+"],
+          "videoCodec": "hevc",
+          "source": "bluray",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "27.88 GB",
+            "base": 1024,
+            "bytes": 29935922053
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "RD",
+          "languages": []
+        }
+      }
+    },
+    {
+      "name": "[RD⚡] Comet 2160p",
+      "description": "📄 Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP\n📹 hevc • DV • HDR | 🔊 Atmos • TrueHD • 7.1\n⭐ BluRay REMUX | 🏷️ GRP\n👤 87 💾 74.3 GB 🔎 TorrentGalaxy\n🇬🇧",
+      "url": "https://comet.example.org/KEY/playback/91a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4/0/0/n/n?torrent_name=Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP&name=Oppenheimer&media_id=tt15398776&media_type=movie",
+      "behaviorHints": {
+        "bingeGroup": "comet|realdebrid|91a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
+        "filename": "Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP",
+        "videoSize": 79778453094
+      },
+      "_fixture": {
+        "id": "comet-v2-rd-cached-2160p-remux",
+        "addon": "Comet",
+        "provenance": "derived",
+        "source": "https://github.com/g0ldyy/comet/blob/f56677f05ed9a158f9a0338ad2f44d8efde35969/comet/utils/formatting.py#L292-L319",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["atmos", "truehd"],
+          "channels": "7.1",
+          "size": {
+            "text": "74.3 GB",
+            "base": 1024,
+            "bytes": 79779017523
+          },
+          "seeders": 87,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en"]
+        }
+      }
+    },
+    {
+      "name": "[TB⬇️] Comet 1080p",
+      "description": "📄 Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb\n📹 avc | 🔊 Dolby Digital Plus • 5.1\n⭐ WEB-DL | 🏷️ NTb\n👤 12 💾 2.6 GB 🔎 EZTV",
+      "url": "https://comet.example.org/KEY/playback/a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5/0/n/4/2?torrent_name=Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb&name=Slow%20Horses&media_id=tt5875444:4:2&media_type=series",
+      "behaviorHints": {
+        "bingeGroup": "comet|torbox|a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
+        "filename": "Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb",
+        "videoSize": 2791728742
+      },
+      "_fixture": {
+        "id": "comet-v2-tb-uncached-1080p-ddp",
+        "addon": "Comet",
+        "provenance": "derived",
+        "source": "https://github.com/g0ldyy/comet/blob/f56677f05ed9a158f9a0338ad2f44d8efde35969/comet/api/endpoints/stream.py#L76-L101",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "2.6 GB",
+            "base": 1024,
+            "bytes": 2791728742
+          },
+          "seeders": 12,
+          "availability": "uncached",
+          "service": "TB",
+          "languages": [],
+          "notes": "Comet spells DD+ as 'Dolby Digital Plus' (RTN normalised name)."
+        }
+      }
+    },
+    {
+      "name": "[TORRENT🧲] Comet 720p",
+      "description": "📄 Severance.S02E03.720p.WEBRip.x265.AAC.2.0-GRP\n📹 hevc | 🔊 AAC • 2.0\n⭐ WEBRip | 🏷️ GRP\n👤 301 💾 412.5 MB 🔎 ThePirateBay\n🇬🇧/🇪🇸",
+      "infoHash": "b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "tracker:udp://open.stealth.si:80/announce"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "comet|torrent|b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6",
+        "filename": "Severance.S02E03.720p.WEBRip.x265.AAC.2.0-GRP",
+        "videoSize": 432537600
+      },
+      "_fixture": {
+        "id": "comet-v2-p2p-720p-webrip",
+        "addon": "Comet",
+        "provenance": "derived",
+        "source": "https://github.com/g0ldyy/comet/blob/f56677f05ed9a158f9a0338ad2f44d8efde35969/comet/api/endpoints/stream.py#L500-L534",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "hevc",
+          "source": "webrip",
+          "audio": ["aac"],
+          "channels": "2.0",
+          "size": {
+            "text": "412.5 MB",
+            "base": 1024,
+            "bytes": 432537600
+          },
+          "seeders": 301,
+          "availability": "p2p",
+          "service": null,
+          "languages": ["en", "es"]
+        }
+      }
+    },
+    {
+      "name": "MediaFusion 🧲 RD ⚡️ 4k",
+      "description": "🎨 Dolby Vision|HDR10 📺 WEB-DL 🎞️ hevc 🎵 Atmos|EAC3 🔊 5.1\n📦 18.62 GB 👤 154\n🌐 English + French\n🔗 TorrentGalaxy",
+      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/rd/c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7/Dune.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-🎨 Dolby Vision|HDR10 📺 WEB-DL 🎞️ hevc 🎵 Atmos|EAC3-4K",
+        "videoSize": 19993169592,
+        "notWebReady": false,
+        "filename": "Dune.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "mediafusion-v2-rd-cached-4k-default",
+        "addon": "MediaFusion",
+        "provenance": "derived",
+        "source": "https://github.com/mhdzumair/MediaFusion/blob/f01aba8bfbfe0c31ead9463e05f0a361ddc651fc/docs/configuration/stream-formatting.md#default-templates",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["atmos", "ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "18.62 GB",
+            "base": 1024,
+            "bytes": 19993072763
+          },
+          "seeders": 154,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "fr"],
+          "notes": "'Dolby Vision' spelled out; 'EAC3' for DD+. notWebReady false is sent explicitly."
+        }
+      }
+    },
+    {
+      "name": "MediaFusion 🧲 TRB ⏳ 1080p",
+      "description": "📺 BluRay 🎞️ x264 🎵 DTS 🔊 5.1\n📦 9.87 GB / 41.20 GB 👤 18\n🌐 English\n🔗 1337x | 🧑‍💻 GRP",
+      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/torbox/d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708/1/1/The.Office.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "MediaFusion-📺 BluRay 🎞️ x264 🎵 DTS-1080P",
+        "videoSize": 10597944197,
+        "notWebReady": false,
+        "filename": "The.Office.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "mediafusion-v2-trb-uncached-1080p",
+        "addon": "MediaFusion",
+        "provenance": "derived",
+        "source": "https://github.com/mhdzumair/MediaFusion/blob/f01aba8bfbfe0c31ead9463e05f0a361ddc651fc/docs/configuration/stream-formatting.md#default-templates",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dts"],
+          "channels": "5.1",
+          "size": {
+            "text": "9.87 GB",
+            "base": 1024,
+            "bytes": 10597831803
+          },
+          "seeders": 18,
+          "availability": "uncached",
+          "service": "TB",
+          "languages": ["en"],
+          "notes": "MediaFusion calls TorBox 'TRB'."
+        }
+      }
+    },
+    {
+      "name": "⚡️ [RD]\nTorz\n2160p",
+      "description": "💿 BluRay REMUX 🎞️ HEVC\n📺 DV HDR10 🎧 TrueHD, Atmos | 7.1\n📦 61.2 GB 👤 45\n🌐 🇬🇧 🇫🇷\n⚙️ FraMeSToR 🔍 TorrentGalaxy\n📄 Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
+      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819/0/Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
+      "behaviorHints": {
+        "bingeGroup": "torz:e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819",
+        "videoSize": 65712130867,
+        "filename": "Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv"
+      },
+      "_fixture": {
+        "id": "stremthru-torz-rd-cached-2160p",
+        "addon": "StremThru Torz",
+        "provenance": "derived",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_template_default.go",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "61.2 GB",
+            "base": 1024,
+            "bytes": 65712999629
+          },
+          "seeders": 45,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "fr"],
+          "notes": "Three-line name: marker+service, addon, resolution."
+        }
+      }
+    },
+    {
+      "name": "[TB]\nTorz\n1080p",
+      "description": "💿 WEB-DL 🎞️ AVC\n🎧 DD+ | 5.1\n💾 3.1 GB 📦 22.4 GB 👤 9\n⚙️ FLUX 🔍 TorrentGalaxy\n📄 The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a/3/The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "behaviorHints": {
+        "bingeGroup": "torz:f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a",
+        "videoSize": 3328599654,
+        "filename": "The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv"
+      },
+      "_fixture": {
+        "id": "stremthru-torz-tb-uncached-1080p",
+        "addon": "StremThru Torz",
+        "provenance": "derived",
+        "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/stream_template_default.go",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "3.1 GB",
+            "base": 1024,
+            "bytes": 3328599654
+          },
+          "seeders": 9,
+          "availability": "uncached",
+          "service": "TB",
+          "languages": [],
+          "notes": "Uncached = '[TB]' without ⚡️. '💾 file 📦 pack': 💾 is the file here, unlike Torrentio where 💾 is the only size."
+        }
+      }
+    },
+    {
+      "name": "[RD+] Comet 2160p\nDV | HDR10 | 10bit",
+      "description": "Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv\n💾33.82 GiB 👤61 ⚙️TorrentGalaxy\n🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸",
+      "url": "https://aiostreams.example.org/api/v1/proxy/KEY/Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "com.aiostreams.viren070|realdebrid|2160p|BluRay|DV|HDR10",
+        "videoSize": 36314065715,
+        "filename": "Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-torrentio-style-rd-cached",
+        "addon": "AIOStreams (Torrentio format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L7-L16",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "bluray",
+          "audio": ["dts-hd-ma"],
+          "channels": "7.1",
+          "size": {
+            "text": "33.82 GiB",
+            "base": 1024,
+            "bytes": 36313948488
+          },
+          "seeders": 61,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "fr"],
+          "notes": "AIOStreams shows the wrapped addon's name ('Comet'), sizes in GiB, and no space after emojis. 'Subs / ...' lists subtitle languages, not audio."
+        }
+      }
+    },
+    {
+      "name": "[TB⚡] TorBox 2160p",
+      "description": "🎥 WEB-DL 🎞️ HEVC 🏷️ FLUX 📡 AMZN\n📺 DV | HDR10+ 🎧 Atmos | DD+ 🔊 5.1\n📦 17.3 GB 👥 120 🔍 TorBox\n🌎 English | French📝 English\n📁 Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
+      "behaviorHints": {
+        "bingeGroup": "com.aiostreams.viren070|torbox|2160p|WEB-DL|DV|HDR10+",
+        "videoSize": 17300000000,
+        "filename": "Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-gdrive-style-tb-cached",
+        "addon": "AIOStreams (GDrive format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L24-L32",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10+"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["atmos", "ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "17.3 GB",
+            "base": 1000,
+            "bytes": 17300000000
+          },
+          "seeders": 120,
+          "availability": "cached",
+          "service": "TB",
+          "languages": ["en", "fr"],
+          "notes": "'sbytes' modifier: decimal GB (1000-based). '🌎 ... 📝 ...' has no separator between audio and subtitle languages."
+        }
+      }
+    },
+    {
+      "name": "🚀 FHD",
+      "description": "🎬 Gladiator Ii (2024) \n🎥 WEB-DL 📺 HDR 🎞️ HEVC \n🎧 DD+ | Atmos 🔊 5.1 🗣️ 🇬🇧\n📦 7.94 GB 🌱 230 \n🏷️ GRP 📡 TorrentGalaxy \n❌ Not Ready (RD) 🔍Torrentio ",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Gladiator.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "com.aiostreams.viren070|realdebrid|1080p|WEB-DL|HDR",
+        "videoSize": 7940000000,
+        "filename": "Gladiator.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-prism-style-uncached",
+        "addon": "AIOStreams (Prism format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L47-L54",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": ["HDR"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["ddp", "atmos"],
+          "channels": "5.1",
+          "size": {
+            "text": "7.94 GB",
+            "base": 1000,
+            "bytes": 7940000000
+          },
+          "seeders": 230,
+          "availability": "uncached",
+          "service": "RD",
+          "languages": ["en"],
+          "notes": "Name has no digits ('🚀 FHD' = 1080p); trust behaviorHints.filename. Trailing spaces on lines."
+        }
+      }
+    },
+    {
+      "name": "✨ 4K 🎫 \nBLURAY REMUX",
+      "description": "🔆 DV • HDR10  🔊 TrueHD • Atmos\n📦 58.1 GB \n🌎 English • German",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Interstellar.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv",
+      "behaviorHints": {
+        "videoSize": 58100000000,
+        "filename": "Interstellar.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-minimal-style-cached",
+        "addon": "AIOStreams (Minimalistic format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L41-L46",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["truehd", "atmos"],
+          "channels": "7.1",
+          "size": {
+            "text": "58.1 GB",
+            "base": 1000,
+            "bytes": 58100000000
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": null,
+          "languages": ["en", "de"],
+          "notes": "Cache state only as a ticket emoji (🎫 cached, 🎟️ not); no service code. bingeGroup omitted (autoplay disabled)."
+        }
+      }
+    },
+    {
+      "name": "[RD+] Jackettio 4K",
+      "title": "Furiosa.A.Mad.Max.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP\n💾16.42 GB 👥45 ⚙️yts 🇺🇸",
+      "url": "https://jackettio.example.org/KEY/download/movie/tt12037194/abc123/Furiosa.A.Mad.Max.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP.mkv",
+      "_fixture": {
+        "id": "jackettio-rd-cached-4k",
+        "addon": "Jackettio",
+        "provenance": "derived",
+        "source": "https://github.com/arvida42/jackettio/blob/576d4f168d4679db2dacb8dd7e268704ef76cd52/src/lib/jackettio.js#L371-L388",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["ddp", "atmos"],
+          "channels": "5.1",
+          "size": {
+            "text": "16.42 GB",
+            "base": 1024,
+            "bytes": 17630840750
+          },
+          "seeders": 45,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en"],
+          "notes": "No behaviorHints at all; 🇺🇸 (not 🇬🇧) for English; seeders marked 👥."
+        }
+      }
+    },
+    {
+      "name": "[AD] Jackettio 1080p",
+      "title": "Nosferatu.2024.1080p.WEBRip.x264.AAC5.1-GRP\n💾2.1 GB 👥310 ⚙️thepiratebay 🌎 🇫🇷\n⬇️ 42% 3.1 MB/s",
+      "url": "https://jackettio.example.org/KEY/download/movie/tt5040012/def456/Nosferatu.2024.1080p.WEBRip.x264.AAC5.1-GRP.mkv",
+      "_fixture": {
+        "id": "jackettio-ad-uncached-1080p-progress",
+        "addon": "Jackettio",
+        "provenance": "derived",
+        "source": "https://github.com/arvida42/jackettio/blob/576d4f168d4679db2dacb8dd7e268704ef76cd52/src/lib/jackettio.js#L371-L388",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "webrip",
+          "audio": ["aac"],
+          "channels": "5.1",
+          "size": {
+            "text": "2.1 GB",
+            "base": 1024,
+            "bytes": 2254857830
+          },
+          "seeders": 310,
+          "availability": "uncached",
+          "service": "AD",
+          "languages": ["multi", "fr"],
+          "notes": "Uncached is shown only by the ABSENCE of '+' after AD. '3.1 MB/s' is a speed, not a size. 🌎 = multi."
+        }
+      }
+    },
+    {
+      "name": "TorBox (Instant TB) (2160p)",
+      "description": "Quality: WEB-DL\nName: Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv\nSize: 8.4 GB | Source: TorrentGalaxy\nLanguages: English\nType: Torrent | Seeders: 77",
+      "url": "https://stremio.torbox.app/KEY/playback/movie/KEY",
+      "behaviorHints": {
+        "bingeGroup": "torbox|0123456789abcdef0123456789abcdef0123",
+        "filename": "Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
+      },
+      "_fixture": {
+        "id": "torbox-addon-instant-4k",
+        "addon": "TorBox (official addon)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/presets/torbox.ts#L16-L106",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR"],
+          "videoCodec": "hevc",
+          "source": "web-dl",
+          "audio": ["ddp", "atmos"],
+          "channels": "5.1",
+          "size": {
+            "text": "8.4 GB",
+            "base": 1024,
+            "bytes": 9019431322
+          },
+          "seeders": 77,
+          "availability": "cached",
+          "service": "TB",
+          "languages": ["en"],
+          "notes": "INFERRED shape: built from AIOStreams' TorBox-mimicking formatter and its TorBox parser (which looks for 'Instant', 'Your Media', 'Type:', 'Source:', '| Age:'). Not a captured response."
+        }
+      }
+    },
+    {
+      "name": "TorBox (TB) (1080p)",
+      "description": "Quality: BluRay\nName: Heat.1995.1080p.BluRay.DTS.5.1.x264-GRP.mkv\nSize: 1,46 GB | Source: NZBgeek\nLanguages: English, Italian\nType: Usenet | Age: 412d",
+      "url": "https://stremio.torbox.app/KEY/playback/usenet/WyJ4eHgiXQ==",
+      "_fixture": {
+        "id": "torbox-addon-usenet-1080p",
+        "addon": "TorBox (official addon)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/presets/torbox.ts#L16-L106",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "bluray",
+          "audio": ["dts"],
+          "channels": "5.1",
+          "size": {
+            "text": "1,46 GB",
+            "base": 1024,
+            "bytes": 1567663063
+          },
+          "seeders": null,
+          "availability": "uncached",
+          "service": "TB",
+          "languages": ["en", "it"],
+          "notes": "INFERRED shape. Comma decimal separator ('1,46 GB') invented to exercise the size parser (Torrentio's own size parser accepts it)."
+        }
+      }
+    },
+    {
+      "name": "[P2P] Torrentio 720p\n",
+      "description": "Shrinking.S02E05.720p.WEB.h264-ETHEL.mkv\n💾701.5 MiB 👤12 ⚙️EZTV",
+      "infoHash": "08192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "tracker:udp://open.stealth.si:80/announce"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "com.aiostreams.viren070|p2p|720p|WEB",
+        "videoSize": 735576064,
+        "filename": "Shrinking.S02E05.720p.WEB.h264-ETHEL.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-torrentio-style-p2p-mib",
+        "addon": "AIOStreams (Torrentio format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L7-L16",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web",
+          "audio": [],
+          "channels": null,
+          "size": {
+            "text": "701.5 MiB",
+            "base": 1024,
+            "bytes": 735576064
+          },
+          "seeders": 12,
+          "availability": "p2p",
+          "service": null,
+          "languages": [],
+          "notes": "'[P2P]' prefix; MiB unit; name ends with a newline because there are no visual tags."
+        }
+      }
+    },
+    {
+      "name": "[RD⚡] Comet 2160p",
+      "description": "📁 Dune (2021)\n🎥 BluRay REMUX 🎞️ HEVC 🏷️ GRP\n📺 DV • HDR10 🎧 DTS:X 🔊 7.1\n📦 68.4 GB 🔍 TorrentGalaxy\n🌐 🇬🇧 / 🇮🇹📝 🇬🇧",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Dune.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv",
+      "behaviorHints": {
+        "bingeGroup": "com.aiostreams.viren070|realdebrid|2160p|BluRay REMUX|DV|HDR10",
+        "videoSize": 68400000000,
+        "filename": "Dune.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv"
+      },
+      "_fixture": {
+        "id": "aiostreams-lightgdrive-style-dtsx",
+        "addon": "AIOStreams (Light GDrive format)",
+        "provenance": "derived",
+        "source": "https://github.com/Viren070/AIOStreams/blob/11ea793b0e2abf17fbdfc922a0fab47cc48d3b24/packages/core/src/utils/formatter-definitions.ts#L33-L40",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["DV", "HDR10"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["dts-x"],
+          "channels": "7.1",
+          "size": {
+            "text": "68.4 GB",
+            "base": 1000,
+            "bytes": 68400000000
+          },
+          "seeders": null,
+          "availability": "cached",
+          "service": "RD",
+          "languages": ["en", "it"],
+          "notes": "'DTS:X' with a colon; release name says 'DTS-X'."
+        }
+      }
+    },
+    {
+      "name": "StreamHub\n1080p",
+      "description": "Nosferatu (2024)\nHLS · 1080p · AAC 2.0\n🇬🇧 English",
+      "url": "https://cdn.example.net/hls/nosferatu/master.m3u8",
+      "behaviorHints": {
+        "notWebReady": true,
+        "proxyHeaders": {
+          "request": {
+            "Referer": "https://player.example.net/",
+            "User-Agent": "Mozilla/5.0"
+          }
+        },
+        "bingeGroup": "streamhub-1080p"
+      },
+      "_fixture": {
+        "id": "hls-with-proxy-headers",
+        "addon": "Generic HTTP addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#additional-properties-to-provide-information--behaviour-flags",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": ["aac"],
+          "channels": "2.0",
+          "size": null,
+          "seeders": null,
+          "availability": "direct",
+          "service": null,
+          "languages": ["en"],
+          "notes": "proxyHeaders means the host checks Referer/User-Agent: a TV <video> cannot set them, so route via a proxy or warn."
+        }
+      }
+    },
+    {
+      "name": "MyServer 4K",
+      "description": "Arrival (2016) 2160p HDR10 HEVC DTS-HD MA 5.1\nSize: 52 GB",
+      "url": "https://media.example.net/movies/Arrival.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
+      "behaviorHints": {
+        "notWebReady": true,
+        "filename": "Arrival.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
+        "videoSize": 55834574848,
+        "videoHash": "8e245d9679d31e12",
+        "countryWhitelist": ["usa", "can"]
+      },
+      "_fixture": {
+        "id": "direct-mkv-with-video-hash",
+        "addon": "Generic HTTP addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#additional-properties-to-provide-information--behaviour-flags",
+        "expect": {
+          "resolution": "2160p",
+          "hdr": ["HDR10"],
+          "videoCodec": "hevc",
+          "source": "remux",
+          "audio": ["dts-hd-ma"],
+          "channels": "5.1",
+          "size": {
+            "text": "52 GB",
+            "base": 1024,
+            "bytes": 55834574848
+          },
+          "seeders": null,
+          "availability": "direct",
+          "service": null,
+          "languages": [],
+          "notes": "Has everything the subtitles request needs (videoHash, videoSize, filename). countryWhitelist is ISO 3166-1 alpha-3, lower case."
+        }
+      }
+    },
+    {
+      "name": "Trailer",
+      "title": "Official Trailer",
+      "ytId": "dQw4w9WgXcQ",
+      "_fixture": {
+        "id": "youtube-trailer",
+        "addon": "Cinemeta-style trailer",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#stream-object",
+        "expect": {
+          "resolution": null,
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": null,
+          "seeders": null,
+          "availability": "youtube",
+          "service": null,
+          "languages": [],
+          "notes": "Uses deprecated 'title'. Launch the YouTube app."
+        }
+      }
+    },
+    {
+      "name": "Netflix",
+      "description": "Watch on Netflix",
+      "externalUrl": "https://www.netflix.com/title/80100172",
+      "_fixture": {
+        "id": "external-url",
+        "addon": "Generic link addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#stream-object",
+        "expect": {
+          "resolution": null,
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": null,
+          "seeders": null,
+          "availability": "external",
+          "service": null,
+          "languages": []
+        }
+      }
+    },
+    {
+      "name": "Live channel",
+      "description": "Open in the channel app",
+      "externalUrl": "https://example.tv/live",
+      "webosUrl": "com.example.tvapp",
+      "tizenUrl": "ExampleApp.Tv",
+      "androidTvUrl": "https://example.tv/android/live",
+      "_fixture": {
+        "id": "external-webos-url",
+        "addon": "Generic link addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-core/blob/029301839c863f2c7e5b7dcb5ca170d85280eda7/src/types/resource/stream.rs#L826-L835",
+        "expect": {
+          "resolution": null,
+          "hdr": [],
+          "videoCodec": null,
+          "source": null,
+          "audio": [],
+          "channels": null,
+          "size": null,
+          "seeders": null,
+          "availability": "external",
+          "service": null,
+          "languages": [],
+          "notes": "webosUrl/tizenUrl/androidTvUrl exist only in stremio-core (strings, not URLs, for tizen/webos); undocumented in the SDK. Value format here is a guess."
+        }
+      }
+    },
+    {
+      "name": "[Usenet] NZB 1080p",
+      "description": "The.Penguin.S01E01.1080p.WEB-DL.DDP5.1.H.264-GRP\n💾 3.2 GB ⏱️ 41d",
+      "nzbUrl": "https://indexer.example.org/getnzb/abc123.nzb",
+      "servers": ["nntps://user:pass@news.example.org:563/4"],
+      "fileMustInclude": ["/.mkv$|.mp4$/i"],
+      "_fixture": {
+        "id": "usenet-nzb",
+        "addon": "Usenet addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-addon-sdk/blob/ec4e0a49e61bac4f2285891d39414dfbafe93f58/docs/api/responses/stream.md#stream-object",
+        "expect": {
+          "resolution": "1080p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web-dl",
+          "audio": ["ddp"],
+          "channels": "5.1",
+          "size": {
+            "text": "3.2 GB",
+            "base": 1024,
+            "bytes": 3435973837
+          },
+          "seeders": null,
+          "availability": "usenet",
+          "service": null,
+          "languages": [],
+          "notes": "Needs Stremio's streaming server; not playable by a TV <video>. fileMustInclude is an array in stremio-core, a string in the SDK docs."
+        }
+      }
+    },
+    {
+      "name": "RAR 720p",
+      "description": "Old.Show.S01E01.720p.HDTV.x264-GRP",
+      "rarUrls": [
+        ["https://files.example.org/old.show.s01e01.part1.rar", 524288000],
+        ["https://files.example.org/old.show.s01e01.part2.rar"]
+      ],
+      "fileIdx": 0,
+      "_fixture": {
+        "id": "rar-archive",
+        "addon": "Archive addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-core/blob/029301839c863f2c7e5b7dcb5ca170d85280eda7/src/types/resource/stream.rs#L600-L640",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "hdtv",
+          "audio": [],
+          "channels": null,
+          "size": null,
+          "seeders": null,
+          "availability": "usenet",
+          "service": null,
+          "languages": [],
+          "notes": "stremio-core expects each archive entry as [url, bytes?]; the SDK docs describe {url, bytes} objects. Needs the streaming server."
+        }
+      }
+    },
+    {
+      "name": "Example\n720p",
+      "title": "Old field: Movie.2020.720p.WEB-DL.AAC2.0.x264",
+      "description": "New field: Movie.2020.720p.WEB-DL.AAC2.0.x264",
+      "url": "https://media.example.net/Movie.2020.720p.WEB-DL.AAC2.0.x264.mp4",
+      "_fixture": {
+        "id": "description-and-title-both",
+        "addon": "Malformed addon",
+        "provenance": "invented",
+        "source": "https://github.com/Stremio/stremio-core/blob/029301839c863f2c7e5b7dcb5ca170d85280eda7/src/types/resource/stream.rs#L74-L75",
+        "expect": {
+          "resolution": "720p",
+          "hdr": [],
+          "videoCodec": "avc",
+          "source": "web-dl",
+          "audio": ["aac"],
+          "channels": "2.0",
+          "size": null,
+          "seeders": null,
+          "availability": "direct",
+          "service": null,
+          "languages": [],
+          "notes": "stremio-core aliases title to description; with both present serde likely rejects the stream (duplicate field) - INFERRED. BannerTV should prefer description and keep the stream."
+        }
+      }
+    }
+  ]
+}

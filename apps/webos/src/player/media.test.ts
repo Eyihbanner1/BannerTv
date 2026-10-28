@@ -27,10 +27,20 @@ describe('guessMimeType', () => {
 
 describe('buildMediaOptionType', () => {
   it('appends the start position in milliseconds, URI-encoded', () => {
-    const type = buildMediaOptionType('video/mp4', 30000);
+    const type = buildMediaOptionType('video/mp4', { startMs: 30000 });
     expect(type.startsWith('video/mp4;mediaOption=')).toBe(true);
     const json = decodeURI(type.slice('video/mp4;mediaOption='.length));
     expect(JSON.parse(json)).toEqual({ option: { transmission: { playTime: { start: 30000 } } } });
+  });
+
+  it('lifts the 1080p cap on adaptive streams when asked', () => {
+    const type = buildMediaOptionType('application/vnd.apple.mpegurl', {
+      maxSize: { width: 3840, height: 2160 },
+    });
+    const json = decodeURI(type.slice(type.indexOf('=') + 1));
+    expect(JSON.parse(json)).toEqual({
+      option: { adaptiveStreaming: { maxWidth: 3840, maxHeight: 2160 } },
+    });
   });
 });
 

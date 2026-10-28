@@ -1,4 +1,4 @@
-import { guessMimeType } from './media';
+import { guessMimeType } from '../player/media';
 
 export interface LabSource {
   label: string;

@@ -11,8 +11,10 @@ import { DiscoverScreen } from '../screens/discover/DiscoverScreen';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
+import { PlayerScreen } from '../screens/player/PlayerScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
 import { back, currentSection, openSection, type Route, router } from './router';
 import { createScreenSlot, ScreenSlotContext } from './screen-slot';
@@ -54,6 +56,11 @@ function Screen({ route }: { route: Route }) {
       return <DiagnosticsScreen />;
     case 'lab':
       return <LabScreen />;
+    case 'streams':
+      return <StreamsScreen {...route} />;
+    case 'player':
+      // A new episode is a new player, so its session and subtitles start afresh.
+      return <PlayerScreen key={route.videoId} {...route} />;
     default:
       return <PlaceholderScreen section={route.name} />;
   }
@@ -66,6 +73,8 @@ interface ScreenSlotProps {
   active: boolean;
   /** Pushed on top of another screen, rather than a section root. */
   pushed: boolean;
+  /** Over the rail too, as the player is. */
+  fullScreen?: boolean;
 }
 
 /**
@@ -74,7 +83,13 @@ interface ScreenSlotProps {
  * as it was instead of building it again: on a TV that rebuild was most of
  * the time Back took.
  */
-const ScreenSlot = memo(function ScreenSlot({ route, focusKey, active, pushed }: ScreenSlotProps) {
+const ScreenSlot = memo(function ScreenSlot({
+  route,
+  focusKey,
+  active,
+  pushed,
+  fullScreen,
+}: ScreenSlotProps) {
   const [slot] = useState(() => createScreenSlot(active));
   const { ref } = useFocusable<object, HTMLDivElement>({
     focusKey,
@@ -117,7 +132,12 @@ const ScreenSlot = memo(function ScreenSlot({ route, focusKey, active, pushed }:
   return (
     <ScreenSlotContext.Provider value={slot}>
       <FocusContext.Provider value={focusKey}>
-        <div ref={ref} className={active ? styles.slot : `${styles.slot} ${COVERED_CLASS}`}>
+        <div
+          ref={ref}
+          className={[styles.slot, fullScreen ? styles.fullScreen : '', active ? '' : COVERED_CLASS]
+            .filter(Boolean)
+            .join(' ')}
+        >
           {screen}
         </div>
       </FocusContext.Provider>
@@ -153,9 +173,11 @@ export function App() {
     return true;
   });
 
+  // The player takes the whole screen; the rail would only be in the way.
+  const fullScreen = top.name === 'player';
   return (
     <div className={styles.app}>
-      <Rail />
+      {!fullScreen && <Rail />}
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>
           {/* On first run the screens wait, so they cannot take focus from the welcome. */}
@@ -169,7 +191,14 @@ export function App() {
             />
           )}
           {welcomeDone && top !== root && (
-            <ScreenSlot key={topKey} route={top} focusKey={topKey} active pushed />
+            <ScreenSlot
+              key={topKey}
+              route={top}
+              focusKey={topKey}
+              active
+              pushed
+              fullScreen={fullScreen}
+            />
           )}
         </main>
       </FocusContext.Provider>

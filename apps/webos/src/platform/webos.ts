@@ -85,6 +85,19 @@ export class LunaError extends Error {
   }
 }
 
+/**
+ * Whether a Luna answer reports a failure. returnValue is the documented
+ * flag; some services leave it out and send only an errorCode, and the media
+ * service answers success with errorCode 0 and errorText "No Error". It also
+ * sends "No Error" with returnValue false when it fails, so the text alone means nothing.
+ */
+export function lunaFailed(response: Record<string, unknown>): boolean {
+  if (response.returnValue === false) return true;
+  if (response.returnValue === true) return false;
+  const code = response.errorCode;
+  return code !== undefined && code !== null && code !== 0 && code !== '0';
+}
+
 // Bridges are kept here until they answer, so they are not garbage-collected mid-call.
 const pending = new Set<ServiceBridge>();
 
@@ -121,7 +134,7 @@ export function lunaCall<T extends Record<string, unknown>>(
         reject(new Error(`${uri}: unreadable answer ${message}`));
         return;
       }
-      if (response.errorCode !== undefined || response.returnValue === false) {
+      if (lunaFailed(response)) {
         reject(new LunaError(uri, response));
       } else {
         resolve(response as T);
@@ -129,6 +142,34 @@ export function lunaCall<T extends Record<string, unknown>>(
     };
     bridge.call(uri, JSON.stringify(params));
   });
+}
+
+/**
+ * A Luna subscription: every message goes to `onMessage` until the returned
+ * function cancels it. Off the TV it does nothing.
+ */
+export function lunaSubscribe(
+  uri: string,
+  params: Record<string, unknown>,
+  onMessage: (message: Record<string, unknown>) => void,
+): () => void {
+  const Bridge = window.PalmServiceBridge;
+  if (!Bridge) return () => undefined;
+  const bridge = new Bridge();
+  pending.add(bridge);
+  bridge.onservicecallback = (message) => {
+    try {
+      onMessage(JSON.parse(message) as Record<string, unknown>);
+    } catch {
+      onMessage({ unreadable: message });
+    }
+  };
+  bridge.call(uri, JSON.stringify({ ...params, subscribe: true }));
+  return () => {
+    bridge.onservicecallback = null;
+    bridge.cancel();
+    pending.delete(bridge);
+  };
 }
 
 /**

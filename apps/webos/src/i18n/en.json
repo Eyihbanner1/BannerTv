@@ -33,7 +33,11 @@
     "previous": "Previous titles",
     "next": "More titles",
     "loadingTile": "Loading",
-    "seeAll": "See all"
+    "seeAll": "See all",
+    "continueWatching": "Continue watching",
+    "episodeNote": "S{{season}}:E{{episode}}",
+    "nextEpisodeNote": "Next: S{{season}}:E{{episode}}",
+    "nextNote": "Next episode"
   },
   "search": {
     "label": "Search",
@@ -127,7 +131,10 @@
   },
   "details": {
     "watch": "Watch",
-    "comingInPhase2": "Choosing a stream arrives in Phase 2, with the player.",
+    "resumeFrom": "Resume from {{time}}",
+    "startOver": "Start over",
+    "resumeEpisode": "Resume S{{season}}:E{{episode}}",
+    "allStreams": "All streams",
     "season": "Season {{number}}",
     "specials": "Specials",
     "episodes": "Episodes",
@@ -139,16 +146,151 @@
     "loading": "Loading details",
     "noEpisodes": "This addon lists no episodes yet.",
     "trailer": "Trailer",
-    "trailerFailed": "The YouTube app didn't open. Check it's installed on the TV."
+    "trailerFailed": "The YouTube app didn't open. Check it's installed on the TV.",
+    "watched": "watched"
+  },
+  "player": {
+    "starting": "Starting",
+    "seek": "Position",
+    "play": "Play",
+    "pause": "Pause",
+    "audioAndSubtitles": "Audio and subtitles",
+    "quality": "Quality",
+    "otherQuality": "Other",
+    "otherStreams": "Other streams",
+    "allStreams": "All streams",
+    "startOver": "Start over",
+    "nextEpisode": "Next episode",
+    "episodeNumber": "S{{season}}:E{{episode}}",
+    "tryingAnother": "That stream stopped, so BannerTV is trying another.",
+    "steppingDown": "That stream kept stopping to load, so BannerTV is switching to a lighter one.",
+    "keepsBuffering": "This stream keeps stopping to load. Press Up, then Quality, for a lower one.",
+    "keepsBufferingStreams": "This stream keeps stopping to load. Press Up, then Other streams, to pick a smaller one.",
+    "keepsBufferingPlain": "This stream keeps stopping to load.",
+    "subtitlesFailed": "Those subtitles couldn't be loaded.",
+    "upNext": "Up next",
+    "playNextIn": "Play now ({{seconds}})",
+    "keepWatching": "Keep watching",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "subtitlesOff": "Off",
+    "fromStream": "in the stream",
+    "version": "version {{number}} of {{count}}",
+    "versions_one": "{{count}} version",
+    "versions_other": "{{count}} versions",
+    "lookingForSubtitles": "Looking for more subtitles…",
+    "noSubtitles": "No subtitles found",
+    "subtitleSettings": "Subtitle settings",
+    "timing": "Timing",
+    "style": "Subtitle style",
+    "styleHint": "Changes show on the picture straight away.",
+    "styleField": {
+      "size": "Size",
+      "colour": "Colour",
+      "background": "Background",
+      "position": "Position"
+    },
+    "styleValue": {
+      "size": {
+        "small": "Small",
+        "medium": "Medium",
+        "large": "Large",
+        "huge": "Very large"
+      },
+      "colour": {
+        "white": "White",
+        "yellow": "Yellow",
+        "cyan": "Cyan",
+        "green": "Green"
+      },
+      "background": {
+        "outline": "Outline",
+        "shadow": "Shadow",
+        "box": "Dark box",
+        "solid": "Black box"
+      },
+      "position": {
+        "bottom": "Bottom",
+        "raised": "Higher",
+        "top": "Top"
+      }
+    },
+    "problem": {
+      "nothingTitle": "No stream could play",
+      "failedTitle": "This stream won't play",
+      "nothing": "None of your addons offered a stream this TV can play. Try All streams, or add a stream addon in Addons.",
+      "format": "This TV can't play this stream's format.",
+      "network": "The stream stopped loading. Its source may be busy or offline.",
+      "decode": "The TV couldn't decode this stream.",
+      "other": "Something went wrong playing this stream.",
+      "addonsFailed_one": "One addon didn't answer.",
+      "addonsFailed_other": "{{count}} addons didn't answer.",
+      "tryAnother": "Try another stream",
+      "back": "Back to the title"
+    }
+  },
+  "streams": {
+    "title": "All streams",
+    "cached": "Cached",
+    "tested": "Tested: plays",
+    "asking_one": "Asking 1 addon…",
+    "asking_other": "Asking {{count}} addons…",
+    "failed_one": "1 addon didn't answer",
+    "failed_other": "{{count}} addons didn't answer",
+    "count_one": "1 stream",
+    "count_other": "{{count}} streams",
+    "none": "No addon offered a stream for this.",
+    "heavy": "A very large file: it may keep stopping to load on this TV's connection.",
+    "moreNotes_one": "{{note}} (and 1 more note)",
+    "moreNotes_other": "{{note}} (and {{count}} more notes)",
+    "sortBy": "Sort: {{order}}",
+    "sortTitle": "Sort streams",
+    "order": {
+      "quality": "Best quality",
+      "fast": "Fastest start",
+      "addon": "Addon order"
+    },
+    "cannot": {
+      "torrent": "A torrent. Torrents need a streaming engine, which comes in a later update.",
+      "proxy-headers": "Needs request headers the TV's player can't send.",
+      "youtube": "Opens in the YouTube app.",
+      "external": "Opens a web page, which BannerTV can't show."
+    },
+    "warnings": {
+      "truehd": "Dolby TrueHD sound: this TV may play it silently.",
+      "dts": "DTS sound: this TV can't decode it, so there may be no sound.",
+      "av1": "AV1 video: this TV can't decode it.",
+      "hevc": "HEVC video: this TV can't decode it.",
+      "dolby-vision-as-hdr10": "Dolby Vision: plays as HDR10 on this TV.",
+      "dolby-vision-only": "Dolby Vision only: colours may look wrong on this TV.",
+      "uhd-on-hd-tv": "4K: more than this TV can show, and slow to start.",
+      "hdr-on-sdr-tv": "HDR: colours may look dull on this TV.",
+      "old-container": "An old file type: it may not start, and seeking may be slow.",
+      "cam": "Recorded in a cinema: poor picture and sound.",
+      "uncached": "Not cached by your debrid service yet: it would have to download first."
+    }
   },
   "placeholder": {
     "library": "Your saved titles and watch history arrive in Phase 3."
   },
   "settings": {
-    "lead": "Developer tools for the Phase 0 spikes. Real settings arrive in Phase 1.",
+    "lead": "Playback choices, and developer tools.",
     "diagnostics": "Diagnostics",
     "lab": "Playback lab",
-    "about": "{{title}} {{version}} · {{id}}"
+    "about": "{{title}} {{version}} · {{id}}",
+    "streamChoice": "Auto-play picks: {{value}}",
+    "streamChoiceTitle": "Auto-play picks",
+    "streamChoiceValue": {
+      "quality": "Best quality",
+      "fast": "Fastest start"
+    },
+    "probing": "Test links before playing: {{value}}",
+    "probingTitle": "Test links before playing",
+    "probingValue": {
+      "auto": "Automatic",
+      "on": "On",
+      "off": "Off"
+    }
   },
   "diagnostics": {
     "refresh": "Refresh",
@@ -175,7 +317,9 @@
       "both": "Clock at start: {{playing}} at the playing event, {{update}} at the first timeupdate ({{delay}} ms later)"
     },
     "trackCounts": "Audio tracks: {{audio}} · text tracks: {{text}}",
-    "error": "Error: {{error}}"
+    "error": "Error: {{error}}",
+    "embedded": "Test embedded subtitles (Luna)",
+    "inPlayer": "Open in BannerTV's player"
   },
   "welcome": {
     "title": "Welcome to BannerTV",

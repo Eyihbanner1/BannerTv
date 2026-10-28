@@ -1,4 +1,4 @@
-import { createStore } from '@bannertv/core';
+import { createStore, type StreamEntry } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
@@ -13,13 +13,46 @@ export type Route =
   | { name: 'details'; type: string; id: string; preview?: MetaPreview }
   /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */
   | { name: 'catalog'; transportUrl: string; type: string; catalogId: string; genre?: string }
+  /**
+   * Plays one video. Without `stream` the player picks the best working
+   * stream itself; All streams passes the one the user chose. `startAt`
+   * (seconds) carries the position over when the stream is switched.
+   */
+  | {
+      name: 'player';
+      type: string;
+      metaId: string;
+      videoId: string;
+      preview?: MetaPreview;
+      stream?: StreamEntry;
+      /** The viewer picked `stream` by hand, so the player asks before moving to another. */
+      chosen?: boolean;
+      startAt?: number;
+      /** A Lab test stream: no addons are asked and nothing is remembered. */
+      lab?: boolean;
+    }
+  /** Every stream for one video, for choosing by hand instead of auto-play. */
+  | {
+      name: 'streams';
+      type: string;
+      metaId: string;
+      videoId: string;
+      preview?: MetaPreview;
+      startAt?: number;
+    }
   | { name: 'diagnostics' }
   | { name: 'lab' };
+
+/**
+ * Where focus goes on Back. A function is asked as the screen is shown again,
+ * for a screen whose content moves about while it is covered.
+ */
+export type ReturnFocus = string | (() => string | undefined);
 
 interface Entry {
   route: Route;
   /** Where focus was when the next screen opened on top, restored on Back. */
-  returnFocus?: string;
+  returnFocus?: ReturnFocus;
 }
 
 export interface RouterState {
@@ -30,7 +63,7 @@ export interface RouterState {
 export const router = createStore<RouterState>({ stack: [{ route: { name: 'home' } }] });
 
 // Read once by the screen that mounts after Back.
-let pendingFocus: string | undefined;
+let pendingFocus: ReturnFocus | undefined;
 
 export function topRoute(state: RouterState = router.get()): Route {
   return state.stack[state.stack.length - 1]!.route;
@@ -51,11 +84,26 @@ export function openSection(section: Section): void {
 
 export function push(
   route: Route,
-  returnFocus: string = currentlyPressed() ?? getCurrentFocusKey(),
+  returnFocus: ReturnFocus = currentlyPressed() ?? getCurrentFocusKey(),
 ): void {
   router.set(({ stack }) => ({
     stack: [...stack.slice(0, -1), { ...stack[stack.length - 1]!, returnFocus }, { route }],
   }));
+}
+
+/**
+ * Swaps the top screen for another, for example one episode's player for the
+ * next one's, so Back still leads to the screen below. On a section root,
+ * which must stay, it opens the route on top instead.
+ */
+export function replace(route: Route): void {
+  const { stack } = router.get();
+  if (stack.length <= 1) {
+    push(route);
+    return;
+  }
+  pendingFocus = undefined;
+  router.set({ stack: [...stack.slice(0, -1), { route }] });
 }
 
 /** Closes the top screen. Returns false on a section root, where there is nothing to close. */
@@ -71,5 +119,5 @@ export function back(): boolean {
 export function takePendingFocus(): string | undefined {
   const key = pendingFocus;
   pendingFocus = undefined;
-  return key;
+  return typeof key === 'function' ? key() : key;
 }

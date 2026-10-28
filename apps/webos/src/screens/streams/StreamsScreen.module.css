@@ -1,0 +1,150 @@
+.screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bt-content-width);
+  height: 1080px;
+  padding: 72px var(--bt-safe-x) 0 var(--bt-content-inset);
+  box-sizing: border-box;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.heading {
+  flex: 1;
+  min-width: 0;
+  margin-right: 48px;
+}
+
+.name {
+  margin: 0;
+  font: var(--bt-text-title);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode {
+  margin: 8px 0 0;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.status {
+  margin: 12px 0 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.note {
+  margin: 0 0 16px;
+  font: var(--bt-text-body);
+  color: var(--bt-accent);
+}
+
+.list {
+  position: relative;
+  height: 840px;
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.empty {
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.stream {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 152px;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  display: flex;
+  background: var(--bt-surface-1);
+}
+
+.unplayable {
+  opacity: 0.55;
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+  opacity: 1;
+}
+
+.addon {
+  flex: none;
+  width: 260px;
+  margin-right: 24px;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badges {
+  margin: 10px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.badge,
+.works {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 2px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.works {
+  background: rgba(124, 252, 138, 0.16);
+  color: #9cf5a8;
+}
+
+.warning,
+.reason {
+  margin: 8px 0 0;
+  font: var(--bt-text-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.warning {
+  color: #ffcf66;
+}
+
+.reason {
+  color: var(--bt-text-subtle);
+}

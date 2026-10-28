@@ -1,5 +1,5 @@
 /**
- * Helpers for the playback lab (Phase 0 spikes 2 and 3). Pure functions, tested off-device.
+ * Media helpers shared by the player and the playback lab. Pure functions, tested off-device.
  */
 
 export function guessMimeType(url: string): string {
@@ -12,15 +12,35 @@ export function guessMimeType(url: string): string {
   return 'video/mp4';
 }
 
+export interface MediaOptions {
+  /** Where to start, in milliseconds. */
+  startMs?: number;
+  /**
+   * The largest picture adaptive streams may pick. webOS caps HLS and DASH at
+   * 1920x1080 unless told otherwise, so UHD TVs pass 3840x2160.
+   */
+  maxSize?: { width: number; height: number };
+}
+
 /**
- * The `type` attribute that hands a start position to the webOS media pipeline,
- * so the TV starts there instead of seeking after load.
+ * The `type` attribute that hands options to the webOS media pipeline: a start
+ * position, so the TV starts there instead of seeking after load, and the
+ * largest picture for adaptive streams.
  *
  * Source: https://webostv.developer.lge.com/develop/guides/mediaoption-parameter
  */
-export function buildMediaOptionType(mime: string, startMs: number): string {
-  const options = { option: { transmission: { playTime: { start: Math.round(startMs) } } } };
-  return `${mime};mediaOption=${encodeURI(JSON.stringify(options))}`;
+export function buildMediaOptionType(mime: string, options: MediaOptions): string {
+  const option: Record<string, unknown> = {};
+  if (options.startMs !== undefined) {
+    option.transmission = { playTime: { start: Math.round(options.startMs) } };
+  }
+  if (options.maxSize) {
+    option.adaptiveStreaming = {
+      maxWidth: options.maxSize.width,
+      maxHeight: options.maxSize.height,
+    };
+  }
+  return `${mime};mediaOption=${encodeURI(JSON.stringify({ option }))}`;
 }
 
 export function formatTime(seconds: number): string {

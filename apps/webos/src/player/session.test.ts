@@ -1,0 +1,806 @@
+import type { Resolution, StreamEntry } from '@bannertv/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { labStream } from '../lab/player';
+import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
+import { entryKey, type StreamFinder } from './finder';
+import {
+  createPlaybackSession,
+  REBUFFER_WINDOW_MS,
+  SMOOTH_AFTER_S,
+  START_TIMEOUT_MS,
+  STALL_MS,
+} from './session';
+
+interface FakeEngine extends Engine {
+  listener: EngineListener;
+  audio: EngineTrack[];
+  text: EngineTrack[];
+  /** Where load() was asked to start, in seconds. */
+  startAt?: number;
+  /** Whether the engine says the stream is live. */
+  live?: boolean;
+}
+
+// plays: whether load() starts the video, as the TV's player does at once.
+const fake = vi.hoisted(() => ({ engines: [] as FakeEngine[], plays: false }));
+
+// What the session keeps: where playback was, which addons worked, and how much data plays smoothly.
+const kept = vi.hoisted(() => ({
+  progress: vi.fn(),
+  cleared: vi.fn(),
+  sourceMemory: vi.fn(),
+  bandwidth: {
+    maxBitrate: () => 40e6,
+    struggled: vi.fn<(bitrate: number, ceiling?: number) => void>(),
+    smooth: vi.fn<(bitrate: number) => void>(),
+    subscribe: () => () => undefined,
+  },
+}));
+
+vi.mock('../data/playback', () => ({
+  progress: { record: kept.progress, clear: kept.cleared },
+  sourceMemory: { record: kept.sourceMemory },
+  bandwidth: kept.bandwidth,
+}));
+
+// Engines that load at once and hold whatever tracks the test gives them.
+vi.mock('./engines/choose', () => ({
+  chooseEngine: () => Promise.resolve('hls.js'),
+  fallbackEngine: () => undefined,
+  createEngine: (name: Engine['name'], video: HTMLVideoElement, listener: EngineListener) => {
+    const engine: FakeEngine = {
+      name,
+      listener,
+      audio: [],
+      text: [],
+      load: (_url, startAt) => {
+        engine.startAt = startAt;
+        if (fake.plays) void video.play();
+        return Promise.resolve();
+      },
+      isLive: () => engine.live === true,
+      audioTracks: () => engine.audio,
+      selectAudio: (id) => {
+        engine.audio = engine.audio.map((track) => ({ ...track, active: track.id === id }));
+      },
+      textTracks: () => engine.text,
+      selectText: (id) => {
+        engine.text = engine.text.map((track) => ({ ...track, active: track.id === id }));
+      },
+      destroy: () => undefined,
+    };
+    fake.engines.push(engine);
+    return engine;
+  },
+}));
+
+/** The parts of a media element the session listens to. */
+class FakeVideo extends EventTarget {
+  paused = true;
+  currentTime = 0;
+  // A two-hour film, so the bitrates below follow from the sizes.
+  duration = 7200;
+
+  play() {
+    if (this.paused) {
+      this.paused = false;
+      this.fire('play');
+    }
+    return Promise.resolve();
+  }
+
+  pause() {
+    if (!this.paused) {
+      this.paused = true;
+      this.fire('pause');
+    }
+  }
+
+  fire(type: string) {
+    this.dispatchEvent(new Event(type));
+  }
+}
+
+const first = labStream({ label: 'First', url: 'https://media.example.com/first.mkv' }, 0)!;
+const second = labStream({ label: 'Second', url: 'https://media.example.com/second.mkv' }, 1)!;
+
+/** A stream with the size and resolution an addon would give, so its bitrate is known. */
+function sized(file: string, rank: number, gigabytes: number, resolution: Resolution): StreamEntry {
+  const entry = labStream({ label: file, url: `https://media.example.com/${file}.mkv` }, rank)!;
+  return { ...entry, facts: { ...entry.facts, sizeBytes: gigabytes * 1e9, resolution } };
+}
+
+// Over two hours: 80, 50, 30 and about 17 Mbit/s.
+const remux = sized('remux', 2, 72, '2160p');
+const web4k = sized('web4k', 3, 45, '2160p');
+const bluray = sized('bluray', 4, 27, '1080p');
+const web = sized('web', 5, 15, '1080p');
+
+interface SetupOptions {
+  /** What finder.lighter() offers, best first. Nothing lighter by default. */
+  lighter?: StreamEntry[];
+  autoFailover?: boolean;
+  remember?: boolean;
+}
+
+function setup(options: SetupOptions = {}) {
+  const video = new FakeVideo();
+  const markFailed = vi.fn<(entry: StreamEntry) => void>();
+  const offered = options.lighter ?? [];
+  const lighter = vi.fn((_current: StreamEntry, tried: ReadonlySet<string>) =>
+    offered.find((entry) => !tried.has(entryKey(entry))),
+  );
+  const finder = {
+    next: (tried: ReadonlySet<string>) =>
+      [first, second].find((entry) => !tried.has(entryKey(entry))),
+    markFailed,
+    lighter,
+    runtimeSeconds: () => 7200,
+  } as unknown as StreamFinder;
+  const session = createPlaybackSession({
+    video: video as unknown as HTMLVideoElement,
+    type: 'movie',
+    metaId: 'tt1',
+    videoId: 'tt1',
+    finder,
+    autoFailover: options.autoFailover ?? true,
+    remember: options.remember,
+  });
+  return { video, session, markFailed, lighter };
+}
+
+/** Lets the engine choice and load, which are promises, run. */
+async function settle() {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+function lastEngine(): FakeEngine {
+  return fake.engines[fake.engines.length - 1]!;
+}
+
+const track = (id: string, active = false): EngineTrack => ({ id, lang: id, label: id, active });
+
+type Session = ReturnType<typeof createPlaybackSession>;
+
+/** Opens `entry` at `at` seconds and gets it to its first picture. */
+async function start(
+  session: Session,
+  video: FakeVideo,
+  entry: StreamEntry,
+  at = 0,
+  options?: { chosen?: boolean },
+) {
+  session.play(entry, at, options);
+  await settle();
+  void video.play();
+  video.fire('playing');
+  if (at > 0) {
+    video.currentTime = at;
+    video.fire('timeupdate');
+  }
+}
+
+/** Plays on for `seconds` without buffering, the clock and the picture moving together. */
+function playFor(video: FakeVideo, seconds: number) {
+  for (let i = 0; i < seconds; i++) {
+    vi.advanceTimersByTime(1000);
+    video.currentTime += 1;
+    video.fire('timeupdate');
+  }
+}
+
+/** Stops to buffer and is still waiting `ms` later. */
+function wait(video: FakeVideo, ms: number) {
+  video.fire('waiting');
+  vi.advanceTimersByTime(ms);
+}
+
+/** Stops to buffer for `ms`, then plays on. */
+function rebuffer(video: FakeVideo, ms: number) {
+  wait(video, ms);
+  video.fire('playing');
+}
+
+/**
+ * Three waits of a second and a half within half a minute: more than the
+ * connection gives. The third is still going on, as the session judges it a
+ * second in.
+ */
+function struggle(video: FakeVideo) {
+  for (let i = 0; i < 3; i++) {
+    playFor(video, 10);
+    if (i < 2) rebuffer(video, 1500);
+    else wait(video, 1500);
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal('window', globalThis);
+  vi.useFakeTimers();
+  fake.engines.length = 0;
+  fake.plays = false;
+  kept.progress.mockClear();
+  kept.cleared.mockClear();
+  kept.sourceMemory.mockClear();
+  kept.bandwidth.struggled.mockClear();
+  kept.bandwidth.smooth.mockClear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('a paused stream', () => {
+  it('is not failed over when the viewer paused it while it buffered', async () => {
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+    video.fire('waiting');
+    expect(session.get().status).toBe('buffering');
+
+    session.pause();
+    await vi.advanceTimersByTimeAsync(STALL_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get()).toMatchObject({ status: 'paused', entry: first });
+
+    // Played again and still starved, it moves on as before.
+    session.resume();
+    video.fire('waiting');
+    await vi.advanceTimersByTimeAsync(STALL_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get().entry).toBe(second);
+  });
+
+  it('is not failed over by a starved stream reporting it is waiting just after the pause', async () => {
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+
+    session.pause();
+    video.fire('waiting');
+    await vi.advanceTimersByTimeAsync(STALL_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get()).toMatchObject({ status: 'paused', entry: first });
+  });
+
+  it('does not run out its start time while the viewer has it paused', async () => {
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+
+    session.pause();
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+
+    session.resume();
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get().entry).toBe(second);
+  });
+
+  it('shows as paused when OK pauses it before the first picture, and starts its clock again on Play', async () => {
+    fake.plays = true;
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    expect(video.paused).toBe(false);
+    expect(session.get().status).toBe('loading');
+
+    session.togglePlay();
+    expect(session.get().status).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
+
+    session.resume();
+    expect(session.get().status).toBe('loading');
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+  });
+
+  it('stays paused when the engine starts the video after the viewer paused', async () => {
+    fake.plays = true;
+    const { video, session } = setup();
+    session.play(first, 0);
+    // Hidden or paused while the engine was still being chosen.
+    session.pause();
+    await settle();
+    expect(video.paused).toBe(true);
+    expect(session.get().status).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('tracks the viewer chose', () => {
+  it('are chosen again when Try again opens the same stream in a new engine', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const before = lastEngine();
+    before.text = [track('eng|English')];
+    before.audio = [track('eng|English', true), track('fre|French')];
+    before.listener.tracks();
+    session.selectText('eng|English');
+    session.selectAudio('fre|French');
+
+    session.play(first, 42);
+    await settle();
+    const after = lastEngine();
+    expect(after).not.toBe(before);
+    after.text = [track('eng|English')];
+    after.audio = [track('eng|English', true), track('fre|French')];
+    after.listener.tracks();
+    expect(session.get().text).toEqual([track('eng|English', true)]);
+    expect(session.get().audio).toEqual([track('eng|English'), track('fre|French', true)]);
+  });
+
+  it('are not carried over to another stream', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().text = [track('eng|English')];
+    session.selectText('eng|English');
+
+    session.play(second, 0);
+    await settle();
+    lastEngine().text = [track('eng|English')];
+    lastEngine().listener.tracks();
+    expect(session.get().text).toEqual([track('eng|English')]);
+  });
+});
+
+describe('a stream that keeps buffering', () => {
+  it('steps down to a lighter stream at the same place after three long waits', async () => {
+    const { video, session, lighter } = setup({ lighter: [bluray, web] });
+    await start(session, video, remux);
+    playFor(video, 300);
+    rebuffer(video, 1500);
+    playFor(video, 20);
+    rebuffer(video, 1500);
+    playFor(video, 20);
+    expect(session.get().entry).toBe(remux);
+
+    // The third is judged a second in, without waiting for it to end.
+    wait(video, 999);
+    expect(session.get().entry).toBe(remux);
+    vi.advanceTimersByTime(1);
+    expect(lighter).toHaveBeenCalledWith(remux, expect.anything());
+    expect(session.get()).toMatchObject({ entry: bluray, position: 340, steppedDown: true });
+    expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
+    await settle();
+    expect(lastEngine().startAt).toBe(340);
+
+    video.fire('playing');
+    expect(session.get()).toMatchObject({ status: 'playing', entry: bluray, steppedDown: false });
+  });
+
+  it('steps down after fifteen seconds of waiting in all, in fewer stops', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    rebuffer(video, 7000);
+    playFor(video, 30);
+    expect(session.get().entry).toBe(remux);
+
+    wait(video, 7999);
+    expect(session.get().entry).toBe(remux);
+    vi.advanceTimersByTime(1);
+    expect(session.get()).toMatchObject({ entry: bluray, position: 90, steppedDown: true });
+  });
+
+  it('steps down during one wait of fifteen seconds, before it counts as a dead link', async () => {
+    const { video, session, markFailed } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    wait(video, 14999);
+    expect(session.get()).toMatchObject({ entry: remux, status: 'buffering' });
+    vi.advanceTimersByTime(1);
+    expect(session.get()).toMatchObject({ entry: bluray, position: 60, steppedDown: true });
+    expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
+    // The remux played, so it is not marked as broken.
+    expect(markFailed).not.toHaveBeenCalled();
+  });
+
+  it('does not count the buffering a jump causes in a wait already going on', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    rebuffer(video, 1500);
+    playFor(video, 10);
+    wait(video, 500);
+    session.seek(1800);
+    // The jump's own loading, however long, is the jump's.
+    vi.advanceTimersByTime(14000);
+    video.fire('playing');
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false });
+  });
+
+  it('does not count waits shorter than a second', async () => {
+    const { video, session, lighter } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    for (let i = 0; i < 5; i++) {
+      playFor(video, 10);
+      rebuffer(video, 900);
+    }
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false, struggling: false });
+    expect(lighter).not.toHaveBeenCalled();
+    expect(kept.bandwidth.struggled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the viewer jumps', (session: Session) => session.seek(1800)],
+    ['the video seeks', (_session: Session, video: FakeVideo) => video.fire('seeking')],
+  ])('does not count waits just after %s', async (_name, jump) => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    jump(session, video);
+    // All three begin within ten seconds of the jump.
+    rebuffer(video, 3000);
+    playFor(video, 2);
+    rebuffer(video, 2000);
+    playFor(video, 1);
+    rebuffer(video, 1500);
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false });
+
+    // Once the jump is well behind, waiting counts again.
+    struggle(video);
+    expect(session.get()).toMatchObject({ entry: bluray, steppedDown: true });
+  });
+
+  it('forgets waits more than two minutes old', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    rebuffer(video, 1500);
+    playFor(video, 10);
+    rebuffer(video, 1500);
+    playFor(video, REBUFFER_WINDOW_MS / 1000);
+    rebuffer(video, 1500);
+    playFor(video, 10);
+    rebuffer(video, 1500);
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false });
+
+    // Three within two minutes again.
+    playFor(video, 10);
+    wait(video, 1500);
+    expect(session.get()).toMatchObject({ entry: bluray, steppedDown: true });
+  });
+
+  it('keeps a stream the viewer chose, and says it is struggling', async () => {
+    const { video, session, lighter } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60, { chosen: true });
+    struggle(video);
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false, struggling: true });
+    expect(lighter).not.toHaveBeenCalled();
+    // The limit is still lowered, so auto-play picks a lighter stream next time.
+    expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
+  });
+
+  it('keeps a stream when it may not move on by itself', async () => {
+    const { video, session, lighter } = setup({ lighter: [bluray], autoFailover: false });
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false, struggling: true });
+    expect(lighter).not.toHaveBeenCalled();
+  });
+
+  it('says it is struggling when nothing lighter is left, until another stream plays', async () => {
+    const { video, session, lighter } = setup();
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(lighter).toHaveBeenCalled();
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false, struggling: true });
+
+    session.play(web, 120);
+    expect(session.get().struggling).toBe(false);
+  });
+
+  it('steps down at most twice', async () => {
+    const { video, session, lighter } = setup({ lighter: [web4k, bluray, web] });
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(session.get().entry).toBe(web4k);
+    await settle();
+    video.fire('playing');
+
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    video.fire('playing');
+
+    struggle(video);
+    expect(session.get()).toMatchObject({ entry: bluray, steppedDown: false, struggling: true });
+    expect(lighter).toHaveBeenCalledTimes(2);
+    expect(kept.bandwidth.struggled.mock.calls).toEqual([
+      [80e6, undefined],
+      [50e6, undefined],
+      [30e6, undefined],
+    ]);
+  });
+
+  it('works the bitrate out from the title running time while the video length is unknown', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    video.duration = NaN;
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
+  });
+
+  it('is not judged when the viewer pauses while it waits', async () => {
+    const { video, session, lighter } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    rebuffer(video, 1500);
+    playFor(video, 10);
+    rebuffer(video, 1500);
+    playFor(video, 10);
+    // Paused before the third wait has gone on long enough to count.
+    wait(video, 500);
+    session.pause();
+    expect(session.get()).toMatchObject({ status: 'paused', entry: remux, steppedDown: false });
+
+    vi.advanceTimersByTime(60000);
+    session.resume();
+    video.fire('playing');
+    expect(session.get()).toMatchObject({ status: 'playing', entry: remux, steppedDown: false });
+    expect(lighter).not.toHaveBeenCalled();
+  });
+
+  it('does not count the time paused while it waits', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    video.fire('waiting');
+    vi.advanceTimersByTime(5000);
+    session.pause();
+    vi.advanceTimersByTime(60000);
+    session.resume();
+    video.fire('playing');
+    playFor(video, 10);
+
+    // Fourteen seconds of waiting in two stops: not yet too much.
+    rebuffer(video, 9000);
+    expect(session.get()).toMatchObject({ entry: remux, steppedDown: false });
+  });
+});
+
+describe('a stream that plays smoothly', () => {
+  it('tells the bandwidth memory after ten minutes without waiting', async () => {
+    const { video, session } = setup();
+    await start(session, video, bluray, 60);
+    playFor(video, SMOOTH_AFTER_S - 1);
+    expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
+
+    playFor(video, 1);
+    expect(kept.bandwidth.smooth).toHaveBeenCalledWith(30e6);
+    playFor(video, SMOOTH_AFTER_S);
+    expect(kept.bandwidth.smooth).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts the ten minutes again after a wait', async () => {
+    const { video, session } = setup();
+    await start(session, video, bluray, 60);
+    playFor(video, 400);
+    rebuffer(video, 500);
+    playFor(video, 400);
+    expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
+
+    playFor(video, 200);
+    expect(kept.bandwidth.smooth).toHaveBeenCalledWith(30e6);
+  });
+
+  it('says nothing good about a stream that already struggled', async () => {
+    const { video, session } = setup();
+    await start(session, video, remux, 60, { chosen: true });
+    struggle(video);
+    video.fire('playing');
+    playFor(video, SMOOTH_AFTER_S + 60);
+    expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
+  });
+
+  it('undoes its raise when it later keeps buffering', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    playFor(video, SMOOTH_AFTER_S);
+    expect(kept.bandwidth.smooth).toHaveBeenCalledWith(80e6);
+    struggle(video);
+    // The limit before the raise, from the memory.
+    expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, 40e6);
+  });
+
+  it('takes the lower bitrate when the video is longer than the title says', async () => {
+    const { video, session } = setup();
+    // Four hours of video, where the title says two (extras, or a wrong running time).
+    video.duration = 14400;
+    await start(session, video, remux, 60);
+    playFor(video, SMOOTH_AFTER_S);
+    expect(kept.bandwidth.smooth).toHaveBeenCalledWith(40e6);
+  });
+});
+
+describe('a stream that is not remembered', () => {
+  it('keeps no record of how it played, buffering or smooth', async () => {
+    const { video, session } = setup({ lighter: [bluray], remember: false });
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    video.fire('playing');
+    playFor(video, SMOOTH_AFTER_S + 30);
+
+    expect(kept.bandwidth.struggled).not.toHaveBeenCalled();
+    expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
+    expect(kept.progress).not.toHaveBeenCalled();
+    expect(kept.sourceMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe('a live stream', () => {
+  /** A broadcast already two hours in, as the TV's player reports one: no length. */
+  async function live(session: Session, video: FakeVideo, entry = first) {
+    video.duration = NaN;
+    session.play(entry, 0);
+    await settle();
+    lastEngine().live = true;
+    video.currentTime = 7200;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    video.fire('timeupdate');
+  }
+
+  it('saves nothing to resume, whenever it stops or ends', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    expect(session.get()).toMatchObject({ live: true, duration: 0 });
+    playFor(video, 60);
+    video.pause();
+    void video.play();
+    video.fire('ended');
+    session.saveProgress();
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('is told apart by the engine when it gives the broadcast a length that grows', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().live = true;
+    video.currentTime = 600;
+    video.duration = 630;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    playFor(video, 30);
+    expect(session.get()).toMatchObject({ live: true, duration: 0 });
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('starts another stream at the live edge, not at its own clock', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    playFor(video, 60);
+    expect(session.carryOn()).toBe(0);
+
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: second, failedOver: true, live: false });
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+
+  it('steps down at the live edge', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await live(session, video, remux);
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+
+  it('counts its addon as having worked after half a minute of watching, wherever its clock starts', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    playFor(video, 20);
+    expect(kept.sourceMemory).not.toHaveBeenCalled();
+    playFor(video, 15);
+    expect(kept.sourceMemory).toHaveBeenCalledWith(first.addonId, true);
+  });
+  it('is opened once, at the live edge, when it was opened where an older build saved it', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 1200);
+    await settle();
+    lastEngine().live = true;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    expect(kept.cleared).toHaveBeenCalledWith('tt1');
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(2);
+    expect(lastEngine().startAt).toBe(0);
+    expect(session.get().entry).toBe(first);
+
+    // Live again on the new engine: no third start.
+    lastEngine().live = true;
+    video.fire('durationchange');
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(2);
+  });
+
+  it('is not opened again when it was opened at the live edge', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    vi.advanceTimersByTime(0);
+    await settle();
+    expect(fake.engines).toHaveLength(1);
+  });
+
+  it('saves nothing when a jump comes before it is known to be live, and fails over at the live edge', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 0);
+    await settle();
+    // Fast forward on the loading screen.
+    session.seek(30);
+    expect(kept.progress).not.toHaveBeenCalled();
+    expect(session.carryOn()).toBe(0);
+    vi.advanceTimersByTime(START_TIMEOUT_MS);
+    expect(session.get().entry).toBe(second);
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+  });
+});
+
+describe('a stream with an end', () => {
+  it('carries on from where it is', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    expect(session.get().live).toBe(false);
+    expect(session.carryOn()).toBe(630);
+  });
+
+  it('keeps the place it was resumed at when the viewer jumps before the first picture and leaves', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 1800);
+    await settle();
+    session.seek(1830);
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('is a film, not a broadcast, when its file leaves the length out', async () => {
+    const { video, session } = setup();
+    video.duration = Infinity;
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    expect(session.get().live).toBe(false);
+    expect(session.carryOn()).toBe(630);
+    session.destroy();
+    // Saved against the title's running time, so it can resume.
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 630, duration: 7200 }),
+    );
+  });
+
+  it('keeps its place when it fails with nothing left to try, for Try again and for Back', async () => {
+    const { video, session } = setup({ autoFailover: false });
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get().status).toBe('failed');
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 630, duration: 7200 }),
+    );
+    kept.progress.mockClear();
+    // Letting the stream go resets the element, as Chromium does.
+    video.currentTime = 0;
+    video.duration = NaN;
+    video.fire('timeupdate');
+    expect(session.carryOn()).toBe(630);
+    session.destroy();
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+});

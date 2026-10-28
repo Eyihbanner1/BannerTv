@@ -7,6 +7,14 @@ import styles from './Tile.module.css';
 
 export type TileShape = 'poster' | 'landscape';
 
+/** What a Continue Watching tile adds: how far through, and which episode. */
+export interface TileExtra {
+  /** 0 to 1. */
+  progress?: number;
+  /** A short note such as "S1:E3", in the corner. */
+  note?: string;
+}
+
 // Brand violets, so tiles without artwork are easy to tell apart.
 const FALLBACK_ART = [
   ['#4B23C8', '#C9B5FF'],
@@ -32,6 +40,7 @@ interface TileProps {
   /** Position in the row's track or the grid, in px. */
   left: number;
   top?: number;
+  extra?: TileExtra;
   /** Stable handlers that take the tile's index, so moving along a row redraws two tiles, not all. */
   onTileFocus: (index: number) => void;
   onTilePress: (index: number) => void;
@@ -50,10 +59,15 @@ export const Tile = memo(function Tile({
   loadingLabel,
   left,
   top,
+  extra,
   onTileFocus,
   onTilePress,
 }: TileProps) {
-  const label = item ? [item.name, item.releaseInfo].filter(Boolean).join(', ') : loadingLabel;
+  const note = extra?.note;
+  const progress = extra?.progress;
+  const label = item
+    ? [item.name, note ?? item.releaseInfo].filter(Boolean).join(', ')
+    : loadingLabel;
   const className = `${styles.tile} ${styles[shape]}${item ? '' : ` ${styles.loading}`}`;
   const loaded = item !== undefined;
   const style = useMemo<CSSProperties>(
@@ -97,6 +111,15 @@ export const Tile = memo(function Tile({
             fallback={<span className={styles.landscapeName}>{item.name}</span>}
           />
         </>
+      )}
+      {item && note && <span className={styles.note}>{note}</span>}
+      {item && progress !== undefined && (
+        <span className={styles.progress}>
+          <span
+            className={styles.progressDone}
+            style={{ width: `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` }}
+          />
+        </span>
       )}
     </Pressable>
   );

@@ -127,3 +127,69 @@ export interface MetaResponse {
   meta: MetaDetail | null;
   cache: CacheHints;
 }
+
+/** Request headers a stream needs, which a `<video>` element cannot send. */
+export interface ProxyHeaders {
+  request: Record<string, string>;
+  response: Record<string, string>;
+}
+
+/**
+ * Where a stream's media comes from. Exactly one kind per stream, picked in
+ * the order stremio-core uses: url, then ytId, then infoHash, then externalUrl.
+ */
+export type StreamSource =
+  /** Plays in BannerTV's own player. */
+  | { kind: 'url'; url: string }
+  /** A YouTube video, handed to the TV's YouTube app. */
+  | { kind: 'youtube'; ytId: string }
+  /** A torrent. Needs a streaming server, which BannerTV does not have yet. */
+  | { kind: 'torrent'; infoHash: string; fileIdx?: number; trackers: string[] }
+  /** A web page or app link, opened outside BannerTV. */
+  | { kind: 'external'; url: string };
+
+export interface Stream {
+  source: StreamSource;
+  /** The addon's short label, often two lines such as "Torrentio\n4k". */
+  name?: string;
+  /** The longer text: `description`, or the legacy `title`. Often several lines. */
+  description?: string;
+  /** Subtitles the addon sends with the stream itself. */
+  subtitles: Subtitle[];
+  behaviorHints: {
+    /** Streams in the same group play one after another, for next-episode matching. */
+    bingeGroup?: string;
+    /** Stremio's desktop hint. BannerTV still tries these: the TV plays MKV, HEVC and AC-3. */
+    notWebReady: boolean;
+    /** ISO 3166-1 alpha-3 codes, lower case. */
+    countryWhitelist?: string[];
+    proxyHeaders?: ProxyHeaders;
+    filename?: string;
+    videoHash?: string;
+    /** In bytes. */
+    videoSize?: number;
+  };
+}
+
+export interface StreamResponse {
+  streams: Stream[];
+  /** Streams that were left out because they could not be read or played from any source. */
+  dropped: number;
+  cache: CacheHints;
+}
+
+export interface Subtitle {
+  /** Unique within one response. Addons that leave it out get the URL instead. */
+  id: string;
+  url: string;
+  /** As the addon sent it: usually ISO 639-2 (eng, fre, pob), sometimes ISO 639-1 or a name. */
+  lang: string;
+  /** Some addons name the file or the release it matches. */
+  label?: string;
+}
+
+export interface SubtitlesResponse {
+  subtitles: Subtitle[];
+  dropped: number;
+  cache: CacheHints;
+}

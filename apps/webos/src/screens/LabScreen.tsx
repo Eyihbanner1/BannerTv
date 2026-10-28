@@ -2,6 +2,7 @@ import { pause, resume } from '@noriginmedia/norigin-spatial-navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
+import { push } from '../app/router';
 import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { Pressable } from '../components/Pressable';
@@ -16,7 +17,9 @@ import {
   selectTextTrack,
   type TrackInfo,
   trackName,
-} from '../lab/media';
+} from '../player/media';
+import { runEmbeddedTracksTest } from '../lab/embedded';
+import { labPreview, labStream } from '../lab/player';
 import { LAB_SOURCES, type LabSource } from '../lab/sources';
 import { KeyCode } from '../navigation/keys';
 import { useBack } from '../navigation/use-back';
@@ -121,6 +124,8 @@ export function LabScreen() {
   // Where the current load should seek once its metadata arrives. Every load
   // sets it, so a load that failed before seeking can't leak into the next.
   const seekOnLoad = useRef<number | null>(null);
+  // The embedded tracks test, stopped by a new load or by leaving the lab.
+  const stopEmbedded = useRef<() => void>(() => undefined);
   const [current, setCurrent] = useState<LabSource | null>(null);
   const [startMode, setStartMode] = useState<StartMode>('beginning');
   const [startClock, setStartClock] = useState<StartClock | null>(null);
@@ -129,12 +134,13 @@ export function LabScreen() {
   const [fullscreen, setFullscreen] = useState(false);
 
   useScreenFocus('lab-start-mode');
+  useEffect(() => () => stopEmbedded.current(), []);
 
   const note = useCallback((line: string) => {
     const video = videoRef.current;
     const at = video ? formatTime(video.currentTime) : '';
     console.info(`[BannerTV lab] ${at} ${line}`);
-    setLog((lines) => [`${at} ${line}`, ...lines].slice(0, 7));
+    setLog((lines) => [`${at} ${line}`, ...lines].slice(0, 12));
   }, []);
 
   // Media events, track list changes and a twice-a-second refresh of the panel.
@@ -221,6 +227,7 @@ export function LabScreen() {
   const play = (source: LabSource) => {
     const video = videoRef.current;
     if (!video) return;
+    stopEmbedded.current();
     setCurrent(source);
     setStartClock(null);
     setLog([]);
@@ -237,7 +244,7 @@ export function LabScreen() {
       }
       const element = document.createElement('source');
       element.src = source.url;
-      element.type = buildMediaOptionType(mime, START_SECONDS * 1000);
+      element.type = buildMediaOptionType(mime, { startMs: START_SECONDS * 1000 });
       video.appendChild(element);
     } else {
       video.src = source.url;
@@ -259,6 +266,33 @@ export function LabScreen() {
     if (!list) return;
     selectTextTrack(list, index);
     note(index === null ? 'subtitles off' : `subtitle track ${index + 1} showing`);
+  };
+
+  // BannerTV's own player, with its engines and subtitles, on the chosen source.
+  const openInPlayer = () => {
+    const source = current ?? LAB_SOURCES[0];
+    if (!source) return;
+    const index = LAB_SOURCES.indexOf(source);
+    const stream = labStream(source, index);
+    if (!stream) return;
+    push({
+      name: 'player',
+      type: 'movie',
+      metaId: `lab:${index}`,
+      videoId: `lab:${index}`,
+      preview: labPreview(source, index),
+      stream,
+      chosen: true,
+      lab: true,
+    });
+  };
+
+  const testEmbedded = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    stopEmbedded.current();
+    setLog([]);
+    stopEmbedded.current = runEmbeddedTracksTest(video, note);
   };
 
   const enterFullscreen = () => {
@@ -312,6 +346,8 @@ export function LabScreen() {
           label={t('lab.fullscreen')}
           onPress={enterFullscreen}
         />
+        <Button block focusKey="lab-player" label={t('lab.inPlayer')} onPress={openInPlayer} />
+        <Button block focusKey="lab-embedded" label={t('lab.embedded')} onPress={testEmbedded} />
       </div>
 
       <div className={styles.stage}>
