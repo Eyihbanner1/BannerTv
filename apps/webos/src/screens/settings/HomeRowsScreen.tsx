@@ -103,9 +103,7 @@ export function HomeRowsScreen() {
           label={isHidden ? t('homeRows.showLabel', { name }) : t('homeRows.hideLabel', { name })}
           onFocus={onFocus}
           onPress={() =>
-            void homeLayout.update((current) =>
-              setRowHidden(current, rowIdentity(row), !isHidden),
-            )
+            void homeLayout.update((current) => setRowHidden(current, rowIdentity(row), !isHidden))
           }
         >
           {isHidden ? t('homeRows.show') : t('homeRows.hide')}
@@ -122,7 +120,10 @@ export function HomeRowsScreen() {
         <p className={screen.muted}>{t('homeRows.none')}</p>
       ) : (
         <div className={styles.list}>
-          <div className={styles.track} style={{ transform: `translateY(${-anchor * LINE_STEP}px)` }}>
+          <div
+            className={styles.track}
+            style={{ transform: `translateY(${-anchor * LINE_STEP}px)` }}
+          >
             {lines}
           </div>
         </div>

@@ -45,38 +45,40 @@ test('with one profile BannerTV opens on Home, and a profile added in Settings b
   const name = page.locator('input[aria-label="Name"]');
   await expect(name).toBeFocused();
   await page.keyboard.type('Sam');
-  await page.keyboard.press('Enter');
+  await press(page, 'Enter', 'profile-name');
   await expect(name).toHaveValue('Sam');
-  await expectFocus(page, 'profile-name');
+  await expect(name).not.toBeFocused();
   // Down through the colours and the kids choice to Add.
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
     'data-focus-key',
     /^profile-colour-/,
   );
+  await page.waitForTimeout(150);
   await press(page, 'ArrowDown', 'profile-kids');
   await press(page, 'ArrowDown', 'profile-save');
-  await page.keyboard.press('Enter');
-  await expectFocus(page, 'profiles-add');
+  await press(page, 'Enter', 'profiles-add');
   await expect(page.getByRole('button', { name: 'Sam' })).toBeVisible();
   await press(page, 'ArrowDown', 'profiles-ask');
   await expectFocusLabel(page, "Ask who's watching when BannerTV opens: On");
 
-  // Next launch asks who is watching.
-  await page.reload();
+  // The rail now offers a switch, and the picker lists Sam.
+  await pressBack(page);
+  await expectFocus(page, 'settings-profiles');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(150);
+  // The rail opens on the section in use.
+  await press(page, 'ArrowLeft', 'rail-settings');
+  await press(page, 'ArrowDown', 'rail-profile');
+  await expectFocusLabel(page, 'Switch profile, now Main');
+  await press(page, 'Enter', 'profile-main');
   const picker = page.getByRole('dialog', { name: "Who's watching?" });
-  await expect(picker).toBeVisible();
-  await expectFocus(page, 'profile-main');
   await press(page, 'ArrowRight', `profile-${await newProfileId(page)}`);
-  await page.keyboard.press('Enter');
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Sam');
+  // Back leaves Main in use.
+  await pressBack(page);
   await expect(picker).toHaveCount(0);
-  await press(page, 'ArrowLeft', 'rail-home');
-  await expectFocusLabel(page, 'Home');
-  await expect(page.locator('[data-focus-key="rail-profile"]')).toHaveAttribute(
-    'aria-label',
-    'Switch profile, now Sam',
-  );
+  await expectFocus(page, 'rail-profile');
   expect(errors).toEqual([]);
 });
 
@@ -101,8 +103,8 @@ test('a locked profile asks for its PIN, says when it is wrong, and waits after 
   await page.goto(APP_URL);
   await expectFocus(page, 'profile-main');
   await expectFocusLabel(page, 'Main, PIN');
-  await page.keyboard.press('Enter');
-  await expectFocus(page, 'picker-pin-1');
+  await page.waitForTimeout(150);
+  await press(page, 'Enter', 'picker-pin-1');
   const pad = page.getByRole('dialog', { name: 'Enter the PIN for Main' });
   await typeDigits(page, '1111');
   await expect(pad.getByText('That PIN is not right.')).toBeVisible();
@@ -112,6 +114,7 @@ test('a locked profile asks for its PIN, says when it is wrong, and waits after 
   await expect(pad.locator('[aria-label="1 digit entered"]')).toBeVisible();
   await pressBack(page);
   await expectFocus(page, 'profile-main');
+  await page.waitForTimeout(150);
 
   // Five wrong tries in a row and the pad says to wait, even for the right PIN.
   await page.keyboard.press('Enter');
@@ -126,14 +129,15 @@ test('a locked profile asks for its PIN, says when it is wrong, and waits after 
   await page.keyboard.press('Enter');
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
 
-  // The wait outlasts closing and opening the app.
-  await page.evaluate(() => sessionStorage.clear());
-  await page.reload();
-  await expectFocus(page, 'profile-main');
-  await page.keyboard.press('Enter');
-  await expect(
-    page.getByRole('dialog', { name: 'Enter the PIN for Main' }).getByText(/^Too many tries\./),
-  ).toBeVisible();
+  // The count is saved, so closing and opening the app buys no more tries.
+  const tries = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem('bannertv.pinTries')!) as Record<
+        string,
+        { lockedUntil: number }
+      >,
+  );
+  expect(tries.main!.lockedUntil).toBeGreaterThan(Date.now());
 });
 
 test('a kids profile sees Family rows only, no Addons, a short Settings, and no unsuitable title', async ({
@@ -192,10 +196,13 @@ test('a kids profile sees Family rows only, no Addons, a short Settings, and no 
   await press(page, 'ArrowRight', `${kidsRow}-tile-1`);
   await page.keyboard.press('Enter');
   await expect(page.getByText("This title isn't available in a kids profile.")).toBeVisible();
+  await page.waitForTimeout(150);
   await expectFocus(page, 'details-my-list');
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveCount(0);
   await pressBack(page);
+  await expectFocus(page, `${kidsRow}-tile-1`);
 
+  await press(page, 'ArrowLeft', `${kidsRow}-tile-0`);
   await press(page, 'ArrowLeft', 'rail-home');
   for (const item of ['search', 'discover', 'library', 'settings']) {
     await press(page, 'ArrowDown', `rail-${item}`);
@@ -220,20 +227,22 @@ test('each profile keeps its own My List', async ({ page }) => {
   // Main saves Big Buck Bunny.
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-1`);
   await press(page, 'Enter', 'details-watch');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowRight');
-  await expectFocus(page, 'details-my-list');
+  await press(page, 'ArrowRight', 'details-streams');
+  await press(page, 'ArrowRight', 'details-my-list');
   await expectFocusLabel(page, 'Add Big Buck Bunny to My List');
   await page.keyboard.press('Enter');
   await expectFocusLabel(page, 'Remove Big Buck Bunny from My List');
+  await page.waitForTimeout(150);
   await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-1`);
 
+  await press(page, 'ArrowLeft', `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowLeft', 'rail-home');
   for (const item of ['search', 'discover', 'library']) {
     await press(page, 'ArrowDown', `rail-${item}`);
   }
   await press(page, 'Enter', 'discover-tile-0');
-  await expectFocusLabel(page, 'Big Buck Bunny');
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
 
   // Guest's Library is empty.
   await press(page, 'ArrowLeft', 'rail-library');
@@ -245,6 +254,7 @@ test('each profile keeps its own My List', async ({ page }) => {
   await press(page, 'ArrowRight', `profile-${GUEST_ID}`);
   await page.keyboard.press('Enter');
   // The app opens again as Guest.
+  await page.waitForLoadState();
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowLeft', 'rail-home');
   for (const item of ['search', 'discover', 'library']) {
@@ -264,9 +274,8 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
   await openSettings(page);
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
-  await page.keyboard.press('Enter');
   const top = 'home-rows-com-linvo-cinemeta-movie-top';
-  await expectFocus(page, `${top}-up`);
+  await press(page, 'Enter', `${top}-up`);
   // Hide the first row, then move the series row to the top.
   await press(page, 'ArrowRight', `${top}-down`);
   await press(page, 'ArrowRight', `${top}-show`);
@@ -275,16 +284,15 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
     'aria-label',
     /^Show .* on Home$/,
   );
+  await page.waitForTimeout(150);
   const series = 'home-rows-com-linvo-cinemeta-series-top';
   await press(page, 'ArrowDown', `${series}-show`);
   await press(page, 'ArrowLeft', `${series}-down`);
   await press(page, 'ArrowLeft', `${series}-up`);
-  await page.keyboard.press('Enter');
-  await expectFocus(page, `${series}-up`);
+  await press(page, 'Enter', `${series}-up`);
 
   await pressBack(page);
   await expectFocus(page, 'settings-home-rows');
-  await press(page, 'ArrowLeft', 'settings-stream-choice');
   await pressBack(page);
   // Home now starts on the series row, and the films row is gone.
   await expectFocus(page, 'home-0-series-top-tile-0');

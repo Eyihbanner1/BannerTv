@@ -31,11 +31,15 @@
 
 /* The colour in use: a ring that stays when focus moves on. */
 .chosen {
-  box-shadow: 0 0 0 4px var(--bt-bg), 0 0 0 8px var(--bt-text);
+  box-shadow:
+    0 0 0 4px var(--bt-bg),
+    0 0 0 8px var(--bt-text);
 }
 
 .focused {
-  box-shadow: 0 0 0 4px var(--bt-bg), 0 0 0 8px var(--bt-focus);
+  box-shadow:
+    0 0 0 4px var(--bt-bg),
+    0 0 0 8px var(--bt-focus);
   transform: scale(var(--bt-focus-scale));
 }
 

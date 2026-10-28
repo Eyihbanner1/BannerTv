@@ -164,7 +164,11 @@ export function HomeScreen() {
 
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
-  useScreenFocus(firstRowKey, collection.ready && arranged !== null && continueItems !== null, true);
+  useScreenFocus(
+    firstRowKey,
+    collection.ready && arranged !== null && continueItems !== null,
+    true,
+  );
 
   // The hero starts on the first title focus will land on.
   useEffect(() => {

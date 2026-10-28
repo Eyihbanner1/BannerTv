@@ -29,7 +29,7 @@ export function ProfilesScreen() {
   const label = useProfileLabel();
   const [asking, setAsking] = useState<Profile | null>(null);
   const [message, setMessage] = useState<string | undefined>(undefined);
-  useScreenFocus(`profiles-${state.profiles[0]!.id}`, true, true);
+  useScreenFocus(`profiles-${state.profiles[0]!.id}`);
 
   const edit = (profile: Profile) =>
     push({ name: 'profile-edit', id: profile.id }, `profiles-${profile.id}`);
@@ -76,7 +76,13 @@ export function ProfilesScreen() {
             block
             focusKey="profiles-add"
             label={t('profiles.add')}
-            onPress={() => push({ name: 'profile-edit' })}
+            // With a sixth profile added the button goes, so Back lands on the newest profile.
+            onPress={() =>
+              push({ name: 'profile-edit' }, () => {
+                const list = profiles.get().profiles;
+                return canAddProfile() ? 'profiles-add' : `profiles-${list[list.length - 1]!.id}`;
+              })
+            }
           />
         )}
         {state.profiles.length > 1 && (

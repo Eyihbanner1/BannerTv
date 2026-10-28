@@ -37,7 +37,10 @@ function KidsSettings() {
         {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
       </p>
       {open && (
-        <SubtitleStylePanel returnFocusKey="settings-subtitle-style" onClose={() => setOpen(false)} />
+        <SubtitleStylePanel
+          returnFocusKey="settings-subtitle-style"
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   );

@@ -48,9 +48,7 @@ export function ProfileEditScreen({ id }: { id?: string }) {
   const existing = id === undefined ? undefined : state.profiles.find((p) => p.id === id);
   const current = activeProfileId.get();
   const [name, setName] = useState(existing?.name ?? '');
-  const [colour, setColour] = useState(
-    existing?.colour ?? state.profiles.length % PROFILE_COLOURS,
-  );
+  const [colour, setColour] = useState(existing?.colour ?? state.profiles.length % PROFILE_COLOURS);
   const [kids, setKids] = useState<KidsRating | undefined>(existing?.kids);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [pin, setPin] = useState<PinStep | null>(null);
@@ -125,9 +123,7 @@ export function ProfileEditScreen({ id }: { id?: string }) {
                 key={index}
                 focusKey={`profile-colour-${index}`}
                 label={t('profiles.colour', { number: index + 1 })}
-                className={
-                  index === colour ? `${styles.colour} ${styles.chosen}` : styles.colour
-                }
+                className={index === colour ? `${styles.colour} ${styles.chosen}` : styles.colour}
                 focusedClassName={styles.focused}
                 style={{ backgroundImage: avatarArt(index) }}
                 onPress={() => setColour(index)}
@@ -145,7 +141,9 @@ export function ProfileEditScreen({ id }: { id?: string }) {
           ) : (
             existing && (
               <p className={styles.note}>
-                {existing.id === MAIN_PROFILE_ID ? t('profiles.mainNotKids') : t('profiles.youNotKids')}
+                {existing.id === MAIN_PROFILE_ID
+                  ? t('profiles.mainNotKids')
+                  : t('profiles.youNotKids')}
               </p>
             )
           )}

@@ -49,8 +49,7 @@ export function libraryView(
   if (sort === 'name') {
     chosen.sort(
       (a, b) =>
-        a.item.name.localeCompare(b.item.name, 'en', { sensitivity: 'base' }) ||
-        a.index - b.index,
+        a.item.name.localeCompare(b.item.name, 'en', { sensitivity: 'base' }) || a.index - b.index,
     );
   } else if (sort === 'year') {
     chosen.sort(

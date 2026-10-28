@@ -18,6 +18,22 @@ const KEY = 'bannertv.profiles';
 // The profile chosen in this run of the app. A switch reloads the app, and
 // sessionStorage outlives the reload but not the app closing.
 const SESSION_KEY = 'bannertv.profile';
+// A switch also names the profile in the address it reloads: Chromium hands
+// storage writes over in batches, so a write made just before a reload can
+// be missing after it, and the address always arrives.
+const HASH_PREFIX = '#profile=';
+
+/** The profile a switch reloaded the app for, taken out of the address. */
+function takeSwitchedProfile(): string | null {
+  try {
+    const { hash, pathname, search } = window.location;
+    if (hash.indexOf(HASH_PREFIX) !== 0) return null;
+    history.replaceState(null, '', pathname + search);
+    return decodeURIComponent(hash.slice(HASH_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
 /** Main's name until it is renamed. Saved data rather than UI text, so it is not translated. */
 export const MAIN_NAME = 'Main';
 
@@ -48,12 +64,15 @@ profiles.subscribe(() => save(profiles.get()));
  * last profile used unless a PIN guards it.
  */
 function initialChoice(state: ProfilesState): string | null {
+  const switched = takeSwitchedProfile();
   if (state.profiles.length === 1) return MAIN_PROFILE_ID;
-  let session: string | null = null;
-  try {
-    session = sessionStorage.getItem(SESSION_KEY);
-  } catch {
-    session = null;
+  let session: string | null = switched;
+  if (session === null) {
+    try {
+      session = sessionStorage.getItem(SESSION_KEY);
+    } catch {
+      session = null;
+    }
   }
   if (session && state.profiles.some((p) => p.id === session)) return session;
   if (state.askAtLaunch) return null;
@@ -108,7 +127,8 @@ export const pinGuard = createPinGuard({
   },
 });
 
-function reloadApp(): void {
+function reloadApp(id: string): void {
+  window.location.hash = `${HASH_PREFIX.slice(1)}${encodeURIComponent(id)}`;
   window.location.reload();
 }
 
@@ -131,7 +151,7 @@ export function chooseProfile(id: string): void {
     resolvePrefix(profileKeyPrefix(id));
     return;
   }
-  if (activeProfileId.get() !== id) reloadApp();
+  if (activeProfileId.get() !== id) reloadApp(id);
 }
 
 export function canAddProfile(): boolean {

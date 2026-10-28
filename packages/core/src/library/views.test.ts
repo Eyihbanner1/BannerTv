@@ -58,7 +58,14 @@ describe('historyView', () => {
   const cards: Record<string, PlayedVideo> = {
     'tt2:1:2': { videoId: 'tt2:1:2', metaId: 'tt2', type: 'series', name: 'Show', updatedAt: 0 },
     'tt2:1:1': { videoId: 'tt2:1:1', metaId: 'tt2', type: 'series', name: 'Show', updatedAt: 0 },
-    tt1: { videoId: 'tt1', metaId: 'tt1', type: 'movie', name: 'Film', poster: 'https://p', updatedAt: 0 },
+    tt1: {
+      videoId: 'tt1',
+      metaId: 'tt1',
+      type: 'movie',
+      name: 'Film',
+      poster: 'https://p',
+      updatedAt: 0,
+    },
   };
 
   it('lists each title once, most recent first, and skips videos with no card', () => {

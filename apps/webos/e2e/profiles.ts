@@ -1,5 +1,9 @@
 import type { Page } from '@playwright/test';
-import { makePin, type Profile, type ProfilesState } from '../../../packages/core/src/profiles/profiles';
+import {
+  makePin,
+  type Profile,
+  type ProfilesState,
+} from '../../../packages/core/src/profiles/profiles';
 
 export const KIDS_ID = 'kids23';
 export const GUEST_ID = 'guest4';
