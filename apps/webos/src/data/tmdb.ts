@@ -4,6 +4,7 @@ import { fetchJson } from '../platform/http';
 import { queryCache, requestLimiter } from './addons';
 import { API_SERVICE, serviceStatus } from './api';
 import { preferences } from './preferences';
+import { isKidsProfile } from './profiles';
 import { useQuery } from './use-query';
 
 /** TMDB through BannerTV's service, which adds the key. */
@@ -14,11 +15,15 @@ export const tmdbClient = createTmdbClient({
   limiter: requestLimiter,
 });
 
-/** Whether Details asks TMDB: the service has its key, and the profile left it on. */
+/**
+ * Whether Details asks TMDB: the service has its key, and the profile left it
+ * on. A kids profile always asks, since TMDB's rating decides what it plays,
+ * and it has no setting to turn TMDB back on.
+ */
 export function useTmdbOn(): boolean {
   const service = useSyncExternalStore(serviceStatus.subscribe, () => serviceStatus.get().tmdb);
   const wanted = useSyncExternalStore(preferences.subscribe, () => preferences.get().tmdb);
-  return service && wanted;
+  return service && (wanted || isKidsProfile());
 }
 
 export interface TmdbAnswer {

@@ -149,7 +149,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     state,
   );
 
-  useScrobble(session, state, { type, metaId, videoId, lab: props.lab });
+  useScrobble(session, state, { type, metaId, videoId, lab: props.lab }, finder.runtimeSeconds);
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for

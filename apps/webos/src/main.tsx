@@ -8,6 +8,7 @@ import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
+import { askAgainOnRelaunch } from './data/profiles';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
@@ -40,7 +41,7 @@ function start() {
   initI18n();
   initNavigation();
   initInputMode();
-  initLifecycle();
+  initLifecycle(askAgainOnRelaunch);
   startAddons();
   startPlaybackData();
   startLibraryData();

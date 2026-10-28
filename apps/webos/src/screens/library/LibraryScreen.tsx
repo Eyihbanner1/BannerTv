@@ -1,5 +1,6 @@
 import {
   historyView,
+  kidsTitleAllowed,
   type LibraryKind,
   type LibrarySort,
   libraryView,
@@ -12,7 +13,8 @@ import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { library } from '../../data/library';
 import { playedVideos, progress } from '../../data/playback';
-import { gridTileKey, PosterGrid } from '../discover/PosterGrid';
+import { isKidsProfile } from '../../data/profiles';
+import { PosterGrid } from '../discover/PosterGrid';
 import { openDetails } from '../home/Hero';
 import discover from '../discover/DiscoverScreen.module.css';
 
@@ -60,17 +62,21 @@ export function LibraryScreen() {
     };
   }, []);
 
-  const items = useMemo(
-    () =>
+  const items = useMemo(() => {
+    const shown =
       choice.show === 'list'
         ? libraryView(library.items(), choice.kind, choice.sort)
-        : historyView(progress.recent(), playedVideos.get, choice.kind),
+        : historyView(progress.recent(), playedVideos.get, choice.kind);
+    // Titles that say they are not for children stay out of a kids profile's
+    // Library; the rest open on Details, which checks them.
+    return isKidsProfile() ? shown.filter((item) => kidsTitleAllowed(item, true)) : shown;
     // `version` changes with any of the stores read here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [choice, version],
-  );
+  }, [choice, version]);
   const state: PagerState = { items, status: 'done' };
-  useScreenFocus(items.length > 0 ? gridTileKey(0) : 'library-show', loaded);
+  // The grid picks its remembered tile, or the nearest one drawn. A tile
+  // remembered from before a title left the list falls back to the grid.
+  useScreenFocus(items.length > 0 ? 'discover-grid' : 'library-show', loaded, true);
 
   const choose = (change: Partial<LibraryChoice>) => {
     lastChoice = { ...choice, ...change };

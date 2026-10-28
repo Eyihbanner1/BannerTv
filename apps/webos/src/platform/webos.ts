@@ -175,10 +175,12 @@ export function lunaSubscribe(
 /**
  * Wires the app lifecycle. With `handlesRelaunch: true` the TV sends
  * webOSRelaunch instead of restarting, and the app must bring itself forward.
+ * `onRelaunch` runs once it is in front, as for someone opening it afresh.
  */
-export function initLifecycle(): void {
+export function initLifecycle(onRelaunch?: () => void): void {
   document.addEventListener('webOSRelaunch', () => {
     system()?.activate?.();
+    onRelaunch?.();
   });
   system()?.stageReady?.();
 }

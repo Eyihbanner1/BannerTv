@@ -10,6 +10,7 @@ import {
   EMPTY_LAYOUT,
   moveRow,
   orderedRows,
+  rowIdentities,
   rowIdentity,
   setRowHidden,
 } from './layout';
@@ -67,6 +68,23 @@ describe('Home layout', () => {
     expect(names(orderedRows(board, layout))).toContain(ids[0]);
     layout = setRowHidden(layout, ids[0]!, false);
     expect(names(arrangeBoard(board, layout))).toContain(ids[0]);
+  });
+
+  it('tells apart two installs of one addon, to move and hide each on its own', () => {
+    const english = { ...shorts, transportUrl: 'https://shorts.example/en/manifest.json' };
+    const twice = buildBoard([...cinemeta, shorts, english]);
+    const both = rowIdentities(twice);
+    const trending = twice.filter((row) => row.catalog.id === 'trending');
+    expect(trending.map((row) => both.get(row))).toEqual([
+      'com.example.shorts|movie|trending|',
+      'com.example.shorts|movie|trending|#2',
+    ]);
+    let layout = setRowHidden(EMPTY_LAYOUT, 'com.example.shorts|movie|trending|#2', true);
+    expect(arrangeBoard(twice, layout)).toContain(trending[0]);
+    expect(arrangeBoard(twice, layout)).not.toContain(trending[1]);
+    layout = moveRow(twice, EMPTY_LAYOUT, 'com.example.shorts|movie|trending|#2', -1);
+    const order = orderedRows(twice, layout);
+    expect(order.indexOf(trending[1]!)).toBe(order.indexOf(trending[0]!) - 1);
   });
 
   it('puts rows it has not seen after the ones it has', () => {

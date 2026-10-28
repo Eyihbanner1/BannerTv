@@ -4,8 +4,13 @@ import { useEffect, useMemo, useRef } from 'react';
 import { syncTraktSoon, traktAccount, traktAvailable } from '../../data/trakt';
 import type { PlaybackSession, SessionState } from '../../player/session';
 
-function percent(state: SessionState): number {
-  return state.duration > 0 ? (state.position / state.duration) * 100 : NaN;
+/**
+ * How far through, in percent. A file that gives no length is measured
+ * against the title's running time, as its saved progress is.
+ */
+function percent(state: SessionState, runtimeSeconds: number): number {
+  const length = state.duration > 0 ? state.duration : runtimeSeconds;
+  return length > 0 ? (state.position / length) * 100 : 0;
 }
 
 /**
@@ -18,8 +23,14 @@ export function useScrobble(
   session: PlaybackSession | null,
   state: SessionState,
   ids: { type: string; metaId: string; videoId: string; lab?: boolean },
+  /** The title's running time, or a guess at it, in seconds. */
+  runtimeSeconds: () => number,
 ): void {
   const { type, metaId, videoId, lab } = ids;
+  const runtime = useRef(runtimeSeconds);
+  useEffect(() => {
+    runtime.current = runtimeSeconds;
+  });
   const scrobbler = useMemo(() => {
     if (lab || !traktAvailable()) return null;
     const target = traktTarget(type as ContentType, metaId, videoId);
@@ -38,10 +49,10 @@ export function useScrobble(
     const now = latest.current;
     if (status === 'playing' && sent.current !== 'playing') {
       sent.current = 'playing';
-      void scrobbler.start(percent(now));
+      void scrobbler.start(percent(now, runtime.current()));
     } else if (status === 'paused' && sent.current === 'playing') {
       sent.current = 'paused';
-      void scrobbler.pause(percent(now));
+      void scrobbler.pause(percent(now, runtime.current()));
     } else if (status === 'ended' && sent.current !== 'none') {
       sent.current = 'stopped';
       void scrobbler.stop(100);
@@ -55,7 +66,7 @@ export function useScrobble(
       const played = sent.current !== 'none';
       if (played && sent.current !== 'stopped' && !latest.current.live) {
         sent.current = 'stopped';
-        void scrobbler.stop(percent(latest.current));
+        void scrobbler.stop(percent(latest.current, runtime.current()));
       }
       if (played) syncTraktSoon();
     };

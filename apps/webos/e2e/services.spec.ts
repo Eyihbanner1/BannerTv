@@ -195,7 +195,7 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
   expect(errors).toEqual([]);
 });
 
-test("a kids profile can't play a film TMDB rates above the profile's age rating", async ({
+test("a kids profile can't play a film TMDB rates above the profile's age rating, even from Continue watching", async ({
   page,
 }) => {
   const errors = watchErrors(page);
@@ -222,6 +222,7 @@ test("a kids profile can't play a film TMDB rates above the profile's age rating
         type: 'movie',
         name: 'Big Buck Bunny',
         genres: ['Animation', 'Family'],
+        trailerStreams: [{ title: 'Trailer', ytId: 'aqz-KE-bpKQ' }],
       },
     }),
   );
@@ -231,12 +232,48 @@ test("a kids profile can't play a film TMDB rates above the profile's age rating
     lastId: KIDS_ID,
     askAtLaunch: false,
   });
+  // Started before the profile was a kids profile.
+  await seedStreamAddon(page, {
+    kv: {
+      [`p/${KIDS_ID}/progress`]: [
+        {
+          metaId: 'tt1254207',
+          type: 'movie',
+          videoId: 'tt1254207',
+          position: 120,
+          duration: 600,
+          updatedAt: 1000,
+          watched: false,
+        },
+      ],
+      [`p/${KIDS_ID}/played`]: [
+        {
+          videoId: 'tt1254207',
+          metaId: 'tt1254207',
+          type: 'movie',
+          name: 'Big Buck Bunny',
+          updatedAt: 1000,
+        },
+      ],
+    },
+  });
   await page.goto(APP_URL);
+  // OK on Continue watching opens the title's page rather than the player.
+  await expectFocus(page, 'home-continue-tile-0');
+  await page.keyboard.press('Enter');
+  const details = page.locator('section[aria-label="Big Buck Bunny"]');
+  await expect(details.getByText("This title isn't available in a kids profile.")).toBeVisible();
+  await expectFocus(page, 'details-my-list');
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="details-trailer"]')).toHaveCount(0);
+  await expect(page.locator('video:not([aria-hidden])')).toHaveCount(0);
+  await pressBack(page);
+  await expectFocus(page, 'home-continue-tile-0');
+
   const kidsRow = 'home-0-movie-top-genre-family';
-  await expectFocus(page, `${kidsRow}-tile-0`);
+  await press(page, 'ArrowDown', `${kidsRow}-tile-0`);
   await page.keyboard.press('Enter');
   await expect(page.getByText("This title isn't available in a kids profile.")).toBeVisible();
   await expectFocus(page, 'details-my-list');
-  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

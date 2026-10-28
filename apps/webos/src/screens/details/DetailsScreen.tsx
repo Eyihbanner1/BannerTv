@@ -312,7 +312,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               onPress={() => play(latestVideo.id)}
             />
           )}
-          {trailer && (
+          {trailer && kidsAllowed && (
             <Button
               focusKey="details-trailer"
               label={t('details.trailer')}

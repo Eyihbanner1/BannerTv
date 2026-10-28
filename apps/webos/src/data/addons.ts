@@ -6,6 +6,7 @@ import {
   DEFAULT_ADDONS,
 } from '@bannertv/core';
 import { fetchJson } from '../platform/http';
+import { isKidsProfile } from './profiles';
 import { storage } from './storage';
 
 /** Most requests the app runs at once (docs/PLAN.md, request routing rule 4). */
@@ -30,6 +31,7 @@ export const addonClient = createAddonClient({
   queries: queryCache,
   limiter: requestLimiter,
   fetchJson,
+  kidsOnly: isKidsProfile,
 });
 
 /**

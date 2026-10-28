@@ -24,15 +24,34 @@ export function rowIdentity(row: BoardRow): string {
   return [row.addon.manifest.id, row.type, row.catalog.id, genre ? genre[1] : ''].join('|');
 }
 
+/**
+ * Each board row's identity. The same addon installed twice with different
+ * settings gives rows with the same identity; the second and later ones get
+ * `#2`, `#3` and so on, in the board's order, so each row is moved and hidden
+ * on its own.
+ */
+export function rowIdentities(rows: readonly BoardRow[]): Map<BoardRow, string> {
+  const seen = new Map<string, number>();
+  const ids = new Map<BoardRow, string>();
+  for (const row of rows) {
+    const base = rowIdentity(row);
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    ids.set(row, count === 1 ? base : `${base}#${count}`);
+  }
+  return ids;
+}
+
 /** Every row, hidden ones too, in the chosen order: rows the layout has not seen follow in the board's order. */
 export function orderedRows(rows: readonly BoardRow[], layout: HomeLayout): BoardRow[] {
   if (layout.order.length === 0) return rows.slice();
+  const ids = rowIdentities(rows);
   const rank = new Map(layout.order.map((id, index) => [id, index]));
   // Chromium 68 sorts unstably, so ties fall back to the board's order by hand.
   return rows
-    .map((row, index) => ({ row, index, rank: rank.get(rowIdentity(row)) }))
+    .map((row, index) => ({ row, index, rank: rank.get(ids.get(row)!) }))
     .sort((a, b) => {
-      if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank;
+      if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank || a.index - b.index;
       if (a.rank !== undefined) return -1;
       if (b.rank !== undefined) return 1;
       return a.index - b.index;
@@ -44,8 +63,9 @@ export function orderedRows(rows: readonly BoardRow[], layout: HomeLayout): Boar
 export function arrangeBoard(rows: readonly BoardRow[], layout: HomeLayout): BoardRow[] {
   const ordered = orderedRows(rows, layout);
   if (layout.hidden.length === 0) return ordered;
+  const ids = rowIdentities(rows);
   const hidden = new Set(layout.hidden);
-  return ordered.filter((row) => !hidden.has(rowIdentity(row)));
+  return ordered.filter((row) => !hidden.has(ids.get(row)!));
 }
 
 function readLayout(saved: unknown): HomeLayout {
@@ -75,14 +95,15 @@ export function createHomeLayout(options: { storage: KeyValueStore }): HomeLayou
   });
 }
 
-/** The layout with row `id` moved one place up (-1) or down (1) among all the rows. */
+/** The layout with row `id` (from rowIdentities) moved one place up (-1) or down (1) among all the rows. */
 export function moveRow(
   rows: readonly BoardRow[],
   layout: HomeLayout,
   id: string,
   by: -1 | 1,
 ): HomeLayout {
-  const order = orderedRows(rows, layout).map(rowIdentity);
+  const ids = rowIdentities(rows);
+  const order = orderedRows(rows, layout).map((row) => ids.get(row)!);
   const from = order.indexOf(id);
   const to = from + by;
   if (from < 0 || to < 0 || to >= order.length) return layout;

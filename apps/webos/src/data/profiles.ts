@@ -229,5 +229,23 @@ export function removeProfile(id: string): void {
   }));
 }
 
+/**
+ * Someone opened BannerTV again from the TV's launcher while it was still
+ * running in the background. When it would ask who is watching at launch, or
+ * the profile in use has a PIN, it starts again with the question, so whoever
+ * opens it next does not walk into a locked profile.
+ */
+export function askAgainOnRelaunch(): void {
+  const state = profiles.get();
+  if (state.profiles.length < 2) return;
+  if (!state.askAtLaunch && !activeProfile()?.pin) return;
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Without sessionStorage nothing outlives the reload anyway.
+  }
+  window.location.reload();
+}
+
 /** Open while "Who's watching?" is up over the app, from the rail. */
 export const profileSwitcher = createStore<boolean>(false);

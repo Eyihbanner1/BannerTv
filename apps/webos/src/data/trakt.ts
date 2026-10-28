@@ -48,6 +48,8 @@ export const lastSync = createStore<LastSync | null>(null);
 
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
 let lastRunAt = 0;
+// A sync that came due behind another app, run once BannerTV is back.
+let missed = false;
 
 /** Syncs now, unless Trakt is not for this profile. Never rejects. */
 export function syncTrakt(): Promise<TraktSyncResult> {
@@ -67,8 +69,9 @@ export function syncTrakt(): Promise<TraktSyncResult> {
 function schedule(ms: number) {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    // Hidden behind another app: the next sync waits until BannerTV is back.
-    if (!document.hidden) void syncTrakt();
+    // Hidden behind another app: the sync waits until BannerTV is back.
+    if (document.hidden) missed = true;
+    else void syncTrakt();
   }, ms);
 }
 
@@ -105,7 +108,9 @@ export function startTrakt(): void {
       signedIn = now;
     });
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && Date.now() - lastRunAt >= SYNC_EVERY_MS) schedule(FIRST_SYNC_MS);
+      if (document.hidden || !(missed || Date.now() - lastRunAt >= SYNC_EVERY_MS)) return;
+      missed = false;
+      schedule(FIRST_SYNC_MS);
     });
     schedule(FIRST_SYNC_MS);
   });

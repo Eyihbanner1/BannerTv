@@ -1,7 +1,16 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
+import { seedStreamAddon } from './play';
 import { GUEST_ID, KIDS_ID, lockedWith, main, seedProfiles } from './profiles';
-import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
+import {
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  openSection,
+  press,
+  pressBack,
+  watchErrors,
+} from './tv';
 
 const json = (route: Route, body: unknown) =>
   route.fulfill({
@@ -264,6 +273,46 @@ test('each profile keeps its own My List', async ({ page }) => {
   await expect(page.getByText('Nothing saved yet.')).toBeVisible();
 });
 
+test('a title taken off My List from its page leaves focus on the Library', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      library: {
+        items: [
+          {
+            id: 'tt1254207',
+            type: 'movie',
+            name: 'Big Buck Bunny',
+            releaseInfo: '2008',
+            addedAt: 2,
+          },
+          { id: 'tt1727587', type: 'movie', name: 'Sintel', releaseInfo: '2010', addedAt: 1 },
+        ],
+        outbox: [],
+        synced: [],
+      },
+    },
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'library');
+  await expectFocus(page, 'discover-tile-0');
+  await press(page, 'ArrowRight', 'discover-tile-1');
+  await expectFocusLabel(page, 'Sintel, 2010');
+  await press(page, 'Enter', 'details-watch');
+  await press(page, 'ArrowRight', 'details-trailer');
+  await press(page, 'ArrowRight', 'details-streams');
+  await press(page, 'ArrowRight', 'details-my-list');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Add Sintel to My List');
+  await page.waitForTimeout(150);
+  // Back: the tile it came from has gone, so focus goes to the one left.
+  await pressBack(page);
+  await expectFocus(page, 'discover-tile-0');
+  await expectFocusLabel(page, 'Big Buck Bunny, 2008');
+  await press(page, 'ArrowUp', 'library-show');
+});
+
 test('Home rows hides and moves rows for this profile only', async ({ page }) => {
   await mockAddons(page);
   await page.goto(APP_URL);
@@ -274,7 +323,7 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
   await openSettings(page);
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
-  const top = 'home-rows-com-linvo-cinemeta-movie-top';
+  const top = 'home-rows-0-movie-top';
   await press(page, 'Enter', `${top}-up`);
   // Hide the first row, then move the series row to the top.
   await press(page, 'ArrowRight', `${top}-down`);
@@ -285,7 +334,7 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
     /^Show .* on Home$/,
   );
   await page.waitForTimeout(150);
-  const series = 'home-rows-com-linvo-cinemeta-series-top';
+  const series = 'home-rows-0-series-top';
   await press(page, 'ArrowDown', `${series}-show`);
   await press(page, 'ArrowLeft', `${series}-down`);
   await press(page, 'ArrowLeft', `${series}-up`);

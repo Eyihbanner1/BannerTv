@@ -7,6 +7,7 @@ export {
   type HomeLayoutStore,
   moveRow,
   orderedRows,
+  rowIdentities,
   rowIdentity,
   setRowHidden,
 } from './addons/layout';

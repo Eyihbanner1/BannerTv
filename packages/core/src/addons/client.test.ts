@@ -23,9 +23,19 @@ const ANIME = {
   resources: ['meta'],
 };
 
-async function setup(answers: Record<string, () => Promise<unknown>>) {
+const ADULT_URL = 'https://adult.example/manifest.json';
+const ADULT = {
+  ...ANIME,
+  id: 'org.adult',
+  name: 'Adult',
+  resources: ['meta', 'stream'],
+  behaviorHints: { adult: true },
+};
+
+async function setup(answers: Record<string, () => Promise<unknown>>, kids = false) {
   const fetchJson = vi.fn((url: string) => {
     if (url === ANIME_URL) return Promise.resolve(ANIME);
+    if (url === ADULT_URL) return Promise.resolve(ADULT);
     const answer = answers[url];
     return answer ? answer() : Promise.reject(new HttpError('status', 'Not found', 404));
   });
@@ -40,6 +50,7 @@ async function setup(answers: Record<string, () => Promise<unknown>>) {
     queries: createQueryCache(),
     limiter: createLimiter(6),
     fetchJson,
+    kidsOnly: () => kids,
   });
   return { client, collection, fetchJson };
 }
@@ -100,6 +111,28 @@ describe('createAddonClient', () => {
       expect.anything(),
     );
     expect(query.get().error).toBeInstanceOf(NotFoundError);
+  });
+
+  it('leaves addons marked adult out of a kids profile, and caches its details apart', async () => {
+    const adultMeta = 'https://adult.example/meta/movie/tt1.json';
+    const cinemetaMeta = 'https://v3-cinemeta.strem.io/meta/movie/tt1.json';
+    const answers = {
+      [adultMeta]: () => Promise.resolve({ meta: { id: 'tt1', type: 'movie', name: 'Adult cut' } }),
+      [cinemetaMeta]: () => Promise.resolve({ meta: { id: 'tt1', type: 'movie', name: 'Film' } }),
+    };
+    for (const kids of [false, true]) {
+      const { client, collection, fetchJson } = await setup(answers, kids);
+      await collection.install(ADULT_URL);
+      collection.move(ADULT_URL, -10);
+      const query = client.meta('movie', 'tt1');
+      query.load();
+      await flush();
+      expect(query.get().data?.name).toBe(kids ? 'Film' : 'Adult cut');
+      expect(fetchJson.mock.calls.some(([url]) => url === adultMeta)).toBe(!kids);
+      expect(client.streams('movie', 'tt1').map(({ addon }) => addon.manifest.id)).toEqual(
+        kids ? [] : ['org.adult'],
+      );
+    }
   });
 
   it('reports the network failure when no addon answered', async () => {

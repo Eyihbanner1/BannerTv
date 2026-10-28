@@ -39,7 +39,9 @@
     "continueWatching": "Continue watching",
     "episodeNote": "S{{season}}:E{{episode}}",
     "nextEpisodeNote": "Next: S{{season}}:E{{episode}}",
-    "nextNote": "Next episode"
+    "nextNote": "Next episode",
+    "allHiddenLead": "Every Home row is hidden. Show them again in Settings, Home rows.",
+    "noKidsRowsLead": "None of the addons has family films or series yet. A grown-up can add one, such as Cinemeta."
   },
   "search": {
     "label": "Search",

@@ -1,4 +1,4 @@
-import { type BoardRow, kidsTitleAllowed } from '@bannertv/core';
+import { type BoardRow, buildBoard, kidsTitleAllowed } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -16,6 +16,7 @@ import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
+import { RAIL_FOCUS_KEY } from '../../components/Rail';
 import { Row, RowPlaceholder } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
@@ -169,8 +170,9 @@ export function HomeScreen() {
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
   // A tile the pointer moved onto while Home waited for that keeps focus.
+  // With no rows at all, the rail takes focus, so the remote still works.
   useScreenFocus(
-    firstRowKey,
+    firstRowKey ?? RAIL_FOCUS_KEY,
     collection.ready && arranged !== null && continueItems !== null,
     true,
     pointedAt,
@@ -261,11 +263,18 @@ export function HomeScreen() {
   }, []);
 
   if (collection.ready && arranged !== null && rows.length === 0 && !continuing) {
+    // Rows can be missing because the profile hid them all, or because no
+    // catalog has family titles for a kids profile, as well as for want of addons.
+    const why = isKidsProfile()
+      ? 'home.noKidsRowsLead'
+      : board.length > 0 || buildBoard(collection.addons).length === 0
+        ? 'home.noAddonsLead'
+        : 'home.allHiddenLead';
     return (
       <div className={styles.home}>
         <div className={styles.empty}>
           <h1 className={styles.emptyTitle}>{t('home.noAddons')}</h1>
-          <p className={styles.emptyLead}>{t('home.noAddonsLead')}</p>
+          <p className={styles.emptyLead}>{t(why)}</p>
         </div>
       </div>
     );
