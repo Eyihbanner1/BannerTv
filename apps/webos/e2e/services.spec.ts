@@ -20,6 +20,11 @@ const json = (route: Route, body: unknown) =>
     body: JSON.stringify(body),
   });
 
+/** A row tile shows "Loading" until its catalog answers, and OK on it opens nothing yet. */
+async function expectTitleFocused(page: Page): Promise<void> {
+  await expect(page.locator('[data-focused="true"]')).not.toHaveAttribute('aria-label', 'Loading');
+}
+
 /** From Settings' first button to the Services group on the right. */
 async function openServices(page: Page, first: string): Promise<void> {
   await press(page, 'ArrowRight', 'settings-profiles');
@@ -99,6 +104,7 @@ test('signed in to Trakt, Details ticks what was watched, the player says what p
 
   // Watched elsewhere: the first episode has its tick, the second has none.
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await expectTitleFocused(page);
   await press(page, 'Enter', 'details-episodes-0');
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute('aria-label', /, watched$/);
   await press(page, 'ArrowDown', 'details-episodes-1');
@@ -155,6 +161,7 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
   const { tmdb } = await mockServices(page, { tmdb: true, certificate: '12A' });
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expectTitleFocused(page);
 
   await press(page, 'Enter', 'details-watch');
   const details = page.locator('section[aria-label="Elephants Dream"]');
@@ -187,6 +194,7 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
   }
   await page.keyboard.press('Enter');
   await press(page, 'ArrowRight', `${FIRST_ROW}-tile-1`);
+  await expectTitleFocused(page);
   await press(page, 'Enter', 'details-watch');
   const bunny = page.locator('section[aria-label="Big Buck Bunny"]');
   await expect(bunny.getByText('Starring Proog, Emo')).toBeVisible();
@@ -272,6 +280,7 @@ test("a kids profile can't play a film TMDB rates above the profile's age rating
 
   const kidsRow = 'home-0-movie-top-genre-family';
   await press(page, 'ArrowDown', `${kidsRow}-tile-0`);
+  await expectTitleFocused(page);
   await page.keyboard.press('Enter');
   await expect(page.getByText("This title isn't available in a kids profile.")).toBeVisible();
   await expectFocus(page, 'details-my-list');
