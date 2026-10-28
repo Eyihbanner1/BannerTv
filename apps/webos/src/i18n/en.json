@@ -8,7 +8,9 @@
     "tryAgain": "Try again",
     "loading": "Loading",
     "listSeparator": ", ",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "on": "On",
+    "off": "Off"
   },
   "rail": {
     "label": "Main menu",
@@ -274,7 +276,7 @@
     "library": "Your saved titles and watch history arrive in Phase 3."
   },
   "settings": {
-    "lead": "Playback choices, and developer tools.",
+    "lead": "Playback, profiles and developer tools.",
     "diagnostics": "Diagnostics",
     "lab": "Playback lab",
     "about": "{{title}} {{version}} · {{id}}",
@@ -290,7 +292,10 @@
       "auto": "Automatic",
       "on": "On",
       "off": "Off"
-    }
+    },
+    "playback": "Playback",
+    "people": "Profiles and Home",
+    "kidsLead": "How subtitles look. Grown-ups can change the rest from their own profile."
   },
   "diagnostics": {
     "refresh": "Refresh",
@@ -329,5 +334,59 @@
     "notice": "BannerTV doesn't host or provide any films or series. Everything comes from the addons you add, and you're responsible for the addons you choose.",
     "start": "Start browsing",
     "addAddon": "Add an addon"
+  },
+  "profiles": {
+    "title": "Profiles",
+    "lead": "Everyone gets their own Continue Watching, My List, history and settings. A kids profile only shows family films and series.",
+    "whoIsWatching": "Who's watching?",
+    "manageHint": "Add or change profiles in Settings.",
+    "switch": "Switch profile, now {{name}}",
+    "kids": "Kids",
+    "kidsUpTo": "Kids, up to {{rating}}",
+    "locked": "PIN",
+    "you": "You",
+    "add": "Add a profile",
+    "edit": "Edit profile",
+    "gone": "This profile has been deleted.",
+    "name": "Name",
+    "namePlaceholder": "Up to {{max}} letters",
+    "nameNeeded": "Give the profile a name.",
+    "full": "This TV already has six profiles.",
+    "colour": "Colour {{number}}",
+    "kidsProfile": "Kids profile",
+    "kidsExplained": "Only family films and series, no Addons, and limited Settings. Ratings come from TMDB when it is on, and titles without one are left out.",
+    "mainNotKids": "Main set BannerTV up, so it is never a kids profile.",
+    "youNotKids": "Switch to another profile to make this one a kids profile.",
+    "save": "Save",
+    "askAtLaunch": "Ask who's watching when BannerTV opens: {{value}}",
+    "delete": "Delete profile",
+    "deleteTitle": "Delete {{name}}?",
+    "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt."
+  },
+  "pin": {
+    "entered_one": "{{count}} digit entered",
+    "entered_other": "{{count}} digits entered",
+    "delete": "Delete",
+    "enterFor": "Enter the PIN for {{name}}",
+    "wrong": "That PIN is not right.",
+    "locked": "Too many tries. Wait {{seconds}} seconds.",
+    "set": "Set a PIN",
+    "change": "Change PIN",
+    "remove": "Remove PIN",
+    "choose": "Choose a four-digit PIN",
+    "again": "Enter the PIN again",
+    "mismatch": "Those PINs didn't match. Choose one again."
+  },
+  "homeRows": {
+    "title": "Home rows",
+    "lead": "Put the rows you watch most at the top, and hide the ones you never use. Only this profile changes.",
+    "none": "There are no rows yet. Add an addon with catalogs first.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "hide": "Hide",
+    "show": "Show",
+    "hideLabel": "Hide {{name}} from Home",
+    "showLabel": "Show {{name}} on Home",
+    "hiddenFrom": "Hidden · {{addon}}"
   }
 }

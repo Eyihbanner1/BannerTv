@@ -1,4 +1,5 @@
-import { createStore, type StreamOrder } from '@bannertv/core';
+import { createStore, MAIN_PROFILE_ID, type StreamOrder } from '@bannertv/core';
+import { activeProfileId } from './profiles';
 
 export type SubtitleSize = 'small' | 'medium' | 'large' | 'huge';
 export type SubtitleColour = 'white' | 'yellow' | 'cyan' | 'green';
@@ -40,7 +41,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
+// Main keeps the key it had before profiles (ADR 0004, item 1).
 const KEY = 'bannertv.preferences';
+
+function keyFor(profileId: string): string {
+  return profileId === MAIN_PROFILE_ID ? KEY : `${KEY}.${profileId}`;
+}
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.indexOf(value as T) !== -1 ? (value as T) : fallback;
@@ -96,23 +102,40 @@ export function readPreferences(raw: string | null): Preferences {
   };
 }
 
-function load(): Preferences {
+function load(profileId: string | null): Preferences {
+  if (profileId === null) return DEFAULT_PREFERENCES;
   try {
-    return readPreferences(localStorage.getItem(KEY));
+    return readPreferences(localStorage.getItem(keyFor(profileId)));
   } catch {
     return DEFAULT_PREFERENCES;
   }
 }
 
-export const preferences = createStore<Preferences>(load());
+/** The preferences of the profile in use: the defaults until someone is chosen. */
+export const preferences = createStore<Preferences>(load(activeProfileId.get()));
+
+// Read when the picker has an answer; nothing reads preferences before then.
+activeProfileId.subscribe(() => preferences.set(load(activeProfileId.get())));
 
 preferences.subscribe(() => {
+  const profileId = activeProfileId.get();
+  if (profileId === null) return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(preferences.get()));
+    localStorage.setItem(keyFor(profileId), JSON.stringify(preferences.get()));
   } catch {
     // Without storage the choices last until the app closes.
   }
 });
+
+/** Forgets a deleted profile's preferences. */
+export function deletePreferences(profileId: string): void {
+  if (profileId === MAIN_PROFILE_ID) return;
+  try {
+    localStorage.removeItem(keyFor(profileId));
+  } catch {
+    // Nothing was saved, then.
+  }
+}
 
 export function setPreference<K extends keyof Preferences>(key: K, value: Preferences[K]): void {
   preferences.set((current) => (current[key] === value ? current : { ...current, [key]: value }));

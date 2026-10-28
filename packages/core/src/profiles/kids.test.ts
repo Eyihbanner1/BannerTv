@@ -43,6 +43,13 @@ describe('kidsTitleAllowed', () => {
     expect(kidsTitleAllowed({ type: 'tv', genres: ['Family'] })).toBe(false);
     expect(kidsTitleAllowed({ type: 'channel', genres: ['Kids'] })).toBe(false);
   });
+
+  it('trusts a Family catalog for what it leaves out, not for what is unsuitable', () => {
+    expect(kidsTitleAllowed({ type: 'movie', genres: [] }, true)).toBe(true);
+    expect(kidsTitleAllowed({ type: 'movie', genres: ['Animation'] }, true)).toBe(true);
+    expect(kidsTitleAllowed({ type: 'movie', genres: ['Horror'] }, true)).toBe(false);
+    expect(kidsTitleAllowed({ type: 'tv', genres: [] }, true)).toBe(false);
+  });
 });
 
 describe('age ratings', () => {

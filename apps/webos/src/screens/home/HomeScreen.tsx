@@ -1,4 +1,4 @@
-import { type BoardRow, buildBoard } from '@bannertv/core';
+import { type BoardRow, kidsTitleAllowed } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -20,6 +20,8 @@ import { Row, RowPlaceholder } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { useHomeBoard } from '../../data/home-board';
+import { isKidsProfile } from '../../data/profiles';
 import { useQuery } from '../../data/use-query';
 import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
@@ -45,6 +47,7 @@ export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 
 const emptyRows = new Set<string>();
 const NO_ITEMS: readonly MetaPreview[] = [];
+const NO_ROWS: readonly BoardRow[] = [];
 
 interface HomeRowProps {
   row: BoardRow;
@@ -75,10 +78,14 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
     [row.addon, row.type, row.catalog.id, row.extra],
   );
   const state = useQuery(query, near);
-  const items = useMemo(
-    () => (state.data ? state.data.slice(0, MAX_ROW_ITEMS) : null),
-    [state.data],
-  );
+  const items = useMemo(() => {
+    if (!state.data) return null;
+    // A kids row asked its catalog for Family titles; this keeps out any that are not for children.
+    const allowed = isKidsProfile()
+      ? state.data.filter((item) => kidsTitleAllowed(item, true))
+      : state.data;
+    return allowed.slice(0, MAX_ROW_ITEMS);
+  }, [state.data]);
   const empty = state.status === 'success' && items !== null && items.length === 0;
   const onRetry = useCallback(() => query.retry(), [query]);
   const onRowItemFocus = useCallback(
@@ -123,7 +130,9 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
 export function HomeScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
+  // The profile's rows: its order and hidden rows from Settings, or Family rows for kids.
+  const arranged = useHomeBoard(collection.addons);
+  const board = arranged ?? NO_ROWS;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
   // Home opens on its first row: it only mounts when the section is opened,
@@ -155,7 +164,7 @@ export function HomeScreen() {
 
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
-  useScreenFocus(firstRowKey, collection.ready && continueItems !== null, true);
+  useScreenFocus(firstRowKey, collection.ready && arranged !== null && continueItems !== null, true);
 
   // The hero starts on the first title focus will land on.
   useEffect(() => {
@@ -243,7 +252,7 @@ export function HomeScreen() {
     if (item) heroTimer.current = setTimeout(() => heroItem.set(item), delay);
   }, []);
 
-  if (collection.ready && rows.length === 0 && !continuing) {
+  if (collection.ready && arranged !== null && rows.length === 0 && !continuing) {
     return (
       <div className={styles.home}>
         <div className={styles.empty}>

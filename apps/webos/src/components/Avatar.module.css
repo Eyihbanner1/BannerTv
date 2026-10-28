@@ -1,0 +1,23 @@
+.avatar {
+  display: inline-block;
+  border-radius: 50%;
+  color: #fff;
+  font-family: var(--bt-font);
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.small {
+  width: 48px;
+  height: 48px;
+  font-size: 26px;
+  line-height: 48px;
+}
+
+.large {
+  width: 200px;
+  height: 200px;
+  font-size: 96px;
+  line-height: 200px;
+}

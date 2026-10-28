@@ -1,0 +1,16 @@
+/* Playback on the left, people and Home on the right, side by side. */
+.left,
+.right {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.left {
+  margin-right: 96px;
+}
+
+.heading {
+  margin-bottom: 24px;
+  color: var(--bt-text-subtle);
+  font: var(--bt-text-label);
+}

@@ -15,13 +15,19 @@ const NOT_FOR_CHILDREN = ['horror', 'thriller', 'crime', 'war', 'adult', 'erotic
 /**
  * Whether a kids profile may see a title, from what catalogs say about it.
  * Its genres must name it as for families or children and nothing that is
- * not. A title with no genres is left out: the filter fails closed.
+ * not. A title with no genres is left out: the filter fails closed. Titles
+ * from a catalog already asked for Family titles (kids Home rows) need only
+ * avoid the genres that are not for children, since catalog pages often
+ * leave genres out.
  */
-export function kidsTitleAllowed(item: Pick<MetaPreview, 'type' | 'genres'>): boolean {
+export function kidsTitleAllowed(
+  item: Pick<MetaPreview, 'type' | 'genres'>,
+  fromFamilyCatalog = false,
+): boolean {
   if (KIDS_TYPES.indexOf(item.type) === -1) return false;
   const genres = item.genres.map((genre) => genre.trim().toLowerCase());
-  if (!genres.some((genre) => FOR_CHILDREN.indexOf(genre) !== -1)) return false;
-  return !genres.some((genre) => NOT_FOR_CHILDREN.indexOf(genre) !== -1);
+  if (genres.some((genre) => NOT_FOR_CHILDREN.indexOf(genre) !== -1)) return false;
+  return fromFamilyCatalog || genres.some((genre) => FOR_CHILDREN.indexOf(genre) !== -1);
 }
 
 /** BBFC ratings, lowest first. 12 and 12A count the same. */

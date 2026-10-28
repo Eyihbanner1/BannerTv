@@ -8,8 +8,10 @@
 export interface KeyValueStore {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
-  /** Forgets a key, for a deleted profile. */
+  /** Forgets a key. */
   delete?(key: string): Promise<void>;
+  /** Forgets every key that starts with `prefix`, for a deleted profile. */
+  deletePrefix?(prefix: string): Promise<void>;
 }
 
 /** One cached response. Durations are in milliseconds from `storedAt`. */
@@ -39,6 +41,12 @@ export function memoryKeyValueStore(): Required<KeyValueStore> {
     },
     delete: (key) => {
       values.delete(key);
+      return Promise.resolve();
+    },
+    deletePrefix: (prefix) => {
+      for (const key of Array.from(values.keys())) {
+        if (key.indexOf(prefix) === 0) values.delete(key);
+      }
       return Promise.resolve();
     },
   };

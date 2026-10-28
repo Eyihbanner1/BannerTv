@@ -5,6 +5,7 @@ import './styles/fonts.css';
 import './styles/base.css';
 import { App } from './app/App';
 import { startAddons } from './data/addons';
+import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
@@ -40,6 +41,7 @@ function start() {
   initLifecycle();
   startAddons();
   startPlaybackData();
+  startLibraryData();
 
   createRoot(root).render(
     <StrictMode>

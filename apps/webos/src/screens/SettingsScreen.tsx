@@ -6,15 +6,48 @@ import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { Menu } from '../components/Menu';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
+import { isKidsProfile } from '../data/profiles';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
 import styles from './Screen.module.css';
+import settings from './SettingsScreen.module.css';
 
 const STREAM_CHOICES: ReadonlyArray<Preferences['streamChoice']> = ['quality', 'fast'];
 const PROBING: ReadonlyArray<Preferences['probing']> = ['auto', 'on', 'off'];
 
 type Open = 'streamChoice' | 'probing' | 'style' | null;
 
+/** A kids profile's Settings: only how subtitles look. */
+function KidsSettings() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  useScreenFocus('settings-subtitle-style');
+  return (
+    <div className={styles.screen}>
+      <h1 className={styles.title}>{t('rail.settings')}</h1>
+      <p className={styles.lead}>{t('settings.kidsLead')}</p>
+      <div className={styles.column}>
+        <Button
+          block
+          focusKey="settings-subtitle-style"
+          label={t('player.style')}
+          onPress={() => setOpen(true)}
+        />
+      </div>
+      <p className={styles.muted}>
+        {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
+      </p>
+      {open && (
+        <SubtitleStylePanel returnFocusKey="settings-subtitle-style" onClose={() => setOpen(false)} />
+      )}
+    </div>
+  );
+}
+
 export function SettingsScreen() {
+  return isKidsProfile() ? <KidsSettings /> : <FullSettings />;
+}
+
+function FullSettings() {
   const { t } = useTranslation();
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
   const [open, setOpen] = useState<Open>(null);
@@ -24,7 +57,8 @@ export function SettingsScreen() {
     <div className={styles.screen}>
       <h1 className={styles.title}>{t('rail.settings')}</h1>
       <p className={styles.lead}>{t('settings.lead')}</p>
-      <div className={styles.column}>
+      <div className={`${styles.column} ${settings.left}`}>
+        <h2 className={settings.heading}>{t('settings.playback')}</h2>
         <Button
           block
           focusKey="settings-stream-choice"
@@ -56,6 +90,21 @@ export function SettingsScreen() {
           focusKey="settings-lab"
           label={t('settings.lab')}
           onPress={() => push({ name: 'lab' })}
+        />
+      </div>
+      <div className={`${styles.column} ${settings.right}`}>
+        <h2 className={settings.heading}>{t('settings.people')}</h2>
+        <Button
+          block
+          focusKey="settings-profiles"
+          label={t('profiles.title')}
+          onPress={() => push({ name: 'profiles' })}
+        />
+        <Button
+          block
+          focusKey="settings-home-rows"
+          label={t('homeRows.title')}
+          onPress={() => push({ name: 'home-rows' })}
         />
       </div>
       <p className={styles.muted}>

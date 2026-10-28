@@ -41,7 +41,12 @@ export type Route =
       startAt?: number;
     }
   | { name: 'diagnostics' }
-  | { name: 'lab' };
+  | { name: 'lab' }
+  /** Settings > Profiles, and one profile's page; without an id it adds a profile. */
+  | { name: 'profiles' }
+  | { name: 'profile-edit'; id?: string }
+  /** Settings > Home rows: their order, and which are hidden. */
+  | { name: 'home-rows' };
 
 /**
  * Where focus goes on Back. A function is asked as the screen is shown again,

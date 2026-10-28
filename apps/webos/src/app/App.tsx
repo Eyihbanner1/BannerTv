@@ -1,6 +1,7 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { memo, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Rail } from '../components/Rail';
+import { activeProfileId, profileSwitcher } from '../data/profiles';
 import { welcomed } from '../data/welcome';
 import { platformBack } from '../platform/webos';
 import { useBack } from '../navigation/use-back';
@@ -12,7 +13,11 @@ import { HomeScreen } from '../screens/home/HomeScreen';
 import { LabScreen } from '../screens/LabScreen';
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
 import { PlayerScreen } from '../screens/player/PlayerScreen';
+import { ProfileEditScreen } from '../screens/profiles/ProfileEditScreen';
+import { ProfilePicker } from '../screens/profiles/ProfilePicker';
+import { ProfilesScreen } from '../screens/profiles/ProfilesScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
+import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
@@ -58,6 +63,12 @@ function Screen({ route }: { route: Route }) {
       return <LabScreen />;
     case 'streams':
       return <StreamsScreen {...route} />;
+    case 'profiles':
+      return <ProfilesScreen />;
+    case 'profile-edit':
+      return <ProfileEditScreen id={route.id} />;
+    case 'home-rows':
+      return <HomeRowsScreen />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;
@@ -154,6 +165,11 @@ const ScreenSlot = memo(function ScreenSlot({
 export function App() {
   const { stack } = useSyncExternalStore(router.subscribe, router.get);
   const welcomeDone = useSyncExternalStore(welcomed.subscribe, welcomed.get);
+  const profileId = useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
+  const switching = useSyncExternalStore(profileSwitcher.subscribe, profileSwitcher.get);
+  // Screens wait for the welcome, then for someone to say who is watching:
+  // until then nobody's history or list can be read.
+  const ready = welcomeDone && profileId !== null;
   const root = stack[0]!.route;
   const top = stack[stack.length - 1]!.route;
   const rootKey = `screen-${routeId(root)}`;
@@ -181,7 +197,7 @@ export function App() {
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>
           {/* On first run the screens wait, so they cannot take focus from the welcome. */}
-          {welcomeDone && (
+          {ready && (
             <ScreenSlot
               key={rootKey}
               route={root}
@@ -190,7 +206,7 @@ export function App() {
               pushed={false}
             />
           )}
-          {welcomeDone && top !== root && (
+          {ready && top !== root && (
             <ScreenSlot
               key={topKey}
               route={top}
@@ -203,6 +219,8 @@ export function App() {
         </main>
       </FocusContext.Provider>
       {!welcomeDone && <WelcomeScreen />}
+      {welcomeDone && profileId === null && <ProfilePicker mode="launch" />}
+      {ready && switching && <ProfilePicker mode="switch" />}
     </div>
   );
 }

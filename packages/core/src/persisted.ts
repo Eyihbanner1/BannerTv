@@ -17,6 +17,7 @@ export interface Persisted<T> {
    * waits for the read and starts it if needed.
    */
   update(change: (value: T) => T): Promise<void>;
+  /** Told of every change, and once when the saved value has been read, even if it is `initial`. */
   subscribe(listener: Listener): () => void;
 }
 
@@ -40,6 +41,9 @@ export interface PersistedOptions<T> {
 export function createPersisted<T>(options: PersistedOptions<T>): Persisted<T> {
   const { storage, key, initial, read, write = (value: T) => value } = options;
   const state = createStore<T>(initial);
+  const listeners = new Set<Listener>();
+  const notify = () => listeners.forEach((listener) => listener());
+  state.subscribe(notify);
   let loading: Promise<void> | undefined;
   let isLoaded = false;
   let saving = false;
@@ -59,7 +63,8 @@ export function createPersisted<T>(options: PersistedOptions<T>): Persisted<T> {
       value = initial;
     }
     isLoaded = true;
-    state.set(value);
+    if (Object.is(value, state.get())) notify();
+    else state.set(value);
   }
 
   function load() {
@@ -96,6 +101,11 @@ export function createPersisted<T>(options: PersistedOptions<T>): Persisted<T> {
       saving = true;
       await saveLatest();
     },
-    subscribe: state.subscribe,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
 }

@@ -4,16 +4,16 @@ import {
   createProgressStore,
   createSourceMemory,
 } from '@bannertv/core';
-import { storage } from './storage';
+import { profileKv, storage } from './storage';
 
-/** Where each video was left, for Resume and Continue Watching on Home. */
-export const progress = createProgressStore({ storage: storage.kv });
+/** Where each video was left, for Resume and Continue Watching on Home. Per profile. */
+export const progress = createProgressStore({ storage: profileKv });
 
-/** Which addons' streams have played on this TV, for auto-play's ranking. */
+/** Which addons' streams have played on this TV, for auto-play's ranking. Shared by profiles. */
 export const sourceMemory = createSourceMemory({ storage: storage.kv });
 
-/** The name, artwork and episode of each video that played, for Continue Watching on Home. */
-export const playedVideos = createPlayedVideos({ storage: storage.kv });
+/** The name, artwork and episode of each video that played, for Continue Watching on Home. Per profile. */
+export const playedVideos = createPlayedVideos({ storage: profileKv });
 
 /** How much data this TV's connection keeps up with, so auto-play avoids streams that buffer. */
 export const bandwidth = createBandwidthMemory({ storage: storage.kv });

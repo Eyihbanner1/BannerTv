@@ -1,4 +1,4 @@
-export { buildBoard, type BoardRow, GENRE_PICKS, type RowStyle } from './addons/board';
+export { buildBoard, type BoardRow, GENRE_PICKS, type RowStyle, slug } from './addons/board';
 export {
   arrangeBoard,
   createHomeLayout,

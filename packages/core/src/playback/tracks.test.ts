@@ -78,9 +78,12 @@ describe('createPersisted', () => {
       read: (saved) => (typeof saved === 'number' ? saved : 0),
     });
     expect(value.loaded()).toBe(false);
+    let told = 0;
+    value.subscribe(() => told++);
     await Promise.all([value.update((n) => n + 1), value.update((n) => n + 1)]);
     expect(value.get()).toBe(7);
     expect(value.loaded()).toBe(true);
+    expect(told).toBeGreaterThan(0);
     expect(await storage.get('n')).toBe(7);
     // An update that changes nothing writes nothing.
     const before = writes.length;
@@ -116,7 +119,11 @@ describe('createPersisted', () => {
         return saved as string[];
       },
     });
+    let told = false;
+    other.subscribe(() => (told = true));
     await other.load();
     expect(other.get()).toEqual([]);
+    // Nothing usable was saved, so the value is still `initial`, but readers still hear it is loaded.
+    expect(told).toBe(true);
   });
 });
