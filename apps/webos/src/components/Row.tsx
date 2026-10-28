@@ -147,33 +147,38 @@ export const Row = memo(function Row(props: RowProps) {
 
   // Tiles get handlers that never change, so moving along the row redraws the
   // two tiles whose focus changed, not every tile.
-  const latest = useRef({ items, anchor, count, onItemFocus, onItemPress });
+  const latest = useRef({ items, scrolled, anchor, first, last, onItemFocus, onItemPress });
   useLayoutEffect(() => {
-    latest.current = { items, anchor, count, onItemFocus, onItemPress };
+    latest.current = { items, scrolled, anchor, first, last, onItemFocus, onItemPress };
   });
   const onTileFocus = useCallback(
     (index: number) => {
       const current = latest.current;
       rememberFocus(focusKey, `${focusKey}-tile-${index}`);
-      if (canSlide() && index !== current.anchor) scrollTo(index);
+      // Against the remembered position, not the drawn one: a row that showed
+      // fewer tiles than that keeps the tile focus landed on once it grows.
+      if (canSlide() && index !== current.scrolled) scrollTo(index);
       const item = current.items ? current.items[index] : undefined;
       if (ref.current) current.onItemFocus(item, ref.current);
     },
     [focusKey, scrollTo, ref],
   );
   // Focus can rest on a placeholder while the row loads. Once the titles
-  // arrive, report the one under it, so the hero catches up. If the row loaded
-  // fewer titles than that, or failed, move focus to what is drawn at once
-  // rather than leave it on nothing.
+  // arrive, report the one under it, so the hero catches up. If that tile is
+  // no longer drawn (the row loaded fewer titles, or failed), move focus to
+  // what is, at once, rather than leave it on nothing.
   useEffect(() => {
     const prefix = `${focusKey}-tile-`;
     const focused = focusedKey();
     if (!items || focused.indexOf(prefix) !== 0) return;
     const index = Number(focused.slice(prefix.length));
     const current = latest.current;
+    if (index < current.first || index >= current.last) {
+      void setFocus(`${prefix}${current.anchor}`);
+      return;
+    }
     const item = items[index];
     if (item && ref.current) current.onItemFocus(item, ref.current);
-    else if (index >= current.count) void setFocus(`${prefix}${current.anchor}`);
   }, [items, focusKey, ref]);
   const onTilePress = useCallback((index: number) => {
     const { items: list, onItemPress: press } = latest.current;
