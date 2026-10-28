@@ -183,6 +183,30 @@ describe('createLibrary', () => {
     expect(library.outbox()).toEqual([{ op: 'remove', id: 'late', type: 'movie' }]);
   });
 
+  it('takes back an addition the limit dropped on its way, once a pull showed Trakt lacked the title', async () => {
+    const time = clock();
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: time.now });
+    for (let i = 0; i < MAX_LIBRARY_ITEMS; i++) {
+      time.tick();
+      await library.add(preview(`t${i}`));
+    }
+    // A pull from an account that has only t1: the rest are queued for it.
+    await library.forgetRemote();
+    await library.mergeRemote([{ id: 't1', type: 'movie', name: 'T1', addedAt: 1 }]);
+    const sending = library.outbox().slice();
+    expect(sending.some((change) => change.id === 't0')).toBe(true);
+    time.tick();
+    await library.add(preview('late'));
+    time.tick();
+    await library.add(preview('later'));
+    expect(library.has('t0')).toBe(false);
+    expect(library.has('t1')).toBe(false);
+    await library.sent(sending);
+    // t0 is only on Trakt because the TV just put it there; t1 was there before.
+    expect(library.outbox()).toContainEqual({ op: 'remove', id: 't0', type: 'movie' });
+    expect(library.outbox().some((change) => change.id === 't1')).toBe(false);
+  });
+
   it('leaves no removal for the next account after signing out', async () => {
     const library = createLibrary({ storage: memoryKeyValueStore() });
     await library.add(preview('a'));

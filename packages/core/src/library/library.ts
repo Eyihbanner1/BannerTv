@@ -178,9 +178,11 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
   });
   let changes = 0;
   // Titles the limit took off while their addition waited, which the viewer did
-  // not remove: if that addition was already on its way, Trakt may have had the
-  // title before, so no removal is sent for it.
+  // not remove. If that addition was already on its way, a removal goes to
+  // Trakt only when a pull since sign-in showed Trakt did not have the title:
+  // otherwise it may have been on the viewer's list before.
   const trimmed = new Set<string>();
+  let pulled = false;
   let index = new Map<string, LibraryItem>();
   let indexed: LibraryItem[] | null = null;
 
@@ -265,7 +267,9 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           synced = synced.concat(change.id);
           // Taken off here while the addition was on its way: it is on Trakt's list
           // now, so the removal goes there too, or the next sync would bring it back.
-          if (trimmed.delete(change.id)) continue;
+          if (trimmed.delete(change.id) && (!pulled || current.synced.indexOf(change.id) !== -1)) {
+            continue;
+          }
           if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
             outbox = queue(outbox, { op: 'remove', id: change.id, type: change.type });
           }
@@ -275,6 +279,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       });
     },
     mergeRemote(remote) {
+      pulled = true;
       return state.update((current) => {
         const pending = new Map(current.outbox.map((change) => [change.id, change]));
         const before = new Set(current.synced);
@@ -342,6 +347,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
     },
     forgetRemote() {
       trimmed.clear();
+      pulled = false;
       return state.update((current) =>
         current.outbox.length === 0 && current.synced.length === 0
           ? current
