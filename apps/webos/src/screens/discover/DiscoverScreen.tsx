@@ -14,7 +14,7 @@ import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
-import { eventForItem, noteFirstPage } from '../../data/sports';
+import { eventForItem, noteFirstPage, prepareItems } from '../../data/sports';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
@@ -143,8 +143,13 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
     }
   }, [source, genre, firstItems]);
 
-  // A match in a sports catalog opens its event page, which asks only this addon.
+  // A match in a sports catalog opens its event page, which asks only this addon. The
+  // list is read for its clock-only times once drawn, not on the press.
   const items = state.items;
+  useEffect(
+    () => (source ? prepareItems(source.addon, source.catalog, items) : undefined),
+    [source, items],
+  );
   const onPress = useCallback(
     (item: MetaPreview) => {
       const event = source ? eventForItem(source.addon, source.catalog, items, item) : undefined;

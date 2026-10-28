@@ -1000,21 +1000,51 @@ describe('clock-only times', () => {
     expect(memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
   });
 
-  it('keeps the same list on last night when it is seen after midnight', async () => {
+  it("keeps last night's list on last night after midnight, in this launch and the next", async () => {
+    let time = EVENING;
+    const items = ['20:00', '22:00', '23:45', '00:30', '02:00'].map((t, n) => clockMatch(n, t));
+    const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
+    const store = memoryKeyValueStore();
+    const first = await setup([fake], { now: () => time, store });
+    first.feed.want(day());
+    await first.clock.advance(1000);
+    const lastNight = [
+      at('2026-10-28T20:00:00Z'),
+      at('2026-10-28T22:00:00Z'),
+      at('2026-10-28T23:45:00Z'),
+      at('2026-10-29T00:30:00Z'),
+      at('2026-10-29T02:00:00Z'),
+    ];
+    const kickOffs = (feed: typeof first.feed) =>
+      ['ev:0', 'ev:1', 'ev:2', 'ev:3', 'ev:4'].map(
+        (id) => feed.get().events.find((e) => e.sources[0]!.id === id)?.kickOff?.at,
+      );
+    expect(kickOffs(first.feed)).toEqual(lastNight);
+    // 01:00, the addon still lists last night: 00:30 is under way and 02:00 an hour away.
+    time = Date.parse('2026-10-29T01:00:00Z');
+    first.feed.refresh();
+    await first.clock.advance(3 * 60 * 1000);
+    expect(kickOffs(first.feed)).toEqual(lastNight);
+    await first.memory.flush();
+    first.feed.dispose();
+    // The TV is switched on again at 01:00: what the last launch saw settles the days.
+    const next = await setup([fake], { now: () => time, store });
+    next.feed.want(localDate(time));
+    await next.clock.advance(1000);
+    expect(kickOffs(next.feed)).toEqual(lastNight);
+    expect(next.memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
+  });
+
+  it("puts a list first seen after midnight on the addon's new day", async () => {
     const night = Date.parse('2026-10-29T01:00:00Z');
     const items = ['20:00', '22:00', '23:45', '00:30', '02:00'].map((t, n) => clockMatch(n, t));
     const fake = fakeAddon('Clocks', [{ id: 'football', name: 'Football', items }], { base });
-    const { feed, clock, memory } = await setup([fake], { now: () => night });
+    const { feed, clock } = await setup([fake], { now: () => night });
     feed.want(localDate(night));
     await clock.advance(1000);
     const event = (id: string) => feed.get().events.find((e) => e.sources[0]!.id === id)!;
-    expect(event('ev:0').kickOff?.at).toBe(at('2026-10-28T20:00:00Z'));
-    expect(event('ev:2').kickOff?.at).toBe(at('2026-10-28T23:45:00Z'));
-    // Under way for half an hour, and an hour away: neither is tomorrow's.
-    expect(event('ev:3').kickOff?.at).toBe(at('2026-10-29T00:30:00Z'));
-    expect(event('ev:4').kickOff?.at).toBe(at('2026-10-29T02:00:00Z'));
-    expect(eventState(event('ev:4'), { now: night })).toBe('upcoming');
-    expect(memory.get(fake.addon.manifest.id, 'ev:3')?.at).toBe(at('2026-10-29T00:30:00Z'));
+    expect(event('ev:0').kickOff?.at).toBe(at('2026-10-29T20:00:00Z'));
+    expect(event('ev:3').kickOff?.at).toBe(at('2026-10-30T00:30:00Z'));
   });
 
   it('keeps a live-first list on its days around midnight, and live once a time turns LIVE', async () => {

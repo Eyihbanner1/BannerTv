@@ -8,7 +8,6 @@ import type { KickOff } from './types';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
 
 const MONTHS: Record<string, number> = {
   jan: 1,
@@ -117,9 +116,8 @@ export function knowsZone(zone: string): boolean {
   return fixedOffset(zone) !== undefined || formatterFor(zone) !== null;
 }
 
-// Zones change offset only on the quarter hour, so one reading serves its whole quarter
-// hour. Reading one is most of the cost of placing kick-offs on a TV.
-const QUARTER_HOUR = 15 * MINUTE;
+// Zones change offset on the minute, so one reading serves its whole minute: kick-offs
+// share a few. Reading one is most of the cost of placing kick-offs on a TV.
 const MAX_OFFSETS = 4000;
 const offsets = new Map<string, number | undefined>();
 
@@ -128,7 +126,7 @@ export function zoneOffset(zone: string, at: number): number | undefined {
   if (zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT') return 0;
   const fixed = fixedOffset(zone);
   if (fixed !== undefined) return fixed;
-  const key = `${zone} ${Math.floor(at / QUARTER_HOUR)}`;
+  const key = `${zone} ${Math.floor(at / MINUTE)}`;
   if (offsets.has(key)) return offsets.get(key);
   const offset = readOffset(zone, at);
   if (offsets.size >= MAX_OFFSETS) offsets.clear();
@@ -400,22 +398,6 @@ export function nextDayAt(at: number, zone: string | undefined, days = 1): numbe
     wall.getUTCMinutes(),
     zone ? { name: zone, sure: true } : { offset: 0, sure: true },
   );
-}
-
-/**
- * Where an instant falls on the calendar in `zone`, the addon's: the day,
- * counted from 1970, and the minutes into it. With no zone the clocks named
- * their own offsets, and UTC days are counted, as nextDayAt does.
- */
-export function wallClock(
-  at: number,
-  zone: string | undefined,
-): { day: number; minutes: number } | undefined {
-  const offset = zone ? zoneOffset(zone, at) : 0;
-  if (offset === undefined) return undefined;
-  const wall = at + offset * MINUTE;
-  const day = Math.floor(wall / DAY);
-  return { day, minutes: Math.floor((wall - day * DAY) / MINUTE) };
 }
 
 /** A clock with a day and month in an item's name ("⏰ 19:45 - 27/10"), in the addon's zone. */

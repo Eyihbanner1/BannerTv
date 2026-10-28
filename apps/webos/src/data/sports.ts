@@ -470,6 +470,11 @@ function build(listings: readonly Listing[]): SportEvent[] {
   }
 }
 
+/** The kick-off seen earlier for the same match, which settles a clock-only time's day. */
+function rememberedAt(listing: Listing): number | undefined {
+  return kickoffs.get(listing.source.addonId, listing.source.id)?.at;
+}
+
 /**
  * Events read from items of one sports catalog that Discover or a search
  * fetched, with the same rules as the Sports screen. Empty when nothing reads
@@ -483,26 +488,87 @@ export function eventsFromItems(
   if (!SPORTS_IN_BUILD) return [];
   const reading = readingOf(addon, catalog);
   if (!reading) return [];
-  const now = Date.now();
   try {
     // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
-    return build(rollClockWraps(readItems(reading.context, items, now), reading.zone, now));
+    const listings = readItems(reading.context, items, Date.now());
+    return build(rollClockWraps(listings, reading.zone, rememberedAt));
   } catch {
     return [];
   }
 }
 
-// A Discover list read for its clock-only times, once per list: a press looks its tile up.
-const rolledLists = new WeakMap<
+const PREPARE_CHUNK = 40;
+
+/** Discover lists read for their clock-only times, by list. */
+const prepared = new WeakMap<
   readonly MetaPreview[],
-  { addon: InstalledAddon; catalog: ManifestCatalog; byId: Map<string, Listing> }
+  { addon: InstalledAddon; catalog: ManifestCatalog; byId?: Map<string, Listing> }
 >();
 
 /**
- * The match a tile of a sports catalog opens: the tile alone, as before,
- * except that a clock-only time takes its day from the list the tile is in,
- * so 00:30 after 23:45 is tomorrow's. None for a channel, or an item that is
- * not a match.
+ * Reads a Discover list of a sports catalog for its clock-only times, a few
+ * items at a time once it is drawn, so a press on one of its tiles only looks
+ * the tile up (docs/PLAN.md, Performance). Returns a stop for when the list
+ * changes. A list whose first items have no clock-only time is left there.
+ */
+export function prepareItems(
+  addon: InstalledAddon,
+  catalog: ManifestCatalog,
+  items: readonly MetaPreview[],
+): () => void {
+  const reading = SPORTS_IN_BUILD ? readingOf(addon, catalog) : undefined;
+  const known = prepared.get(items);
+  if (!reading || items.length < 2 || (known?.addon === addon && known.catalog === catalog)) {
+    return () => undefined;
+  }
+  const entry: { addon: InstalledAddon; catalog: ManifestCatalog; byId?: Map<string, Listing> } = {
+    addon,
+    catalog,
+  };
+  prepared.set(items, entry);
+  const now = Date.now();
+  const listings: Listing[] = [];
+  let clocks = false;
+  let next = 0;
+  let timer: number | undefined;
+  const step = () => {
+    const end = Math.min(items.length, next + PREPARE_CHUNK);
+    for (const listing of readItems(reading.context, items.slice(next, end), now)) {
+      listings.push(listing);
+      if (listing.kickOff?.source === 'clock') clocks = true;
+    }
+    next = end;
+    if (next < items.length && clocks) {
+      timer = window.setTimeout(step, 0);
+      return;
+    }
+    timer = undefined;
+    const byId = new Map<string, Listing>();
+    try {
+      if (clocks) {
+        for (const listing of rollClockWraps(listings, reading.zone, rememberedAt)) {
+          if (!byId.has(listing.source.id)) byId.set(listing.source.id, listing);
+        }
+      }
+    } catch {
+      // The tiles' own readings stand.
+    }
+    entry.byId = byId;
+  };
+  timer = window.setTimeout(step, 0);
+  return () => {
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    // Not finished: read again when the list is next drawn.
+    if (prepared.get(items) === entry) prepared.delete(items);
+  };
+}
+
+/**
+ * The match a tile of a sports catalog opens: the tile alone, with a
+ * clock-only time on the day its list puts it (prepareItems) or the day
+ * remembered for it, so 00:30 after 23:45 is tomorrow's. None for a channel,
+ * or an item that is not a match.
  */
 export function eventForItem(
   addon: InstalledAddon,
@@ -513,23 +579,17 @@ export function eventForItem(
   if (!SPORTS_IN_BUILD) return undefined;
   const reading = readingOf(addon, catalog);
   if (!reading) return undefined;
-  const now = Date.now();
-  let [listing] = readItems(reading.context, [item], now);
+  let [listing] = readItems(reading.context, [item], Date.now());
   if (!listing) return undefined;
   if (listing.kickOff?.source === 'clock') {
-    let rolled = rolledLists.get(items);
-    if (!rolled || rolled.addon !== addon || rolled.catalog !== catalog) {
-      const byId = new Map<string, Listing>();
-      try {
-        const listings = rollClockWraps(readItems(reading.context, items, now), reading.zone, now);
-        for (const one of listings) if (!byId.has(one.source.id)) byId.set(one.source.id, one);
-      } catch {
-        // The tile's own reading stands.
-      }
-      rolled = { addon, catalog, byId };
-      rolledLists.set(items, rolled);
+    const list = prepared.get(items);
+    const placed = list?.addon === addon && list.catalog === catalog ? list.byId : undefined;
+    try {
+      listing =
+        placed?.get(item.id) ?? rollClockWraps([listing], reading.zone, rememberedAt)[0] ?? listing;
+    } catch {
+      // The tile's own reading stands.
     }
-    listing = rolled.byId.get(item.id) ?? listing;
   }
   const [event] = build([listing]);
   return event && event.kind !== 'channel' ? event : undefined;

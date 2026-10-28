@@ -1,4 +1,4 @@
-import { parseMetaPreview } from '@bannertv/protocol';
+import { type MetaPreview, parseMetaPreview } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { type Listing, readListing, rollClockWraps } from './listing';
 import {
@@ -18,6 +18,7 @@ import {
 
 const NOW = Date.parse('2026-10-28T04:05:00Z');
 const at = (iso: string) => Date.parse(iso);
+const HOUR = 60 * 60 * 1000;
 
 describe('dated text', () => {
   it('reads the forms addons write, with their zone', () => {
@@ -127,7 +128,7 @@ describe('clock times', () => {
 
 describe('a list of clock times that wraps past midnight', () => {
   let counter = 0;
-  function clocks(times: string[], now: number, zone: string | undefined): Listing[] {
+  function matches(times: string[]): MetaPreview[] {
     return times.map((releaseInfo) => {
       const item = parseMetaPreview({
         id: `c${counter++}`,
@@ -136,25 +137,35 @@ describe('a list of clock times that wraps past midnight', () => {
         releaseInfo,
       });
       if (!item) throw new Error('not an item');
-      const context = {
-        addonIndex: 0,
-        addonId: 'test.clocks',
-        transportUrl: 'https://clocks.example/manifest.json',
-        catalogId: 'today',
-        replays: false,
-        channels: false,
-        ...(zone ? { zone } : {}),
-      };
-      return readListing(item, context, now);
+      return item;
     });
   }
+  function read(items: MetaPreview[], now: number, zone: string | undefined): Listing[] {
+    const context = {
+      addonIndex: 0,
+      addonId: 'test.clocks',
+      transportUrl: 'https://clocks.example/manifest.json',
+      catalogId: 'today',
+      replays: false,
+      channels: false,
+      ...(zone ? { zone } : {}),
+    };
+    return items.map((item) => readListing(item, context, now));
+  }
+  const clocks = (times: string[], now: number, zone: string | undefined) =>
+    read(matches(times), now, zone);
   const kickOffs = (listings: Listing[]) => listings.map((listing) => listing.kickOff?.at);
+  /** What a roll placed, by item id, for reading the same items again later. */
+  const memoryOf = (listings: Listing[]) => {
+    const known = new Map(listings.map((listing) => [listing.source.id, listing.kickOff?.at]));
+    return (listing: Listing) => known.get(listing.source.id);
+  };
 
   it('puts the times after the wrap on the next day', () => {
     const evening = at('2026-10-28T21:00:00Z');
     const listed = clocks(['22:00', '23:45', '00:30', '02:00'], evening, 'Europe/London');
     expect(kickOffs(listed)[2]).toBe(at('2026-10-28T00:30:00Z'));
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', evening))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
       at('2026-10-28T22:00:00Z'),
       at('2026-10-28T23:45:00Z'),
       at('2026-10-29T00:30:00Z'),
@@ -165,22 +176,78 @@ describe('a list of clock times that wraps past midnight', () => {
   it('counts the next day by the calendar across the clock change', () => {
     const saturday = at('2027-03-27T22:00:00Z');
     const listed = clocks(['23:30', '02:30'], saturday, 'Europe/London');
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', saturday))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
       at('2027-03-27T23:30:00Z'),
       at('2027-03-28T01:30:00Z'),
     ]);
   });
 
-  it('keeps a list seen after midnight on last night, its times past midnight on today', () => {
+  it("puts a list seen after midnight on the addon's new day when nothing is remembered", () => {
     const night = at('2026-10-29T01:00:00Z');
     const listed = clocks(['20:00', '22:00', '23:45', '00:30', '02:00'], night, 'Europe/London');
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', night))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2026-10-29T20:00:00Z'),
+      at('2026-10-29T22:00:00Z'),
+      at('2026-10-29T23:45:00Z'),
+      at('2026-10-30T00:30:00Z'),
+      at('2026-10-30T02:00:00Z'),
+    ]);
+  });
+
+  it("keeps last night's list on last night after midnight, by the days remembered", () => {
+    const items = matches(['20:00', '22:00', '23:45', '00:30', '02:00']);
+    const evening = rollClockWraps(
+      read(items, at('2026-10-28T21:00:00Z'), 'Europe/London'),
+      'Europe/London',
+    );
+    const lastNight = [
       at('2026-10-28T20:00:00Z'),
       at('2026-10-28T22:00:00Z'),
       at('2026-10-28T23:45:00Z'),
       at('2026-10-29T00:30:00Z'),
       at('2026-10-29T02:00:00Z'),
+    ];
+    expect(kickOffs(evening)).toEqual(lastNight);
+    // Read again at 01:00, as the addon still lists it: 00:30 is under way, 02:00 to come.
+    const night = read(items, at('2026-10-29T01:00:00Z'), 'Europe/London');
+    expect(kickOffs(rollClockWraps(night, 'Europe/London', memoryOf(evening)))).toEqual(lastNight);
+  });
+
+  it('keeps the matches left after midnight on the day remembered for them', () => {
+    // Seen at 22:30 with the evening's matches still listed: 00:30 and 02:45 are tomorrow's.
+    const items = matches(['23:30', '00:30', '02:45']);
+    const before = rollClockWraps(
+      read(items, at('2026-11-04T22:30:00Z'), 'Europe/London'),
+      'Europe/London',
+    );
+    expect(kickOffs(before).slice(1)).toEqual([
+      at('2026-11-05T00:30:00Z'),
+      at('2026-11-05T02:45:00Z'),
     ]);
+    // At 23:40 the 23:30 shows LIVE with no time: nothing left wraps, but memory knows the day.
+    const later = read(items.slice(1), at('2026-11-04T23:40:00Z'), 'Europe/London');
+    expect(kickOffs(later)).toEqual([at('2026-11-04T00:30:00Z'), at('2026-11-04T02:45:00Z')]);
+    expect(kickOffs(rollClockWraps(later, 'Europe/London', memoryOf(before)))).toEqual([
+      at('2026-11-05T00:30:00Z'),
+      at('2026-11-05T02:45:00Z'),
+    ]);
+  });
+
+  it('goes by most of what is remembered, and by nothing remembered days away', () => {
+    const items = matches(['19:00', '20:00', '21:00']);
+    const listed = read(items, at('2026-10-28T12:00:00Z'), 'Europe/London');
+    const placed = kickOffs(listed);
+    const days = (listing: Listing, offset: number) => listing.kickOff!.at! + offset * 24 * HOUR;
+    // Two of three a day earlier: the run goes a day earlier.
+    const mostly = (listing: Listing) => days(listing, listing === listed[2] ? 0 : -1);
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London', mostly))).toEqual(
+      placed.map((time) => time! - 24 * HOUR),
+    );
+    // A week ago, or hours off the clock: no evidence either way.
+    const weekAgo = (listing: Listing) => days(listing, -7);
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London', weekAgo))).toEqual(placed);
+    const offClock = (listing: Listing) => days(listing, -1) + 5 * HOUR;
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London', offClock))).toEqual(placed);
   });
 
   it('puts a list seen in the small hours on today when it starts later today', () => {
@@ -188,7 +255,7 @@ describe('a list of clock times that wraps past midnight', () => {
     const listed = clocks(['03:00', '12:30', '20:00', '22:30'], night, 'Europe/London');
     // Alone, 22:30 would be last night's: more than 20 hours ahead.
     expect(kickOffs(listed)[3]).toBe(at('2026-10-28T22:30:00Z'));
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', night))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
       at('2026-10-29T03:00:00Z'),
       at('2026-10-29T12:30:00Z'),
       at('2026-10-29T20:00:00Z'),
@@ -196,22 +263,69 @@ describe('a list of clock times that wraps past midnight', () => {
     ]);
   });
 
-  it('places a list as readClock places one time: last night only when nearer', () => {
+  it('puts a list seen after midnight on today when it starts later today', () => {
     const night = at('2026-10-29T01:00:00Z');
-    // Later today, not last night's: the latest is 19 hours ahead.
     const later = clocks(['13:00', '15:00', '20:00'], night, 'Europe/London');
-    expect(kickOffs(rollClockWraps(later, 'Europe/London', night))).toEqual([
+    expect(kickOffs(rollClockWraps(later, 'Europe/London'))).toEqual([
       at('2026-10-29T13:00:00Z'),
       at('2026-10-29T15:00:00Z'),
       at('2026-10-29T20:00:00Z'),
     ]);
-    // Last night's: two of the three kicked off in the last four hours, and today they
-    // would be more than 20 hours away.
-    const lastNight = clocks(['20:00', '21:30', '23:00'], night, 'Europe/London');
-    expect(kickOffs(rollClockWraps(lastNight, 'Europe/London', night))).toEqual([
-      at('2026-10-28T20:00:00Z'),
-      at('2026-10-28T21:30:00Z'),
-      at('2026-10-28T23:00:00Z'),
+  });
+
+  it('keeps a list over a day long on today, however busy its second day', () => {
+    const friday = at('2026-11-06T10:00:00Z');
+    const listed = clocks(
+      ['19:45', '00:30', '03:00', '12:30', '15:00', '15:00', '15:00', '17:30', '20:00'],
+      friday,
+      'Europe/London',
+    );
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2026-11-06T19:45:00Z'),
+      at('2026-11-07T00:30:00Z'),
+      at('2026-11-07T03:00:00Z'),
+      at('2026-11-07T12:30:00Z'),
+      at('2026-11-07T15:00:00Z'),
+      at('2026-11-07T15:00:00Z'),
+      at('2026-11-07T15:00:00Z'),
+      at('2026-11-07T17:30:00Z'),
+      at('2026-11-07T20:00:00Z'),
+    ]);
+  });
+
+  it('reads a step back of exactly half a day as a wrap', () => {
+    const evening = at('2026-11-04T18:00:00Z');
+    const listed = clocks(['19:00', '20:00', '08:00'], evening, 'Europe/London');
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))[2]).toBe(at('2026-11-05T08:00:00Z'));
+  });
+
+  it('keeps a step forward of most of a day on the same day', () => {
+    const morning = at('2026-11-04T10:00:00Z');
+    const listed = clocks(['00:15', '23:30'], morning, 'Europe/London');
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
+      at('2026-11-04T00:15:00Z'),
+      at('2026-11-04T23:30:00Z'),
+    ]);
+  });
+
+  it("reads steps forward of over half a day in zones that are not the address's", () => {
+    // 03:30 in New York; the clocks name their zone, and the address none.
+    const early = at('2026-10-31T07:30:00Z');
+    const et = clocks(
+      ['1:00 AM ET', '2:30 AM ET', '8:00 PM ET', '10:30 PM ET', '12:30 AM ET'],
+      early,
+      undefined,
+    );
+    expect(kickOffs(rollClockWraps(et, undefined))[4]).toBe(at('2026-11-01T04:30:00Z'));
+    const kolkata = clocks(
+      ['19:30 (Asia/Kolkata)', '00:30 (Asia/Kolkata)', '15:30 (Asia/Kolkata)'],
+      at('2026-11-03T12:30:00Z'),
+      undefined,
+    );
+    expect(kickOffs(rollClockWraps(kolkata, undefined))).toEqual([
+      at('2026-11-03T14:00:00Z'),
+      at('2026-11-03T19:00:00Z'),
+      at('2026-11-04T10:00:00Z'),
     ]);
   });
 
@@ -222,7 +336,7 @@ describe('a list of clock times that wraps past midnight', () => {
       morning,
       'Europe/London',
     );
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', morning))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
       at('2026-10-28T12:30:00Z'),
       at('2026-10-28T15:00:00Z'),
       at('2026-10-28T20:00:00Z'),
@@ -244,11 +358,9 @@ describe('a list of clock times that wraps past midnight', () => {
       at('2026-10-29T01:00:00Z'),
     ];
     expect(kickOffs(listed)).toEqual(placed);
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', night))).toEqual(placed);
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual(placed);
     const two = clocks(['00:20', '23:40'], at('2026-10-29T00:30:00Z'), 'Europe/London');
-    expect(kickOffs(rollClockWraps(two, 'Europe/London', at('2026-10-29T00:30:00Z')))).toEqual(
-      kickOffs(two),
-    );
+    expect(kickOffs(rollClockWraps(two, 'Europe/London'))).toEqual(kickOffs(two));
   });
 
   it('keeps clocks that name their own zone on their own day when the address names none', () => {
@@ -260,7 +372,7 @@ describe('a list of clock times that wraps past midnight', () => {
       undefined,
     );
     expect(kickOffs(nz)).toEqual([at('2026-10-29T02:00:00Z'), at('2026-10-29T06:30:00Z')]);
-    expect(kickOffs(rollClockWraps(nz, undefined, auckland))).toEqual(kickOffs(nz));
+    expect(kickOffs(rollClockWraps(nz, undefined))).toEqual(kickOffs(nz));
     // 23:30 in New York, already the 29th in UTC: tonight's games stay tonight.
     const late = at('2026-10-29T03:30:00Z');
     const et = clocks(['1:00 PM ET', '4:00 PM ET', '8:00 PM ET'], late, undefined);
@@ -269,14 +381,14 @@ describe('a list of clock times that wraps past midnight', () => {
       at('2026-10-28T20:00:00Z'),
       at('2026-10-29T00:00:00Z'),
     ]);
-    expect(kickOffs(rollClockWraps(et, undefined, late))).toEqual(kickOffs(et));
+    expect(kickOffs(rollClockWraps(et, undefined))).toEqual(kickOffs(et));
     // A wrap still moves on a day: 00:30 in Auckland after 23:30 there.
     const nzNight = clocks(
       ['22:00 (Pacific/Auckland)', '23:30 (Pacific/Auckland)', '00:30 (Pacific/Auckland)'],
       auckland,
       undefined,
     );
-    expect(kickOffs(rollClockWraps(nzNight, undefined, auckland))).toEqual([
+    expect(kickOffs(rollClockWraps(nzNight, undefined))).toEqual([
       at('2026-10-29T09:00:00Z'),
       at('2026-10-29T10:30:00Z'),
       at('2026-10-29T11:30:00Z'),
@@ -286,7 +398,7 @@ describe('a list of clock times that wraps past midnight', () => {
   it('leaves a list that is not in kick-off order as it is', () => {
     const evening = at('2026-10-28T21:00:00Z');
     const listed = clocks(['20:00', '15:00', '00:30'], evening, 'Europe/London');
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', evening))).toEqual(kickOffs(listed));
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual(kickOffs(listed));
   });
 
   it('reads the repeats where pages overlap as the same matches, not as a step back', () => {
@@ -301,7 +413,7 @@ describe('a list of clock times that wraps past midnight', () => {
       at('2026-10-28T23:00:00Z'),
       at('2026-10-29T00:30:00Z'),
     ];
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', evening))).toEqual([
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London'))).toEqual([
       at('2026-10-28T20:00:00Z'),
       ...days,
       ...days,

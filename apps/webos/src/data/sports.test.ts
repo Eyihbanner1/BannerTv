@@ -214,7 +214,7 @@ describe('events read from a search of a sports addon', () => {
 
 describe('a match opened from its catalog in Discover', () => {
   it('reads the time with the list it is in, so 00:30 after 23:45 is tomorrow', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(new Date('2026-10-28T23:30:00Z'));
     const addon = install(
       'org.x.sports',
@@ -231,13 +231,39 @@ describe('a match opened from its catalog in Discover', () => {
     );
     const football = catalogOf(addon, 'football');
 
+    // Pressed before the list is read, the tile goes alone: this morning's.
+    const early = sports.eventForItem(addon, football, items, items[2]!);
+    expect(early?.kickOff?.at).toBe(Date.parse('2026-10-28T00:30:00Z'));
+    sports.prepareItems(addon, football, items);
+    vi.runAllTimers();
     const event = sports.eventForItem(addon, football, items, items[2]!);
-    expect(event?.sources[0]?.id).toBe('x:2');
+    expect(event?.sources.map((source) => source.id)).toEqual(['x:2']);
     expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T00:30:00Z'));
-    // Alone, the same tile would be this morning's.
-    expect(sports.eventsFromItems(addon, football, [items[2]!])[0]?.kickOff?.at).toBe(
-      Date.parse('2026-10-28T00:30:00Z'),
+  });
+
+  it('reads a tile on the day remembered for it, list or not', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T23:30:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
     );
+    const { sports } = await start([addon]);
+    const item = parseMetaPreview({
+      id: 'x:2',
+      type: 'tv',
+      name: 'Ajax vs PSV',
+      releaseInfo: '00:30',
+    })!;
+    // The Sports screen saw it tomorrow at 00:30.
+    sports.kickoffs.note('org.x.sports', 'x:2', {
+      at: Date.parse('2026-10-29T00:30:00Z'),
+      sure: true,
+      source: 'clock',
+    });
+    const event = sports.eventForItem(addon, catalogOf(addon, 'football'), [item], item);
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T00:30:00Z'));
   });
 
   it('opens the tile pressed, not an earlier one it would merge with', async () => {

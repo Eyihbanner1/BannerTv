@@ -118,8 +118,6 @@ interface PageRead {
   items: string[];
   /** The ids of the events among them, in order. */
   events: string[];
-  /** When it was read, which settles the day of clock-only times. */
-  at: number;
 }
 
 interface Page {
@@ -293,6 +291,10 @@ export function createSportsFeed(options: {
   /** Lookups still waiting for an answer, by the same key, with the install they went to. */
   const metaLookups = new Map<string, { transportUrl: string; stop: () => void }>();
   const more = new Set<string>();
+  // Clock-only days are read with the kick-offs earlier launches saw, so none is noted
+  // before those are in: a list read first after midnight would put its own guess there.
+  let memoryLoaded = memory === undefined;
+  let memoryAsked = false;
 
   function context(track: Track): CatalogContext {
     const { entry } = track;
@@ -403,7 +405,7 @@ export function createSportsFeed(options: {
       listings.push(listing);
       if (isEvent(listing)) events.push(item.id);
     }
-    page.read = { data, listings, items, events, at };
+    page.read = { data, listings, items, events };
     return page.read;
   }
 
@@ -453,15 +455,16 @@ export function createSportsFeed(options: {
     if (known && known.reads.length === reads.length && known.reads.every((r, i) => r === reads[i]))
       return known;
     const read: Listing[] = [];
-    let readAt = 0;
     for (const pageRead of reads) {
-      if (!pageRead) continue;
-      for (const listing of pageRead.listings) read.push(listing);
-      readAt = Math.max(readAt, pageRead.at);
+      if (pageRead) for (const listing of pageRead.listings) read.push(listing);
     }
-    // Clock-only times are on one day, the next after the list wraps past midnight,
-    // as of the latest read (docs/PLAN.md, Time, live and finished).
-    track.listings = { reads, read, listings: rollClockWraps(read, track.entry.zone, readAt) };
+    // Clock-only times are on the addon's day until the list wraps past midnight, or on
+    // the days remembered for the same matches (docs/PLAN.md, Time, live and finished).
+    track.listings = {
+      reads,
+      read,
+      listings: rollClockWraps(read, track.entry.zone, rememberedAt),
+    };
     return track.listings;
   }
 
@@ -849,9 +852,13 @@ export function createSportsFeed(options: {
     }
   }
 
+  function rememberedAt(listing: Listing): number | undefined {
+    return memory?.get(listing.source.addonId, listing.source.id)?.at;
+  }
+
   /** Clock-only kick-offs are remembered once their day is known, and again if it changes. */
   function noteClocks({ read, listings }: TrackListings) {
-    if (!memory) return;
+    if (!memory || !memoryLoaded) return;
     for (let i = 0; i < read.length; i++) {
       const listing = read[i]!;
       const kickOff = listings[i]!.kickOff;
@@ -864,6 +871,15 @@ export function createSportsFeed(options: {
   }
 
   function update() {
+    if (memory && !memoryAsked) {
+      memoryAsked = true;
+      void memory.load().then(() => {
+        memoryLoaded = true;
+        // Read the days again with what earlier launches saw.
+        tracks.forEach((track) => delete track.listings);
+        schedule();
+      });
+    }
     const loading = advance();
     const listings: Listing[] = [];
     const failed: string[] = [];
