@@ -124,7 +124,7 @@ function movieMeta(id: string) {
 }
 
 /** A solid violet PNG, small but real, so images load without console errors. */
-function png(width: number, height: number): Buffer {
+export function png(width: number, height: number): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;

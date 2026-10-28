@@ -1,3 +1,6 @@
+import { mark } from '../platform/marks';
+import { decodeAheadOf } from './decode-ahead';
+
 /**
  * Moves a vertical stack of rows so the row with this focus key sits at the
  * top of its window, like Home under the hero. Rows mark themselves with
@@ -10,4 +13,6 @@ export function slideTrack(track: HTMLElement | null, rowFocusKey: string | unde
     ? track.querySelector<HTMLElement>(`[data-row-key="${rowFocusKey}"]`)
     : null;
   track.style.transform = element ? `translateY(${-element.offsetTop}px)` : '';
+  mark(`slide:${rowFocusKey ?? ''}`);
+  decodeAheadOf(track, element);
 }

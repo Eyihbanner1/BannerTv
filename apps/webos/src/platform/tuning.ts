@@ -36,6 +36,24 @@ export interface Tuning {
   decoding: 'auto' | 'async';
   /** Smaller copies of tile artwork for smoother downscaling; off saves graphics memory. */
   mips: boolean;
+  /**
+   * Home's rows box is its own layer, so a Down moves it without drawing
+   * again the rows already drawn: only the strip coming into view is drawn.
+   */
+  homeLayer: boolean;
+  /**
+   * Between presses, the posters and logos of the row the next Down brings
+   * into view, and of the row above, are decoded, so the press only uploads
+   * them. Wide art is left out: decoding ahead decodes at full size.
+   */
+  decodeAhead: boolean;
+  /** A new hero backdrop fades in over the old one, or replaces it at once. */
+  heroFade: boolean;
+  /**
+   * Performance marks for a TV trace: key presses, row slides, rows filling
+   * in, hero changes and decoding ahead (performance.getEntriesByType('mark')).
+   */
+  marks: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -51,6 +69,10 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   overscan: 2,
   decoding: 'auto',
   mips: false,
+  homeLayer: false,
+  decodeAhead: false,
+  heroFade: true,
+  marks: false,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -86,6 +108,10 @@ export function parseTuning(raw: string | null): Tuning {
     overscan: count(stored.overscan, 1, 10, d.overscan),
     decoding: oneOf(stored.decoding, ['auto', 'async'], d.decoding),
     mips: flag(stored.mips, d.mips),
+    homeLayer: flag(stored.homeLayer, d.homeLayer),
+    decodeAhead: flag(stored.decodeAhead, d.decodeAhead),
+    heroFade: flag(stored.heroFade, d.heroFade),
+    marks: flag(stored.marks, d.marks),
   };
 }
 
@@ -112,12 +138,14 @@ export function changedTuning(value: Tuning = tuning): Partial<Tuning> {
 /**
  * The switches that work through CSS become classes on the root element. The
  * stylesheets draw rows sliding, tiles zooming over the motion time, the hero
- * panning and tile art with mipmaps; each class turns one of those off, and
- * the defaults turn them all off.
+ * panning and fading, tile art with mipmaps, and Home's rows box without a
+ * layer of its own; each class changes one of those.
  */
 export function applyTuning(root: HTMLElement, value: Tuning = tuning): void {
   if (value.motion !== 'slide') root.classList.add(`tune-motion-${value.motion}`);
   if (value.zoom !== 'animate') root.classList.add(`tune-zoom-${value.zoom}`);
   if (!value.heroPan) root.classList.add('tune-no-pan');
   if (!value.mips) root.classList.add('tune-no-mips');
+  if (value.homeLayer) root.classList.add('tune-home-layer');
+  if (!value.heroFade) root.classList.add('tune-no-hero-fade');
 }

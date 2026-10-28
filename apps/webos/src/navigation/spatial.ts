@@ -6,12 +6,16 @@ import {
   navigateByDirection,
   setKeyMap,
 } from '@noriginmedia/norigin-spatial-navigation';
+import { mark } from '../platform/marks';
+import { tuning } from '../platform/tuning';
 import { markActivity } from './activity';
 import { backStack } from './back';
 import { timeBack } from './back-timing';
 import { isBackKey, SPATIAL_KEY_MAP } from './keys';
 
 const WHEEL_STEP_MS = 150;
+/** Keys a timing mark names. Anything else, typing included, is "other", so marks never spell out an address. */
+const MARKED_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'];
 // A focus change this soon after a wheel notch came from the wheel.
 const WHEEL_INTENT_MS = 400;
 let lastWheel = 0;
@@ -75,6 +79,20 @@ export function initNavigation(): void {
   setKeyMap(SPATIAL_KEY_MAP);
 
   window.addEventListener('keydown', markActivity, { capture: true, passive: true });
+  if (tuning.marks) {
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        const name = isBackKey(event)
+          ? 'Back'
+          : MARKED_KEYS.indexOf(event.key) >= 0
+            ? event.key
+            : 'other';
+        mark(`key:${name}`);
+      },
+      { capture: true, passive: true },
+    );
+  }
 
   window.addEventListener('keydown', (event) => {
     if (!isBackKey(event)) return;

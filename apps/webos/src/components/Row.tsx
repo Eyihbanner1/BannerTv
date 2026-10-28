@@ -15,6 +15,7 @@ import {
 } from '../navigation/focus-memory';
 import { focusedKey } from '../navigation/spatial';
 import { canSlide } from '../platform/input-mode';
+import { mark } from '../platform/marks';
 import { tuning } from '../platform/tuning';
 import { Button } from './Button';
 import { MoreTile, Tile, type TileExtra, type TileShape } from './Tile';
@@ -163,6 +164,11 @@ export const Row = memo(function Row(props: RowProps) {
     },
     [focusKey, scrollTo, ref],
   );
+  // When the row's titles reach the page, for a TV trace.
+  useLayoutEffect(() => {
+    if (items) mark(`row:${focusKey}:${items.length}`);
+  }, [items, focusKey]);
+
   // Focus can rest on a placeholder while the row loads. Once the titles
   // arrive, report the one under it, so the hero catches up. If that tile is
   // no longer drawn (the row loaded fewer titles, or failed), move focus to
