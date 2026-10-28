@@ -8,7 +8,7 @@ import type { Timers } from '../timers';
 import type { SportsCatalog } from './detect';
 import type { Matcher } from './dictionary';
 import { buildEvents } from './events';
-import type { KickoffMemory } from './kickoffs';
+import { dayEvidence, type KickoffMemory } from './kickoffs';
 import { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
 import { sportOf } from './sport';
 import { cleanTitle } from './text';
@@ -463,7 +463,11 @@ export function createSportsFeed(options: {
     track.listings = {
       reads,
       read,
-      listings: rollClockWraps(read, track.entry.zone, rememberedAt),
+      listings: rollClockWraps(
+        read,
+        track.entry.zone,
+        memory && dayEvidence(memory, now(), track.entry.zone),
+      ),
     };
     return track.listings;
   }
@@ -850,10 +854,6 @@ export function createSportsFeed(options: {
       query.load();
       read();
     }
-  }
-
-  function rememberedAt(listing: Listing): number | undefined {
-    return memory?.get(listing.source.addonId, listing.source.id)?.at;
   }
 
   /** Clock-only kick-offs are remembered once their day is known, and again if it changes. */

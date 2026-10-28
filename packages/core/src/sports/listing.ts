@@ -313,10 +313,12 @@ const DAY = 24 * HOUR;
  * not in kick-off order and is left as it is.
  *
  * The run of days starts on the addon's current day, unless kick-offs
- * remembered for the same matches put it a day either side: a list still
- * showing last night's matches after midnight stays on last night once
- * BannerTV has seen it before midnight. Pass a catalog's listings in the
- * order the addon sent them, across its pages.
+ * remembered for most of the same matches put it a day either side
+ * (dayEvidence): a list still showing last night's matches after midnight
+ * stays on last night, until the next morning, once BannerTV has seen it
+ * before midnight. A match remembered on the day it reads as stays there.
+ * Pass a catalog's listings in the order the addon sent them, across its
+ * pages.
  */
 export function rollClockWraps(
   listings: readonly Listing[],
@@ -347,40 +349,55 @@ export function rollClockWraps(
     shiftOf.set(listing.source.id, wraps);
     shifts[i] = wraps;
   }
-  const whole = remembered ? rememberedShift(listings, shifts, remembered) : 0;
+  const { whole, staying } = remembered
+    ? rememberedShift(listings, shifts, remembered)
+    : { whole: 0, staying: undefined };
   if (wraps === 0 && whole === 0) return listings.slice();
   return listings.map((listing, i) => {
     const shift = shifts[i];
     const kickOff = listing.kickOff;
-    if (shift === undefined || kickOff?.at === undefined || shift + whole === 0) return listing;
-    const at = nextDayAt(kickOff.at, zone, shift + whole);
+    if (shift === undefined || kickOff?.at === undefined) return listing;
+    const days = shift + (staying?.has(listing.source.id) ? 0 : whole);
+    if (days === 0) return listing;
+    const at = nextDayAt(kickOff.at, zone, days);
     return at === undefined ? listing : { ...listing, kickOff: { ...kickOff, at } };
   });
 }
 
 /**
  * The days a list's whole run moves by so its clock-only times agree with the
- * kick-offs remembered for the same matches: -1, 0 or 1, by most of them.
- * None when nothing remembered is within two hours of a day either side.
+ * kick-offs remembered for the same matches: -1 or 1 when more than half of
+ * its matches are remembered that way, each within two hours of a whole day.
+ * A match with nothing remembered counts for the addon's current day, and
+ * channel programmes, never remembered, do not count. `staying` are the
+ * matches remembered on the day they read as, which stay there: the top of a
+ * live-first list read on last night by itself.
  */
 function rememberedShift(
   listings: readonly Listing[],
   shifts: readonly number[],
   remembered: (listing: Listing) => number | undefined,
-): number {
-  const votes = [0, 0, 0];
+): { whole: number; staying: Set<string> } {
+  const counted = new Set<string>();
+  const staying = new Set<string>();
+  let earlier = 0;
+  let later = 0;
   for (let i = 0; i < listings.length; i++) {
+    const listing = listings[i]!;
     const shift = shifts[i];
-    const at = listings[i]!.kickOff?.at;
-    if (shift === undefined || at === undefined) continue;
-    const known = remembered(listings[i]!);
+    const at = listing.kickOff?.at;
+    if (shift === undefined || at === undefined || counted.has(listing.source.id)) continue;
+    if (listing.kind !== 'event' && listing.kind !== 'replay') continue;
+    counted.add(listing.source.id);
+    const known = remembered(listing);
     if (known === undefined) continue;
     const away = (known - (at + shift * DAY)) / DAY;
     const days = Math.round(away);
-    if (days < -1 || days > 1 || Math.abs(away - days) * DAY > 2 * HOUR) continue;
-    votes[days + 1]!++;
+    if (Math.abs(away - days) * DAY > 2 * HOUR) continue;
+    if (days === -1) earlier++;
+    else if (days === 1) later++;
+    else if (days === 0) staying.add(listing.source.id);
   }
-  if (votes[0]! > votes[1]! && votes[0]! >= votes[2]!) return -1;
-  if (votes[2]! > votes[1]! && votes[2]! > votes[0]!) return 1;
-  return 0;
+  const whole = earlier * 2 > counted.size ? -1 : later * 2 > counted.size ? 1 : 0;
+  return { whole, staying };
 }

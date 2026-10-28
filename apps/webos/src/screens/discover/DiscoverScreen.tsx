@@ -152,11 +152,11 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
   );
   const onPress = useCallback(
     (item: MetaPreview) => {
-      const event = source ? eventForItem(source.addon, source.catalog, items, item) : undefined;
+      const event = source ? eventForItem(source.addon, source.catalog, item) : undefined;
       if (event) push({ name: 'event', event });
       else openDetails(item);
     },
-    [source, items],
+    [source],
   );
 
   const restored =

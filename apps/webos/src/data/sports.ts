@@ -7,6 +7,7 @@ import {
   createMatcher,
   createSportsFeed,
   createStore,
+  dayEvidence,
   type EventSource,
   type InstalledAddon,
   type ItemSource,
@@ -470,11 +471,6 @@ function build(listings: readonly Listing[]): SportEvent[] {
   }
 }
 
-/** The kick-off seen earlier for the same match, which settles a clock-only time's day. */
-function rememberedAt(listing: Listing): number | undefined {
-  return kickoffs.get(listing.source.addonId, listing.source.id)?.at;
-}
-
 /**
  * Events read from items of one sports catalog that Discover or a search
  * fetched, with the same rules as the Sports screen. Empty when nothing reads
@@ -490,26 +486,42 @@ export function eventsFromItems(
   if (!reading) return [];
   try {
     // Clock-only times move on a day where the list wraps past midnight, as on the Sports screen.
-    const listings = readItems(reading.context, items, Date.now());
-    return build(rollClockWraps(listings, reading.zone, rememberedAt));
+    const now = Date.now();
+    const listings = readItems(reading.context, items, now);
+    return build(rollClockWraps(listings, reading.zone, dayEvidence(kickoffs, now, reading.zone)));
   } catch {
     return [];
   }
 }
 
 const PREPARE_CHUNK = 40;
+/** How long the pages added to a Discover list go on being read as of its first read. */
+const PREPARED_FOR_MS = 60 * 60 * 1000;
 
-/** Discover lists read for their clock-only times, by list. */
-const prepared = new WeakMap<
-  readonly MetaPreview[],
-  { addon: InstalledAddon; catalog: ManifestCatalog; byId?: Map<string, Listing> }
->();
+interface Prepared {
+  addon: InstalledAddon;
+  items: readonly MetaPreview[];
+  /** When the list was first read: the pages added since are read as of then too. */
+  now: number;
+  /** The listings of items[0] to items[read - 1]. */
+  listings: Listing[];
+  read: number;
+  /** The days the last list read through gave its clock-only times, by item id. */
+  placed?: Map<string, { item: MetaPreview; listing: Listing }>;
+  timer?: number;
+}
+
+/** The Discover list of each sports catalog, read for its clock-only times. */
+const prepared = new WeakMap<ManifestCatalog, Prepared>();
 
 /**
  * Reads a Discover list of a sports catalog for its clock-only times, a few
  * items at a time once it is drawn, so a press on one of its tiles only looks
- * the tile up (docs/PLAN.md, Performance). Returns a stop for when the list
- * changes. A list whose first items have no clock-only time is left there.
+ * the tile up (docs/PLAN.md, Performance). A list that grew by a page goes on
+ * from where the last stopped, as of the same time, so a page added after
+ * midnight follows on from the one before it; the last list's days serve
+ * until it is through. Returns a stop for when the list changes or Discover
+ * closes.
  */
 export function prepareItems(
   addon: InstalledAddon,
@@ -517,50 +529,62 @@ export function prepareItems(
   items: readonly MetaPreview[],
 ): () => void {
   const reading = SPORTS_IN_BUILD ? readingOf(addon, catalog) : undefined;
-  const known = prepared.get(items);
-  if (!reading || items.length < 2 || (known?.addon === addon && known.catalog === catalog)) {
+  let state = prepared.get(catalog);
+  if (!reading || items.length < 2) {
+    // A tile of a list this short is read alone (eventForItem).
+    if (state?.timer !== undefined) window.clearTimeout(state.timer);
+    prepared.delete(catalog);
     return () => undefined;
   }
-  const entry: { addon: InstalledAddon; catalog: ManifestCatalog; byId?: Map<string, Listing> } = {
-    addon,
-    catalog,
-  };
-  prepared.set(items, entry);
+  if (state?.addon !== addon) state = undefined;
+  if (state?.items === items && state.read === items.length && state.timer === undefined) {
+    return () => undefined;
+  }
+  if (state?.timer !== undefined) window.clearTimeout(state.timer);
   const now = Date.now();
-  const listings: Listing[] = [];
-  let clocks = false;
-  let next = 0;
-  let timer: number | undefined;
+  // The pager adds pages at the end: what was read of the last list holds.
+  const grown =
+    state !== undefined &&
+    now - state.now < PREPARED_FOR_MS &&
+    state.read <= items.length &&
+    state.items.slice(0, state.read).every((item, i) => items[i] === item);
+  const current: Prepared = grown
+    ? { ...state!, addon, items, timer: undefined }
+    : { addon, items, now, listings: [], read: 0 };
+  prepared.set(catalog, current);
   const step = () => {
-    const end = Math.min(items.length, next + PREPARE_CHUNK);
-    for (const listing of readItems(reading.context, items.slice(next, end), now)) {
-      listings.push(listing);
-      if (listing.kickOff?.source === 'clock') clocks = true;
+    const end = Math.min(items.length, current.read + PREPARE_CHUNK);
+    for (const listing of readItems(reading.context, items.slice(current.read, end), current.now)) {
+      current.listings.push(listing);
     }
-    next = end;
-    if (next < items.length && clocks) {
-      timer = window.setTimeout(step, 0);
+    current.read = end;
+    if (current.read < items.length) {
+      current.timer = window.setTimeout(step, 0);
       return;
     }
-    timer = undefined;
-    const byId = new Map<string, Listing>();
+    current.timer = undefined;
+    const tiles = new Map<string, MetaPreview>();
+    for (const item of items) if (!tiles.has(item.id)) tiles.set(item.id, item);
+    const placed = new Map<string, { item: MetaPreview; listing: Listing }>();
     try {
-      if (clocks) {
-        for (const listing of rollClockWraps(listings, reading.zone, rememberedAt)) {
-          if (!byId.has(listing.source.id)) byId.set(listing.source.id, listing);
+      const evidence = dayEvidence(kickoffs, current.now, reading.zone);
+      for (const listing of rollClockWraps(current.listings, reading.zone, evidence)) {
+        const item = tiles.get(listing.source.id);
+        if (item && listing.kickOff?.source === 'clock' && !placed.has(listing.source.id)) {
+          placed.set(listing.source.id, { item, listing });
         }
       }
     } catch {
       // The tiles' own readings stand.
     }
-    entry.byId = byId;
+    current.placed = placed;
   };
-  timer = window.setTimeout(step, 0);
+  current.timer = window.setTimeout(step, 0);
   return () => {
-    if (timer === undefined) return;
-    window.clearTimeout(timer);
-    // Not finished: read again when the list is next drawn.
-    if (prepared.get(items) === entry) prepared.delete(items);
+    if (current.timer === undefined) return;
+    // Left where it is: the next time the list is drawn goes on from there.
+    window.clearTimeout(current.timer);
+    current.timer = undefined;
   };
 }
 
@@ -573,20 +597,22 @@ export function prepareItems(
 export function eventForItem(
   addon: InstalledAddon,
   catalog: ManifestCatalog,
-  items: readonly MetaPreview[],
   item: MetaPreview,
 ): SportEvent | undefined {
   if (!SPORTS_IN_BUILD) return undefined;
   const reading = readingOf(addon, catalog);
   if (!reading) return undefined;
-  let [listing] = readItems(reading.context, [item], Date.now());
+  const now = Date.now();
+  let [listing] = readItems(reading.context, [item], now);
   if (!listing) return undefined;
   if (listing.kickOff?.source === 'clock') {
-    const list = prepared.get(items);
-    const placed = list?.addon === addon && list.catalog === catalog ? list.byId : undefined;
+    const state = prepared.get(catalog);
+    const known = state?.addon === addon ? state.placed?.get(item.id) : undefined;
     try {
       listing =
-        placed?.get(item.id) ?? rollClockWraps([listing], reading.zone, rememberedAt)[0] ?? listing;
+        (known?.item === item ? known.listing : undefined) ??
+        rollClockWraps([listing], reading.zone, dayEvidence(kickoffs, now, reading.zone))[0] ??
+        listing;
     } catch {
       // The tile's own reading stands.
     }

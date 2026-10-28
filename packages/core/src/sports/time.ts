@@ -400,6 +400,16 @@ export function nextDayAt(at: number, zone: string | undefined, days = 1): numbe
   );
 }
 
+/**
+ * `hour` o'clock on the calendar day after `at` in `zone`, the addon's, or
+ * in UTC when no zone is known.
+ */
+export function morningAfter(at: number, zone: string | undefined, hour: number): number {
+  const named: Zone = zone ? { name: zone, sure: true } : { offset: 0, sure: true };
+  const [year, month, day] = shiftDate(dateIn(at, named), 1);
+  return instant(year, month, day, hour, 0, named) ?? at + (24 + hour) * HOUR;
+}
+
 /** A clock with a day and month in an item's name ("⏰ 19:45 - 27/10"), in the addon's zone. */
 export function readNameClock(
   clock: { hours: number; minutes: number; day?: number; month?: number; year?: number },

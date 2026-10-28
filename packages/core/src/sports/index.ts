@@ -19,7 +19,7 @@ export {
   SPORTS_POLICY,
   type WantOptions,
 } from './feed';
-export { createKickoffMemory, type KickoffMemory } from './kickoffs';
+export { createKickoffMemory, dayEvidence, type KickoffMemory } from './kickoffs';
 export { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
 export { sportOf } from './sport';
 export { addDays, localClock, localDate, localDayStart } from './time';

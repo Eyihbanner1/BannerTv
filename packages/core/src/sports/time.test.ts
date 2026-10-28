@@ -1,5 +1,6 @@
 import { type MetaPreview, parseMetaPreview } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
+import { createKickoffMemory, dayEvidence } from './kickoffs';
 import { type Listing, readListing, rollClockWraps } from './listing';
 import {
   addDays,
@@ -238,16 +239,183 @@ describe('a list of clock times that wraps past midnight', () => {
     const listed = read(items, at('2026-10-28T12:00:00Z'), 'Europe/London');
     const placed = kickOffs(listed);
     const days = (listing: Listing, offset: number) => listing.kickOff!.at! + offset * 24 * HOUR;
-    // Two of three a day earlier: the run goes a day earlier.
+    // Two of three a day earlier: the run goes a day earlier, but the one remembered on
+    // the day it reads as stays there.
     const mostly = (listing: Listing) => days(listing, listing === listed[2] ? 0 : -1);
-    expect(kickOffs(rollClockWraps(listed, 'Europe/London', mostly))).toEqual(
-      placed.map((time) => time! - 24 * HOUR),
-    );
+    expect(kickOffs(rollClockWraps(listed, 'Europe/London', mostly))).toEqual([
+      placed[0]! - 24 * HOUR,
+      placed[1]! - 24 * HOUR,
+      placed[2],
+    ]);
     // A week ago, or hours off the clock: no evidence either way.
     const weekAgo = (listing: Listing) => days(listing, -7);
     expect(kickOffs(rollClockWraps(listed, 'Europe/London', weekAgo))).toEqual(placed);
     const offClock = (listing: Listing) => days(listing, -1) + 5 * HOUR;
     expect(kickOffs(rollClockWraps(listed, 'Europe/London', offClock))).toEqual(placed);
+  });
+
+  /** What a memory that noted these listings at `seen` gives as evidence at `now`. */
+  const evidenceOf = (noted: Array<[Listing[], number]>, now: number) => {
+    let time = 0;
+    const memory = createKickoffMemory({
+      timers: { after: () => () => undefined, every: () => () => undefined },
+      now: () => time,
+    });
+    for (const [listings, seen] of noted) {
+      time = seen;
+      for (const listing of listings) {
+        memory.note(listing.source.addonId, listing.source.id, listing.kickOff);
+      }
+    }
+    return dayEvidence(memory, now, 'Europe/London');
+  };
+  /** A list seen at `seen` and read again at each of `later`, by what was seen. */
+  const seenThenRead = (times: string[], seen: number, later: number[]) => {
+    const items = matches(times);
+    const first = rollClockWraps(read(items, seen, 'Europe/London'), 'Europe/London');
+    return {
+      first: kickOffs(first),
+      later: later.map((now) =>
+        kickOffs(
+          rollClockWraps(
+            read(items, now, 'Europe/London'),
+            'Europe/London',
+            evidenceOf([[first, seen]], now),
+          ),
+        ),
+      ),
+    };
+  };
+
+  it("holds last night's whole card after midnight until the morning, however early it began", () => {
+    const { first, later } = seenThenRead(
+      ['12:30', '15:00', '15:00', '15:00', '17:30', '20:00'],
+      at('2026-10-31T21:00:00Z'),
+      [at('2026-11-01T01:00:00Z'), at('2026-11-01T03:00:00Z'), at('2026-11-01T06:30:00Z')],
+    );
+    expect(first[0]).toBe(at('2026-10-31T12:30:00Z'));
+    expect(later[0]).toEqual(first);
+    expect(later[1]).toEqual(first);
+    // From 06:00, the plan's rule: the addon's current day.
+    expect(later[2]).toEqual(first.map((time) => time! + 24 * HOUR));
+  });
+
+  it('holds a list first seen in the morning through the night after', () => {
+    const { first, later } = seenThenRead(
+      ['12:30', '15:00', '17:30', '20:00', '22:00'],
+      at('2026-10-31T07:00:00Z'),
+      [at('2026-11-01T03:30:00Z'), at('2026-11-01T06:30:00Z')],
+    );
+    expect(later[0]).toEqual(first);
+    expect(later[1]).toEqual(first.map((time) => time! + 24 * HOUR));
+  });
+
+  it("keeps a long list's second day on its days after midnight", () => {
+    const { first, later } = seenThenRead(
+      ['19:45', '00:30', '03:00', '12:30', '15:00', '15:00', '17:30', '20:00'],
+      at('2026-11-06T10:00:00Z'),
+      [at('2026-11-07T01:00:00Z')],
+    );
+    expect(first.slice(0, 2)).toEqual([at('2026-11-06T19:45:00Z'), at('2026-11-07T00:30:00Z')]);
+    expect(first[7]).toBe(at('2026-11-07T20:00:00Z'));
+    expect(later[0]).toEqual(first);
+  });
+
+  it('holds a list seen late on its evening only until the next morning', () => {
+    // At 23:40 the addon may already list tomorrow's matches, or still tonight's, over:
+    // the plan reads tonight's, and BannerTV keeps to that until the morning.
+    const { first, later } = seenThenRead(['15:00', '17:30', '20:00'], at('2026-11-04T23:40:00Z'), [
+      at('2026-11-05T00:10:00Z'),
+      at('2026-11-05T06:30:00Z'),
+    ]);
+    expect(first[0]).toBe(at('2026-11-04T15:00:00Z'));
+    expect(later[0]).toEqual(first);
+    expect(later[1]).toEqual(first.map((time) => time! + 24 * HOUR));
+  });
+
+  it('moves a fresh list by no single match remembered, nor by a match listed again days on', () => {
+    const night = at('2026-10-29T01:00:00Z');
+    const items = matches(['20:00', '21:00', '22:00', '23:00']);
+    const listed = read(items, night, 'Europe/London');
+    const placed = kickOffs(rollClockWraps(listed, 'Europe/London'));
+    expect(placed[0]).toBe(at('2026-10-29T20:00:00Z'));
+    // One of the four was seen last night at 21:00, a day earlier: three new ones outvote it.
+    const lastNight = at('2026-10-28T21:00:00Z');
+    const oneOfFour = read(items.slice(1, 2), lastNight, 'Europe/London');
+    expect(
+      kickOffs(
+        rollClockWraps(listed, 'Europe/London', evidenceOf([[oneOfFour, lastNight]], night)),
+      ),
+    ).toEqual(placed);
+    // The second day of a Test, first seen two days ago: says nothing about today.
+    const daysAgo = at('2026-10-27T19:30:00Z');
+    const test = read(items, daysAgo, 'Europe/London').map((listing) => ({
+      ...listing,
+      kickOff: { ...listing.kickOff!, at: listing.kickOff!.at! + 24 * HOUR },
+    }));
+    expect(
+      kickOffs(rollClockWraps(listed, 'Europe/London', evidenceOf([[test, daysAgo]], night))),
+    ).toEqual(placed);
+    // Seen last night, all four: the run stays on last night.
+    const all = read(items, lastNight, 'Europe/London');
+    expect(
+      kickOffs(rollClockWraps(listed, 'Europe/London', evidenceOf([[all, lastNight]], night))),
+    ).toEqual(placed.map((time) => time! - 24 * HOUR));
+  });
+
+  it('counts only matches, never the channel programmes between them', () => {
+    const programme = (n: number, releaseInfo: string) =>
+      parseMetaPreview({
+        id: `prog${n}`,
+        type: 'tv',
+        name: `Sports Tonight S1, E${n}`,
+        releaseInfo,
+      })!;
+    const games = matches(['20:00', '21:00', '22:00']);
+    const items = [
+      games[0]!,
+      programme(1, '20:45'),
+      games[1]!,
+      programme(2, '21:45'),
+      games[2]!,
+      programme(3, '22:45'),
+      programme(4, '23:30'),
+    ];
+    const seen = at('2026-10-28T21:00:00Z');
+    const first = read(items, seen, 'Europe/London');
+    expect(first.map((listing) => listing.kind)).toEqual([
+      'event',
+      'channel',
+      'event',
+      'channel',
+      'event',
+      'channel',
+      'channel',
+    ]);
+    const night = at('2026-10-29T01:00:00Z');
+    const games1st = first.filter((listing) => listing.kind === 'event');
+    const placed = rollClockWraps(
+      read(items, night, 'Europe/London'),
+      'Europe/London',
+      evidenceOf([[games1st, seen]], night),
+    );
+    expect(kickOffs(placed.filter((listing) => listing.kind === 'event'))).toEqual([
+      at('2026-10-28T20:00:00Z'),
+      at('2026-10-28T21:00:00Z'),
+      at('2026-10-28T22:00:00Z'),
+    ]);
+  });
+
+  it('keeps the top of a live-first list on the day remembered for it', () => {
+    const { first, later } = seenThenRead(['20:30', '20:15', '22:00'], at('2026-10-28T21:00:00Z'), [
+      at('2026-10-29T00:20:00Z'),
+    ]);
+    expect(first).toEqual([
+      at('2026-10-28T20:30:00Z'),
+      at('2026-10-28T20:15:00Z'),
+      at('2026-10-28T22:00:00Z'),
+    ]);
+    expect(later[0]).toEqual(first);
   });
 
   it('puts a list seen in the small hours on today when it starts later today', () => {

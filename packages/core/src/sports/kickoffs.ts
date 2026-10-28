@@ -1,6 +1,7 @@
 import type { KeyValueStore } from '../storage';
 import type { Timers } from '../timers';
 import { sortStable } from './sort';
+import { morningAfter } from './time';
 import type { KickOff } from './types';
 
 const STORAGE_KEY = 'sports.kickoffs';
@@ -103,6 +104,36 @@ function moveIn(entries: Map<string, Entry>, from: string, to: string): void {
     if (held) mergeEntry(held, entry);
     else entries.set(renamed, entry);
   }
+}
+
+/** Last night's list holds on last night until this hour the next morning (rollClockWraps). */
+const EVIDENCE_UNTIL_HOUR = 6;
+
+/**
+ * The remembered kick-offs that can settle the day of a clock-only time
+ * (rollClockWraps): those of matches first seen today, or yesterday until
+ * 06:00 this morning in the addon's zone. An id listed again on later days
+ * (the next day of a Test, an addon that numbers its matches by place) says
+ * nothing about which day its list is.
+ */
+export function dayEvidence(
+  memory: KickoffMemory,
+  now: number,
+  zone: string | undefined,
+): (listing: { source: { addonId: string; id: string } }) => number | undefined {
+  // Most of a page is first seen in the same minute.
+  const until = new Map<number, number>();
+  return ({ source }) => {
+    const seen = memory.firstSeen(source.addonId, source.id);
+    if (seen === undefined) return undefined;
+    const minute = Math.floor(seen / 60000);
+    let end = until.get(minute);
+    if (end === undefined) {
+      end = morningAfter(seen, zone, EVIDENCE_UNTIL_HOUR);
+      until.set(minute, end);
+    }
+    return now < end ? memory.get(source.addonId, source.id)?.at : undefined;
+  };
 }
 
 export function createKickoffMemory(options: {
