@@ -158,15 +158,29 @@ describe('createLibrary', () => {
     );
     expect(library.has('t0')).toBe(false);
     expect(library.has('t1')).toBe(true);
+  });
 
-    // Dropped while its addition was on its way: Trakt is told to take it off.
+  it('never takes off Trakt a title the limit dropped while its addition was on its way', async () => {
+    const time = clock();
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: time.now });
+    for (let i = 0; i < MAX_LIBRARY_ITEMS; i++) {
+      time.tick();
+      await library.add(preview(`t${i}`));
+    }
+    // The first push takes every addition; one more title is saved meanwhile.
     const sending = library.outbox().slice();
     time.tick();
     await library.add(preview('late'));
-    const inFlight = [{ op: 'add' as const, id: 't1', type: 'movie' as const }];
-    await library.sent(sending.concat(inFlight));
-    expect(library.has('t1')).toBe(false);
-    expect(library.outbox()).toContainEqual({ op: 'remove', id: 't1', type: 'movie' });
+    expect(library.has('t0')).toBe(false);
+    // Trakt may have had t0 already, so it is left there, not removed.
+    await library.sent(sending);
+    expect(library.outbox()).toEqual([{ op: 'add', id: 'late', type: 'movie' }]);
+
+    // A title the viewer takes off on the way still has its removal sent.
+    const next = library.outbox().slice();
+    await library.remove('late');
+    await library.sent(next);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'late', type: 'movie' }]);
   });
 
   it('leaves no removal for the next account after signing out', async () => {

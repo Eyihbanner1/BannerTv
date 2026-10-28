@@ -177,6 +177,10 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
     read: readState,
   });
   let changes = 0;
+  // Titles the limit took off while their addition waited, which the viewer did
+  // not remove: if that addition was already on its way, Trakt may have had the
+  // title before, so no removal is sent for it.
+  const trimmed = new Set<string>();
   let index = new Map<string, LibraryItem>();
   let indexed: LibraryItem[] | null = null;
 
@@ -206,6 +210,8 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
         // waiting for Trakt: a title not on My List is not put on Trakt's list.
         const dropped = new Set(all.slice(MAX_LIBRARY_ITEMS).map((i) => i.id));
         const outbox = current.outbox.filter((c) => c.op !== 'add' || !dropped.has(c.id));
+        trimmed.delete(item.id);
+        dropped.forEach((id) => trimmed.add(id));
         return {
           ...current,
           items: all.slice(0, MAX_LIBRARY_ITEMS),
@@ -259,6 +265,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           synced = synced.concat(change.id);
           // Taken off here while the addition was on its way: it is on Trakt's list
           // now, so the removal goes there too, or the next sync would bring it back.
+          if (trimmed.delete(change.id)) continue;
           if (!saved.has(change.id) && !outbox.some((c) => c.id === change.id)) {
             outbox = queue(outbox, { op: 'remove', id: change.id, type: change.type });
           }
@@ -323,6 +330,9 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
         const kept = newestFirst(items).slice(0, MAX_LIBRARY_ITEMS);
         // A title that does not fit is not sent to Trakt only to be dropped here.
         const fits = new Set(kept.map((item) => item.id));
+        items.forEach((item) => {
+          if (!fits.has(item.id)) trimmed.add(item.id);
+        });
         return {
           items: kept,
           outbox: outbox.filter((change) => change.op !== 'add' || fits.has(change.id)),
@@ -331,6 +341,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       });
     },
     forgetRemote() {
+      trimmed.clear();
       return state.update((current) =>
         current.outbox.length === 0 && current.synced.length === 0
           ? current
