@@ -61,9 +61,11 @@ class RowTileAdapter extends BaseWebAdapter {
 
 export function initNavigation(): void {
   init({
-    // Holding an arrow moves at most once per 100 ms, so key repeat never queues up.
+    // Holding an arrow moves at most once per 100 ms, so key repeat never
+    // queues up. Separate presses all count: throttling them too would drop
+    // the presses a busy TV delivers together after a pause.
     throttle: 100,
-    throttleKeypresses: true,
+    throttleKeypresses: false,
     // Real DOM focus lets LG Audio Guidance read aria-labels and opens the
     // on-screen keyboard on inputs. Rows scroll by transform, never by the browser.
     shouldFocusDOMNode: true,

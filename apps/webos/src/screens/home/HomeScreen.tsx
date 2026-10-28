@@ -23,13 +23,14 @@ import { describeAddonError, typeLabel } from '../../data/describe';
 import { useHomeBoard } from '../../data/home-board';
 import { isKidsProfile } from '../../data/profiles';
 import { useQuery } from '../../data/use-query';
+import { activityGap } from '../../navigation/activity';
 import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
-import { heroItem } from './hero-item';
+import { cancelHero, heroItem, showInHero } from './hero-item';
 import styles from './HomeScreen.module.css';
 
 /** Rows show the first titles of a catalog; Discover pages through the rest. */
@@ -141,9 +142,7 @@ export function HomeScreen() {
   // The row the rows area has slid to.
   const slideRow = useRef<string>(undefined);
   const trackRef = useRef<HTMLDivElement>(null);
-  const heroTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const slideFrame = useRef(0);
-  const lastFocusAt = useRef(0);
 
   // Continue Watching comes first when there is something to continue.
   const continueItems = useContinueItems();
@@ -201,7 +200,7 @@ export function HomeScreen() {
 
   useEffect(
     () => () => {
-      clearTimeout(heroTimer.current);
+      cancelHero();
       cancelAnimationFrame(slideFrame.current);
     },
     [],
@@ -249,11 +248,9 @@ export function HomeScreen() {
         slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`),
       );
     }
-    const now = Date.now();
-    const delay = now - lastFocusAt.current < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS;
-    lastFocusAt.current = now;
-    clearTimeout(heroTimer.current);
-    if (item) heroTimer.current = setTimeout(() => heroItem.set(item), delay);
+    // Paced by the presses, not by focus reports: a row that loads or empties
+    // under focus reports again without a press.
+    showInHero(item, activityGap() < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS);
   }, []);
 
   if (collection.ready && arranged !== null && rows.length === 0 && !continuing) {

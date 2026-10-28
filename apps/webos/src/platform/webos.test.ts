@@ -22,6 +22,11 @@ describe('lunaFailed', () => {
     expect(lunaFailed({ errorCode: '0' })).toBe(false);
   });
 
+  it('goes by returnValue over a "No Error" text', () => {
+    // The media service fills in "No Error" whatever the outcome, as webOS 22's unsubscribe did.
+    expect(lunaFailed({ returnValue: false, errorCode: 0, errorText: 'No Error' })).toBe(true);
+  });
+
   it('takes an empty answer as success', () => {
     expect(lunaFailed({})).toBe(false);
   });

@@ -88,7 +88,8 @@ export class LunaError extends Error {
 /**
  * Whether a Luna answer reports a failure. returnValue is the documented
  * flag; some services leave it out and send only an errorCode, and the media
- * service answers success with errorCode 0 and errorText "No Error".
+ * service answers success with errorCode 0 and errorText "No Error". It also
+ * sends "No Error" with returnValue false when it fails, so the text alone means nothing.
  */
 export function lunaFailed(response: Record<string, unknown>): boolean {
   if (response.returnValue === false) return true;

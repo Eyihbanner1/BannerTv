@@ -6,7 +6,11 @@
  *   location.reload();
  *
  * Anything missing or unreadable takes its default, which is what ships, and
- * `localStorage.removeItem('bannertv.tuning')` goes back to all defaults.
+ * `localStorage.removeItem('bannertv.tuning')` goes back to all defaults. The
+ * defaults are the lightest set from the TV comparison of 28 October 2026:
+ * moving along a row went from a p95 frame gap of 200-300 ms to about 17 ms.
+ * Before that they were `{"motion":"slide","zoom":"animate","heroBusyMs":250,
+ * "heroArt":"large","heroPan":true,"mips":true}`.
  */
 export interface Tuning {
   /** Home's rows and each row's tiles slide, slide on a layer kept between presses, or jump. */
@@ -17,7 +21,10 @@ export interface Tuning {
   heroDelayMs: number;
   /** The same, while presses come quickly; never shorter than `heroDelayMs`. */
   heroBusyMs: number;
-  /** Size of the hero's backdrop, which Details shares. */
+  /**
+   * Size of the hero's backdrop, which Details shares. Metahub's medium
+   * backdrops measured 1920x1080 on the TV, the same as large ones did.
+   */
   heroArt: 'large' | 'medium';
   /** The hero backdrop's slow pan. */
   heroPan: boolean;
@@ -34,16 +41,16 @@ export interface Tuning {
 export const TUNING_KEY = 'bannertv.tuning';
 
 export const TUNING_DEFAULTS: Readonly<Tuning> = {
-  motion: 'slide',
-  zoom: 'animate',
+  motion: 'jump',
+  zoom: 'instant',
   heroDelayMs: 250,
-  heroBusyMs: 250,
-  heroArt: 'large',
-  heroPan: true,
+  heroBusyMs: 800,
+  heroArt: 'medium',
+  heroPan: false,
   rowsAround: 2,
   overscan: 2,
   decoding: 'auto',
-  mips: true,
+  mips: false,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -102,7 +109,12 @@ export function changedTuning(value: Tuning = tuning): Partial<Tuning> {
   return changed as Partial<Tuning>;
 }
 
-/** The switches that work through CSS become classes on the root element. */
+/**
+ * The switches that work through CSS become classes on the root element. The
+ * stylesheets draw rows sliding, tiles zooming over the motion time, the hero
+ * panning and tile art with mipmaps; each class turns one of those off, and
+ * the defaults turn them all off.
+ */
 export function applyTuning(root: HTMLElement, value: Tuning = tuning): void {
   if (value.motion !== 'slide') root.classList.add(`tune-motion-${value.motion}`);
   if (value.zoom !== 'animate') root.classList.add(`tune-zoom-${value.zoom}`);

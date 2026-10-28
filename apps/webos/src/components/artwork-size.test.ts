@@ -12,8 +12,8 @@ describe('artworkUrl', () => {
     expect(artworkUrl(metahub('poster', 'large'), 'posterTile', true)).toBe(
       metahub('poster', 'medium'),
     );
-    expect(artworkUrl(metahub('background', 'medium'), 'backdrop', true)).toBe(
-      metahub('background', 'large'),
+    expect(artworkUrl(metahub('background', 'large'), 'backdrop', true)).toBe(
+      metahub('background', 'medium'),
     );
     expect(artworkUrl(metahub('logo', 'medium'), 'titleLogo', true)).toBe(metahub('logo', 'large'));
     expect(artworkUrl(metahub('background', 'medium'), 'landscapeTile', true)).toBe(
