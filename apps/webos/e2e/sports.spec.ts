@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { mockPlayback, readKv } from './play';
 import {
@@ -15,11 +15,13 @@ import {
   APP_URL,
   expectFocus,
   expectFocusLabel,
+  focusedKey,
   openSection,
   press,
   pressBack,
   pressTo,
   railSections,
+  slidTo,
   watchErrors,
 } from './tv';
 
@@ -42,6 +44,28 @@ function realErrors(errors: string[]): string[] {
 /** The Sports screen's row headings, top down. */
 function sportsRows(page: Page) {
   return page.locator('[data-row-key^="sports-row-"] h2');
+}
+
+/** What Audio Guidance reads for every tile drawn on the Sports screen. */
+function sportsTileLabels(page: Page): Promise<string[]> {
+  return page
+    .locator('[data-focus-key^="sports-row-"][data-focus-key*="-tile-"]')
+    .evaluateAll((tiles) => tiles.map((tile) => tile.getAttribute('aria-label') ?? ''));
+}
+
+/** Answers a catalog request with these items. */
+function answer(route: Route, metas: unknown[]) {
+  return route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify({ metas }),
+  });
+}
+
+/** The row a focus key is in: `home-0-movie-top-tile-3` is in `home-0-movie-top`. */
+function rowOf(key: string): string {
+  return key.replace(/-tile-\d+$/, '');
 }
 
 /** What Audio Guidance reads for each tile of a row. */
@@ -68,6 +92,28 @@ async function watchScripts(page: Page) {
 
 function addedScripts(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as { __scripts?: string[] }).__scripts ?? []);
+}
+
+/** Notes every row the page ever draws, however briefly. */
+async function watchRows(page: Page) {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as { __rows?: string[] }).__rows = seen;
+    const note = (node: Node) => {
+      if (!(node instanceof Element)) return;
+      for (const row of [node, ...Array.from(node.querySelectorAll('[data-row-key]'))]) {
+        const key = row.getAttribute('data-row-key');
+        if (key && seen.indexOf(key) === -1) seen.push(key);
+      }
+    };
+    new MutationObserver((changes) => {
+      for (const change of changes) change.addedNodes.forEach(note);
+    }).observe(document, { childList: true, subtree: true });
+  });
+}
+
+function drawnRows(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as { __rows?: string[] }).__rows ?? []);
 }
 
 /** Starts the app at SPORTS_NOW with Cinemeta, the sports addons and OpenSubtitles. */
@@ -160,7 +206,9 @@ test('Sports groups the day by competition and works out live from kick-off time
   page,
 }) => {
   const errors = watchErrors(page);
-  const { requests } = await startWithSports(page);
+  let held: Promise<void> | undefined;
+  let release = () => undefined as void;
+  const { requests } = await startWithSports(page, { held: () => held });
   await openSection(page, 'sports');
   await expectFocus(page, 'sports-day-1');
   await expect(page.locator('[data-focus-key="sports-day-1"]')).toHaveText('Today');
@@ -190,13 +238,28 @@ test('Sports groups the day by competition and works out live from kick-off time
   await press(page, 'ArrowRight', `${EFL_CUP}-tile-1`);
   await press(page, 'ArrowDown', 'sports-row-c-country-gb-sct-football-tile-0');
 
-  // Forty-five minutes on, with no key pressed and no new answer: City and Celtic are live.
+  // Forty-five minutes on, with no key pressed and no answer yet to what the feed
+  // asks again: City and Celtic are live, from the clock alone.
   const asked = requests.all.length;
+  held = new Promise((resolve) => (release = resolve));
   await page.clock.fastForward(45 * MINUTE);
   await expect(sportsRows(page).first()).toHaveText('EFL Cup · 2 live of 2');
   await expectFocusLabel(page, 'Celtic v Rangers, Scottish football, live now');
-  // The feed refreshes every two minutes, but answers changed nothing.
-  expect(requests.all.length).toBeGreaterThanOrEqual(asked);
+  held = undefined;
+  release();
+  // One refresh in those 45 minutes: each copy that went stale is asked for once,
+  // and the clock's ticks ask nothing.
+  const again = () =>
+    requests.all
+      .slice(asked)
+      .filter((request) => request.includes('/catalog/'))
+      .sort();
+  const refreshed = ['football', 'live', 'today'].map(
+    (id) => `sports /bannertv/catalog/sport/${id}.json`,
+  );
+  await expect.poll(again).toEqual(refreshed);
+  await page.waitForTimeout(500);
+  expect(again()).toEqual(refreshed);
 
   // Live now holds only what is live or about to start.
   await press(page, 'ArrowUp', `${EFL_CUP}-tile-1`);
@@ -236,9 +299,13 @@ test('a match plays from the addon that listed it, and leaves nothing in Continu
     )
     .toBe(true);
   expect(playback.media).toContain('/match-1080p.webm');
-  // More Sports claims the same ids, but it never listed this match.
+  // More Sports claims the same type and ids, but it never listed this match:
+  // it is asked for neither its meta nor its streams.
   expect(requests.streams.every((request) => request.indexOf('sports ') === 0)).toBe(true);
   expect(requests.streams).toContain('sports sport/tsport:arsenal-brighton');
+  expect(
+    requests.all.filter((request) => /^more \/bannertv\/(meta|stream)\//.test(request)),
+  ).toEqual([]);
   // A match is not a film to come back to.
   await page.waitForTimeout(1500);
   await pressBack(page);
@@ -251,7 +318,7 @@ test('a match plays from the addon that listed it, and leaves nothing in Continu
   expect(realErrors(errors)).toEqual([]);
 });
 
-test('odd items, a crowded day and an addon that has gone away never break Sports', async ({
+test('a crowded day, odd items and addons that fail or hang never break Sports', async ({
   page,
 }) => {
   const errors = watchErrors(page);
@@ -288,9 +355,15 @@ test('odd items, a crowded day and an addon that has gone away never break Sport
   // More Sports answered 502: it is named, with Try again, and the rest still shows.
   await expect(page.getByText("More Sports didn't answer.")).toBeVisible();
   await expect(sportsRows(page).first()).toBeVisible();
-  // Rows far from focus are drawn empty, with their headings.
-  const headings = await page.locator('section h2').allTextContents();
-  expect(headings.filter((heading) => heading.startsWith('Made-up League '))).toHaveLength(40);
+  // Rows far from focus are drawn empty, with their headings, once the crowded page is in.
+  await expect
+    .poll(
+      async () =>
+        (await page.locator('section h2').allTextContents()).filter((heading) =>
+          heading.startsWith('Made-up League '),
+        ).length,
+    )
+    .toBe(40);
 
   // Down through the rows and along one, quickly.
   for (let n = 0; n < 8; n++) await page.keyboard.press('ArrowDown');
@@ -300,16 +373,6 @@ test('odd items, a crowded day and an addon that has gone away never break Sport
     'data-focus-key',
     /^sports-row-.+-tile-\d+$/,
   );
-
-  // The script in a name stays text.
-  expect(await page.evaluate(() => (window as { __xss?: number }).__xss)).toBeUndefined();
-  await expect(page.locator('img[src="x"]')).toHaveCount(0);
-  // A 5,000-letter name stays inside its tile: 384 wide, a little more when focused.
-  for (const width of await page
-    .locator('[data-focus-key^="sports-row-"][data-focus-key*="-tile-"]')
-    .evaluateAll((tiles) => tiles.map((tile) => tile.getBoundingClientRect().width))) {
-    expect(width).toBeLessThanOrEqual(384 * 1.1);
-  }
 
   // Try again asks More Sports again; it is still down.
   const moreAsked = requests.all.filter((r) => r.includes('more_sports_live')).length;
@@ -363,10 +426,15 @@ test('Search finds a team by its everyday name, and can ask the sports addons', 
     .toEqual(['sports /bannertv/catalog/sport/search/search=man city.json']);
   const asked = page.locator('[data-row-key^="search-res-sports-"]');
   await expect(asked.locator('h2')).toHaveText(/^SportsTest Sports$/);
+  // Focus goes on to the addon's row in place of the button, not back to the box.
+  const addonRow = (await asked.getAttribute('data-row-key')) ?? '';
+  await expectFocus(page, `${addonRow}-tile-0`);
+  await page.waitForTimeout(500);
+  await expectFocusLabel(page, 'Manchester City v Burnley, EFL Cup, 20:00');
   expect(realErrors(errors)).toEqual([]);
 });
 
-test('Show in Sports: No puts the catalogs back on Home, and removing the addon hides Sports', async ({
+test('Show in Sports: No puts the catalogs back on Home, and removing the addon forgets it', async ({
   page,
 }) => {
   const errors = watchErrors(page);
@@ -400,24 +468,69 @@ test('Show in Sports: No puts the catalogs back on Home, and removing the addon 
   await expect(page.locator('[data-row-key="home-1-sport-live"] h2')).toHaveText(/^🔴 Live/);
   await pressBack(page);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // The Live sport row noted the matches' kick-offs at launch, by the addon's id.
+  await expect.poll(() => keptKickOffs(page, SPORTS_MANIFEST.id)).not.toEqual([]);
 
-  // Back to Automatic, then removed: Sports goes, and so does what was kept for it.
+  // Removed while set to No: its setting goes, and so do the kick-offs kept for it.
   await openSection(page, 'addons');
   await pressTo(page, 'ArrowDown', 'Move Test Sports down');
   await pressTo(page, 'ArrowRight', 'Show Test Sports in Sports: No');
-  await page.keyboard.press('Enter');
-  await pressTo(page, 'ArrowUp', 'Yes');
-  await pressTo(page, 'ArrowUp', 'Automatic');
-  await page.keyboard.press('Enter');
-  await expectFocusLabel(page, 'Show Test Sports in Sports: Automatic');
-  await expect.poll(() => railSections(page)).toContain('sports');
-  await pressTo(page, 'ArrowRight', 'Remove Test Sports');
+  await removeAddon(page, 'Test Sports');
+  await expect.poll(() => readKv(page, 'sports.settings')).toEqual({});
+  await expect.poll(() => keptKickOffs(page, SPORTS_MANIFEST.id)).toEqual([]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+/** Ids of the items the kick-off memory keeps for one addon. */
+async function keptKickOffs(page: Page, addonId: string): Promise<string[]> {
+  const rows = await readKv(page, 'sports.kickoffs');
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row: unknown) => (Array.isArray(row) && typeof row[0] === 'string' ? row[0] : ''))
+    .filter((key: string) => key.indexOf(`${addonId}\n`) === 0);
+}
+
+/** From the addon's last button in Addons, removes it and waits for the note. */
+async function removeAddon(page: Page, name: string) {
+  await pressTo(page, 'ArrowRight', `Remove ${name}`);
   await press(page, 'Enter', 'remove-addon-cancel');
   await press(page, 'ArrowLeft', 'remove-addon-confirm');
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Removed Test Sports.')).toBeVisible();
+  await expect(page.getByText(`Removed ${name}.`)).toBeVisible();
+}
+
+test('removing the last sports addon takes Sports out of the rail', async ({ page }) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await pressTo(page, 'ArrowDown', 'Move Test Sports down');
+  await pressTo(page, 'ArrowRight', 'Show Test Sports in Sports: Automatic');
+  expect(await railSections(page)).toContain('sports');
+  await removeAddon(page, 'Test Sports');
   await expect.poll(() => railSections(page)).not.toContain('sports');
-  await expect.poll(() => readKv(page, 'sports.settings')).toEqual({});
+  await expect.poll(() => keptKickOffs(page, SPORTS_MANIFEST.id)).toEqual([]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('Sports gives way to Home when its last sports addon goes while it is open', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // The addon's daily refresh brings a version with no sports catalogs left.
+  let update: (manifest: unknown) => void = () => undefined;
+  const updated = new Promise<unknown>((resolve) => (update = resolve));
+  await startWithSports(page, { update: updated });
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await expect(sportsRows(page).first()).toHaveText('EFL Cup · 1 live of 2');
+
+  update({ ...SPORTS_MANIFEST, version: '1.1.0', catalogs: [] });
+  // The refresh runs a few seconds after start-up.
+  await page.clock.fastForward(10 * 1000);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => railSections(page)).not.toContain('sports');
   expect(realErrors(errors)).toEqual([]);
 });
 
@@ -463,16 +576,348 @@ test.describe('in New York', () => {
     await startWithSports(page);
     await openSection(page, 'sports');
     await expectFocus(page, 'sports-day-1');
-    // 15:30 in New York: the Lakers' 00:30 London tip-off is tonight at 20:30.
-    const headings = await sportsRows(page).allTextContents();
-    expect(headings).toContain('EFL Cup · 1 live of 2');
-    const labels = await page
-      .locator('[data-focus-key^="sports-row-"][data-focus-key*="-tile-"]')
-      .evaluateAll((tiles) => tiles.map((tile) => tile.getAttribute('aria-label') ?? ''));
-    expect(labels).toContain('Manchester City v Burnley, EFL Cup, 16:00');
-    expect(
-      labels.some((label) => /^Los Angeles Lakers v New York Knicks, .*20:30$/.test(label)),
-    ).toBe(true);
+    // 15:30 in New York: the Lakers' 00:30 London tip-off is tonight at 20:30. The
+    // rows first draw from what the Live sport row had; today's page follows.
+    await expect(sportsRows(page)).toContainText(['EFL Cup · 1 live of 2']);
+    await expect
+      .poll(() => sportsTileLabels(page))
+      .toContain('Manchester City v Burnley, EFL Cup, 16:00');
+    await expect
+      .poll(async () =>
+        (await sportsTileLabels(page)).some((label) =>
+          /^Los Angeles Lakers v New York Knicks, .*20:30$/.test(label),
+        ),
+      )
+      .toBe(true);
     expect(realErrors(errors)).toEqual([]);
   });
+});
+
+test('a sports addon first in the list never has its catalogs on Home, even for a moment', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await page.clock.install({ time: SPORTS_NOW });
+  await watchRows(page);
+  await mockAddons(page);
+  await seedSports(page, { sportsFirst: true });
+  const requests = await mockSports(page);
+  await page.goto(APP_URL);
+  // Cinemeta is the second addon now.
+  await expectFocus(page, 'home-1-movie-top-tile-0');
+  await expect(page.locator('main [data-row-key]').nth(2)).toHaveAttribute(
+    'data-row-key',
+    LIVE_ROW,
+  );
+  await page.waitForTimeout(500);
+  expect((await drawnRows(page)).filter((key) => key.indexOf('home-0-') === 0)).toEqual([]);
+  // Only the Live sport row's request: none for the catalogs as Home rows.
+  expect(requests.all.filter((request) => request.includes('/catalog/'))).toEqual([
+    'sports /bannertv/catalog/sport/live.json',
+  ]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('the Live sport row coming and going leaves Home on the row in view', async ({ page }) => {
+  const errors = watchErrors(page);
+  // Live now: Arsenal until 21:30 and Celtic until 22:10. Starting at 23:00, City.
+  const { arsenal, celtic, city } = MATCHES;
+  const late = { ...city, released: '2026-10-28T23:00:00.000Z' };
+  await startWithSports(page, {
+    catalogs: {
+      'sport/live': (route) =>
+        answer(
+          route,
+          [arsenal, celtic, late].map((match) => ({ ...match, type: 'sport' })),
+        ),
+    },
+  });
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
+  // Two rows under it, so its going and coming moves the row in view.
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(300);
+  const tile = await focusedKey(page);
+  expect(tile).toMatch(/^home-0-.+-tile-0$/);
+  await expect.poll(() => slidTo(page, rowOf(tile))).toBe(true);
+
+  // 22:30: nothing is live, and the row goes.
+  await page.clock.fastForward(3 * 60 * MINUTE);
+  await expect(page.locator(`[data-row-key="${LIVE_ROW}"]`)).toHaveCount(0);
+  await expect.poll(() => slidTo(page, rowOf(tile))).toBe(true);
+  await expectFocus(page, tile);
+
+  // 22:46: City is starting soon, and the row is back.
+  await page.clock.fastForward(16 * MINUTE);
+  await expect(page.locator(`[data-row-key="${LIVE_ROW}"]`)).toHaveCount(1);
+  await expect.poll(() => slidTo(page, rowOf(tile))).toBe(true);
+  await expectFocus(page, tile);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('a Home row that turns out to be sport under focus hands focus to the row above', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  let release = () => undefined as void;
+  const firstPage = new Promise<void>((resolve) => (release = resolve));
+  await startWithSports(page, { liveEvents: firstPage });
+  // Live Events is last on Home: down to it while its first page is on its way.
+  let focused = '';
+  for (let n = 0; n < 40 && !/^home-\d+-tv-events-tile-/.test(focused); n++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    focused = await focusedKey(page);
+  }
+  expect(focused).toMatch(/^home-\d+-tv-events-tile-0$/);
+  const row = rowOf(focused);
+  const above = await page
+    .locator(`[data-row-key="${row}"]`)
+    .evaluate((element) => element.previousElementSibling?.getAttribute('data-row-key') ?? '');
+  expect(above).toMatch(/^home-0-/);
+
+  // Its first page is all matches: it goes to Sports, and focus and the view to the row above.
+  release();
+  await expect(page.locator(`[data-row-key="${row}"]`)).toHaveCount(0);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    new RegExp(`^${above}-tile-\\d+$`),
+  );
+  await page.waitForTimeout(500);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    new RegExp(`^${above}-tile-\\d+$`),
+  );
+  await expect.poll(() => slidTo(page, above)).toBe(true);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('moving on into the rows before a day opens keeps the day they belong to', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  const today = ['EFL Cup · 1 live of 2', 'Scottish football', 'Earlier today'];
+  await expect(sportsRows(page)).toHaveText(today);
+
+  // Over Tomorrow and down into Today's rows, quicker than a rest on Tomorrow.
+  await page.keyboard.press('ArrowRight');
+  await expectFocus(page, 'sports-day-2');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^sports-row-.+-tile-0$/,
+  );
+  const tile = await focusedKey(page);
+  await page.waitForTimeout(800);
+  await expect(page.locator('[data-focus-key="sports-day-1"]')).toHaveClass(/selected/);
+  await expect(sportsRows(page)).toHaveText(today);
+  await expectFocus(page, tile);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('a competition on two days starts at its first match on each', async ({ page }) => {
+  const errors = watchErrors(page);
+  // Six more EFL Cup ties live at 19:30, so the row is longer than the screen on both days.
+  const ties = [0, 1, 2, 3, 4, 5].map((n) => ({
+    id: `tsport:cup-${n}`,
+    type: 'sport',
+    name: `Borough ${n} vs Rovers ${n}`,
+    genres: ['Football', 'EFL Cup'],
+    released: `2026-10-28T19:0${n}:00.000Z`,
+  }));
+  const { arsenal, celtic } = MATCHES;
+  await startWithSports(page, {
+    catalogs: {
+      'sport/live': (route) =>
+        answer(route, [
+          ...[arsenal, celtic].map((match) => ({ ...match, type: 'sport' })),
+          ...ties,
+        ]),
+    },
+  });
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await expect(sportsRows(page).first()).toHaveText('EFL Cup · 7 live of 8');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  for (let n = 1; n <= 5; n++) await press(page, 'ArrowRight', `${EFL_CUP}-tile-${n}`);
+
+  // Live now has the same competition: its row starts at its first match.
+  await press(page, 'ArrowUp', 'sports-day-1');
+  await press(page, 'ArrowLeft', 'sports-day-0');
+  await page.waitForTimeout(600);
+  await expect(page.locator('[data-focus-key="sports-day-0"]')).toHaveClass(/selected/);
+  await expect(sportsRows(page).first()).toHaveText('EFL Cup · 7 live of 7');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await expect(
+    page.locator(`[data-row-key="${EFL_CUP}"] [data-focus-key="${EFL_CUP}-tile-0"]`),
+  ).toBeInViewport();
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('a Live now row whose last match ends hands focus to the row in its place', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await expect(sportsRows(page).first()).toHaveText('EFL Cup · 1 live of 2');
+  await press(page, 'ArrowLeft', 'sports-day-0');
+  await page.waitForTimeout(600);
+  await expect(sportsRows(page)).toHaveText(['EFL Cup · 1 live of 1', 'Scottish football']);
+  const scottish = 'sports-row-c-country-gb-sct-football';
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'ArrowDown', `${scottish}-tile-0`);
+
+  // 22:15: Celtic's match is over; City's is still on, in the EFL Cup row above.
+  await page.clock.fastForward((2 * 60 + 45) * MINUTE);
+  await expect(sportsRows(page)).toHaveText(['EFL Cup · 1 live of 1']);
+  await expectFocus(page, `${EFL_CUP}-tile-0`);
+  await page.waitForTimeout(500);
+  await expectFocus(page, `${EFL_CUP}-tile-0`);
+  await expectFocusLabel(page, 'Manchester City v Burnley, EFL Cup, live now');
+  await expect.poll(() => slidTo(page, EFL_CUP)).toBe(true);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('Search answers from what the Live sport row fetched, and asks nothing itself', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { requests } = await startWithSports(page);
+  await openSection(page, 'search');
+  await expectFocus(page, 'search-field');
+  const asked = requests.all.length;
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('arsenal');
+  await expect(page.locator('[data-row-key="search-res-sports"] h2')).toHaveText('Sports');
+  expect(await tileLabels(page, 'search-res-sports')).toEqual([
+    'Arsenal v Brighton, EFL Cup, live now',
+  ]);
+  // Minutes on Search ask the sports addons nothing: only Sports and the Live sport row do.
+  await page.clock.fastForward(5 * MINUTE);
+  await page.waitForTimeout(500);
+  expect(requests.all.slice(asked).filter((request) => request.includes('/catalog/'))).toEqual([]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('sports rows coming and going above Search results leave the view on the focused row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  let release = () => undefined as void;
+  const searched = new Promise<void>((resolve) => (release = resolve));
+  // The addon's search finds only a channel, which is not a match: its row goes.
+  const channel = {
+    id: 'tsport:ch-1',
+    type: 'sport',
+    name: 'Sky Sports Main Event',
+    releaseInfo: '24/7',
+  };
+  await startWithSports(page, {
+    catalogs: { 'sport/search': (route) => searched.then(() => answer(route, [channel])) },
+  });
+  await openSection(page, 'search');
+  await expectFocus(page, 'search-field');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('sintel');
+  await expect(page.getByText("Nothing in your sports addons' lists matches.")).toBeVisible();
+  await page.keyboard.press('Escape');
+  await press(page, 'ArrowDown', 'search-sports-addons');
+  await page.keyboard.press('Enter');
+  const addonRow = page.locator('[data-row-key^="search-res-sports-"]');
+  await expect(addonRow).toHaveCount(1);
+  const addonKey = (await addonRow.getAttribute('data-row-key')) ?? '';
+  await expectFocus(page, `${addonKey}-tile-0`);
+
+  // Down to the films: the view slides them to the top.
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^search-res-0-movie-.+-tile-0$/,
+  );
+  const films = rowOf(await focusedKey(page));
+  await expect.poll(() => slidTo(page, films)).toBe(true);
+
+  // The addon answers: its row goes from above, and the films stay in view.
+  release();
+  await expect(addonRow).toHaveCount(0);
+  await expect.poll(() => slidTo(page, films)).toBe(true);
+  await expectFocus(page, `${films}-tile-0`);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('a kick-off on another day keeps its time on a tile', async ({ page }) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  await openSection(page, 'search');
+  await expectFocus(page, 'search-field');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('wolves');
+  await expect(page.getByText("Nothing in your sports addons' lists matches.")).toBeVisible();
+  await page.keyboard.press('Escape');
+  await press(page, 'ArrowDown', 'search-sports-addons');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'aria-label',
+    /^Wolves v Aston Villa, .*, Tomorrow, about 20:00$/,
+  );
+  // The whole of it shows, time and all.
+  const shown = await page.locator('[data-focused="true"]').evaluate((tile) =>
+    Array.from(tile.querySelectorAll('span'))
+      .filter((span) => span.children.length === 0 && span.textContent === 'Tomorrow, about 20:00')
+      .map((span) => span.scrollWidth <= span.clientWidth),
+  );
+  expect(shown).toEqual([true]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+test('odd items stay text, inside their tiles', async ({ page }) => {
+  const errors = watchErrors(page);
+  // Only the odd items and Arsenal: few enough rows that every one is drawn.
+  await startWithSports(page, {
+    catalogs: {
+      'sport/live': (route) =>
+        answer(route, [...oddItems(), { ...MATCHES.arsenal, type: 'sport' }]),
+      'sport/today': (route) => answer(route, []),
+      'sport/football': (route) => answer(route, []),
+    },
+  });
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+
+  // The script in a name stays text.
+  const script = page.locator('[data-focus-key^="sports-row-"][data-focus-key*="-tile-"]', {
+    hasText: '<img src=x onerror="window.__xss=1">',
+  });
+  await expect(script).toHaveCount(1);
+  await expect(page.locator('img[src="x"]')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { __xss?: number }).__xss)).toBeUndefined();
+
+  // A 5,000-letter name stays inside its tile, and nothing of it shows beyond.
+  const long = page.locator('[data-focus-key^="sports-row-"][aria-label^="QQQQ"]');
+  await expect(long).toHaveCount(1);
+  const tile = await long.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const name = element.querySelector('span + span') ?? element;
+    const line = name.getBoundingClientRect();
+    // Just past the tile's right edge, level with the name: the gap before the next tile.
+    const beyond = document.elementFromPoint(box.right + 8, line.top + line.height / 2);
+    return {
+      width: box.width,
+      height: box.height,
+      hit: beyond !== null,
+      beyond: beyond !== null && element.contains(beyond),
+    };
+  });
+  expect(tile.width).toBeLessThanOrEqual(384 * 1.1);
+  expect(tile.height).toBeLessThanOrEqual(176 * 1.1);
+  expect(tile.hit).toBe(true);
+  expect(tile.beyond).toBe(false);
+  expect(realErrors(errors)).toEqual([]);
 });

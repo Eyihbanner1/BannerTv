@@ -9,7 +9,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import type { TFunction } from 'i18next';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { type EventPlay, push } from '../../app/router';
+import { eventPlay, push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Button } from '../../components/Button';
@@ -70,11 +70,31 @@ function previewOf(name: string, event: SportEvent, background?: string): MetaPr
 }
 
 /**
+ * The badges the addon sent for the two sides, home first as in the name.
+ * Each side keeps its place, so a badge on its own still stands by its team.
+ * Only the event page draws them: fixture tiles are text, and none is bundled.
+ */
+export function TeamBadges({ event }: { event: Pick<SportEvent, 'homeLogo' | 'awayLogo'> }) {
+  const { homeLogo, awayLogo } = event;
+  if (!homeLogo && !awayLogo) return null;
+  return (
+    <div className={styles.badges}>
+      <div className={styles.badge}>
+        {homeLogo && <Artwork key={homeLogo} src={homeLogo} className={styles.badgeImage} />}
+      </div>
+      <div className={styles.badge}>
+        {awayLogo && <Artwork key={awayLogo} src={awayLogo} className={styles.badgeImage} />}
+      </div>
+    </div>
+  );
+}
+
+/**
  * One match: teams, competition, local kick-off, state, which addons list
- * it, and the addon's background. Watch uses the automatic stream choice
- * across every source; All streams lists them by addon (docs/PLAN.md, Sports
- * addons, Screens). Only the addons that listed it are asked, for its page
- * and its streams.
+ * it, the addon's background and any team badges it sent. Watch uses the
+ * automatic stream choice across every source; All streams lists them by
+ * addon (docs/PLAN.md, Sports addons, Screens). Only the addons that listed
+ * it are asked, for its page and its streams.
  */
 export function EventScreen({ event: opened }: { event: SportEvent }) {
   const { t } = useTranslation();
@@ -92,10 +112,8 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
   const primary = sources[0];
   const metaQuery = useMemo(() => (primary ? addonClient.metaFrom(primary) : null), [primary]);
   const meta = useQuery(metaQuery).data;
-  const play = useMemo<EventPlay>(
-    () => ({ key: event.key, sources: event.sources }),
-    [event.key, event.sources],
-  );
+  const { key, sources: listed, kind } = event;
+  const play = useMemo(() => eventPlay({ key, sources: listed, kind }), [key, listed, kind]);
   const [resting, setResting] = useState(false);
   usePrefetch(primary?.type ?? '', primary && resting ? primary.id : null, undefined, play);
 
@@ -110,6 +128,7 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
   ]
     .filter(Boolean)
     .join(' · ');
+  const badged = !!(event.homeLogo || event.awayLogo);
   const addonNames: string[] = [];
   for (const source of sources) {
     const addonName = source.addon.manifest.name;
@@ -136,7 +155,8 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
       <div className={styles.art}>
         {background && <Artwork key={background} src={background} className={styles.backdrop} />}
       </div>
-      <div className={styles.info}>
+      <div className={badged ? `${styles.info} ${styles.badged}` : styles.info}>
+        <TeamBadges event={event} />
         <p className={styles.competition}>{competition}</p>
         <h1 className={styles.title}>{name}</h1>
         <p className={state === 'live' || state === 'live-unknown' ? styles.live : styles.when}>

@@ -17,8 +17,11 @@ interface LiveSportRowProps {
   /** Near focus: fetched and drawn, like any Home row. */
   near: boolean;
   onItemFocus: (rowKey: string, item: MetaPreview | undefined, element: HTMLElement) => void;
-  /** Nothing is live any more; `focused` if focus was in the row. */
-  onGone: (focused: boolean) => void;
+  /**
+   * The row is drawn, or is not because nothing is live any more, so the rows
+   * under it have moved. `focused` if focus was in the row as it went.
+   */
+  onShown: (shown: boolean, focused: boolean) => void;
 }
 
 /**
@@ -29,7 +32,7 @@ interface LiveSportRowProps {
 export const LiveSportRow = memo(function LiveSportRow({
   near,
   onItemFocus,
-  onGone,
+  onShown,
 }: LiveSportRowProps) {
   const { t } = useTranslation();
   useWantSports(near ? 'live' : null, true);
@@ -55,8 +58,8 @@ export const LiveSportRow = memo(function LiveSportRow({
   const empty = events.length === 0;
   // Before the tiles unregister, while focus is still on one of them.
   useLayoutEffect(() => {
-    if (empty) onGone(focusedKey().indexOf(`${LIVE_SPORT_FOCUS_KEY}-tile-`) === 0);
-  }, [empty, onGone]);
+    onShown(!empty, empty && focusedKey().indexOf(`${LIVE_SPORT_FOCUS_KEY}-tile-`) === 0);
+  }, [empty, onShown]);
   const onFocus = useCallback(
     (_: number | undefined, element: HTMLElement) =>
       onItemFocus(LIVE_SPORT_ROW_KEY, undefined, element),

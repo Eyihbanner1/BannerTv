@@ -51,6 +51,7 @@ export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
 
 const emptyRows = new Set<string>();
 const NO_ITEMS: readonly MetaPreview[] = [];
+const NO_ROWS: readonly BoardRow[] = [];
 
 interface HomeRowProps {
   row: BoardRow;
@@ -134,12 +135,14 @@ export function HomeScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
-  // Sports catalogs leave the board: the Live sport row stands in for them.
-  const board = useMemo(
-    () => buildBoard(collection.addons, sports.homeLeaveOut),
-    [collection.addons, sports.homeLeaveOut],
-  );
   const ready = collection.ready && sports.ready;
+  // Sports catalogs leave the board: the Live sport row stands in for them. The
+  // board waits for sport to be settled too, so a sports catalog is never drawn,
+  // or fetched, for the moment before it is known to be one.
+  const board = useMemo(
+    () => (ready ? buildBoard(collection.addons, sports.homeLeaveOut) : NO_ROWS),
+    [ready, collection.addons, sports.homeLeaveOut],
+  );
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
   // Home opens on its first row: it only mounts when the section is opened,
@@ -200,10 +203,42 @@ export function HomeScreen() {
   // rows above it disappear or Continue Watching comes or goes, and on return,
   // so Home comes back as it was. A first focus on a row still loading has not
   // slid anything yet, so the row holding focus counts first.
+  const drawnRows = useRef(rows);
   useLayoutEffect(() => {
+    const before = drawnRows.current;
+    drawnRows.current = rows;
+    const onHome = (rowKey: string) =>
+      rowKey === LIVE_SPORT_ROW_KEY ||
+      (rowKey === CONTINUE_ROW_KEY && continuing) ||
+      rows.some((row) => row.key === rowKey);
+    // The row now in the place of one that has left, as for an empty row.
+    const inPlaceOf = (rowKey: string) => {
+      const index = before.findIndex((row) => row.key === rowKey);
+      if (index === -1) return undefined;
+      return (
+        rows[Math.min(index, rows.length - 1)]?.key ?? (continuing ? CONTINUE_ROW_KEY : undefined)
+      );
+    };
     const key = focusedKey();
     const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
-    if (tile > 0 && canSlide()) slideRow.current = key.slice('home-'.length, tile);
+    const focused = tile > 0 ? key.slice('home-'.length, tile) : undefined;
+    if (focused !== undefined && onHome(focused)) {
+      if (canSlide()) slideRow.current = focused;
+    } else if (focused !== undefined && !emptyRows.has(focused)) {
+      // The row left the board under focus, once its first page showed it is
+      // sport. Before its tiles unregister, while focus is still on one of them.
+      // (A row that turned out empty has handed its place on already.)
+      const next = inPlaceOf(focused);
+      if (next) {
+        slideRow.current = next;
+        setFocusedRow(next);
+        void setFocus(`home-${next}`);
+      }
+    }
+    // The same for the row the view was on while focus was elsewhere, in the rail.
+    if (slideRow.current && !onHome(slideRow.current)) {
+      slideRow.current = inPlaceOf(slideRow.current);
+    }
     slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, [rows, continuing]);
 
@@ -262,22 +297,27 @@ export function HomeScreen() {
     showInHero(item, activityGap() < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS);
   }, []);
 
-  // Nothing is live any more: the Live sport row goes, and focus in it moves
-  // to the row that takes its place, as for an empty catalog row.
+  // The Live sport row comes and goes by itself, as matches start and end. When
+  // nothing is live any more, focus in it moves to the row that takes its place,
+  // as for an empty catalog row. Either way the rows under it have moved, so the
+  // view goes back to the row it was on.
   const latestLiveAt = useRef(liveAt);
   useLayoutEffect(() => {
     latestLiveAt.current = liveAt;
   });
-  const onLiveGone = useCallback((focused: boolean) => {
-    const list = latestRows.current;
-    const at = latestLiveAt.current;
-    const next =
-      list[at]?.key ??
-      list[at - 1]?.key ??
-      (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
-    if (slideRow.current === LIVE_SPORT_ROW_KEY) slideRow.current = next;
-    setFocusedRow((row) => (row === LIVE_SPORT_ROW_KEY ? next : row));
-    if (focused && next) void setFocus(`home-${next}`);
+  const onLiveShown = useCallback((shown: boolean, focused: boolean) => {
+    if (!shown) {
+      const list = latestRows.current;
+      const at = latestLiveAt.current;
+      const next =
+        list[at]?.key ??
+        list[at - 1]?.key ??
+        (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
+      if (slideRow.current === LIVE_SPORT_ROW_KEY) slideRow.current = next;
+      setFocusedRow((row) => (row === LIVE_SPORT_ROW_KEY ? next : row));
+      if (focused && next) void setFocus(`home-${next}`);
+    }
+    slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, []);
 
   if (ready && rows.length === 0 && !continuing) {
@@ -303,7 +343,7 @@ export function HomeScreen() {
       key={LIVE_SPORT_ROW_KEY}
       near={Math.abs(liveAt - focusedIndex) <= 1 || Math.abs(liveAt - nearIndex) <= ROWS_AROUND}
       onItemFocus={onItemFocus}
-      onGone={onLiveGone}
+      onShown={onLiveShown}
     />
   );
   rows.forEach((row, index) => {

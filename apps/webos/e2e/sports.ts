@@ -16,6 +16,8 @@ export const SPORTS_NOW = new Date('2026-10-28T19:30:00Z');
 export const SPORTS_ADDON_URL = 'https://sports.example.com/bannertv/manifest.json';
 /** A second sports addon: it lists one match the first also has, and its live catalog fails. */
 export const MORE_SPORTS_URL = 'https://more-sports.example.com/bannertv/manifest.json';
+/** An addon whose one catalog shows it is sport only by what its first page holds. */
+export const LIVE_EVENTS_URL = 'https://events.example.com/bannertv/manifest.json';
 
 const at = (iso: string) => `${iso.replace(/Z$/, '')}.000Z`;
 
@@ -55,14 +57,27 @@ export const MORE_SPORTS_MANIFEST = {
   version: '2.0.0',
   name: 'More Sports',
   description: 'A second made-up sports addon.',
-  types: ['tv'],
-  // It claims the first addon's ids too: it must never be asked for that addon's matches.
+  // It claims the first addon's ids and type too, so asking every addon that
+  // could answer would ask it: it must never be asked for that addon's matches.
+  types: ['tv', 'sport'],
   resources: ['catalog', 'meta', 'stream'],
   idPrefixes: ['tsport:', 'msport:'],
   catalogs: [
     { type: 'tv', id: 'more_sports_live', name: 'Live Now' },
     { type: 'tv', id: 'more_sports_channels', name: '24/7 Sports Channels' },
   ],
+};
+
+/** Its catalog names a view sports addons have, but no sport: Home shows it until a page says. */
+export const LIVE_EVENTS_MANIFEST = {
+  id: 'org.bannertv.live-events',
+  version: '1.0.0',
+  name: 'Live Events',
+  description: 'A made-up addon of events.',
+  types: ['tv'],
+  resources: ['catalog'],
+  idPrefixes: ['levent:'],
+  catalogs: [{ type: 'tv', id: 'events', name: 'Live Events' }],
 };
 
 export interface Match {
@@ -105,6 +120,13 @@ export const MATCHES = {
     name: 'Los Angeles Lakers vs New York Knicks',
     genres: ['Basketball'],
     released: at('2026-10-29T00:30:00Z'),
+  },
+  /** Only in the addon's own search. A zone abbreviation alone leaves its time unsure. */
+  wolves: {
+    id: 'tsport:wolves-villa',
+    name: 'Wolves vs Aston Villa',
+    genres: ['Football'],
+    releaseInfo: '29 Oct 2026 · 20:00 WET',
   },
 } satisfies Record<string, Match>;
 
@@ -149,8 +171,22 @@ const json = (route: Route, body: unknown, status = 200) =>
 export interface SportsOptions {
   /** Also installs More Sports. */
   moreSports?: boolean;
+  /**
+   * Also installs Live Events, last. Its first page, four matches, answers
+   * once this settles.
+   */
+  liveEvents?: Promise<void>;
+  /** Installs Test Sports first, before Cinemeta. */
+  sportsFirst?: boolean;
   /** Answers for particular catalog paths of Test Sports, e.g. `sport/live`. Undefined falls through. */
   catalogs?: Record<string, (route: Route, extra: string) => Promise<void> | undefined>;
+  /** While this gives a promise, Test Sports' catalogs answer only once it settles. */
+  held?: () => Promise<void> | undefined;
+  /**
+   * The manifest Test Sports' address answers with once this settles, for
+   * the app's daily refresh. Until then, and without it, the installed one.
+   */
+  update?: Promise<unknown>;
   /** Stored "Show in Sports" settings, by addon id. */
   settings?: Record<string, 'yes' | 'no'>;
 }
@@ -173,14 +209,21 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
   const subtitles = JSON.parse(
     readFileSync(resolve(core, 'opensubtitles-v3.manifest.json'), 'utf8'),
   );
+  const sports = {
+    transportUrl: SPORTS_ADDON_URL,
+    manifest: SPORTS_MANIFEST,
+    official: false,
+    fetchedAt: 0,
+  };
   const addons = [
+    ...(options.sportsFirst ? [sports] : []),
     {
       transportUrl: 'https://v3-cinemeta.strem.io/manifest.json',
       manifest: cinemeta,
       official: true,
       fetchedAt: 0,
     },
-    { transportUrl: SPORTS_ADDON_URL, manifest: SPORTS_MANIFEST, official: false, fetchedAt: 0 },
+    ...(options.sportsFirst ? [] : [sports]),
     ...(options.moreSports
       ? [
           {
@@ -197,6 +240,16 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
       official: true,
       fetchedAt: 0,
     },
+    ...(options.liveEvents
+      ? [
+          {
+            transportUrl: LIVE_EVENTS_URL,
+            manifest: LIVE_EVENTS_MANIFEST,
+            official: false,
+            fetchedAt: 0,
+          },
+        ]
+      : []),
   ];
   await page.addInitScript(
     ({ stored, settings }) => {
@@ -227,12 +280,16 @@ export async function mockSports(page: Page, options: SportsOptions = {}): Promi
   const requests: SportsRequests = { all: [], streams: [] };
   const { arsenal, celtic, city, barnsley, lakers } = MATCHES;
 
-  await page.route(/^https:\/\/sports\.example\.com\/bannertv\//, (route) => {
+  await page.route(/^https:\/\/sports\.example\.com\/bannertv\//, async (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname);
     requests.all.push(`sports ${path}`);
-    if (path === '/bannertv/manifest.json') return json(route, SPORTS_MANIFEST);
+    if (path === '/bannertv/manifest.json') {
+      return json(route, options.update ? await options.update : SPORTS_MANIFEST);
+    }
     const catalog = /^\/bannertv\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+))?\.json$/.exec(path);
     if (catalog) {
+      const held = options.held?.();
+      if (held) await held;
       const [, type, id, extra = ''] = catalog as unknown as [string, string, string, string?];
       const answered = options.catalogs?.[`${type}/${id}`]?.(route, extra);
       if (answered) return answered;
@@ -252,7 +309,7 @@ export async function mockSports(page: Page, options: SportsOptions = {}): Promi
       if (id === 'search') {
         // Each word of the search starts a word of the name: "man city" finds Manchester City.
         const words = (/search=([^&]+)/.exec(extra)?.[1] ?? '').toLowerCase().split(/\s+/);
-        const found = [barnsley, arsenal, celtic, city, lakers].filter((m) => {
+        const found = [barnsley, arsenal, celtic, city, lakers, MATCHES.wolves].filter((m) => {
           const name = m.name.toLowerCase().split(/\s+/);
           return words.every((word) => name.some((part) => part.indexOf(word) === 0));
         });
@@ -300,6 +357,24 @@ export async function mockSports(page: Page, options: SportsOptions = {}): Promi
     }
     return json(route, { metas: [] });
   });
+
+  const events = options.liveEvents;
+  if (events) {
+    await page.route(/^https:\/\/events\.example\.com\/bannertv\//, async (route) => {
+      const path = decodeURIComponent(new URL(route.request().url()).pathname);
+      requests.all.push(`events ${path}`);
+      if (path === '/bannertv/manifest.json') return json(route, LIVE_EVENTS_MANIFEST);
+      if (path !== '/bannertv/catalog/tv/events.json') return json(route, { metas: [] });
+      await events;
+      const metas = ['Lions', 'Tigers', 'Bears', 'Wolves'].map((name, n) => ({
+        id: `levent:${n}`,
+        type: 'tv',
+        name: `${name} vs Hawks ${n}`,
+        released: at(`2026-10-28T2${n}:00:00Z`),
+      }));
+      return json(route, { metas });
+    });
+  }
   return requests;
 }
 

@@ -33,6 +33,7 @@ const ROWS_AROUND = 3;
 const TODAY_INDEX = 1;
 const ROW_PREFIX = 'sports-row-';
 
+const DAYS_KEY = 'sports-days';
 const dayKey = (index: number) => `sports-day-${index}`;
 const rowKey = (group: SportsGroup) => `${ROW_PREFIX}${group.key}`;
 
@@ -45,15 +46,28 @@ interface DayStripProps {
   now: number;
   onRest: (day: SportsDay) => void;
   onPick: (day: SportsDay) => void;
+  /** Focus has left the strip, for the rows or the rail. */
+  onLeave: () => void;
 }
 
-const DayStrip = memo(function DayStrip({ days, day, now, onRest, onPick }: DayStripProps) {
+const DayStrip = memo(function DayStrip({
+  days,
+  day,
+  now,
+  onRest,
+  onPick,
+  onLeave,
+}: DayStripProps) {
   const { t } = useTranslation();
-  const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
-    focusKey: 'sports-days',
+  const { ref, focusKey, hasFocusedChild } = useFocusable<object, HTMLDivElement>({
+    focusKey: DAYS_KEY,
     saveLastFocusedChild: false,
+    trackChildren: true,
     preferredChildFocusKey: dayKey(Math.max(0, days.indexOf(day))),
   });
+  useEffect(() => {
+    if (!hasFocusedChild) onLeave();
+  }, [hasFocusedChild, onLeave]);
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className={styles.days} role="tablist">
@@ -176,12 +190,31 @@ export function SportsScreen() {
     },
     [changeDay],
   );
+  // Only a rest on the strip opens a day: moving on into the rows keeps the day
+  // they belong to, the one still marked in the strip.
+  const onLeaveStrip = useCallback(() => window.clearTimeout(restTimer.current), []);
   useEffect(() => () => window.clearTimeout(restTimer.current), []);
 
   const onFocusRow = useCallback((key: string) => {
     setFocusedRow(key);
     if (canSlide()) slideTrack(trackRef.current, key);
   }, []);
+  // A row leaves the day when its last match ends. Like an empty row on Home, it
+  // hands its place to the row now there, or the one above at the end, and focus
+  // follows if it was in the row, rather than falling to the strip. Before the
+  // row's tiles unregister, while focus is still on one of them.
+  const drawnGroups = useRef(groups);
+  useLayoutEffect(() => {
+    const before = drawnGroups.current;
+    drawnGroups.current = groups;
+    if (focusedRow === undefined || groups.some((group) => rowKey(group) === focusedRow)) return;
+    const index = before.findIndex((group) => rowKey(group) === focusedRow);
+    const next = groups[Math.min(Math.max(0, index), groups.length - 1)];
+    const nextKey = next ? rowKey(next) : undefined;
+    const focused = focusedKey().indexOf(`${focusedRow}-tile-`) === 0;
+    setFocusedRow(nextKey);
+    if (focused) void setFocus(nextKey ?? DAYS_KEY);
+  }, [groups, focusedRow]);
   // Rows above the focused one can come and go as matches start and end.
   useLayoutEffect(() => {
     if (canSlide()) slideTrack(trackRef.current, focusedRow);
@@ -202,8 +235,10 @@ export function SportsScreen() {
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
           {groups.map((group, index) => (
+            // A new day's rows are new rows, even for a competition on both days:
+            // they start at their first tiles.
             <GroupRow
-              key={group.key}
+              key={`${day}|${group.key}`}
               group={group}
               near={Math.abs(index - focusedIndex) <= ROWS_AROUND}
               view={view}
@@ -227,7 +262,14 @@ export function SportsScreen() {
     <div className={styles.screen}>
       <div className={styles.header}>
         <h1 className={styles.title}>{t('rail.sports')}</h1>
-        <DayStrip days={days} day={day} now={view.now} onRest={onRest} onPick={changeDay} />
+        <DayStrip
+          days={days}
+          day={day}
+          now={view.now}
+          onRest={onRest}
+          onPick={changeDay}
+          onLeave={onLeaveStrip}
+        />
         {feed.failed.length > 0 && (
           <div className={styles.problem}>
             <p className={styles.problemText}>

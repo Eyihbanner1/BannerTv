@@ -6,6 +6,7 @@ import {
   estimateBitrate,
   type InstalledAddon,
   isLighter,
+  type ItemSource,
   type OrderOptions,
   orderStreams,
   playableCandidates,
@@ -130,7 +131,7 @@ function buildEntries(
   return entries;
 }
 
-function create(type: string, videoId: string, event?: EventPlay): StreamFinder {
+function create(type: string, videoId: string, sources?: readonly ItemSource[]): StreamFinder {
   let answers: ReadonlyArray<AddonAnswer<Stream[]>> = [];
   let unsubscribe: Array<() => void> = [];
   let started = false;
@@ -234,9 +235,7 @@ function create(type: string, videoId: string, event?: EventPlay): StreamFinder 
       started = true;
       dropped = false;
       // A sports event asks only the addons that listed it, once per source.
-      answers = event
-        ? addonClient.streamsFrom(itemSources(event.sources))
-        : addonClient.streams(type, videoId);
+      answers = sources ? addonClient.streamsFrom(sources) : addonClient.streams(type, videoId);
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
       // A lower limit after a stream kept buffering moves heavy streams down.
       unsubscribe.push(bandwidth.subscribe(refresh));
@@ -332,18 +331,32 @@ function create(type: string, videoId: string, event?: EventPlay): StreamFinder 
 const finders = new Map<string, { finder: StreamFinder; createdAt: number }>();
 
 /**
+ * A sports event's finder is keyed by the event and by each install and item
+ * it asks, as the collection has them now: an event that gains a source, or
+ * whose key passes to another install's copy when an addon is removed, gets a
+ * finder of its own. The addresses stay in this map, in memory: never logged
+ * or saved.
+ */
+function eventKey(event: EventPlay, sources: readonly ItemSource[]): string {
+  const asked = sources.map((s) => `${s.addon.transportUrl}\n${s.type}\n${s.id}`);
+  return `event:${event.key}\n${asked.join('\n')}`;
+}
+
+/**
  * The finder for one video, shared by Details (prefetch), the player and All
- * streams. A sports event has one finder for all its sources, keyed by the event.
+ * streams. A sports event has one finder for all its sources, keyed by the
+ * event and the installs it asks, as the collection has them now.
  */
 export function streamFinder(type: string, videoId: string, event?: EventPlay): StreamFinder {
-  const key = event ? `event:${event.key}` : `${type}:${videoId}`;
+  const sources = event ? itemSources(event.sources) : undefined;
+  const key = event && sources ? eventKey(event, sources) : `${type}:${videoId}`;
   const now = Date.now();
   const existing = finders.get(key);
   if (existing && now - existing.createdAt < FINDER_LIFETIME_MS) return existing.finder;
   existing?.finder.destroy();
   // The new finder goes to the end, so the map stays oldest first.
   finders.delete(key);
-  const finder = create(type, videoId, event);
+  const finder = create(type, videoId, sources);
   finders.set(key, { finder, createdAt: now });
   // Only a few videos are ever in play at once; drop the oldest.
   if (finders.size > 8) {

@@ -185,14 +185,12 @@ export function startSports(): Promise<void> {
     evidence.forEach((value, key) => loaded.set(key, value));
     evidence = loaded;
     void kickoffs.load();
-    let known = new Set<string>();
+    let before: readonly InstalledAddon[] = [];
     let wasReady = false;
     const onCollection = () => {
       const { addons, ready } = addonCollection.get();
-      const ids = new Set(addons.map((addon) => addon.manifest.id));
-      // Removing an addon removes what BannerTV kept about its matches (docs/PLAN.md, Store and privacy).
-      if (wasReady) known.forEach((id) => (ids.has(id) ? undefined : forgetAddon(id)));
-      known = ids;
+      if (wasReady) followCollection(before, addons);
+      before = addons;
       wasReady = ready;
       detect();
     };
@@ -200,6 +198,70 @@ export function startSports(): Promise<void> {
     onCollection();
   });
   return stored;
+}
+
+/**
+ * An addon id without a trailing settings hash, as the collection compares
+ * them: `org.example.0123456789ab` → `org.example`.
+ */
+function idStem(id: string): string {
+  return id.replace(/[.:|-][0-9a-f]{8,}$/i, '');
+}
+
+/**
+ * Removing an addon removes what BannerTV kept about its matches (docs/PLAN.md,
+ * Store and privacy). An addon set up again on its settings page takes its
+ * old place in the same change, and can come back with another id (a new
+ * settings hash): what was kept goes with it to the new id.
+ */
+function followCollection(before: readonly InstalledAddon[], now: readonly InstalledAddon[]): void {
+  const ids = new Set(now.map((addon) => addon.manifest.id));
+  const known = new Set(before.map((addon) => addon.manifest.id));
+  const arrived = now.filter((addon) => !known.has(addon.manifest.id));
+  const gone = new Set<string>();
+  for (const addon of before) {
+    const id = addon.manifest.id;
+    if (ids.has(id) || gone.has(id)) continue;
+    gone.add(id);
+    // Much as the collection tells an addon set up again: the same address, the same id
+    // before its settings hash, or the same name. Addresses are compared, never read.
+    const successor =
+      arrived.find((a) => a.transportUrl === addon.transportUrl) ??
+      arrived.find((a) => idStem(a.manifest.id) === idStem(id)) ??
+      arrived.find((a) => a.manifest.name === addon.manifest.name);
+    if (successor) moveAddon(id, successor.manifest.id);
+    else forgetAddon(id);
+  }
+}
+
+/** What was kept about an addon, under the id it came back with. */
+function moveAddon(from: string, to: string): void {
+  // The kick-off memory cannot move an addon's items yet, so they go.
+  kickoffs.forget(from);
+  const setting = settings[from];
+  if (setting) {
+    const next = { ...settings };
+    delete next[from];
+    if (!next[to]) next[to] = setting;
+    settings = next;
+    saveSettings();
+  }
+  // In the same order, so the oldest still go first when the list is full.
+  const moved = new Map<string, boolean>();
+  let changed = false;
+  evidence.forEach((value, key) => {
+    if (key.indexOf(`${from}\n`) !== 0) {
+      moved.set(key, value);
+      return;
+    }
+    changed = true;
+    const renamed = `${to}${key.slice(from.length)}`;
+    // What the new id has seen itself wins.
+    if (!evidence.has(renamed)) moved.set(renamed, value);
+  });
+  if (!changed) return;
+  evidence = moved;
+  saveEvidence();
 }
 
 function forgetAddon(id: string): void {
@@ -366,9 +428,10 @@ export function eventsFromItems(
   items: readonly MetaPreview[],
 ): SportEvent[] {
   if (!SPORTS_IN_BUILD) return [];
-  const entry = sportsState.get().catalogs.find((e) => e.addon === addon && e.catalog === catalog);
+  const { catalogs, searchLeaveOut } = sportsState.get();
+  const entry = catalogs.find((e) => e.addon === addon && e.catalog === catalog);
   const searched = catalogAccepts(catalog, ['search']);
-  if (!entry && !(searched && sportsState.get().searchLeaveOut?.(addon, catalog))) return [];
+  if (!entry && !(searched && searchLeaveOut?.(addon, catalog))) return [];
   const { addons } = addonCollection.get();
   const context: CatalogContext = {
     addonIndex: Math.max(0, addons.indexOf(addon)),
@@ -379,7 +442,12 @@ export function eventsFromItems(
     channels: entry?.view === 'channels',
   };
   if (entry?.sport) context.sport = entry.sport;
-  if (entry?.zone) context.zone = entry.zone;
+  // The zone belongs to the install: a search catalog, not a sports catalog
+  // itself, reads times as the addon's sports catalogs do.
+  const zone =
+    entry?.zone ??
+    catalogs.find((e) => e.addon.transportUrl === addon.transportUrl && e.zone)?.zone;
+  if (zone) context.zone = zone;
   const now = Date.now();
   const listings: Listing[] = [];
   for (const item of items) {

@@ -12,7 +12,7 @@ import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { back, type EventPlay, replace } from '../../app/router';
+import { back, type EventPlay, remembersPlace, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
@@ -64,7 +64,7 @@ interface PlayerScreenProps {
   chosen?: boolean;
   startAt?: number;
   lab?: boolean;
-  /** A sports event: its own sources only, and nothing saved to continue. */
+  /** A sports event: its own sources only, and no Continue Watching card. */
   event?: EventPlay;
 }
 
@@ -150,6 +150,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for
   // the Lab or a live broadcast. The card keeps the ids the progress is saved under.
+  // Never for sports either, replays included: the row would ask every addon
+  // with the id's prefix for its page, not the one that listed it.
   const playing = state.status === 'playing';
   const live = state.live;
   const recorded = useRef<string | null>(null);
@@ -188,6 +190,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!element) return;
     setVideo(element);
     const releaseProbing = holdProbing();
+    // A sports match saves nothing and never resumes; a replay keeps its place
+    // like any other video.
+    const remember = remembersPlace(props);
     const created = createPlaybackSession({
       video: element,
       type,
@@ -195,8 +200,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       videoId,
       finder,
       autoFailover: !props.chosen,
-      // Sports are not saved to continue: Continue Watching would ask other addons for them.
-      remember: !props.lab && !sportsEvent,
+      remember,
     });
     setSession(created);
     if (!props.lab) finder.start();
@@ -206,7 +210,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = props.startAt ?? (props.lab ? 0 : progress.resumeAt(videoId)) ?? 0;
+        const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose());
         if (cancelled) return;

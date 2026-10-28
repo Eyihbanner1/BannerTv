@@ -63,24 +63,27 @@
   color: var(--bt-text);
 }
 
+/* The kick-off takes all the width the sources leave it, so a long one
+   ("Tomorrow, about 20:00") keeps its time; only what is left over is cut. */
 .footer {
   position: absolute;
   left: 20px;
   right: 20px;
   bottom: 14px;
   height: 32px;
+  display: flex;
 }
 
 .when {
-  float: left;
-  max-width: 220px;
+  flex: 0 1 auto;
+  min-width: 0;
   font: var(--bt-text-label);
   line-height: 32px;
   color: var(--bt-accent);
 }
 
 .live {
-  float: left;
+  flex: none;
   padding: 0 12px;
   border-radius: 8px;
   background: #d61f45;
@@ -92,8 +95,10 @@
 }
 
 .sources {
-  float: right;
+  flex: none;
   max-width: 140px;
+  margin-left: auto;
+  padding-left: 16px;
   font: var(--bt-text-label);
   font-size: 20px;
   line-height: 32px;

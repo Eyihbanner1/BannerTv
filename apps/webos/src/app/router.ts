@@ -20,9 +20,30 @@ export type Section = (typeof SECTIONS)[number];
  * one request per source (docs/PLAN.md, Sports addons, Play and playback).
  */
 export interface EventPlay {
-  /** The event's key, which names its stream finder. */
+  /** The event's key, which with its sources' installs names its stream finder. */
   key: string;
   sources: SportEvent['sources'];
+  /**
+   * A replay or full match on demand, which keeps its place to resume like
+   * any other video. A match, live or still to come, saves nothing.
+   */
+  replay: boolean;
+}
+
+/** How the event page hands an event to the player and All streams. */
+export function eventPlay(event: Pick<SportEvent, 'key' | 'sources' | 'kind'>): EventPlay {
+  return { key: event.key, sources: event.sources, replay: event.kind === 'replay' };
+}
+
+/**
+ * Whether playback keeps its place to resume, and what it learns about
+ * addons and the connection. Never for the Lab's test streams, nor for a
+ * sports match, whose broadcast has no place to come back to; a sports
+ * replay does, like any other video (docs/PLAN.md, Play and playback).
+ */
+export function remembersPlace(route: { lab?: boolean; event?: EventPlay }): boolean {
+  if (route.lab) return false;
+  return !route.event || route.event.replay;
 }
 
 export type Route =
@@ -50,7 +71,10 @@ export type Route =
       startAt?: number;
       /** A Lab test stream: no addons are asked and nothing is remembered. */
       lab?: boolean;
-      /** A sports event: only its own sources are asked, and nothing is saved to continue. */
+      /**
+       * A sports event: only its own sources are asked, and nothing goes on
+       * Continue Watching. Only a replay keeps its place (see remembersPlace).
+       */
       event?: EventPlay;
     }
   /** Every stream for one video, for choosing by hand instead of auto-play. */
