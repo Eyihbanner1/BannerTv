@@ -11,9 +11,10 @@
  * - The catalog takes no genre or skip extras: a genre list would take over
  *   Cinemeta's genre rows on Home. Search is answered, so the films are found
  *   by name.
- * - One adaptive HLS stream per film plus an identical backup, which the
- *   player falls back to if the first stalls. The stream `name` is never shown
- *   in BannerTV, so the credit goes on the description's first line.
+ * - One adaptive HLS stream per film plus a backup, which the player falls
+ *   back to if the first stalls: the same files through a second master
+ *   address, so the player starts them afresh. The stream `name` is never
+ *   shown in BannerTV, so the credit goes on the description's first line.
  * - The ranker reads words in the description: no "TS", "HD" on its own,
  *   sizes or other words it would take for a quality fact.
  */
@@ -49,7 +50,12 @@ export const CATALOG_NAME = 'Blender open movies';
 /** Seconds, read by the app from the JSON body (it ignores HTTP caching). */
 const CACHE_HINTS = { cacheMaxAge: 21600, staleRevalidate: 604800, staleError: 2592000 };
 
-/** The subtitle check tracks prepare-media.mjs writes for every film (scripts/lib/captions.mjs). */
+/**
+ * The subtitle check tracks prepare-media.mjs writes for every film
+ * (scripts/lib/captions.mjs). The label says what they are in players that
+ * show one; BannerTV never turns them on by itself.
+ */
+export const CAPTION_LABEL = 'Subtitle check';
 export const CAPTION_TRACKS = [
   { lang: 'eng', file: 'eng.vtt' },
   { lang: 'kor', file: 'kor.vtt' },
@@ -108,9 +114,17 @@ export function preview(origin: string, film: Film) {
   };
 }
 
-/** The credit as one sentence, for Details and the credits page. */
+/** The licence deed's address as a viewer would type it: no scheme, no closing slash. */
+export function licenceAddress(film: Film): string {
+  return film.licence.url.replace(/^https:\/\//, '').replace(/\/$/, '');
+}
+
+/**
+ * The credit as one sentence, for Details and the credits page. CC BY asks for
+ * the licence's address with every showing, and Details is where a TV shows it.
+ */
 export function creditSentence(film: Film): string {
-  return `${film.credit}. Licensed under ${film.licence.name}; re-encoded for streaming by BannerTV.`;
+  return `${film.credit}. Licensed under ${film.licence.name}, ${licenceAddress(film)}; re-encoded for streaming by BannerTV.`;
 }
 
 export function meta(origin: string, film: Film) {
@@ -129,19 +143,35 @@ function fold(text: string): string {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+/** The words of a text, folded, without punctuation. */
+function words(text: string): string[] {
+  return fold(text)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
 /**
- * The catalog, or the films matching a search. Every word typed must appear
- * in the title, director, genres or year.
+ * Whether a film matches every word typed. The app searches as the viewer
+ * types and the Demo's row comes first, so a word matches the start of a word
+ * in the title ("bun" finds Big Buck Bunny) but only a whole word of the
+ * director, genres or year ("an" finds nothing, "animation" finds them all).
  */
+function matches(film: Film, typed: readonly string[]): boolean {
+  const title = words(film.name);
+  const other = new Set(words([...film.director, ...film.genres, String(film.year)].join(' ')));
+  return (
+    typed.length > 0 &&
+    typed.every((word) => other.has(word) || title.some((part) => part.startsWith(word)))
+  );
+}
+
+/** The catalog, or the films matching a search. */
 export function catalog(origin: string, extra: Record<string, string>) {
   let films = [...FILMS];
   const search = extra.search?.trim();
   if (search !== undefined) {
-    const words = fold(search).split(/\s+/).filter(Boolean);
-    films = films.filter((film) => {
-      const text = fold([film.name, ...film.director, ...film.genres, String(film.year)].join(' '));
-      return words.length > 0 && words.every((word) => text.includes(word));
-    });
+    const typed = words(search);
+    films = films.filter((film) => matches(film, typed));
   }
   const skip = Number(extra.skip ?? 0);
   if (Number.isFinite(skip) && skip > 0) films = films.slice(skip);
@@ -149,6 +179,8 @@ export function catalog(origin: string, extra: Record<string, string>) {
 }
 
 export const STREAM_NAME = `${ADDON_NAME}\nAuto · up to 1080p`;
+/** Ends the backup's first line. No word in it that the ranker reads as a quality fact. */
+export const BACKUP_MARK = ' · backup copy';
 
 function stream(origin: string, film: Film, backup: boolean) {
   const base = mediaBase(origin, film);
@@ -156,14 +188,15 @@ function stream(origin: string, film: Film, backup: boolean) {
     url: `${base}/master.m3u8${backup ? '?b=1' : ''}`,
     name: STREAM_NAME,
     description: [
-      `${film.name} (${film.year}) · ${film.licence.name} · © Blender Foundation`,
+      // The stream list shows only this line, so the backup says so here.
+      `${film.name} (${film.year}) · ${film.licence.name} · © Blender Foundation${backup ? BACKUP_MARK : ''}`,
       'Adaptive HLS · 1080p · H.264 · AAC 2.0',
-      ...(backup ? ['Backup copy'] : []),
     ].join('\n'),
     subtitles: CAPTION_TRACKS.map((track) => ({
       id: `${film.slug}-${track.lang}`,
       url: `${base}/subs/${track.file}`,
       lang: track.lang,
+      label: CAPTION_LABEL,
     })),
     behaviorHints: { bingeGroup: 'bannertv-demo-hls' },
   };

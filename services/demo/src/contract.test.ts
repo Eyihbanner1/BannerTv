@@ -133,6 +133,10 @@ describe('the demo, as the TV app reads it', () => {
       const { meta: detail } = parseMetaResponse({ meta: meta(ORIGIN, film) }, 'movie');
       expect(detail?.id).toBe(filmId(film));
       expect(detail?.description).toContain(film.licence.name);
+      // CC BY wants the licence's address wherever the film is shown.
+      expect(detail?.description).toContain(
+        film.licence.url.replace('https://', '').replace(/\/$/, ''),
+      );
       expect(detail?.description).toContain('Blender');
       expect(detail?.directors).toEqual(film.director);
       expect(detail?.videos).toEqual([]);
@@ -183,7 +187,9 @@ describe('the demo, as the TV app reads it', () => {
     expect(primary?.description?.split('\n')[0]).toBe(
       `${film.name} (${film.year}) · ${film.licence.name} · © Blender Foundation`,
     );
-    expect(backup?.description?.split('\n').at(-1)).toBe('Backup copy');
+    expect(backup?.description?.split('\n')[0]).toBe(
+      `${film.name} (${film.year}) · ${film.licence.name} · © Blender Foundation · backup copy`,
+    );
     expect(primary?.behaviorHints.bingeGroup).toBe('bannertv-demo-hls');
     expect(primary?.behaviorHints.notWebReady).toBe(false);
   });
@@ -197,6 +203,7 @@ describe('the demo, as the TV app reads it', () => {
       ]);
       for (const subtitle of primary?.subtitles ?? []) {
         expect(subtitle.url).toMatch(/^https:\/\/.+\/subs\/(eng|kor)\.vtt$/);
+        expect(subtitle.label).toBe('Subtitle check');
       }
     }
   });

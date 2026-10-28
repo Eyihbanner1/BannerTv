@@ -56,6 +56,21 @@ describe('demo addon routes', () => {
     expect(await ids('the matrix')).toEqual([]);
   });
 
+  it('matches title words as they are typed, but other words only whole', async () => {
+    const ids = async (search: string) => {
+      const response = await appCall('catalog', 'movie', 'blender', [['search', search]]);
+      const { metas } = await body<{ metas: { id: string }[] }>(response);
+      return metas.map((meta) => meta.id);
+    };
+    expect(await ids('bun')).toEqual(['bannertv:big-buck-bunny']);
+    expect(await ids('it')).toEqual(['bannertv:wing-it']);
+    expect(await ids('animation')).toEqual(FILMS.map(filmId));
+    // Typing another title must not bring up the Demo's row on the way.
+    for (const typing of ['an', 'ma', 'on', 'ring', 'ant', 'fan', 'ed', '200']) {
+      expect(await ids(typing)).toEqual([]);
+    }
+  });
+
   it('reads search text written with + for spaces', async () => {
     const { metas } = await body<{ metas: unknown[] }>(
       await call('/catalog/movie/blender/search=big+buck.json'),

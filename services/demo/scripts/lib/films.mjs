@@ -49,11 +49,12 @@ export function checkFilms(data) {
     if (!Array.isArray(film.cast) || !film.cast.every((name) => typeof name === 'string')) {
       fail(film, 'cast must be a list');
     }
-    // The hero clamps the description to three lines and Details to six.
+    // The hero clamps the description to three lines, about 200 characters at
+    // its width; the first-run journey in apps/webos/e2e measures the real thing.
     if (typeof film.description !== 'string' || film.description.length < 40) {
       fail(film, 'description is missing');
     }
-    if (film.description.length > 260) fail(film, 'description is too long for the hero');
+    if (film.description.length > 200) fail(film, 'description is too long for the hero');
     if (typeof film.credit !== 'string' || !film.credit.trim())
       fail(film, 'credit line is missing');
     const licence = film.licence;
