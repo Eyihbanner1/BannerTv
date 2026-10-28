@@ -119,20 +119,34 @@ export function progressPrinter(label, durationSeconds) {
   };
 }
 
+/**
+ * Whether an address answers, and its size, without downloading it. Some
+ * storage links (video.blender.org's signed redirects) refuse HEAD but answer
+ * GET, so a refused HEAD is followed by a GET of the first byte.
+ */
+async function reach(url) {
+  const head = await fetch(url, { method: 'HEAD', redirect: 'follow', headers: USER_AGENT });
+  if (head.ok) return { bytes: Number(head.headers.get('content-length')) || undefined };
+  const get = await fetch(url, {
+    redirect: 'follow',
+    headers: { ...USER_AGENT, Range: 'bytes=0-0' },
+  });
+  await get.body?.cancel();
+  if (!get.ok) return { failure: `${head.status}, then ${get.status} for a GET` };
+  // 206 says the whole size after the slash; a server that ignores Range sends it all as 200.
+  const total = /\/(\d+)$/.exec(get.headers.get('content-range') ?? '')?.[1];
+  const length = get.status === 200 ? get.headers.get('content-length') : total;
+  return { bytes: Number(length) || undefined };
+}
+
 /** The first address that answers, without downloading it. */
 export async function firstReachable(urls) {
   const tried = [];
   for (const url of urls) {
     try {
-      const response = await fetch(url, {
-        method: 'HEAD',
-        redirect: 'follow',
-        headers: USER_AGENT,
-      });
-      if (response.ok) {
-        return { url, bytes: Number(response.headers.get('content-length')) || undefined };
-      }
-      tried.push(`${url}: ${response.status}`);
+      const { bytes, failure } = await reach(url);
+      if (!failure) return { url, bytes };
+      tried.push(`${url}: ${failure}`);
     } catch (error) {
       tried.push(`${url}: ${error.message}`);
     }
