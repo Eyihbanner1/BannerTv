@@ -1,0 +1,21 @@
+# Copied into public/ by prepare-media.mjs. Cloudflare applies these to the
+# static files only; the Worker sets its own headers on the addon's JSON.
+# Each header is set by one rule only: overlapping rules would join values.
+
+# The TV app runs from file://, so hls.js and the subtitle loader need CORS.
+/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+
+# Segment paths carry the film's media version, so they never change.
+/*.ts
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.m3u8
+  Cache-Control: public, max-age=3600
+
+/*.vtt
+  Cache-Control: public, max-age=86400
+
+/art/*
+  Cache-Control: public, max-age=86400

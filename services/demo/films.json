@@ -1,0 +1,72 @@
+{
+  "films": [
+    {
+      "slug": "big-buck-bunny",
+      "name": "Big Buck Bunny",
+      "logoLines": ["Big Buck Bunny"],
+      "year": 2008,
+      "durationSeconds": 596,
+      "genres": ["Animation", "Comedy", "Family"],
+      "director": ["Sacha Goedegebure"],
+      "cast": [],
+      "description": "A big, gentle rabbit is enjoying a sunny morning in the forest when three mischievous rodents start bullying the local wildlife, and then him. Pushed too far, he cooks up an elaborate, cartoonish plan to teach them a lesson.",
+      "credit": "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org",
+      "licence": { "name": "CC BY 3.0", "url": "https://creativecommons.org/licenses/by/3.0/" },
+      "website": "https://peach.blender.org/",
+      "source": {
+        "fps": 24,
+        "urls": [
+          "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov",
+          "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov.zip",
+          "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_surround.avi"
+        ]
+      },
+      "media": 1,
+      "art": { "background": null, "poster": null, "posterFocus": 0.5 }
+    },
+    {
+      "slug": "spring",
+      "name": "Spring",
+      "logoLines": ["Spring"],
+      "year": 2019,
+      "durationSeconds": 464,
+      "genres": ["Animation", "Fantasy", "Family"],
+      "director": ["Andy Goralczyk"],
+      "cast": [],
+      "description": "A young shepherd girl and her loyal dog must face the ancient spirits of the mountains to keep the seasons turning. A wordless, painterly fable told through image and music.",
+      "credit": "© Blender Foundation | cloud.blender.org/spring",
+      "licence": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+      "website": "https://studio.blender.org/films/spring/",
+      "source": {
+        "fps": 24,
+        "urls": [
+          "https://video.blender.org/download/web-videos/3d95fb3d-c866-42c8-9db1-fe82f48ccb95-804.mp4"
+        ]
+      },
+      "media": 1,
+      "art": { "background": null, "poster": null, "posterFocus": 0.5 }
+    },
+    {
+      "slug": "wing-it",
+      "name": "Wing It!",
+      "logoLines": ["Wing It!"],
+      "year": 2023,
+      "durationSeconds": 238,
+      "genres": ["Animation", "Comedy", "Family"],
+      "director": ["Rik Schutte"],
+      "cast": [],
+      "description": "A fussy, by-the-book cat engineer has his careful space project upended by an over-eager dog who fancies himself a pilot. Before long the pair are hurtling skywards in a craft that isn't quite ready.",
+      "credit": "(CC) Blender Foundation | studio.blender.org",
+      "licence": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+      "website": "https://studio.blender.org/films/wing-it/",
+      "source": {
+        "fps": 24,
+        "urls": [
+          "https://video.blender.org/download/web-videos/bd0084a5-1d26-4816-ab5e-1bad9e2fb990-1080.mp4"
+        ]
+      },
+      "media": 1,
+      "art": { "background": null, "poster": null, "posterFocus": 0.5 }
+    }
+  ]
+}
