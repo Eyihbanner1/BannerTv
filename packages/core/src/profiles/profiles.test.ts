@@ -97,6 +97,12 @@ describe('PINs', () => {
     time += PIN_LOCK_MS;
     expect(guard.attempt(profile, '2468')).toBe('ok');
 
+    // A deleted profile's tries go with it.
+    guard.attempt(profile, '0000');
+    expect(saved).toEqual({ kid: { count: 1, lockedUntil: expect.any(Number) } });
+    guard.forget('kid');
+    expect(saved).toEqual({});
+
     const damaged = createPinGuard({
       saved: { kid: { count: 'x', lockedUntil: 1 }, other: null },
     });

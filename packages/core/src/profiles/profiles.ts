@@ -222,6 +222,10 @@ export function createPinGuard(options: PinGuardOptions = {}) {
       persist();
       return locked ? 'locked' : 'wrong';
     },
+    /** Forgets a deleted profile's wrong tries. */
+    forget(profileId: string): void {
+      if (misses.delete(profileId)) persist();
+    },
   };
 }
 
