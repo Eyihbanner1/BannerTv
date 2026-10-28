@@ -102,13 +102,18 @@ describe('createTraktAccount', () => {
   it('is loading until the saved sign-in is read, then signed out when there is none', async () => {
     const { account } = setup(fakeTrakt(() => ok({})));
     expect(account.get()).toEqual({ status: 'loading' });
+    const seen: unknown[] = [];
+    account.subscribe(() => seen.push(account.get()));
     await account.load();
     expect(account.get()).toEqual({ status: 'signedOut' });
+    // Screens hear that loading is over even though nothing was saved.
+    expect(seen).toEqual([{ status: 'signedOut' }]);
   });
 
   it('keeps the tokens from a sign-in, then asks Trakt for the username', async () => {
     const trakt = fakeTrakt(() => ok({}));
     const { account, storage } = setup(trakt);
+    await account.load();
     const seen: unknown[] = [];
     account.subscribe(() => seen.push(account.get()));
 
