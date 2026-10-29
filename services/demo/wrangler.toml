@@ -1,0 +1,31 @@
+# BannerTV Demo. Run `pnpm --filter @bannertv/demo media` first, then deploy
+# with `npx wrangler@4 deploy` from this folder. See docs/DEMO_ADDON.md.
+name = "demo"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+logpush = false
+
+# Films, artwork and captions. Requests for these files are served by
+# Cloudflare without running the Worker: free, unlimited, and outside the
+# account's 100,000 Worker requests a day that the pairing relay also uses.
+# Anything that isn't a file (the addon's JSON) runs the Worker.
+[assets]
+directory = "./public"
+not_found_handling = "none"
+
+# No request logs, traces or log pushes: the privacy policy promises none.
+# Leave out any [cache] block; Workers Cache would bill every file request.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[observability.issues]
+enabled = false

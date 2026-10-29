@@ -1,4 +1,4 @@
-import { type Cue, languageKey, type StreamEntry } from '@bannertv/core';
+import { BANNERTV_DEMO_ID, type Cue, languageKey, type StreamEntry } from '@bannertv/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
@@ -34,6 +34,15 @@ export interface Subtitles {
 
 const EMPTY: SubtitleListState = { options: [], pending: 0 };
 const noop = () => () => undefined;
+
+/**
+ * BannerTV Demo's subtitle tracks only check how subtitles look. They wait for
+ * the viewer to pick one, and picking one leaves the language other titles
+ * start with as it was.
+ */
+function isSubtitleCheck(entry: StreamEntry | null): boolean {
+  return entry?.addonId === BANNERTV_DEMO_ID;
+}
 
 function languageOf(
   choice: SubtitleChoice,
@@ -112,7 +121,7 @@ export function useSubtitles(
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
       const made = decided.current;
-      const wanted = preferences.get().subtitleLanguage;
+      const wanted = isSubtitleCheck(entry) ? null : preferences.get().subtitleLanguage;
       if (made?.entry === entry) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
@@ -234,7 +243,9 @@ export function useSubtitles(
         const option = options.find((o) => o.key === next.key);
         if (option) broken.current.delete(option.url);
       }
-      setPreference('subtitleLanguage', languageOf(next, options, tracks));
+      if (!isSubtitleCheck(entry)) {
+        setPreference('subtitleLanguage', languageOf(next, options, tracks));
+      }
     },
     setOffset,
   };

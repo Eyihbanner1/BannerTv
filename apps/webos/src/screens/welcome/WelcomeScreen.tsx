@@ -10,8 +10,9 @@ import styles from './WelcomeScreen.module.css';
 
 /**
  * First run: what BannerTV is, the notice the LG store asks for (BannerTV
- * hosts nothing; the user picks the addons), and a way into Home or straight
- * into adding an addon. Back here leaves the app, like Back on Home.
+ * hosts nothing beyond its Demo addon's Creative Commons films; the user picks
+ * the addons), and a way into Home or straight into adding an addon. Back here
+ * leaves the app, like Back on Home.
  */
 export function WelcomeScreen() {
   const { t } = useTranslation();

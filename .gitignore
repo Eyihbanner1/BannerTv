@@ -14,3 +14,8 @@ playwright-report/
 
 # Personal test media for the playback lab, see docs/TV_SETUP.md
 apps/webos/lab-sources.local.json
+
+# BannerTV Demo: built media (deployed, not committed), downloads and frame reviews
+services/demo/public/
+services/demo/.work/
+services/demo/review/
