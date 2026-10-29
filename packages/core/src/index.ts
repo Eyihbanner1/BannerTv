@@ -1,4 +1,11 @@
-export { buildBoard, type BoardRow, GENRE_PICKS, type RowStyle, slug } from './addons/board';
+export {
+  buildBoard,
+  type BoardRow,
+  type CatalogFilter,
+  GENRE_PICKS,
+  type RowStyle,
+  slug,
+} from './addons/board';
 export {
   arrangeBoard,
   createHomeLayout,
@@ -19,11 +26,13 @@ export {
   CATALOG_POLICY,
   type CatalogOptions,
   createAddonClient,
+  type ItemSource,
   META_POLICY,
   metahubAtSize,
   type MetahubSize,
   NotFoundError,
   PLAY_TIMEOUT_MS,
+  SOURCE_META_POLICY,
   STREAM_POLICY,
   type SubtitleHints,
   SUBTITLES_POLICY,
@@ -38,7 +47,13 @@ export {
   type InstalledAddon,
   type StoredAddon,
 } from './addons/collection';
-export { CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './addons/defaults';
+export {
+  BANNERTV_DEMO_ID,
+  BANNERTV_DEMO_URL,
+  CINEMETA_URL,
+  DEFAULT_ADDONS,
+  OPENSUBTITLES_V3_URL,
+} from './addons/defaults';
 export {
   type CatalogPager,
   createCatalogPager,
@@ -53,6 +68,7 @@ export {
   searchSources,
 } from './addons/sources';
 export { type FetchJson, type FetchJsonOptions, HttpError, type HttpErrorKind } from './http';
+export { createLane, DroppedError, type Lane } from './lane';
 export {
   createLibrary,
   type Library,
@@ -155,6 +171,7 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './sports';
 export { createStore } from './store';
 export { assessStream, SEVERE_WARNINGS } from './streams/assess';
 export { DEFAULT_MAX_BITRATE, estimateBitrate, isLighter, parseRuntime } from './streams/bitrate';
@@ -238,3 +255,4 @@ export {
   type TraktSend,
   type TraktTimers,
 } from './integrations/trakt/transport';
+export type { Timers } from './timers';

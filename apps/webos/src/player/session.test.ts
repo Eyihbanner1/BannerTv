@@ -121,6 +121,7 @@ interface SetupOptions {
   lighter?: StreamEntry[];
   autoFailover?: boolean;
   remember?: boolean;
+  continueRow?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -145,6 +146,7 @@ function setup(options: SetupOptions = {}) {
     finder,
     autoFailover: options.autoFailover ?? true,
     remember: options.remember,
+    continueRow: options.continueRow,
   });
   return { video, session, markFailed, lighter };
 }
@@ -629,6 +631,37 @@ describe('a stream that is not remembered', () => {
     expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
     expect(kept.progress).not.toHaveBeenCalled();
     expect(kept.sourceMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe('a sports replay', () => {
+  it('keeps its place, marked to stay off Continue Watching, as it plays and when it ends', async () => {
+    const { video, session } = setup({ continueRow: false });
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    session.saveProgress();
+    expect(kept.progress).toHaveBeenLastCalledWith({
+      metaId: 'tt1',
+      type: 'movie',
+      videoId: 'tt1',
+      position: 630,
+      duration: 7200,
+      continueRow: false,
+    });
+    video.fire('ended');
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 7200, continueRow: false }),
+    );
+  });
+
+  it('is the only video kept off the row', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 30);
+    session.destroy();
+    expect(kept.progress).toHaveBeenCalled();
+    for (const [update] of kept.progress.mock.calls)
+      expect(update).not.toHaveProperty('continueRow');
   });
 });
 

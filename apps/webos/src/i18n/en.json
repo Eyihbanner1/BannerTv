@@ -17,6 +17,7 @@
     "home": "Home",
     "search": "Search",
     "discover": "Discover",
+    "sports": "Sports",
     "library": "Library",
     "addons": "Addons",
     "settings": "Settings"
@@ -41,7 +42,9 @@
     "nextEpisodeNote": "Next: S{{season}}:E{{episode}}",
     "nextNote": "Next episode",
     "allHiddenLead": "Every Home row is hidden. Show them again in Settings, Home rows.",
-    "noKidsRowsLead": "None of the addons has family films or series yet. A grown-up can add one, such as Cinemeta."
+    "noKidsRowsLead": "None of the addons has family films or series yet. A grown-up can add one, such as Cinemeta.",
+    "sportsOnly": "Your sport is in Sports",
+    "sportsOnlyLead": "Your addons only list sport, which has its own place in the menu. Add an addon such as Cinemeta for films and series."
   },
   "search": {
     "label": "Search",
@@ -51,6 +54,42 @@
     "clearRecent": "Clear recent searches",
     "nothingFound": "Nothing found for “{{term}}”.",
     "noAddons": "None of your addons can search. Add one, such as Cinemeta, in Addons."
+  },
+  "sports": {
+    "title": "Sports",
+    "liveNow": "Live now",
+    "liveNowLabel": "live now",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "dayLabel": "{{weekday}} {{day}}",
+    "dayAt": "{{day}} {{time}}",
+    "dayAbout": "{{day}}, about {{time}}",
+    "about": "About {{time}}",
+    "live": "LIVE",
+    "liveSince": "Live now, since {{time}}",
+    "liveUnknown": "Live, start time unknown",
+    "soon": "Starting soon",
+    "soonAt": "Starting {{time}}",
+    "ended": "Ended",
+    "noTime": "Time not given",
+    "teams": "{{home}} v {{away}}",
+    "sources_one": "{{count}} source",
+    "sources_other": "{{count}} sources",
+    "liveCount": "{{title}} · {{live}} live of {{count}}",
+    "earlier": "Earlier today",
+    "replays": "Replays",
+    "liveUnknownRow": "Live, time unknown",
+    "liveRow": "Live sport",
+    "loading": "Asking your sports addons",
+    "loadingMore": "Asking for more",
+    "nothingLive": "Nothing is live right now. Today shows what is on later.",
+    "nothingOnDay": "Your sports addons list nothing for this day.",
+    "failed": "{{names}} didn't answer.",
+    "more": "Your sports addons may list more than BannerTV shows here.",
+    "listedBy": "Listed by {{names}}",
+    "addonGone": "The addon that listed this has been removed.",
+    "notInLists": "Nothing in your sports addons' lists matches. They can be asked directly.",
+    "searchAddons": "Search sports addons"
   },
   "discover": {
     "type": "Type",
@@ -120,6 +159,14 @@
       "not-an-addon": "That address answered, but not with an addon.",
       "different-addon": "That link is for a different addon. Add it with Add an addon instead.",
       "other": "That addon couldn't be added."
+    },
+    "sports": "Sports",
+    "sportsLabel": "Show {{name}} in Sports: {{value}}",
+    "sportsTitle": "Show {{name}} in Sports",
+    "sportsValue": {
+      "auto": "Automatic",
+      "yes": "Yes",
+      "no": "No"
     }
   },
   "addonError": {
@@ -333,9 +380,9 @@
   "welcome": {
     "title": "Welcome to BannerTV",
     "lead": "Films and series from the addons you choose, in one place and made for your remote.",
-    "ready": "Cinemeta is already added, so Home is ready to browse. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
+    "ready": "Cinemeta and BannerTV Demo are already added, so Home is ready to browse, with a few free films to play. You can add more addons at any time in Addons, by typing an address or sending it from your phone.",
     "noticeTitle": "Good to know",
-    "notice": "BannerTV doesn't host or provide any films or series. Everything comes from the addons you add, and you're responsible for the addons you choose.",
+    "notice": "Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV doesn't host or provide any films or series. Everything else comes from the addons you add, and you're responsible for the addons you choose.",
     "start": "Start browsing",
     "addAddon": "Add an addon"
   },

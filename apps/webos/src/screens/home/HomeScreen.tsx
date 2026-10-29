@@ -3,6 +3,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
   memo,
+  type ReactElement,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -23,6 +24,7 @@ import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { useHomeBoard } from '../../data/home-board';
 import { isKidsProfile } from '../../data/profiles';
+import { noteFirstPage, sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { activityGap } from '../../navigation/activity';
 import { focusedKey } from '../../navigation/spatial';
@@ -32,10 +34,13 @@ import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
 import { cancelHero, heroItem, showInHero } from './hero-item';
+import { LIVE_SPORT_ROW_KEY, LiveSportRow } from './LiveSportRow';
 import styles from './HomeScreen.module.css';
 
 /** Rows show the first titles of a catalog; Discover pages through the rest. */
 const MAX_ROW_ITEMS = 40;
+/** The Live sport row is the third row on Home, counting Continue Watching. */
+const LIVE_SPORT_PLACE = 2;
 /** Rows further than this from the focused one are drawn as empty boxes and not fetched yet. */
 const ROWS_AROUND = tuning.rowsAround;
 /** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
@@ -62,6 +67,8 @@ interface HomeRowProps {
   near: boolean;
   /** The row's catalog came back empty; `focused` if focus was in it. */
   onEmpty: (key: string, focused: boolean) => void;
+  /** The row's addon failed, or answered again after failing. */
+  onFailed: (key: string, failed: boolean) => void;
   onItemFocus: (rowKey: string, item: MetaPreview | undefined, element: HTMLElement) => void;
 }
 
@@ -78,7 +85,14 @@ function openCatalog(row: BoardRow): void {
 
 // Memoised with stable handlers: moving between rows redraws only the rows
 // that come into or leave the drawn window, not every row on Home.
-const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }: HomeRowProps) {
+const HomeRow = memo(function HomeRow({
+  row,
+  first,
+  near,
+  onEmpty,
+  onFailed,
+  onItemFocus,
+}: HomeRowProps) {
   const { t } = useTranslation();
   const query = useMemo(
     () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
@@ -94,6 +108,7 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
     return allowed.slice(0, MAX_ROW_ITEMS);
   }, [state.data]);
   const empty = state.status === 'success' && items !== null && items.length === 0;
+  const failed = state.status === 'error';
   const onRetry = useCallback(() => query.retry(), [query]);
   const onRowItemFocus = useCallback(
     (item: MetaPreview | undefined, element: HTMLElement) => onItemFocus(row.key, item, element),
@@ -106,9 +121,14 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
     if (!empty) return;
     onEmpty(row.key, focusedKey().indexOf(`${rowFocusKey(row)}-tile-`) === 0);
   }, [empty, onEmpty, row]);
+  useEffect(() => onFailed(row.key, failed), [failed, onFailed, row.key]);
   useEffect(() => {
     if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
   }, [first, items]);
+  // What a first page looked like settles whether a catalog is sport (data/sports.ts).
+  useEffect(() => {
+    if (state.data && row.extra.length === 0) noteFirstPage(row.addon, row.catalog, state.data);
+  }, [state.data, row]);
 
   const title = row.name;
   const tag = typeLabel(t, row.type);
@@ -137,11 +157,22 @@ const HomeRow = memo(function HomeRow({ row, first, near, onEmpty, onItemFocus }
 export function HomeScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  // The profile's rows: its order and hidden rows from Settings, or Family rows for kids.
-  const arranged = useHomeBoard(collection.addons);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  const ready = collection.ready && sports.ready;
+  // A kids profile has no Sports, so no Live sport row either.
+  const sportShown = sports.shown && !isKidsProfile();
+  // The profile's rows: its order and hidden rows from Settings, or Family rows
+  // for kids. Sports catalogs leave the board: the Live sport row stands in for
+  // them. The board waits for sport to be settled too, so a sports catalog is
+  // never drawn, or fetched, for the moment before it is known to be one.
+  const arranged = useHomeBoard(collection.addons, ready, sports.homeLeaveOut);
   const board = arranged ?? NO_ROWS;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
+  // The hero starts on the first row whose addon answered: on a new TV whose
+  // first addon is down, Cinemeta's row below fills it.
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const heroIndex = rows.findIndex((row) => !failed.has(row.key));
   // Home opens on its first row: it only mounts when the section is opened,
   // and Back from a screen on top of it finds it still mounted.
   const [focusedRow, setFocusedRow] = useState<string>();
@@ -158,10 +189,17 @@ export function HomeScreen() {
     : rows.length > 0
       ? rowFocusKey(rows[0]!)
       : undefined;
-  const focusedIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.key === focusedRow),
-  );
+  // The Live sport row sits before the catalog row at this index, while sport is installed.
+  const liveAt = sportShown
+    ? Math.max(0, Math.min(LIVE_SPORT_PLACE - (continuing ? 1 : 0), rows.length))
+    : -1;
+  const focusedIndex =
+    focusedRow === LIVE_SPORT_ROW_KEY
+      ? liveAt
+      : Math.max(
+          0,
+          rows.findIndex((row) => row.key === focusedRow),
+        );
   // Rows coming into the drawn window mount after the focus move has painted,
   // in a render React can interrupt, so a press rarely waits on a new row. The
   // rows next to focus are drawn at once, so the next press has a row to go to.
@@ -171,7 +209,7 @@ export function HomeScreen() {
   // A title can leave the row while the player is on top, so focus falls back.
   // A tile the pointer moved onto while Home waited for that keeps focus.
   // With no rows at all, the rail takes focus, so the remote still works.
-  const focusReady = collection.ready && arranged !== null && continueItems !== null;
+  const focusReady = ready && arranged !== null && continueItems !== null;
   useScreenFocus(firstRowKey ?? RAIL_FOCUS_KEY, focusReady, true, pointedAt);
 
   // The hero starts on the first title focus will land on.
@@ -200,10 +238,42 @@ export function HomeScreen() {
   // rows above it disappear or Continue Watching comes or goes, and on return,
   // so Home comes back as it was. A first focus on a row still loading has not
   // slid anything yet, so the row holding focus counts first.
+  const drawnRows = useRef(rows);
   useLayoutEffect(() => {
+    const before = drawnRows.current;
+    drawnRows.current = rows;
+    const onHome = (rowKey: string) =>
+      rowKey === LIVE_SPORT_ROW_KEY ||
+      (rowKey === CONTINUE_ROW_KEY && continuing) ||
+      rows.some((row) => row.key === rowKey);
+    // The row now in the place of one that has left, as for an empty row.
+    const inPlaceOf = (rowKey: string) => {
+      const index = before.findIndex((row) => row.key === rowKey);
+      if (index === -1) return undefined;
+      return (
+        rows[Math.min(index, rows.length - 1)]?.key ?? (continuing ? CONTINUE_ROW_KEY : undefined)
+      );
+    };
     const key = focusedKey();
     const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
-    if (tile > 0 && canSlide()) slideRow.current = key.slice('home-'.length, tile);
+    const focused = tile > 0 ? key.slice('home-'.length, tile) : undefined;
+    if (focused !== undefined && onHome(focused)) {
+      if (canSlide()) slideRow.current = focused;
+    } else if (focused !== undefined && !emptyRows.has(focused)) {
+      // The row left the board under focus, once its first page showed it is
+      // sport. Before its tiles unregister, while focus is still on one of them.
+      // (A row that turned out empty has handed its place on already.)
+      const next = inPlaceOf(focused);
+      if (next) {
+        slideRow.current = next;
+        setFocusedRow(next);
+        void setFocus(`home-${next}`);
+      }
+    }
+    // The same for the row the view was on while focus was elsewhere, in the rail.
+    if (slideRow.current && !onHome(slideRow.current)) {
+      slideRow.current = inPlaceOf(slideRow.current);
+    }
     slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, [rows, continuing]);
 
@@ -243,6 +313,16 @@ export function HomeScreen() {
     if (focused) void setFocus(`home-${next}`);
   }, []);
 
+  const onFailed = useCallback((key: string, now: boolean) => {
+    setFailed((keys) => {
+      if (keys.has(key) === now) return keys;
+      const next = new Set(keys);
+      if (now) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
   // Rows that are loading or failed report focus too, so the rows under them
   // are drawn and Down has somewhere to go. Only titles change the hero.
   const onItemFocus = useCallback((rowKey: string, item: MetaPreview | undefined) => {
@@ -262,23 +342,77 @@ export function HomeScreen() {
     showInHero(item, activityGap() < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS);
   }, []);
 
-  if (collection.ready && arranged !== null && rows.length === 0 && !continuing) {
-    // Rows can be missing because the profile hid them all, or because no
-    // catalog has family titles for a kids profile, as well as for want of addons.
-    const why = isKidsProfile()
-      ? 'home.noKidsRowsLead'
-      : board.length > 0 || buildBoard(collection.addons).length === 0
-        ? 'home.noAddonsLead'
-        : 'home.allHiddenLead';
+  // The Live sport row comes and goes by itself, as matches start and end. When
+  // nothing is live any more, focus in it moves to the row that takes its place,
+  // as for an empty catalog row. Either way the rows under it have moved, so the
+  // view goes back to the row it was on.
+  const latestLiveAt = useRef(liveAt);
+  useLayoutEffect(() => {
+    latestLiveAt.current = liveAt;
+  });
+  const onLiveShown = useCallback((shown: boolean, focused: boolean) => {
+    if (!shown) {
+      const list = latestRows.current;
+      const at = latestLiveAt.current;
+      const next =
+        list[at]?.key ??
+        list[at - 1]?.key ??
+        (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
+      if (slideRow.current === LIVE_SPORT_ROW_KEY) slideRow.current = next;
+      setFocusedRow((row) => (row === LIVE_SPORT_ROW_KEY ? next : row));
+      if (focused && next) void setFocus(`home-${next}`);
+    }
+    slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
+  }, []);
+
+  if (ready && arranged !== null && rows.length === 0 && !continuing) {
+    // Rows can be missing because the profile hid them all, because no catalog
+    // has family titles for a kids profile, or because the addons only list
+    // sport, which has its own screen, as well as for want of addons.
+    const allHidden =
+      board.length === 0 && buildBoard(collection.addons, sports.homeLeaveOut).length > 0;
+    const [title, lead] = isKidsProfile()
+      ? ['home.noAddons', 'home.noKidsRowsLead']
+      : allHidden
+        ? ['home.noAddons', 'home.allHiddenLead']
+        : sportShown
+          ? ['home.sportsOnly', 'home.sportsOnlyLead']
+          : ['home.noAddons', 'home.noAddonsLead'];
     return (
       <div className={styles.home}>
         <div className={styles.empty}>
-          <h1 className={styles.emptyTitle}>{t('home.noAddons')}</h1>
-          <p className={styles.emptyLead}>{t(why)}</p>
+          <h1 className={styles.emptyTitle}>{t(title)}</h1>
+          <p className={styles.emptyLead}>{t(lead)}</p>
         </div>
       </div>
     );
   }
+
+  // One flat, keyed list, so the Live sport row moving never remounts a catalog row.
+  const catalogRows: ReactElement[] = [];
+  const liveRow = (
+    <LiveSportRow
+      key={LIVE_SPORT_ROW_KEY}
+      near={Math.abs(liveAt - focusedIndex) <= 1 || Math.abs(liveAt - nearIndex) <= ROWS_AROUND}
+      onItemFocus={onItemFocus}
+      onShown={onLiveShown}
+    />
+  );
+  rows.forEach((row, index) => {
+    if (index === liveAt) catalogRows.push(liveRow);
+    catalogRows.push(
+      <HomeRow
+        key={row.key}
+        row={row}
+        first={continueItems !== null && !continuing && index === heroIndex}
+        near={Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND}
+        onEmpty={onEmpty}
+        onFailed={onFailed}
+        onItemFocus={onItemFocus}
+      />,
+    );
+  });
+  if (liveAt === rows.length) catalogRows.push(liveRow);
 
   return (
     <div className={styles.home}>
@@ -286,18 +420,7 @@ export function HomeScreen() {
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
           {continuing && <ContinueRow items={continueItems} onItemFocus={onItemFocus} />}
-          {rows.map((row, index) => (
-            <HomeRow
-              key={row.key}
-              row={row}
-              first={continueItems !== null && !continuing && index === 0}
-              near={
-                Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
-              }
-              onEmpty={onEmpty}
-              onItemFocus={onItemFocus}
-            />
-          ))}
+          {catalogRows}
         </div>
       </div>
     </div>

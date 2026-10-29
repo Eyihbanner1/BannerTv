@@ -16,6 +16,7 @@ import { Button } from '../../components/Button';
 import { addonCollection } from '../../data/addons';
 import { typeLabel } from '../../data/describe';
 import { homeLayout } from '../../data/library';
+import { sportsState } from '../../data/sports';
 import { canSlide } from '../../platform/input-mode';
 import screen from '../Screen.module.css';
 import styles from './HomeRowsScreen.module.css';
@@ -26,22 +27,29 @@ const OVERSCAN = 2;
 
 // Board keys are unique, and stay put while rows are moved and hidden.
 const lineKey = (row: BoardRow) => `home-rows-${row.key}`;
+const NO_ROWS: readonly BoardRow[] = [];
 
 /**
  * Settings > Home rows: every row Home can show, in its order, each with
  * Up, Down, and Hide or Show. Kept per profile. Rows from addons added later
- * join at the bottom.
+ * join at the bottom. Sports catalogs are on the Sports screen, not Home, so
+ * they are not listed.
  */
 export function HomeRowsScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const layout = useSyncExternalStore(homeLayout.subscribe, homeLayout.get);
-  const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  const ready = collection.ready && sports.ready;
+  const board = useMemo(
+    () => (ready ? buildBoard(collection.addons, sports.homeLeaveOut) : NO_ROWS),
+    [ready, collection.addons, sports.homeLeaveOut],
+  );
   const ids = useMemo(() => rowIdentities(board), [board]);
   const rows = useMemo(() => orderedRows(board, layout), [board, layout]);
   const hidden = useMemo(() => hiddenRowIds(board, layout), [board, layout]);
   const [focused, setFocused] = useState(0);
-  useScreenFocus(rows.length > 0 ? `${lineKey(rows[0]!)}-up` : undefined, collection.ready);
+  useScreenFocus(rows.length > 0 ? `${lineKey(rows[0]!)}-up` : undefined, ready);
 
   // A moved line is drawn in its new place, which drops DOM focus: give it
   // back, unless focus has gone elsewhere or the screen is no longer shown.
@@ -124,7 +132,7 @@ export function HomeRowsScreen() {
     <div className={screen.screen}>
       <h1 className={screen.title}>{t('homeRows.title')}</h1>
       <p className={screen.lead}>{t('homeRows.lead')}</p>
-      {collection.ready && rows.length === 0 ? (
+      {ready && rows.length === 0 ? (
         <p className={screen.muted}>{t('homeRows.none')}</p>
       ) : (
         <div className={styles.list}>

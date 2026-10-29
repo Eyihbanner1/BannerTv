@@ -2,7 +2,7 @@
 
 A media center for LG webOS TVs that plays content from Stremio-compatible addons, built for the LG remote and Magic Remote.
 
-BannerTV hosts no content. Users add addon URLs, and BannerTV browses, resolves and plays what those addons return.
+BannerTV hosts no content of its own, apart from the BannerTV Demo addon (`services/demo`): three Creative Commons films from the Blender Foundation, preinstalled so a new TV has something to play. Users add addon URLs, and BannerTV browses, resolves and plays what those addons return.
 
 ## Status
 

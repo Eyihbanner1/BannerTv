@@ -7,3 +7,7 @@ playwright-report/
 brand/
 # Markdown is written by hand, and docs/PLAN.md is exported from the plan doc.
 *.md
+
+# Captured exactly as the addons sent them, and the generated matcher data.
+packages/core/src/sports/fixtures/
+packages/core/src/sports/data/

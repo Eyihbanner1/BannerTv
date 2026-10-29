@@ -28,11 +28,18 @@ export interface ProgressEntry {
   /** Milliseconds since 1970. */
   updatedAt: number;
   watched: boolean;
+  /**
+   * False for a video that keeps its place to resume but never goes on
+   * Continue Watching, such as a sports replay: only the addon that listed
+   * it may be asked for its page and streams, and the row would ask others.
+   * Left out for every other video.
+   */
+  continueRow?: false;
 }
 
 export type ProgressUpdate = Pick<
   ProgressEntry,
-  'metaId' | 'type' | 'videoId' | 'position' | 'duration'
+  'metaId' | 'type' | 'videoId' | 'position' | 'duration' | 'continueRow'
 >;
 
 export interface ProgressStore {
@@ -90,14 +97,14 @@ function isId(value: unknown): value is string {
 /** A saved entry, or undefined when any field is missing or of the wrong kind. */
 function readEntry(value: unknown): ProgressEntry | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { metaId, type, videoId, position, duration, updatedAt, watched } = value as Record<
-    string,
-    unknown
-  >;
+  const { metaId, type, videoId, position, duration, updatedAt, watched, continueRow } =
+    value as Record<string, unknown>;
   if (!isId(metaId) || !isId(type) || !isId(videoId)) return undefined;
   if (!isAmount(position) || !isAmount(duration) || !isAmount(updatedAt)) return undefined;
   if (typeof watched !== 'boolean') return undefined;
-  return { metaId, type, videoId, position, duration, updatedAt, watched };
+  const entry: ProgressEntry = { metaId, type, videoId, position, duration, updatedAt, watched };
+  if (continueRow === false) entry.continueRow = false;
+  return entry;
 }
 
 /** Chromium 68 does not sort stably, so equal times keep their order in `entries` by hand. */
@@ -248,6 +255,8 @@ export function createProgressStore(options: {
         updatedAt: now(),
         watched: reachedEnd || entries.get(update.videoId)?.watched === true,
       };
+      // Each record says it again: the same video played from elsewhere can go on the row.
+      if (update.continueRow === false) entry.continueRow = false;
       put(entry);
       trim();
       save();

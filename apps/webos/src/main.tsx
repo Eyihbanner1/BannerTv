@@ -9,6 +9,7 @@ import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
+import { startSports } from './data/sports';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
@@ -47,6 +48,7 @@ function start() {
   startLibraryData();
   checkServiceStatus();
   startTrakt();
+  void startSports();
 
   createRoot(root).render(
     <StrictMode>

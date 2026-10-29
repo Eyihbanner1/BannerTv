@@ -48,6 +48,13 @@ export const SUBTITLES_POLICY: CachePolicy = {
   errorFor: 0,
 };
 
+/** A sports item's own meta changes as the match goes on: a few minutes, this launch only. */
+export const SOURCE_META_POLICY: CachePolicy = {
+  freshFor: 5 * MINUTE,
+  revalidateFor: 60 * MINUTE,
+  errorFor: 0,
+};
+
 const METAHUB = 'https://images.metahub.space';
 
 export type MetahubSize = 'small' | 'medium' | 'large';
@@ -94,6 +101,21 @@ export interface CatalogOptions {
    * every term typed would otherwise push Home's rows out of storage.
    */
   persist?: boolean;
+  /** How long the response lasts when the addon sends no hints; CATALOG_POLICY by default. */
+  policy?: CachePolicy;
+  /**
+   * A narrower limit to wait behind, such as the sports lane. A request made
+   * through a lane is cached apart from the same request made without one,
+   * so its policy and limit always apply.
+   */
+  lane?: Limiter;
+}
+
+/** One item as one addon listed it, for requests that must go to that addon only. */
+export interface ItemSource {
+  addon: InstalledAddon;
+  type: ContentType;
+  id: string;
 }
 
 /** One addon's answer to a fan-out request. */
@@ -121,10 +143,21 @@ export interface AddonClient {
   /** Asks addons that declare meta for this type and ID, in priority order, until one knows it. */
   meta(type: ContentType, id: string): Query<MetaDetail>;
   /**
+   * The meta of an item from the addon that listed it, and no other: sports
+   * ids can share a prefix across addons. Kept for this launch only, and
+   * apart from the same request made through a lane.
+   */
+  metaFrom(source: ItemSource, options?: { lane?: Limiter }): Query<MetaDetail>;
+  /**
    * One query per addon that declares streams for this type and video ID, in
    * priority order. They all run at once, so the picker fills as they answer.
    */
   streams(type: ContentType, videoId: string): Array<AddonAnswer<Stream[]>>;
+  /**
+   * One query per distinct source, each asking only the addon that listed
+   * it, for a sports event merged from several addons and catalogs.
+   */
+  streamsFrom(sources: readonly ItemSource[]): Array<AddonAnswer<Stream[]>>;
   /** The same for subtitles. */
   subtitles(
     type: ContentType,
@@ -160,15 +193,27 @@ export function createAddonClient(options: {
   const get = (url: string) => limiter.run(() => fetchJson(url, { timeoutMs: BROWSE_TIMEOUT_MS }));
   const getForPlay = (url: string) =>
     limiter.run(() => fetchJson(url, { timeoutMs: PLAY_TIMEOUT_MS }));
+  const streamQuery = (url: string) =>
+    queries.query(url, {
+      policy: STREAM_POLICY,
+      persist: false,
+      fetch: async () => {
+        const response = parseStreamResponse(await getForPlay(url));
+        // The addon's own cache hints are ignored: links can expire long before them.
+        return { value: response.streams, hints: {} };
+      },
+    });
 
   return {
     catalog(addon, type, catalogId, extra = [], options = {}) {
       const url = resourceUrl(addon.transportUrl, 'catalog', type, catalogId, extra);
-      return queries.query(url, {
-        policy: CATALOG_POLICY,
+      const lane = options.lane;
+      return queries.query(lane ? `lane:${url}` : url, {
+        policy: options.policy ?? CATALOG_POLICY,
         persist: options.persist !== false,
         fetch: async () => {
-          const response = parseCatalogResponse(await get(url), type);
+          const json = lane ? await lane.run(() => get(url)) : await get(url);
+          const response = parseCatalogResponse(json, type);
           return { value: response.metas.map(withArtwork), hints: response.cache };
         },
       });
@@ -199,24 +244,42 @@ export function createAddonClient(options: {
       });
     },
 
+    metaFrom(source, options = {}) {
+      const url = resourceUrl(source.addon.transportUrl, 'meta', source.type, source.id);
+      const lane = options.lane;
+      // Apart from the same request made without the lane, as for catalogs: the event
+      // page's own request must not wait in the lane, nor fail when the lane drops.
+      return queries.query(lane ? `lane:from:${url}` : `from:${url}`, {
+        policy: SOURCE_META_POLICY,
+        persist: false,
+        fetch: async () => {
+          const json = lane ? await lane.run(() => get(url)) : await get(url);
+          const response = parseMetaResponse(json, source.type);
+          if (!response.meta) throw new NotFoundError();
+          return { value: withArtwork(response.meta), hints: response.cache };
+        },
+      });
+    },
+
+    streamsFrom(sources) {
+      const seen = new Set<string>();
+      const answers: Array<AddonAnswer<Stream[]>> = [];
+      for (const source of sources) {
+        const url = resourceUrl(source.addon.transportUrl, 'stream', source.type, source.id);
+        if (seen.has(url)) continue;
+        seen.add(url);
+        answers.push({ addon: source.addon, query: streamQuery(url) });
+      }
+      return answers;
+    },
+
     streams(type, videoId) {
       return usable()
         .filter((addon) => supportsResource(addon.manifest, 'stream', type, videoId))
-        .map((addon) => {
-          const url = resourceUrl(addon.transportUrl, 'stream', type, videoId);
-          return {
-            addon,
-            query: queries.query(url, {
-              policy: STREAM_POLICY,
-              persist: false,
-              fetch: async () => {
-                const response = parseStreamResponse(await getForPlay(url));
-                // The addon's own cache hints are ignored: links can expire long before them.
-                return { value: response.streams, hints: {} };
-              },
-            }),
-          };
-        });
+        .map((addon) => ({
+          addon,
+          query: streamQuery(resourceUrl(addon.transportUrl, 'stream', type, videoId)),
+        }));
     },
 
     subtitles(type, videoId, hints = {}) {

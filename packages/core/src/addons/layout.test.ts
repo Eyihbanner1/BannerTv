@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { memoryKeyValueStore } from '../storage';
 import { buildBoard } from './board';
 import { type InstalledAddon, installIdOf } from './collection';
-import { DEFAULT_ADDONS } from './defaults';
+import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from './defaults';
 import {
   arrangeBoard,
   createHomeLayout,
@@ -21,7 +21,10 @@ function installed(manifest: unknown, transportUrl: string): InstalledAddon {
   return { transportUrl, manifest: parseManifest(manifest), official: false, fetchedAt: 0 };
 }
 
-const cinemeta = DEFAULT_ADDONS.map((a) => installed(a.manifest, a.transportUrl));
+// Cinemeta and OpenSubtitles v3, without BannerTV Demo.
+const cinemeta = DEFAULT_ADDONS.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL).map((a) =>
+  installed(a.manifest, a.transportUrl),
+);
 const shorts = installed(
   {
     id: 'com.example.shorts',

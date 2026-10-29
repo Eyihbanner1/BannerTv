@@ -1,7 +1,7 @@
 import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import type { InstalledAddon } from '../addons/collection';
-import { DEFAULT_ADDONS } from '../addons/defaults';
+import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from '../addons/defaults';
 import { discoverSources, searchSources } from '../addons/sources';
 import {
   buildKidsBoard,
@@ -20,7 +20,10 @@ function installed(
   return { transportUrl, manifest: parseManifest(manifest), official: false, fetchedAt: 0 };
 }
 
-const defaults = DEFAULT_ADDONS.map((a) => installed(a.manifest, a.transportUrl));
+// Cinemeta and OpenSubtitles v3, without BannerTV Demo.
+const defaults = DEFAULT_ADDONS.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL).map((a) =>
+  installed(a.manifest, a.transportUrl),
+);
 
 const adult = installed(
   {

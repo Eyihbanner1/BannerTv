@@ -118,6 +118,33 @@ describe('createProgressStore', () => {
     expect(rewatch.position).toBe(40);
   });
 
+  it('keeps a video off Continue Watching while it is recorded so, across launches too', async () => {
+    const storage = memoryKeyValueStore();
+    const progress = createProgressStore({ storage, now: () => 1000 });
+    await progress.load();
+    progress.record({ ...movie(600), continueRow: false });
+    // Its place is kept to resume all the same.
+    expect(progress.get('tt1')).toMatchObject({ position: 600, continueRow: false });
+    expect(progress.resumeAt('tt1')).toBe(600);
+    await flush();
+
+    const relaunched = createProgressStore({ storage });
+    await relaunched.load();
+    expect(relaunched.get('tt1')).toEqual({
+      metaId: 'tt1',
+      type: 'movie',
+      videoId: 'tt1',
+      position: 600,
+      duration: 6000,
+      updatedAt: 1000,
+      watched: false,
+      continueRow: false,
+    });
+    // Played from elsewhere since, it can go on the row.
+    relaunched.record(movie(700));
+    expect(relaunched.get('tt1')).not.toHaveProperty('continueRow');
+  });
+
   it('never marks a video watched while its duration is unknown', async () => {
     const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => 0 });
     await progress.load();
@@ -363,6 +390,20 @@ describe('createProgressStore', () => {
       const progress = createProgressStore({ storage });
       await progress.load();
       expect(progress.forMeta('tt1')).toEqual([good]);
+    });
+
+    it('reads only false as keeping a video off Continue Watching', async () => {
+      const storage = memoryKeyValueStore();
+      await storage.set('progress', [
+        saved({ videoId: 'a', continueRow: true as unknown as false }),
+        saved({ videoId: 'b', continueRow: 'no' as unknown as false }),
+        saved({ videoId: 'c', continueRow: false }),
+      ]);
+      const progress = createProgressStore({ storage });
+      await progress.load();
+      expect(progress.get('a')).toEqual(saved({ videoId: 'a' }));
+      expect(progress.get('b')).toEqual(saved({ videoId: 'b' }));
+      expect(progress.get('c')).toEqual(saved({ videoId: 'c', continueRow: false }));
     });
 
     it('keeps the latest of two saved entries for the same video', async () => {

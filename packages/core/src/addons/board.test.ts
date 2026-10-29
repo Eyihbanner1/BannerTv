@@ -2,7 +2,7 @@ import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { buildBoard } from './board';
 import type { InstalledAddon } from './collection';
-import { DEFAULT_ADDONS } from './defaults';
+import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from './defaults';
 
 function installed(
   manifest: unknown,
@@ -12,10 +12,12 @@ function installed(
 }
 
 const defaults = DEFAULT_ADDONS.map((a) => installed(a.manifest, a.transportUrl));
+/** Cinemeta and OpenSubtitles v3 as shipped, without BannerTV Demo. */
+const stremio = defaults.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL);
 
 describe('buildBoard', () => {
   it('turns Cinemeta into Popular and Featured rows plus genre rows', () => {
-    const rows = buildBoard(defaults);
+    const rows = buildBoard(stremio);
     expect(rows.map((r) => [r.key, r.name, r.type, r.style, r.extra])).toEqual([
       ['0-movie-top', 'Popular', 'movie', 'poster', []],
       ['0-series-top', 'Popular', 'series', 'poster', []],
@@ -53,7 +55,7 @@ describe('buildBoard', () => {
       },
       'https://other.example/manifest.json',
     );
-    const rows = buildBoard([other, ...defaults]);
+    const rows = buildBoard([other, ...stremio]);
     expect(rows.slice(0, 4).map((r) => [r.key, r.style])).toEqual([
       ['0-movie-trending', 'landscape'],
       ['0-movie-x', 'poster'],
@@ -63,6 +65,18 @@ describe('buildBoard', () => {
     // Cinemeta still adds series genres, but no more movie genres.
     const cinemetaGenres = rows.filter((r) => r.kind === 'genre' && r.key.indexOf('1-') === 0);
     expect(cinemetaGenres.map((r) => r.type)).toEqual(['series', 'series', 'series']);
+  });
+
+  it('starts a new TV on BannerTV Demo, with genre rows still from Cinemeta', () => {
+    const rows = buildBoard(defaults);
+    expect(rows.slice(0, 3).map((r) => [r.key, r.name, r.style])).toEqual([
+      ['0-movie-blender', 'Blender open movies', 'poster'],
+      ['1-movie-top', 'Popular', 'poster'],
+      ['1-series-top', 'Popular', 'poster'],
+    ]);
+    const genres = rows.filter((r) => r.kind === 'genre');
+    expect(genres.length).toBeGreaterThan(0);
+    expect(genres.every((r) => r.key.indexOf('1-') === 0)).toBe(true);
   });
 
   it('is empty without addons', () => {

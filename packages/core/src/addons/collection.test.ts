@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../http';
 import { memoryKeyValueStore } from '../storage';
 import { createAddonCollection, InstallError, installIdOf, type StoredAddon } from './collection';
-import { CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
+import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
+
+/** Cinemeta and OpenSubtitles v3 as shipped: two official addons, without BannerTV Demo. */
+const STREMIO_DEFAULTS = DEFAULT_ADDONS.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL);
 
 const EXTRA_URL = 'https://addon.example.com/conf/manifest.json';
 const EXTRA_MANIFEST = {
@@ -15,13 +18,14 @@ const EXTRA_MANIFEST = {
 
 function setup(
   fetchJson = vi.fn<(url: string) => Promise<unknown>>(() => Promise.resolve(EXTRA_MANIFEST)),
+  defaults: readonly StoredAddon[] = STREMIO_DEFAULTS,
 ) {
   const storage = memoryKeyValueStore();
   let time = 1000;
   const collection = createAddonCollection({
     storage,
     fetchJson,
-    defaults: DEFAULT_ADDONS,
+    defaults,
     now: () => time,
   });
   return { storage, collection, fetchJson, setTime: (t: number) => (time = t) };
@@ -31,17 +35,18 @@ const urls = (collection: { get(): { addons: readonly { transportUrl: string }[]
   collection.get().addons.map((a) => a.transportUrl);
 
 describe('createAddonCollection', () => {
-  it('installs Cinemeta and OpenSubtitles on first launch and saves them', async () => {
-    const { collection, storage } = setup();
+  it('installs BannerTV Demo, Cinemeta and OpenSubtitles on first launch and saves them', async () => {
+    const { collection, storage } = setup(undefined, DEFAULT_ADDONS);
     expect(collection.get().ready).toBe(false);
     await collection.load();
     expect(collection.get().ready).toBe(true);
     expect(collection.get().addons.map((a) => a.manifest.name)).toEqual([
+      'BannerTV Demo',
       'Cinemeta',
       'OpenSubtitles v3',
     ]);
-    expect(collection.get().addons[0]!.official).toBe(true);
-    expect(((await storage.get('addons')) as StoredAddon[]).length).toBe(2);
+    expect(collection.get().addons.every((a) => a.official)).toBe(true);
+    expect(((await storage.get('addons')) as StoredAddon[]).length).toBe(3);
   });
 
   it('keeps an empty collection empty instead of bringing the defaults back', async () => {
@@ -55,7 +60,7 @@ describe('createAddonCollection', () => {
     const { collection, storage } = setup();
     await storage.set('addons', [
       { transportUrl: EXTRA_URL, manifest: { id: 'broken' }, official: false, fetchedAt: 1 },
-      DEFAULT_ADDONS[0],
+      STREMIO_DEFAULTS[0],
       'junk',
     ]);
     await collection.load();
@@ -68,7 +73,7 @@ describe('createAddonCollection', () => {
     const addon = await collection.install('stremio://addon.example.com/conf/manifest.json');
     expect(fetchJson).toHaveBeenCalledWith(EXTRA_URL, { timeoutMs: 10000 });
     expect(addon).toMatchObject({ transportUrl: EXTRA_URL, official: false, fetchedAt: 1000 });
-    expect(urls(collection)).toEqual([...DEFAULT_ADDONS.map((a) => a.transportUrl), EXTRA_URL]);
+    expect(urls(collection)).toEqual([...STREMIO_DEFAULTS.map((a) => a.transportUrl), EXTRA_URL]);
 
     await collection.install(EXTRA_URL);
     expect(collection.get().addons).toHaveLength(3);
@@ -88,7 +93,7 @@ describe('createAddonCollection', () => {
     collection.move(EXTRA_URL, -5);
     const configured = 'https://addon.example.com/new-settings/manifest.json';
     await collection.install(configured, { replaces: EXTRA_URL });
-    expect(urls(collection)).toEqual([configured, ...DEFAULT_ADDONS.map((a) => a.transportUrl)]);
+    expect(urls(collection)).toEqual([configured, ...STREMIO_DEFAULTS.map((a) => a.transportUrl)]);
     const saved = (await storage.get('addons')) as StoredAddon[];
     expect(saved.map((a) => a.transportUrl)).toEqual(urls(collection));
     // It is the same install, by a name that does not give its address away.
@@ -98,7 +103,7 @@ describe('createAddonCollection', () => {
     const reloaded = createAddonCollection({
       storage,
       fetchJson: () => Promise.resolve(EXTRA_MANIFEST),
-      defaults: DEFAULT_ADDONS,
+      defaults: STREMIO_DEFAULTS,
     });
     await reloaded.load();
     expect(installIdOf(reloaded.get().addons[0]!)).toBe(first);
@@ -107,19 +112,23 @@ describe('createAddonCollection', () => {
     await reloaded.install(EXTRA_URL);
     const names = reloaded.get().addons.map(installIdOf);
     expect(new Set(names).size).toBe(names.length);
-    const again = createAddonCollection({ storage, fetchJson: vi.fn(), defaults: DEFAULT_ADDONS });
+    const again = createAddonCollection({
+      storage,
+      fetchJson: vi.fn(),
+      defaults: STREMIO_DEFAULTS,
+    });
     await again.load();
     expect(again.get().addons.map(installIdOf)).toEqual(names);
 
     // Settings that match an addon already in the list update that one instead.
     await collection.install(CINEMETA_URL, { replaces: configured });
-    expect(urls(collection)).toEqual(DEFAULT_ADDONS.map((a) => a.transportUrl));
+    expect(urls(collection)).toEqual(STREMIO_DEFAULTS.map((a) => a.transportUrl));
 
     // Replacing an addon with itself updates it where it is.
     await collection.install(EXTRA_URL);
     collection.move(EXTRA_URL, -5);
     await collection.install(EXTRA_URL, { replaces: EXTRA_URL });
-    const order = [EXTRA_URL, ...DEFAULT_ADDONS.map((a) => a.transportUrl)];
+    const order = [EXTRA_URL, ...STREMIO_DEFAULTS.map((a) => a.transportUrl)];
     expect(urls(collection)).toEqual(order);
     // Replacing one that is gone is a plain install.
     await collection.install(configured, { replaces: 'https://gone.example.com/manifest.json' });
@@ -198,13 +207,13 @@ describe('createAddonCollection', () => {
     collection.move(EXTRA_URL, 1);
     expect(urls(collection)[1]).toBe(EXTRA_URL);
     collection.remove(CINEMETA_URL);
-    expect(urls(collection)).toEqual([EXTRA_URL, DEFAULT_ADDONS[1]!.transportUrl]);
+    expect(urls(collection)).toEqual([EXTRA_URL, STREMIO_DEFAULTS[1]!.transportUrl]);
   });
 
   it('refreshes old manifests and keeps the old one when an addon is down', async () => {
     const fetchJson = vi.fn((url: string): Promise<unknown> => {
       if (url === CINEMETA_URL) {
-        return Promise.resolve({ ...(DEFAULT_ADDONS[0]!.manifest as object), version: '9.9.9' });
+        return Promise.resolve({ ...(STREMIO_DEFAULTS[0]!.manifest as object), version: '9.9.9' });
       }
       return Promise.reject(new HttpError('timeout', 'slow'));
     });
@@ -220,6 +229,6 @@ describe('createAddonCollection', () => {
     fetchJson.mockClear();
     await collection.refreshManifests(1000);
     // Only the one that failed is old enough to try again.
-    expect(fetchJson.mock.calls.map(([url]) => url)).toEqual([DEFAULT_ADDONS[1]!.transportUrl]);
+    expect(fetchJson.mock.calls.map(([url]) => url)).toEqual([STREMIO_DEFAULTS[1]!.transportUrl]);
   });
 });

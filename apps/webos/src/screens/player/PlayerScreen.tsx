@@ -12,7 +12,7 @@ import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { back, replace } from '../../app/router';
+import { back, type EventPlay, remembersPlace, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
@@ -66,6 +66,8 @@ interface PlayerScreenProps {
   chosen?: boolean;
   startAt?: number;
   lab?: boolean;
+  /** A sports event: its own sources only, and no Continue Watching card. */
+  event?: EventPlay;
 }
 
 const noop = () => () => undefined;
@@ -96,7 +98,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const finder = useMemo(() => streamFinder(type, videoId), [type, videoId]);
+  const sportsEvent = props.event;
+  const finder = useMemo(
+    () => streamFinder(type, videoId, sportsEvent),
+    [type, videoId, sportsEvent],
+  );
   const [session, setSession] = useState<PlaybackSession | null>(null);
   const [nothing, setNothing] = useState(false);
   const [resumedAt, setResumedAt] = useState(0);
@@ -115,9 +121,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const hideTimer = useRef<number | undefined>(undefined);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
 
+  // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
-    () => (type === 'movie' ? null : addonClient.meta(type, metaId)),
-    [type, metaId],
+    () => (type === 'movie' || sportsEvent ? null : addonClient.meta(type, metaId)),
+    [type, metaId, sportsEvent],
   );
   const meta = useQuery(metaQuery).data;
   const item = meta ?? preview;
@@ -154,11 +161,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for
   // the Lab or a live broadcast. The card keeps the ids the progress is saved under.
+  // Never for sports either, replays included: the row would ask every addon
+  // with the id's prefix for its page, not the one that listed it. Their
+  // progress is marked to stay off the row too (continueRow below).
   const playing = state.status === 'playing';
   const live = state.live;
   const recorded = useRef<string | null>(null);
   useEffect(() => {
-    if (props.lab || !playing || live || !item) return;
+    if (props.lab || sportsEvent || !playing || live || !item) return;
     const card = playedCard(item, videoId, meta, { metaId, type });
     const prior = meta ? undefined : playedVideos.get(videoId);
     if (prior && prior.metaId === metaId) {
@@ -180,7 +190,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (recorded.current === key) return;
     recorded.current = key;
     playedVideos.record(card);
-  }, [props.lab, playing, live, item, meta, videoId, metaId, type]);
+  }, [props.lab, sportsEvent, playing, live, item, meta, videoId, metaId, type]);
 
   // The running time tells a heavy file from a long one, for auto-play's ranking.
   const runtime = item?.runtime;
@@ -192,6 +202,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!element) return;
     setVideo(element);
     const releaseProbing = holdProbing();
+    // A sports match saves nothing and never resumes; a replay keeps its place
+    // like any other video, but never goes on Continue Watching.
+    const remember = remembersPlace(props);
     const created = createPlaybackSession({
       video: element,
       type,
@@ -199,7 +212,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       videoId,
       finder,
       autoFailover: !props.chosen,
-      remember: !props.lab,
+      remember,
+      continueRow: !sportsEvent,
     });
     setSession(created);
     if (!props.lab) finder.start();
@@ -209,7 +223,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = props.startAt ?? (props.lab ? 0 : progress.resumeAt(videoId)) ?? 0;
+        const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose());
         if (cancelled) return;
@@ -490,6 +504,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           preview,
           // Before a stream has opened, where the viewer asked to start.
           startAt: session && state.entry ? session.carryOn() : resumedAt,
+          event: sportsEvent,
         }),
     });
   }
@@ -627,6 +642,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
               videoId,
               preview,
               startAt: session && state.entry ? session.carryOn() : resumedAt,
+              event: sportsEvent,
             })
           }
           onRetry={() => {

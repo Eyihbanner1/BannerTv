@@ -7,15 +7,17 @@ import {
   orderedTypes,
   type PagerState,
 } from '@bannertv/core';
-import type { ExtraArg } from '@bannertv/protocol';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import type { ExtraArg, MetaPreview } from '@bannertv/protocol';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { isKidsProfile } from '../../data/profiles';
+import { eventForItem, noteFirstPage, prepareItems } from '../../data/sports';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
@@ -147,6 +149,30 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
     }
   }, [pager, state, restoreTo]);
 
+  // What a first page looked like settles whether a catalog is sport (data/sports.ts).
+  const firstItems = paged.items.length > 0 ? paged.items : null;
+  useEffect(() => {
+    if (source && genre === undefined && firstItems) {
+      noteFirstPage(source.addon, source.catalog, firstItems);
+    }
+  }, [source, genre, firstItems]);
+
+  // A match in a sports catalog opens its event page, which asks only this addon. The
+  // list is read for its clock-only times once drawn, not on the press.
+  const items = state.items;
+  useEffect(
+    () => (source ? prepareItems(source.addon, source.catalog, items) : undefined),
+    [source, items],
+  );
+  const onPress = useCallback(
+    (item: MetaPreview) => {
+      const event = source ? eventForItem(source.addon, source.catalog, item) : undefined;
+      if (event) push({ name: 'event', event });
+      else openDetails(item);
+    },
+    [source],
+  );
+
   const restored =
     restoreTo === undefined ||
     state.items.length > restoreTo ||
@@ -235,7 +261,7 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
           emptyMessage={t('discover.empty')}
           onLoadMore={() => pager?.loadMore()}
           onRetry={() => pager?.retry()}
-          onPress={openDetails}
+          onPress={onPress}
           onFocusTile={(index) => {
             memoryFor(memoryKey).index = index;
           }}
