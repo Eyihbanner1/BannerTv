@@ -1,0 +1,25 @@
+{
+  "movie_results": [],
+  "person_results": [],
+  "tv_results": [
+    {
+      "backdrop_path": "/qp6FhWqr7Ow2hXt4ZA1kTnZEHkR.jpg",
+      "id": 82728,
+      "name": "Bluey",
+      "original_name": "Bluey",
+      "overview": "Bluey is an inexhaustible six year-old Blue Heeler dog, who loves to play and turns everyday family life into extraordinary adventures.",
+      "poster_path": "/b9mY0X5T20ZqnoC4fE6v5Y4grKm.jpg",
+      "media_type": "tv",
+      "adult": false,
+      "original_language": "en",
+      "genre_ids": [16, 10762, 35, 10751],
+      "popularity": 301.246,
+      "first_air_date": "2018-10-01",
+      "vote_average": 8.6,
+      "vote_count": 641,
+      "origin_country": ["AU"]
+    }
+  ],
+  "tv_episode_results": [],
+  "tv_season_results": []
+}

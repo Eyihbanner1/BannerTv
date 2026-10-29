@@ -1,0 +1,55 @@
+/* The padding leaves room for the focus scale. */
+.list {
+  position: relative;
+  height: 720px;
+  padding-top: 12px;
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.line {
+  position: absolute;
+  left: 0;
+  width: 1560px;
+  height: 96px;
+  padding: 0 24px;
+  border-radius: 20px;
+  background: var(--bt-surface-1);
+  display: flex;
+  align-items: center;
+}
+
+.line > * {
+  margin-left: 16px;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addon {
+  color: var(--bt-text-subtle);
+  font: var(--bt-text-label);
+}
+
+.hidden .name {
+  color: var(--bt-text-subtle);
+  text-decoration: line-through;
+}
+
+.disabled {
+  opacity: 0.4;
+}

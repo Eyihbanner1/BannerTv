@@ -1,4 +1,4 @@
-import { type BoardRow, buildBoard } from '@bannertv/core';
+import { type BoardRow, buildBoard, kidsTitleAllowed } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -17,10 +17,13 @@ import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
+import { RAIL_FOCUS_KEY } from '../../components/Rail';
 import { Row, RowPlaceholder } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { useHomeBoard } from '../../data/home-board';
+import { isKidsProfile } from '../../data/profiles';
 import { noteFirstPage, sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { activityGap } from '../../navigation/activity';
@@ -96,10 +99,14 @@ const HomeRow = memo(function HomeRow({
     [row.addon, row.type, row.catalog.id, row.extra],
   );
   const state = useQuery(query, near);
-  const items = useMemo(
-    () => (state.data ? state.data.slice(0, MAX_ROW_ITEMS) : null),
-    [state.data],
-  );
+  const items = useMemo(() => {
+    if (!state.data) return null;
+    // A kids row asked its catalog for Family titles; this keeps out any that are not for children.
+    const allowed = isKidsProfile()
+      ? state.data.filter((item) => kidsTitleAllowed(item, true))
+      : state.data;
+    return allowed.slice(0, MAX_ROW_ITEMS);
+  }, [state.data]);
   const empty = state.status === 'success' && items !== null && items.length === 0;
   const failed = state.status === 'error';
   const onRetry = useCallback(() => query.retry(), [query]);
@@ -152,13 +159,14 @@ export function HomeScreen() {
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
   const ready = collection.ready && sports.ready;
-  // Sports catalogs leave the board: the Live sport row stands in for them. The
-  // board waits for sport to be settled too, so a sports catalog is never drawn,
-  // or fetched, for the moment before it is known to be one.
-  const board = useMemo(
-    () => (ready ? buildBoard(collection.addons, sports.homeLeaveOut) : NO_ROWS),
-    [ready, collection.addons, sports.homeLeaveOut],
-  );
+  // A kids profile has no Sports, so no Live sport row either.
+  const sportShown = sports.shown && !isKidsProfile();
+  // The profile's rows: its order and hidden rows from Settings, or Family rows
+  // for kids. Sports catalogs leave the board: the Live sport row stands in for
+  // them. The board waits for sport to be settled too, so a sports catalog is
+  // never drawn, or fetched, for the moment before it is known to be one.
+  const arranged = useHomeBoard(collection.addons, ready, sports.homeLeaveOut);
+  const board = arranged ?? NO_ROWS;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
   // The hero starts on the first row whose addon answered: on a new TV whose
@@ -182,7 +190,7 @@ export function HomeScreen() {
       ? rowFocusKey(rows[0]!)
       : undefined;
   // The Live sport row sits before the catalog row at this index, while sport is installed.
-  const liveAt = sports.shown
+  const liveAt = sportShown
     ? Math.max(0, Math.min(LIVE_SPORT_PLACE - (continuing ? 1 : 0), rows.length))
     : -1;
   const focusedIndex =
@@ -200,8 +208,9 @@ export function HomeScreen() {
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
   // A tile the pointer moved onto while Home waited for that keeps focus.
-  const focusReady = ready && continueItems !== null;
-  useScreenFocus(firstRowKey, focusReady, true, pointedAt);
+  // With no rows at all, the rail takes focus, so the remote still works.
+  const focusReady = ready && arranged !== null && continueItems !== null;
+  useScreenFocus(firstRowKey ?? RAIL_FOCUS_KEY, focusReady, true, pointedAt);
 
   // The hero starts on the first title focus will land on.
   useEffect(() => {
@@ -211,7 +220,8 @@ export function HomeScreen() {
   // On Home, Back first returns to the first row. Only from there does it exit.
   // Genre rows share the first row's key as a prefix, so match its tiles exactly.
   // Before Home's first focus, Back stays in the app and focus lands as it would
-  // have, not on a row Continue Watching is about to come above.
+  // have, not on a row Continue Watching is about to come above. That includes
+  // while the profile's rows are still being read and none is drawn yet.
   useBack('screen', () => {
     const first = rows[0];
     if (!focusReady) return true;
@@ -355,17 +365,24 @@ export function HomeScreen() {
     slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, []);
 
-  if (ready && rows.length === 0 && !continuing) {
-    // Addons with sport only: their catalogs are all on the Sports screen.
+  if (ready && arranged !== null && rows.length === 0 && !continuing) {
+    // Rows can be missing because the profile hid them all, because no catalog
+    // has family titles for a kids profile, or because the addons only list
+    // sport, which has its own screen, as well as for want of addons.
+    const allHidden =
+      board.length === 0 && buildBoard(collection.addons, sports.homeLeaveOut).length > 0;
+    const [title, lead] = isKidsProfile()
+      ? ['home.noAddons', 'home.noKidsRowsLead']
+      : allHidden
+        ? ['home.noAddons', 'home.allHiddenLead']
+        : sportShown
+          ? ['home.sportsOnly', 'home.sportsOnlyLead']
+          : ['home.noAddons', 'home.noAddonsLead'];
     return (
       <div className={styles.home}>
         <div className={styles.empty}>
-          <h1 className={styles.emptyTitle}>
-            {t(sports.shown ? 'home.sportsOnly' : 'home.noAddons')}
-          </h1>
-          <p className={styles.emptyLead}>
-            {t(sports.shown ? 'home.sportsOnlyLead' : 'home.noAddonsLead')}
-          </p>
+          <h1 className={styles.emptyTitle}>{t(title)}</h1>
+          <p className={styles.emptyLead}>{t(lead)}</p>
         </div>
       </div>
     );

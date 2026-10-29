@@ -179,8 +179,17 @@ export function createAddonClient(options: {
   queries: QueryCache;
   limiter: Limiter;
   fetchJson: FetchJson;
+  /**
+   * True for a kids profile: details, streams and subtitles come only from
+   * addons not marked adult, and details are cached apart from everyone else's.
+   */
+  kidsOnly?: () => boolean;
 }): AddonClient {
-  const { collection, queries, limiter, fetchJson } = options;
+  const { collection, queries, limiter, fetchJson, kidsOnly = () => false } = options;
+  const usable = () => {
+    const { addons } = collection.get();
+    return kidsOnly() ? addons.filter((addon) => !addon.manifest.behaviorHints.adult) : addons;
+  };
   const get = (url: string) => limiter.run(() => fetchJson(url, { timeoutMs: BROWSE_TIMEOUT_MS }));
   const getForPlay = (url: string) =>
     limiter.run(() => fetchJson(url, { timeoutMs: PLAY_TIMEOUT_MS }));
@@ -211,13 +220,13 @@ export function createAddonClient(options: {
     },
 
     meta(type, id) {
-      return queries.query(`meta:${type}:${id}`, {
+      return queries.query(`${kidsOnly() ? 'kids:' : ''}meta:${type}:${id}`, {
         policy: META_POLICY,
         persist: true,
         fetch: async () => {
-          const addons = collection
-            .get()
-            .addons.filter((addon) => supportsResource(addon.manifest, 'meta', type, id));
+          const addons = usable().filter((addon) =>
+            supportsResource(addon.manifest, 'meta', type, id),
+          );
           let failure: unknown;
           for (const addon of addons) {
             try {
@@ -265,9 +274,8 @@ export function createAddonClient(options: {
     },
 
     streams(type, videoId) {
-      return collection
-        .get()
-        .addons.filter((addon) => supportsResource(addon.manifest, 'stream', type, videoId))
+      return usable()
+        .filter((addon) => supportsResource(addon.manifest, 'stream', type, videoId))
         .map((addon) => ({
           addon,
           query: streamQuery(resourceUrl(addon.transportUrl, 'stream', type, videoId)),
@@ -276,9 +284,8 @@ export function createAddonClient(options: {
 
     subtitles(type, videoId, hints = {}) {
       const extra = subtitleExtra(hints);
-      return collection
-        .get()
-        .addons.filter((addon) => supportsResource(addon.manifest, 'subtitles', type, videoId))
+      return usable()
+        .filter((addon) => supportsResource(addon.manifest, 'subtitles', type, videoId))
         .map((addon) => {
           const url = resourceUrl(addon.transportUrl, 'subtitles', type, videoId, extra);
           return {

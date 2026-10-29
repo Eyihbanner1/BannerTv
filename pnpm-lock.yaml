@@ -107,6 +107,12 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
 
+  services/api:
+    devDependencies:
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
+
   services/demo:
     devDependencies:
       '@bannertv/core':

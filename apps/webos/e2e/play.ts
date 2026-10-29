@@ -188,6 +188,8 @@ export async function seedStreamAddon(
     slowAddon?: boolean;
     /** Stored preferences, as if chosen before. */
     preferences?: Record<string, unknown>;
+    /** Other values in the key-value store, by key, such as a Trakt sign-in. */
+    kv?: Record<string, unknown>;
   } = {},
 ): Promise<void> {
   const cinemeta = JSON.parse(
@@ -230,7 +232,7 @@ export async function seedStreamAddon(
   }));
   const cards = (options.played ?? []).map((card, i) => ({ ...card, updatedAt: 1000 + i }));
   await page.addInitScript(
-    ({ stored, saved, played, chosen }) => {
+    ({ stored, saved, played, chosen, extra }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');
       if (chosen) localStorage.setItem('bannertv.preferences', JSON.stringify(chosen));
@@ -248,10 +250,17 @@ export async function seedStreamAddon(
         tx.objectStore('kv').put(stored, 'addons');
         if (saved.length > 0) tx.objectStore('kv').put(saved, 'progress');
         if (played.length > 0) tx.objectStore('kv').put(played, 'played');
+        for (const key of Object.keys(extra)) tx.objectStore('kv').put(extra[key], key);
         tx.oncomplete = () => db.close();
       };
     },
-    { stored: addons, saved: progress, played: cards, chosen: options.preferences ?? null },
+    {
+      stored: addons,
+      saved: progress,
+      played: cards,
+      chosen: options.preferences ?? null,
+      extra: options.kv ?? {},
+    },
   );
 }
 

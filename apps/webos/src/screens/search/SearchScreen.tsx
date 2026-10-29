@@ -1,4 +1,9 @@
-import { type CatalogSource, searchSources } from '@bannertv/core';
+import {
+  type CatalogSource,
+  kidsSearchSources,
+  kidsTitleAllowed,
+  searchSources,
+} from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -18,6 +23,7 @@ import { slideTrack } from '../../components/row-track';
 import { TextField } from '../../components/TextField';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { isKidsProfile } from '../../data/profiles';
 import { loadRecentSearches, recentSearches } from '../../data/search';
 import { sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
@@ -62,7 +68,15 @@ function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: Res
     [addon, catalog, term],
   );
   const state = useQuery(query);
-  const empty = state.status === 'success' && state.data !== undefined && state.data.length === 0;
+  // A kids profile sees only results that name themselves as for children.
+  const items = useMemo(
+    () =>
+      state.data && isKidsProfile()
+        ? state.data.filter((item) => kidsTitleAllowed(item))
+        : state.data,
+    [state.data],
+  );
+  const empty = state.status === 'success' && items !== undefined && items.length === 0;
   const focusKey = `${RESULT_PREFIX}${source.key}`;
 
   useEffect(() => {
@@ -76,7 +90,7 @@ function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: Res
       title={typeLabel(t, catalog.type)}
       tag={tag}
       shape="poster"
-      items={state.status === 'error' ? [] : (state.data ?? null)}
+      items={state.status === 'error' ? [] : (items ?? null)}
       error={
         state.status === 'error'
           ? describeAddonError(t, state.error, addon.manifest.name)
@@ -218,13 +232,15 @@ export function SearchScreen() {
   // the moment before it is known to be one.
   const ready = collection.ready && sports.ready;
   // Sports catalogs leave the fan-out: Search answers for them from its own copy.
-  const sources = useMemo(
-    () => (ready ? searchSources(collection.addons, sports.searchLeaveOut) : NO_SOURCES),
-    [ready, collection.addons, sports.searchLeaveOut],
-  );
+  const sources = useMemo(() => {
+    if (!ready) return NO_SOURCES;
+    const all = searchSources(collection.addons, sports.searchLeaveOut);
+    return isKidsProfile() ? kidsSearchSources(all) : all;
+  }, [ready, collection.addons, sports.searchLeaveOut]);
+  // A kids profile has no Sports, so no Sports group either.
   const sportsSources = useMemo(() => {
     const leaveOut = sports.searchLeaveOut;
-    if (!ready || !sports.shown || !leaveOut) return null;
+    if (!ready || !sports.shown || !leaveOut || isKidsProfile()) return null;
     return searchSources(collection.addons).filter((source) =>
       leaveOut(source.addon, source.catalog),
     );

@@ -1,8 +1,8 @@
 import { createRecentList } from '@bannertv/core';
-import { storage } from './storage';
+import { profileKv } from './storage';
 
 export const recentSearches = createRecentList({
-  storage: storage.kv,
+  storage: profileKv,
   key: 'recentSearches',
   max: 8,
 });

@@ -17,6 +17,7 @@ describe('readPreferences', () => {
         audioLanguage: 'fre',
         subtitleLanguage: null,
         subtitleStyle: { size: 'huge', colour: 'pink', background: 'box' },
+        tmdb: 'yes',
       }),
     );
     expect(prefs).toEqual({
@@ -26,7 +27,12 @@ describe('readPreferences', () => {
       audioLanguage: 'fre',
       subtitleLanguage: null,
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
+      tmdb: true,
     });
+  });
+
+  it('keeps TMDB turned off', () => {
+    expect(readPreferences(JSON.stringify({ tmdb: false })).tmdb).toBe(false);
   });
 
   it('treats an empty language as not chosen', () => {

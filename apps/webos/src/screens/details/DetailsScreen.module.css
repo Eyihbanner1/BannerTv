@@ -94,6 +94,10 @@
   overflow: hidden;
 }
 
+.short {
+  -webkit-line-clamp: 4;
+}
+
 .credits {
   margin-top: 16px;
   font: var(--bt-text-label);
@@ -121,6 +125,40 @@
   margin-top: 24px;
   font: var(--bt-text-label);
   color: var(--bt-accent);
+}
+
+/* Cast with TMDB's photos, under the buttons. */
+.cast {
+  margin-top: 48px;
+  white-space: nowrap;
+}
+
+.person {
+  display: inline-block;
+  vertical-align: top;
+  width: 120px;
+  margin-right: 24px;
+  text-align: center;
+}
+
+.face {
+  display: block;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bt-surface-1);
+}
+
+.personName {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  font: 600 20px/1.3 var(--bt-font);
+  color: var(--bt-text-muted);
 }
 
 /* Seasons and episodes, on a dark glass panel to the right. */

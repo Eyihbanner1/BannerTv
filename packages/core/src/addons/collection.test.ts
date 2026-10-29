@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../http';
 import { memoryKeyValueStore } from '../storage';
-import { createAddonCollection, InstallError, type StoredAddon } from './collection';
+import { createAddonCollection, InstallError, installIdOf, type StoredAddon } from './collection';
 import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
 
 /** Cinemeta and OpenSubtitles v3 as shipped: two official addons, without BannerTV Demo. */
@@ -96,6 +96,29 @@ describe('createAddonCollection', () => {
     expect(urls(collection)).toEqual([configured, ...STREMIO_DEFAULTS.map((a) => a.transportUrl)]);
     const saved = (await storage.get('addons')) as StoredAddon[];
     expect(saved.map((a) => a.transportUrl)).toEqual(urls(collection));
+    // It is the same install, by a name that does not give its address away.
+    const first = installIdOf({ ...collection.get().addons[0]!, transportUrl: EXTRA_URL });
+    expect(saved[0]!.installId).toBe(first);
+    expect(saved[0]!.installId).not.toContain('example');
+    const reloaded = createAddonCollection({
+      storage,
+      fetchJson: () => Promise.resolve(EXTRA_MANIFEST),
+      defaults: STREMIO_DEFAULTS,
+    });
+    await reloaded.load();
+    expect(installIdOf(reloaded.get().addons[0]!)).toBe(first);
+    expect(saved.slice(1).every((a) => a.installId === undefined)).toBe(true);
+    // Installed again from its first address, the new copy gets a name of its own.
+    await reloaded.install(EXTRA_URL);
+    const names = reloaded.get().addons.map(installIdOf);
+    expect(new Set(names).size).toBe(names.length);
+    const again = createAddonCollection({
+      storage,
+      fetchJson: vi.fn(),
+      defaults: STREMIO_DEFAULTS,
+    });
+    await again.load();
+    expect(again.get().addons.map(installIdOf)).toEqual(names);
 
     // Settings that match an addon already in the list update that one instead.
     await collection.install(CINEMETA_URL, { replaces: configured });
