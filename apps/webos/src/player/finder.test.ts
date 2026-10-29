@@ -1,4 +1,4 @@
-import type { InstalledAddon, QueryState } from '@bannertv/core';
+import type { EventSource, InstalledAddon, ItemSource, QueryState } from '@bannertv/core';
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entryKey, isHeavy, streamFinder } from './finder';
@@ -14,10 +14,41 @@ const addons = vi.hoisted(() => ({
   installs: [] as Array<{ id: string; streams: Array<string | Record<string, unknown>> }>,
   queries: {} as Record<string, FakeQuery[]>,
   answering: true,
+  // The collection that sports events' sources are found in.
+  collection: [] as InstalledAddon[],
+  // Every stream request made for a sports source, and every one loaded again.
+  asked: [] as string[],
+  loaded: [] as string[],
 }));
 
 vi.mock('../data/addons', () => ({
+  addonCollection: {
+    get: () => ({ ready: true, addons: addons.collection }),
+    subscribe: () => () => undefined,
+  },
   addonClient: {
+    // One stream per source, named after the install and the item.
+    streamsFrom: (sources: readonly ItemSource[]) =>
+      sources.map((source) => {
+        const name = `${source.addon.manifest.name}-${source.id}`;
+        addons.asked.push(name);
+        const state: QueryState<Stream[]> = {
+          status: 'success',
+          stale: false,
+          data: [
+            parseStream({ url: `https://media.example.com/${name}.mkv`, name: 'Test\n1080p' })!,
+          ],
+        };
+        return {
+          addon: source.addon,
+          query: {
+            get: () => state,
+            subscribe: () => () => undefined,
+            load: () => addons.loaded.push(name),
+            retry: () => undefined,
+          },
+        };
+      }),
     streams: (_type: string, videoId: string) =>
       addons.installs.map((install, i) => {
         const query: FakeQuery = {
@@ -158,6 +189,100 @@ describe('streamFinder', () => {
     finder.markFailed(first!);
     expect(finder.get().candidates.map((entry) => entry.stream)).toEqual([second!.stream]);
     expect(finder.next(new Set([entryKey(first!)]))?.stream).toBe(second!.stream);
+  });
+});
+
+describe('sports events', () => {
+  /** An install of a sports addon, as the collection holds it. */
+  const install = (name: string, id = 'org.test.sports'): InstalledAddon =>
+    ({
+      transportUrl: `https://${name}.example.com/manifest.json`,
+      manifest: { id, name },
+    }) as unknown as InstalledAddon;
+
+  /** One addon's listing of the match. */
+  const source = (addon: InstalledAddon, id: string, addonIndex = 0): EventSource => ({
+    addonIndex,
+    addonId: addon.manifest.id,
+    transportUrl: addon.transportUrl,
+    type: 'tv',
+    id,
+    name: 'Arsenal v Brighton',
+    catalogId: 'live',
+  });
+
+  beforeEach(() => {
+    addons.asked = [];
+    addons.loaded = [];
+  });
+
+  it('shares one finder while the event asks the same installs', () => {
+    const a = install('a');
+    addons.collection = [a];
+    const play = { key: '0-a-shared', sources: [source(a, 'a:shared')], replay: false };
+    const prefetched = streamFinder('tv', 'a:shared', play);
+    expect(streamFinder('tv', 'a:shared', { ...play, sources: play.sources.slice() })).toBe(
+      prefetched,
+    );
+  });
+
+  it('asks a source the event gained after its finder was made', () => {
+    const [a, b] = [install('a'), install('b', 'org.other.sports')];
+    addons.collection = [a, b];
+    // Prefetched on the event page while only the first addon listed the match.
+    streamFinder('tv', 'a:1', {
+      key: '0-a-1',
+      sources: [source(a, 'a:1')],
+      replay: false,
+    }).start();
+    expect(addons.asked).toEqual(['a-a:1']);
+    // The second addon's copy merged in later, under the same event key.
+    const finder = streamFinder('tv', 'a:1', {
+      key: '0-a-1',
+      sources: [source(a, 'a:1'), source(b, 'b:9', 1)],
+      replay: false,
+    });
+    finder.start();
+    expect(addons.asked).toEqual(['a-a:1', 'a-a:1', 'b-b:9']);
+    expect(finder.get().entries.map((entry) => entry.addonId)).toEqual([
+      'org.test.sports',
+      'org.other.sports',
+    ]);
+  });
+
+  it('never asks an install that was removed when its event key passes to another', () => {
+    // Two installs of one addon, with other settings: they list the same ids.
+    const [first, second] = [install('first'), install('second')];
+    addons.collection = [first, second];
+    streamFinder('tv', 'x:7', {
+      key: '0-x-7',
+      sources: [source(first, 'x:7'), source(second, 'x:7', 1)],
+      replay: false,
+    }).start();
+    addons.asked = [];
+    addons.loaded = [];
+    // The first is removed: the second's copy now leads, and takes the key.
+    addons.collection = [second];
+    const finder = streamFinder('tv', 'x:7', {
+      key: '0-x-7',
+      sources: [source(second, 'x:7')],
+      replay: false,
+    });
+    finder.start();
+    expect(addons.asked).toEqual(['second-x:7']);
+    expect(addons.loaded).toEqual(['second-x:7']);
+    expect(finder.get().entries).toHaveLength(1);
+  });
+
+  it('leaves out the sources of addons no longer installed', () => {
+    const [a, gone] = [install('a'), install('gone', 'org.gone.sports')];
+    addons.collection = [a];
+    streamFinder('tv', 'a:2', {
+      key: '0-a-2',
+      sources: [source(a, 'a:2'), source(gone, 'g:2', 1)],
+      replay: false,
+    }).start();
+    expect(addons.asked).toEqual(['a-a:2']);
   });
 });
 

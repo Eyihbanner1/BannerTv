@@ -4,6 +4,7 @@ import {
   type Cue,
   estimateBitrate,
   type ProgressTracker,
+  type ProgressUpdate,
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
@@ -89,6 +90,12 @@ export interface SessionOptions {
   autoFailover: boolean;
   /** Whether progress and the addon's record are kept. False for the Lab's test streams. */
   remember?: boolean;
+  /**
+   * Whether the progress kept may put the video on Continue Watching. False
+   * for a sports event: its place is kept, but the row would ask addons that
+   * never listed it for its page and streams.
+   */
+  continueRow?: boolean;
 }
 
 export interface PlaybackSession {
@@ -143,6 +150,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
   const { video, type, metaId, videoId, finder } = options;
   const keep = options.remember !== false;
+  const offRow = options.continueRow === false;
   const state = createStore<SessionState>(INITIAL_SESSION_STATE);
   const tried = new Set<string>();
   let engine: Engine | null = null;
@@ -245,6 +253,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     return startedPlaying ? (tracker?.position() ?? lastStartAt) : lastStartAt;
   }
 
+  /** Saves where playback is; a sports event's place is marked to stay off Continue Watching. */
+  function record(position: number, duration: number) {
+    if (!keep) return;
+    const update: ProgressUpdate = { metaId, type, videoId, position, duration };
+    if (offRow) update.continueRow = false;
+    progress.record(update);
+  }
+
   function save() {
     checkLive();
     // A live broadcast has nothing to come back to. Nor has a stream whose
@@ -253,7 +269,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     const position = tracker?.position();
     const duration = savedLength();
     if (position === undefined || !(duration > 0)) return;
-    if (keep) progress.record({ metaId, type, videoId, position, duration });
+    record(position, duration);
   }
 
   function fail(error: PlaybackError, current: number) {
@@ -503,7 +519,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           return;
         }
         const duration = savedLength();
-        if (keep) progress.record({ metaId, type, videoId, position: duration, duration });
+        record(duration, duration);
         patch({ status: 'ended', position: duration });
       },
     ],

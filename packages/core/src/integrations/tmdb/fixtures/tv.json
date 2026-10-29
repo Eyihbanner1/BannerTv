@@ -1,0 +1,269 @@
+{
+  "adult": false,
+  "backdrop_path": "/qp6FhWqr7Ow2hXt4ZA1kTnZEHkR.jpg",
+  "created_by": [
+    {
+      "id": 1915379,
+      "credit_id": "5bb3bd1a0e0a2633a7006a1d",
+      "name": "Joe Brumm",
+      "original_name": "Joe Brumm",
+      "gender": 2,
+      "profile_path": null
+    }
+  ],
+  "episode_run_time": [7],
+  "first_air_date": "2018-10-01",
+  "genres": [
+    { "id": 16, "name": "Animation" },
+    { "id": 10762, "name": "Kids" },
+    { "id": 35, "name": "Comedy" },
+    { "id": 10751, "name": "Family" }
+  ],
+  "homepage": "https://www.bluey.tv",
+  "id": 82728,
+  "in_production": true,
+  "languages": ["en"],
+  "last_air_date": "2024-04-14",
+  "last_episode_to_air": {
+    "id": 4940312,
+    "name": "The Sign",
+    "overview": "Uncle Rad and Aunt Frisky's wedding day arrives.",
+    "vote_average": 9.1,
+    "vote_count": 14,
+    "air_date": "2024-04-14",
+    "episode_number": 49,
+    "episode_type": "standard",
+    "production_code": "",
+    "runtime": 28,
+    "season_number": 3,
+    "show_id": 82728,
+    "still_path": "/aP5ptsbuSFnv3PdS1GtWRJp1DMN.jpg"
+  },
+  "name": "Bluey",
+  "next_episode_to_air": null,
+  "networks": [
+    {
+      "id": 1168,
+      "logo_path": "/4jeeyQDPMj3r8J8kp8ejRwJ8Cj9.png",
+      "name": "ABC Kids",
+      "origin_country": "AU"
+    },
+    {
+      "id": 2534,
+      "logo_path": "/yM6EYQYZNu4bCJ8i5n4cmCQMAdM.png",
+      "name": "Disney Junior",
+      "origin_country": "US"
+    }
+  ],
+  "number_of_episodes": 154,
+  "number_of_seasons": 3,
+  "origin_country": ["AU"],
+  "original_language": "en",
+  "original_name": "Bluey",
+  "overview": "Bluey is an inexhaustible six year-old Blue Heeler dog, who loves to play and turns everyday family life into extraordinary adventures.",
+  "popularity": 301.246,
+  "poster_path": "/b9mY0X5T20ZqnoC4fE6v5Y4grKm.jpg",
+  "production_companies": [
+    {
+      "id": 100735,
+      "logo_path": "/ahQjSsS8vmvc6CiDdn1v1zBL0mw.png",
+      "name": "Ludo Studio",
+      "origin_country": "AU"
+    },
+    {
+      "id": 7521,
+      "logo_path": "/1r7kAIwHyGvTAZ3nYXzlTn6b5zt.png",
+      "name": "BBC Studios",
+      "origin_country": "GB"
+    }
+  ],
+  "production_countries": [{ "iso_3166_1": "AU", "name": "Australia" }],
+  "seasons": [
+    {
+      "air_date": "2019-04-21",
+      "episode_count": 9,
+      "id": 160440,
+      "name": "Specials",
+      "overview": "",
+      "poster_path": "/qBQcsnyvQaMnmcfnyhyCcqXG8no.jpg",
+      "season_number": 0,
+      "vote_average": 0.0
+    },
+    {
+      "air_date": "2018-10-01",
+      "episode_count": 52,
+      "id": 109185,
+      "name": "Season 1",
+      "overview": "",
+      "poster_path": "/oU5QyJ1MT1Nf1fBdX4hPzcRk3Ro.jpg",
+      "season_number": 1,
+      "vote_average": 8.4
+    },
+    {
+      "air_date": "2020-03-18",
+      "episode_count": 52,
+      "id": 151441,
+      "name": "Season 2",
+      "overview": "",
+      "poster_path": "/yAqJE5WR0y4DV3Zz7Lh8sYQfOPJ.jpg",
+      "season_number": 2,
+      "vote_average": 8.7
+    },
+    {
+      "air_date": "2021-09-05",
+      "episode_count": 50,
+      "id": 194233,
+      "name": "Season 3",
+      "overview": "",
+      "poster_path": "/a3MQ2ggUthUKtyNtuK3LlQuGjYz.jpg",
+      "season_number": 3,
+      "vote_average": 8.9
+    }
+  ],
+  "spoken_languages": [{ "english_name": "English", "iso_639_1": "en", "name": "English" }],
+  "status": "Returning Series",
+  "tagline": "",
+  "type": "Scripted",
+  "vote_average": 8.6,
+  "vote_count": 641,
+  "images": {
+    "backdrops": [
+      {
+        "aspect_ratio": 1.778,
+        "height": 1080,
+        "iso_639_1": "en",
+        "file_path": "/qp6FhWqr7Ow2hXt4ZA1kTnZEHkR.jpg",
+        "vote_average": 5.456,
+        "vote_count": 5,
+        "width": 1920
+      },
+      {
+        "aspect_ratio": 1.778,
+        "height": 1080,
+        "iso_639_1": null,
+        "file_path": "/4vJiAWIDBEmvBNjmmQwHqKyGRTR.jpg",
+        "vote_average": 5.318,
+        "vote_count": 3,
+        "width": 1920
+      }
+    ],
+    "logos": [
+      {
+        "aspect_ratio": 2.232,
+        "height": 448,
+        "iso_639_1": "en",
+        "file_path": "/sbXbMjzwBMw5R3TsCJhIrSYsvaF.svg",
+        "vote_average": 5.6,
+        "vote_count": 4,
+        "width": 1000
+      },
+      {
+        "aspect_ratio": 2.233,
+        "height": 600,
+        "iso_639_1": "en",
+        "file_path": "/wBhxvwV6QSkJNVAMcVpYBSIL2qh.png",
+        "vote_average": 5.246,
+        "vote_count": 2,
+        "width": 1340
+      }
+    ],
+    "posters": [
+      {
+        "aspect_ratio": 0.667,
+        "height": 1500,
+        "iso_639_1": "en",
+        "file_path": "/b9mY0X5T20ZqnoC4fE6v5Y4grKm.jpg",
+        "vote_average": 5.522,
+        "vote_count": 4,
+        "width": 1000
+      }
+    ]
+  },
+  "aggregate_credits": {
+    "cast": [
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2263545,
+        "known_for_department": "Acting",
+        "name": "Dave McCormack",
+        "original_name": "Dave McCormack",
+        "popularity": 3.1,
+        "profile_path": "/n0VOvM5e3HZ3fS6hVxo3UQpgMvh.jpg",
+        "roles": [
+          {
+            "credit_id": "5bb3bd1a0e0a2633a7006a2b",
+            "character": "Bandit Heeler (voice)",
+            "episode_count": 150
+          }
+        ],
+        "total_episode_count": 150,
+        "order": 0
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 2263546,
+        "known_for_department": "Acting",
+        "name": "Melanie Zanetti",
+        "original_name": "Melanie Zanetti",
+        "popularity": 2.8,
+        "profile_path": "/tZMfVBVMXeYcZd2jDvX8u57HzMN.jpg",
+        "roles": [
+          {
+            "credit_id": "5bb3bd250e0a2633ab006aa1",
+            "character": "Chilli Heeler (voice)",
+            "episode_count": 147
+          },
+          {
+            "credit_id": "6031e9a1b7b69d003f1a1f2c",
+            "character": "Narrator (voice)",
+            "episode_count": 1
+          }
+        ],
+        "total_episode_count": 147,
+        "order": 1
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2263547,
+        "known_for_department": "Acting",
+        "name": "Brad Elliott",
+        "original_name": "Brad Elliott",
+        "popularity": 1.4,
+        "profile_path": null,
+        "roles": [
+          {
+            "credit_id": "5d7b45e8a7c8a4001f3d61a2",
+            "character": "Uncle Stripe (voice)",
+            "episode_count": 30
+          }
+        ],
+        "total_episode_count": 30,
+        "order": 2
+      },
+      {
+        "adult": false,
+        "gender": 0,
+        "id": 3098722,
+        "known_for_department": "Acting",
+        "name": "Uncredited Voice",
+        "original_name": "Uncredited Voice",
+        "popularity": 0.6,
+        "profile_path": null,
+        "roles": [],
+        "total_episode_count": 2,
+        "order": 3
+      }
+    ],
+    "crew": []
+  },
+  "content_ratings": {
+    "results": [
+      { "descriptors": [], "iso_3166_1": "AU", "rating": "G" },
+      { "descriptors": [], "iso_3166_1": "US", "rating": "TV-Y" },
+      { "descriptors": [], "iso_3166_1": "GB", "rating": "U" }
+    ]
+  }
+}

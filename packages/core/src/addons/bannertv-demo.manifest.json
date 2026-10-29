@@ -1,0 +1,24 @@
+{
+  "id": "com.bannertv.demo",
+  "version": "1.0.0",
+  "name": "BannerTV Demo",
+  "description": "Creative Commons films from the Blender Foundation, to try BannerTV with. Served by BannerTV, with no request logs.",
+  "logo": "https://demo.bannertv.workers.dev/art/addon.png",
+  "types": ["movie"],
+  "idPrefixes": ["bannertv:"],
+  "resources": ["catalog", "meta", "stream"],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "blender",
+      "name": "Blender open movies",
+      "extra": [{ "name": "search" }]
+    }
+  ],
+  "behaviorHints": {
+    "adult": false,
+    "p2p": false,
+    "configurable": false,
+    "configurationRequired": false
+  }
+}

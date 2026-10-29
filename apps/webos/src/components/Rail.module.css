@@ -75,3 +75,15 @@
 .expanded .label {
   opacity: 1;
 }
+
+/* Below the sections, apart from them. */
+.profile {
+  margin-top: 48px;
+}
+
+/* The same width as a section's icon, so the labels line up. */
+.avatar {
+  flex: none;
+  width: 48px;
+  height: 48px;
+}

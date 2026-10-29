@@ -1,8 +1,11 @@
 import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { sportsData } from './build/sports-data.ts';
 import { vendorScripts } from './build/vendor-scripts.ts';
 import { webosPackage } from './build/webos-package.ts';
+import { SPORTS_IN_BUILD } from './src/app/features.ts';
+import { SPORTS_DATA_SCRIPT } from './src/data/sports-data-script.ts';
 import { VENDOR_SCRIPTS } from './src/player/engines/vendor.ts';
 
 const root = import.meta.dirname;
@@ -13,6 +16,12 @@ export default defineConfig({
   plugins: [
     react(),
     vendorScripts(VENDOR_SCRIPTS),
+    // A build without Sports carries no team and league data.
+    SPORTS_IN_BUILD &&
+      sportsData({
+        ...SPORTS_DATA_SCRIPT,
+        from: resolve(root, '../../packages/core/src/sports/data/sports-data.json'),
+      }),
     webosPackage({
       metaDir: resolve(root, 'webos-meta'),
       brandDir: resolve(root, '../../brand/webos'),

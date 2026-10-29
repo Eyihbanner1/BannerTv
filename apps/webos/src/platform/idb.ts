@@ -101,6 +101,18 @@ export function createStorage(): Storage {
         if (!database) return fallbackKv.set(key, value);
         await done(database.transaction(KV, 'readwrite').objectStore(KV).put(value, key));
       },
+      async delete(key) {
+        const database = await db;
+        if (!database) return fallbackKv.delete(key);
+        await done(database.transaction(KV, 'readwrite').objectStore(KV).delete(key));
+      },
+      async deletePrefix(prefix) {
+        const database = await db;
+        if (!database) return fallbackKv.deletePrefix(prefix);
+        // Every string key that starts with the prefix sorts between these two.
+        const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+        await done(database.transaction(KV, 'readwrite').objectStore(KV).delete(range));
+      },
     },
     cache: {
       async read(key) {

@@ -298,8 +298,9 @@ function fraction(entry: ProgressEntry | undefined): number | undefined {
  * starts again from the beginning. A finished episode, or one stopped in its
  * closing minute, gives way to the next one once it has aired (undated
  * episodes count as aired). Anything else is left out: a finished film, the
- * end of a series, a film barely started, and a video whose length never
- * became known, such as a live broadcast.
+ * end of a series, a film barely started, a video whose length never became
+ * known, such as a live broadcast, and one kept only to resume, such as a
+ * sports replay (see ProgressEntry.continueRow).
  */
 export function continueItem(
   entry: ProgressEntry,
@@ -307,7 +308,7 @@ export function continueItem(
   progress: ProgressReader,
   now: number,
 ): ContinueItem | undefined {
-  if (entry.duration <= 0) return undefined;
+  if (entry.duration <= 0 || entry.continueRow === false) return undefined;
   const preview = previewOf(card);
   const resumeAt = progress.resumeAt(entry.videoId);
   if (resumeAt !== undefined) {

@@ -1,0 +1,13 @@
+.entry {
+  display: flex;
+  align-items: center;
+}
+
+.name {
+  margin-left: 24px;
+}
+
+.note {
+  margin-left: 24px;
+  opacity: 0.7;
+}

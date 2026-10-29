@@ -50,12 +50,18 @@ function rowStyle(catalog: ManifestCatalog): RowStyle {
   return SPOTLIGHT.test(catalog.name) || SPOTLIGHT.test(catalog.id) ? 'landscape' : 'poster';
 }
 
-function genreRows(addon: InstalledAddon, index: number, used: Set<string>): BoardRow[] {
+function genreRows(
+  addon: InstalledAddon,
+  index: number,
+  used: Set<string>,
+  leaveOut: CatalogFilter | undefined,
+): BoardRow[] {
   const rows: BoardRow[] = [];
   for (const [type, genre] of GENRE_PICKS) {
     if (used.has(type)) continue;
     // The first board catalog of this type that can filter by this genre.
     const catalog = boardCatalogs(addon.manifest).find((c) => {
+      if (leaveOut?.(addon, c)) return false;
       const extra = c.type === type ? findExtra(c, 'genre') : undefined;
       return extra !== undefined && !extra.isRequired && extra.options.indexOf(genre) !== -1;
     });
@@ -74,15 +80,23 @@ function genreRows(addon: InstalledAddon, index: number, used: Set<string>): Boa
   return rows;
 }
 
+/** A catalog Home or Search leaves out, such as a sports catalog the Sports screen shows. */
+export type CatalogFilter = (addon: InstalledAddon, catalog: ManifestCatalog) => boolean;
+
 /**
  * The rows of Home, in collection order: every catalog that needs no extra,
  * then the genre rows of the first addon able to make them for each type.
+ * Catalogs `leaveOut` names get no row.
  */
-export function buildBoard(addons: readonly InstalledAddon[]): BoardRow[] {
+export function buildBoard(
+  addons: readonly InstalledAddon[],
+  leaveOut?: CatalogFilter,
+): BoardRow[] {
   const rows: BoardRow[] = [];
   const typesWithGenres = new Set<string>();
   addons.forEach((addon, index) => {
     for (const catalog of boardCatalogs(addon.manifest)) {
+      if (leaveOut?.(addon, catalog)) continue;
       rows.push({
         key: `${index}-${slug(catalog.type)}-${slug(catalog.id)}`,
         addon,
@@ -94,7 +108,7 @@ export function buildBoard(addons: readonly InstalledAddon[]): BoardRow[] {
         style: rowStyle(catalog),
       });
     }
-    const genres = genreRows(addon, index, typesWithGenres);
+    const genres = genreRows(addon, index, typesWithGenres, leaveOut);
     for (const row of genres) rows.push(row);
     for (const row of genres) typesWithGenres.add(row.type);
   });

@@ -8,6 +8,11 @@ export const WATCHED_FRACTION = 0.9;
 export const MIN_RESUME_SECONDS = 30;
 /** Resuming this close to the end would only show the credits, so it starts over instead. */
 export const END_SECONDS = 60;
+/**
+ * Trakt keeps progress as a rounded percentage. Within this share of the
+ * video's own place it is the same place, as when the TV's stop comes back.
+ */
+const SAME_PLACE_FRACTION = 0.01;
 const KEY = 'progress';
 
 export interface ProgressEntry {
@@ -23,11 +28,18 @@ export interface ProgressEntry {
   /** Milliseconds since 1970. */
   updatedAt: number;
   watched: boolean;
+  /**
+   * False for a video that keeps its place to resume but never goes on
+   * Continue Watching, such as a sports replay: only the addon that listed
+   * it may be asked for its page and streams, and the row would ask others.
+   * Left out for every other video.
+   */
+  continueRow?: false;
 }
 
 export type ProgressUpdate = Pick<
   ProgressEntry,
-  'metaId' | 'type' | 'videoId' | 'position' | 'duration'
+  'metaId' | 'type' | 'videoId' | 'position' | 'duration' | 'continueRow'
 >;
 
 export interface ProgressStore {
@@ -46,6 +58,15 @@ export interface ProgressStore {
   record(update: ProgressUpdate): ProgressEntry;
   /** Forgets the position (Start over); keeps nothing about the video. */
   clear(videoId: string): void;
+  /**
+   * Brings in progress made elsewhere (Trakt): each entry replaces the
+   * video's own only when it is newer. A video watched here stays watched.
+   * When the TV knows the video's length, an entry's place is read as a
+   * share of the video and put onto that length, and one within about a
+   * percentage point of the TV's own place leaves it as it is.
+   * Resolves with how many entries were taken.
+   */
+  merge(entries: readonly ProgressEntry[]): Promise<number>;
   /**
    * Where to resume in seconds, or undefined to start from the beginning:
    * never near either end, nor in a video whose length is unknown.
@@ -76,14 +97,14 @@ function isId(value: unknown): value is string {
 /** A saved entry, or undefined when any field is missing or of the wrong kind. */
 function readEntry(value: unknown): ProgressEntry | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { metaId, type, videoId, position, duration, updatedAt, watched } = value as Record<
-    string,
-    unknown
-  >;
+  const { metaId, type, videoId, position, duration, updatedAt, watched, continueRow } =
+    value as Record<string, unknown>;
   if (!isId(metaId) || !isId(type) || !isId(videoId)) return undefined;
   if (!isAmount(position) || !isAmount(duration) || !isAmount(updatedAt)) return undefined;
   if (typeof watched !== 'boolean') return undefined;
-  return { metaId, type, videoId, position, duration, updatedAt, watched };
+  const entry: ProgressEntry = { metaId, type, videoId, position, duration, updatedAt, watched };
+  if (continueRow === false) entry.continueRow = false;
+  return entry;
 }
 
 /** Chromium 68 does not sort stably, so equal times keep their order in `entries` by hand. */
@@ -234,6 +255,8 @@ export function createProgressStore(options: {
         updatedAt: now(),
         watched: reachedEnd || entries.get(update.videoId)?.watched === true,
       };
+      // Each record says it again: the same video played from elsewhere can go on the row.
+      if (update.continueRow === false) entry.continueRow = false;
       put(entry);
       trim();
       save();
@@ -245,6 +268,37 @@ export function createProgressStore(options: {
       if (!loaded) clearedEarly.add(videoId);
       if (had || !loaded) save();
       if (had) changed();
+    },
+    async merge(incoming) {
+      await load().catch(() => undefined);
+      if (!loaded) return 0;
+      let taken = 0;
+      for (const value of incoming) {
+        let entry = readEntry(value);
+        if (!entry) continue;
+        const own = entries.get(entry.videoId);
+        if (own && own.updatedAt >= entry.updatedAt) continue;
+        if (own && own.duration > 0 && entry.duration > 0) {
+          // Trakt's length for a video is its runtime, not the stream's: a share
+          // of it lands somewhere else in the stream the TV plays.
+          const share = Math.min(entry.position / entry.duration, 1);
+          const same = Math.abs(share - own.position / own.duration) <= SAME_PLACE_FRACTION;
+          // Most often the TV's own stop coming back. One finished elsewhere still counts.
+          if (same && (own.watched || !entry.watched)) continue;
+          entry = { ...entry, position: share * own.duration, duration: own.duration };
+        }
+        entries.set(entry.videoId, own?.watched ? { ...entry, watched: true } : entry);
+        taken += 1;
+      }
+      if (taken === 0) return 0;
+      // Kept least recently updated first, so trimming drops the oldest, wherever they came from.
+      const sorted = readEntries(Array.from(entries.values()));
+      entries.clear();
+      sorted.forEach(put);
+      trim();
+      save();
+      changed();
+      return taken;
     },
     resumeAt(videoId) {
       const entry = entries.get(videoId);

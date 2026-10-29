@@ -1,0 +1,398 @@
+import type { InstalledAddon, Store } from '@bannertv/core';
+import {
+  type ManifestCatalog,
+  type MetaPreview,
+  parseManifest,
+  parseMetaPreview,
+} from '@bannertv/protocol';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// What the app keeps, in memory.
+const saved = vi.hoisted(() => new Map<string, unknown>());
+
+vi.mock('./storage', () => ({
+  storage: {
+    kv: {
+      get: (key: string) => Promise.resolve(saved.get(key)),
+      set: (key: string, value: unknown) => {
+        saved.set(key, value);
+        return Promise.resolve();
+      },
+    },
+  },
+}));
+
+vi.mock('./addons', async () => {
+  const { createStore } = await import('@bannertv/core');
+  return {
+    addonCollection: createStore({ ready: false, addons: [] }),
+    addonClient: {},
+  };
+});
+
+type Collection = Store<{ ready: boolean; addons: readonly InstalledAddon[] }>;
+
+const FOOTBALL = { type: 'tv', id: 'football', name: 'Football' };
+// Named after a view only: a sports catalog once its first page looked like matches.
+const LIVE = { type: 'tv', id: 'now', name: 'Live' };
+const SEARCH = {
+  type: 'tv',
+  id: 'search',
+  name: 'Search',
+  extra: [{ name: 'search', isRequired: true }],
+};
+
+function install(id: string, transportUrl: string, catalogs: object[]): InstalledAddon {
+  return {
+    transportUrl,
+    manifest: parseManifest({
+      id,
+      version: '1.0.0',
+      name: 'Test Sports',
+      resources: ['catalog', 'meta', 'stream'],
+      types: ['tv'],
+      catalogs,
+    }),
+    official: false,
+    fetchedAt: 0,
+  };
+}
+
+const catalogOf = (addon: InstalledAddon, id: string): ManifestCatalog =>
+  addon.manifest.catalogs.find((catalog) => catalog.id === id)!;
+
+const matches = ['Arsenal vs Chelsea', 'Celtic vs Rangers', 'Ajax vs PSV'].map((name, i) =>
+  parseMetaPreview({ id: `x:${i}`, type: 'tv', name })!,
+);
+
+/** A fresh copy of the module, following a collection that is ready with `addons`. */
+async function start(addons: InstalledAddon[]) {
+  vi.resetModules();
+  const sports = await import('./sports');
+  const collection = (await import('./addons')).addonCollection as unknown as Collection;
+  await sports.startSports();
+  collection.set({ ready: true, addons });
+  return { sports, collection };
+}
+
+beforeEach(() => {
+  saved.clear();
+  vi.stubGlobal('window', globalThis);
+  // The team and league data never arrives: grouping goes by what addons say.
+  vi.stubGlobal('document', {
+    createElement: () => ({ remove: () => undefined }),
+    head: { appendChild: () => undefined },
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('an addon set up again with other settings', () => {
+  // The new manifest id differs only by its settings hash, which the collection accepts.
+  const before = install('org.x.sports.ab12cd34ef56', 'https://x.example.com/ab12/manifest.json', [
+    FOOTBALL,
+    LIVE,
+  ]);
+  const after = install('org.x.sports.99887766aabb', 'https://x.example.com/9988/manifest.json', [
+    FOOTBALL,
+    LIVE,
+  ]);
+
+  it('keeps its Show in Sports', async () => {
+    const { sports, collection } = await start([before]);
+    sports.setSportsSetting(before, 'no');
+    expect(sports.sportsState.get().shown).toBe(false);
+
+    collection.set({ ready: true, addons: [after] });
+    expect(sports.sportsSetting(after)).toBe('no');
+    expect(sports.sportsState.get().shown).toBe(false);
+    expect(saved.get('sports.settings')).toEqual({ 'org.x.sports.99887766aabb': 'no' });
+  });
+
+  it('keeps what its first pages looked like', async () => {
+    const { sports, collection } = await start([before]);
+    sports.noteFirstPage(before, catalogOf(before, 'now'), matches);
+    expect(sports.sportsState.get().catalogs.map((entry) => entry.catalog.id)).toEqual([
+      'football',
+      'now',
+    ]);
+
+    collection.set({ ready: true, addons: [after] });
+    const catalogs = sports.sportsState.get().catalogs;
+    expect(catalogs.map((entry) => [entry.addon, entry.catalog.id])).toEqual([
+      [after, 'football'],
+      [after, 'now'],
+    ]);
+    expect(JSON.stringify(saved.get('sports.evidence'))).not.toContain('ab12cd34ef56');
+  });
+
+  it('keeps the kick-offs it saw, under its new id', async () => {
+    const { sports, collection } = await start([before]);
+    const at = Date.parse('2026-10-28T20:00:00Z');
+    sports.kickoffs.note(before.manifest.id, 'x:0', { at, sure: true, source: 'released' });
+    await sports.kickoffs.flush();
+
+    collection.set({ ready: true, addons: [after] });
+    expect(sports.kickoffs.get(after.manifest.id, 'x:0')?.at).toBe(at);
+    expect(sports.kickoffs.get(before.manifest.id, 'x:0')).toBeUndefined();
+    await sports.kickoffs.flush();
+    const rows = JSON.stringify(saved.get('sports.kickoffs'));
+    expect(rows).toContain(after.manifest.id);
+    expect(rows).not.toContain('ab12cd34ef56');
+  });
+
+  it('forgets everything about an addon removed', async () => {
+    const { sports, collection } = await start([before]);
+    sports.setSportsSetting(before, 'yes');
+    sports.noteFirstPage(before, catalogOf(before, 'now'), matches);
+    sports.kickoffs.note(before.manifest.id, 'x:0', {
+      at: Date.parse('2026-10-28T20:00:00Z'),
+      sure: true,
+      source: 'released',
+    });
+    await sports.kickoffs.flush();
+    expect(JSON.stringify(saved.get('sports.kickoffs'))).toContain(before.manifest.id);
+
+    collection.set({ ready: true, addons: [] });
+    await sports.kickoffs.flush();
+    expect(saved.get('sports.settings')).toEqual({});
+    expect(saved.get('sports.evidence')).toEqual([]);
+    expect(saved.get('sports.kickoffs')).toEqual([]);
+  });
+});
+
+describe('events read from a search of a sports addon', () => {
+  it('reads clock times in the zone the install address names', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=America%2FArgentina%2FBuenos_Aires',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const item = parseMetaPreview({
+      id: 'x:9',
+      type: 'tv',
+      name: 'Arsenal vs Chelsea',
+      releaseInfo: '20:00',
+    })!;
+
+    const [event] = sports.eventsFromItems(addon, catalogOf(addon, 'search'), [item]);
+    // 20:00 in Buenos Aires (UTC-3), as the Sports screen reads the same item.
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-28T23:00:00Z'));
+    expect(sports.eventsFromItems(addon, catalogOf(addon, 'football'), [item])[0]?.kickOff).toEqual(
+      event?.kickOff,
+    );
+  });
+
+  it('reads clock times past midnight on the next day, as the Sports screen does', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const items = [
+      ['Arsenal vs Chelsea', '22:00'],
+      ['Celtic vs Rangers', '23:45'],
+      ['Ajax vs PSV', '00:30'],
+    ].map(([name, releaseInfo], i) =>
+      parseMetaPreview({ id: `x:${i}`, type: 'tv', name, releaseInfo })!,
+    );
+
+    const events = sports.eventsFromItems(addon, catalogOf(addon, 'search'), items);
+    const kickOff = (id: string) =>
+      events.find((event) => event.sources.some((source) => source.id === id))?.kickOff?.at;
+    expect([kickOff('x:0'), kickOff('x:1'), kickOff('x:2')]).toEqual([
+      Date.parse('2026-10-28T22:00:00Z'),
+      Date.parse('2026-10-28T23:45:00Z'),
+      Date.parse('2026-10-29T00:30:00Z'),
+    ]);
+  });
+});
+
+describe('a match opened from its catalog in Discover', () => {
+  it('reads the time with the list it is in, so 00:30 after 23:45 is tomorrow', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date('2026-10-28T23:30:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const items = [
+      ['Arsenal vs Chelsea', '22:00'],
+      ['Celtic vs Rangers', '23:45'],
+      ['Ajax vs PSV', '00:30'],
+    ].map(([name, releaseInfo], i) =>
+      parseMetaPreview({ id: `x:${i}`, type: 'tv', name, releaseInfo })!,
+    );
+    const football = catalogOf(addon, 'football');
+
+    // Pressed before the list is read, the tile goes alone: this morning's.
+    const early = sports.eventForItem(addon, football, items[2]!);
+    expect(early?.kickOff?.at).toBe(Date.parse('2026-10-28T00:30:00Z'));
+    sports.prepareItems(addon, football, items);
+    vi.runAllTimers();
+    const event = sports.eventForItem(addon, football, items[2]!);
+    expect(event?.sources.map((source) => source.id)).toEqual(['x:2']);
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T00:30:00Z'));
+  });
+
+  it('keeps the days read as the list grows by a page, and reads on from there', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date('2026-10-28T21:00:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const item = (id: string, minutes: number) =>
+      parseMetaPreview({
+        id,
+        type: 'tv',
+        name: `Home ${id} vs Away ${id}`,
+        releaseInfo: `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`,
+      })!;
+    // A match a minute from 23:30, past midnight, then the next page.
+    const first = Array.from({ length: 45 }, (_, i) => item(`p:${i}`, 23 * 60 + 30 + i));
+    const grown = [...first, item('q:0', 20), item('q:1', 30)];
+    const football = catalogOf(addon, 'football');
+    const atOf = (tile: MetaPreview) => sports.eventForItem(addon, football, tile)?.kickOff?.at;
+
+    sports.prepareItems(addon, football, first);
+    vi.runAllTimers();
+    expect(atOf(first[44]!)).toBe(Date.parse('2026-10-29T00:14:00Z'));
+
+    // Discover draws the longer list, and leaves before it is read through:
+    // 00:14 keeps the day the first list gave it, not this morning's.
+    const stop = sports.prepareItems(addon, football, grown);
+    stop();
+    expect(atOf(first[44]!)).toBe(Date.parse('2026-10-29T00:14:00Z'));
+    // Drawn again, it goes on, and the new page lands after the wrap too.
+    sports.prepareItems(addon, football, grown);
+    vi.runAllTimers();
+    expect(atOf(grown[45]!)).toBe(Date.parse('2026-10-29T00:20:00Z'));
+    expect(atOf(grown[46]!)).toBe(Date.parse('2026-10-29T00:30:00Z'));
+    expect(atOf(first[0]!)).toBe(Date.parse('2026-10-28T23:30:00Z'));
+  });
+
+  it('reads a list opened again or grown after midnight as of its first read', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date('2026-10-28T23:50:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const tile = (id: string, releaseInfo: string) =>
+      parseMetaPreview({ id, type: 'tv', name: `Home ${id} vs Away ${id}`, releaseInfo })!;
+    const football = catalogOf(addon, 'football');
+    const atOf = (item: MetaPreview) => sports.eventForItem(addon, football, item)?.kickOff?.at;
+    const first = ['19:45', '20:00', '22:00', '23:45', '00:15'].map((time, i) =>
+      tile(`t${i}`, time),
+    );
+    const tonight = [
+      Date.parse('2026-10-28T19:45:00Z'),
+      Date.parse('2026-10-28T20:00:00Z'),
+      Date.parse('2026-10-28T22:00:00Z'),
+      Date.parse('2026-10-28T23:45:00Z'),
+      Date.parse('2026-10-29T00:15:00Z'),
+    ];
+    sports.prepareItems(addon, football, first)();
+    sports.prepareItems(addon, football, first);
+    vi.runAllTimers();
+    expect(first.map(atOf)).toEqual(tonight);
+    // At 00:05 Discover opens again on the same cached tiles: read as of 23:50, they
+    // are still tonight's, where read now 19:45 would be this evening's.
+    vi.setSystemTime(new Date('2026-10-29T00:05:00Z'));
+    sports.prepareItems(addon, football, []);
+    sports.prepareItems(addon, football, [...first]);
+    vi.runAllTimers();
+    expect(first.map(atOf)).toEqual(tonight);
+    // The pager adds the next page after the same tiles.
+    const grown = [...first, tile('t5', '00:30')];
+    sports.prepareItems(addon, football, grown);
+    vi.runAllTimers();
+    expect(grown.map(atOf)).toEqual([...tonight, Date.parse('2026-10-29T00:30:00Z')]);
+  });
+
+  it('reads a tile of a one-tile list alone, not as an earlier list had its id', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date('2026-10-28T21:00:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const tile = (id: string, releaseInfo: string, name: string) =>
+      parseMetaPreview({ id, type: 'tv', name, releaseInfo })!;
+    const football = catalogOf(addon, 'football');
+    const tonight = [tile('a', '22:00', 'Arsenal vs Chelsea'), tile('b', '00:30', 'Ajax vs PSV')];
+    const stop = sports.prepareItems(addon, football, tonight);
+    vi.runAllTimers();
+    stop();
+    expect(sports.eventForItem(addon, football, tonight[1]!)?.kickOff?.at).toBe(
+      Date.parse('2026-10-29T00:30:00Z'),
+    );
+    // The next day the catalog lists one tile, under an id the addon has used again.
+    vi.setSystemTime(new Date('2026-10-29T12:00:00Z'));
+    const later = [tile('b', '15:00', 'Feyenoord vs PSV')];
+    sports.prepareItems(addon, football, later);
+    vi.runAllTimers();
+    const event = sports.eventForItem(addon, football, later[0]!);
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T15:00:00Z'));
+    expect(event?.home).toBe('Feyenoord');
+  });
+
+  it('reads a tile on the day remembered for it, list or not', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-28T23:30:00Z'));
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    const item = parseMetaPreview({
+      id: 'x:2',
+      type: 'tv',
+      name: 'Ajax vs PSV',
+      releaseInfo: '00:30',
+    })!;
+    // The Sports screen saw it tomorrow at 00:30.
+    sports.kickoffs.note('org.x.sports', 'x:2', {
+      at: Date.parse('2026-10-29T00:30:00Z'),
+      sure: true,
+      source: 'clock',
+    });
+    const event = sports.eventForItem(addon, catalogOf(addon, 'football'), item);
+    expect(event?.kickOff?.at).toBe(Date.parse('2026-10-29T00:30:00Z'));
+  });
+
+  it('opens the tile pressed, not an earlier one it would merge with', async () => {
+    const addon = install(
+      'org.x.sports',
+      'https://x.example.com/manifest.json?timezone=Europe%2FLondon',
+      [FOOTBALL, SEARCH],
+    );
+    const { sports } = await start([addon]);
+    // The home and away games of a season, neither dated.
+    const items = ['Arsenal vs Chelsea', 'Liverpool vs Everton', 'Chelsea vs Arsenal'].map(
+      (name, i) => parseMetaPreview({ id: `r:${i}`, type: 'tv', name })!,
+    );
+    const event = sports.eventForItem(addon, catalogOf(addon, 'football'), items[2]!);
+    expect(event?.sources.map((source) => source.id)).toEqual(['r:2']);
+    expect(event?.home).toBe('Chelsea');
+  });
+});

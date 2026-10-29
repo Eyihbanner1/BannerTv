@@ -19,6 +19,7 @@ import type {
   MetaPreview,
   MetaResponse,
   PosterShape,
+  SportHints,
   Video,
 } from './types';
 
@@ -74,6 +75,46 @@ function setIfDefined<T extends object, K extends keyof T>(target: T, key: K, va
   if (value !== undefined) target[key] = value;
 }
 
+/** A team as a name, or as `{ name, logo }`, its badge kept with the name it belongs to. */
+function readTeam(value: unknown): { name: string; logo?: string } | undefined {
+  const name = readString(value);
+  if (name !== undefined) return { name };
+  const record = asRecord(value);
+  const named = record && readString(record.name);
+  if (!record || named === undefined) return undefined;
+  const team: { name: string; logo?: string } = { name: named };
+  setIfDefined(team, 'logo', readHttpUrl(record.logo));
+  return team;
+}
+
+/** The non-standard fields sports addons add, or undefined when there are none. */
+function readSportHints(record: JsonRecord): SportHints | undefined {
+  const hints: SportHints = {};
+  setIfDefined(
+    hints,
+    'start',
+    readString(record.eventStart) ??
+      readString(record.startTime) ??
+      readString(record.start_time) ??
+      readString(record.kickoff) ??
+      readString(record.kickOff),
+  );
+  const home = readTeam(record.team1) ?? readTeam(record.homeTeam);
+  const away = readTeam(record.team2) ?? readTeam(record.awayTeam);
+  setIfDefined(hints, 'home', home?.name);
+  setIfDefined(hints, 'homeLogo', home?.logo);
+  setIfDefined(hints, 'away', away?.name);
+  setIfDefined(hints, 'awayLogo', away?.logo);
+  if (typeof record.isLive === 'boolean') hints.live = record.isLive;
+  setIfDefined(hints, 'category', readString(record.category));
+  setIfDefined(
+    hints,
+    'league',
+    readString(record.league) ?? readString(record.competition) ?? readString(record.tournament),
+  );
+  return Object.keys(hints).length > 0 ? hints : undefined;
+}
+
 /**
  * Reads one catalog or meta item. Returns undefined when it has no id or
  * name, so the caller can drop it and keep the rest of the response.
@@ -110,6 +151,8 @@ export function parseMetaPreview(
   setIfDefined(preview, 'releaseInfo', readString(record.releaseInfo) ?? readString(record.year));
   setIfDefined(preview, 'imdbRating', readString(record.imdbRating) ?? linkNames(links, 'imdb')[0]);
   setIfDefined(preview, 'runtime', readString(record.runtime));
+  setIfDefined(preview, 'released', readString(record.released));
+  setIfDefined(preview, 'sport', readSportHints(record));
   return preview;
 }
 

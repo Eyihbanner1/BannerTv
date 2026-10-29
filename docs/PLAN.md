@@ -478,6 +478,20 @@ Phases 0 to 2 are the minimum product; if time runs short, Phase 3's profiles an
 
 On 27 October 2026 the Continue Watching row moved from Phase 3 into Phase 2, since resuming from Home is part of playing. It reads the progress the player saves on the TV: the first row on Home shows what was left part-way, most recent first, with a progress bar and the episode, and OK goes straight back into the player (or into the next episode after a finished one). Phase 3 keeps the library, profiles and Trakt, which will sync the same progress.
 
+On 28 October 2026 Phase 3 started before PR #4 and PR #6 merged, built on the playback branch the way Phase 2 was built on Phase 1 (design in [ADR 0004](adr/0004-library-profiles-trakt.md)). Built so far:
+
+- [x] Local profiles, up to six: "Who's watching?" at launch, an avatar in the rail to switch, a four-digit PIN that locks for 30 seconds after five wrong tries, and kids profiles with a highest UK rating that see only Family titles, no Addons and a short Settings
+- [x] My List on Details, and a Library section with My List and History
+- [x] Home rows: show, hide and move each row, per profile
+- [x] Audio and subtitle languages remembered per title
+- [x] BannerTV's API Worker (`services/api`), which holds the Trakt and TMDB keys so the app and the repository never do
+- [x] Trakt: sign-in with a code entered at trakt.tv, sync of paused progress, watched ticks and My List both ways, and scrobbling from the player
+- [x] TMDB on Details: UK rating, studio or network, cast photos, episode stills and summaries, and a logo and backdrop where the addon has none; a kids profile cannot play a title rated above its rating
+- [ ] Deploy the API Worker and put its three secrets (Eyitayo, from the laptop: see `services/api/README.md`). Until then Trakt and TMDB stay hidden in the app
+- [ ] Try Trakt and TMDB on the TV once the Worker is up
+
+Still to come, as ADR 0004 lists: settings backup to a phone, the addon catalog browser, per-title reuse of the last link, and the sports organisation that the sports thread plans in PR #7.
+
 **Phase 0 tasks to start with**
 
 - [x] Eyitayo creates the `Eyihbanner1/BannerTv` repository and confirms the app ID

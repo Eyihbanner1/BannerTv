@@ -1,4 +1,4 @@
-import { type ContinueItem, continueWatching } from '@bannertv/core';
+import { type ContinueItem, continueWatching, kidsTitleAllowed } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import type { TFunction } from 'i18next';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -9,6 +9,7 @@ import { Row } from '../../components/Row';
 import type { TileExtra } from '../../components/Tile';
 import { cardsMissing, fillPlayedCards, onCardAnswer } from '../../data/continue';
 import { playedVideos, progress } from '../../data/playback';
+import { isKidsProfile } from '../../data/profiles';
 import { onActivity } from '../../navigation/activity';
 import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 
@@ -43,6 +44,10 @@ function snapshot(): ContinueItem[] {
   const hour = Math.floor(now / HOUR_MS);
   if (latest && latest.versions === versions && latest.hour === hour) return latest.items;
   let items = continueWatching(progress, playedVideos.get, now);
+  // A kids profile's own history can hold titles from before it was a kids
+  // profile, or above a rating since lowered: those that say they are not for
+  // children leave the row, and the rest open on Details, which checks them.
+  if (isKidsProfile()) items = items.filter((item) => kidsTitleAllowed(item.preview, true));
   // With the same progress and cards, a new hour changes the row only when an episode aired.
   if (latest && latest.versions === versions && sameTitles(items, latest.items)) {
     items = latest.items;
@@ -181,7 +186,8 @@ interface ContinueRowProps {
 /**
  * Continue Watching: what was left part-way, most recent first, as wide
  * tiles with a progress bar. OK goes straight back into the player where
- * playback stopped, or into the next episode.
+ * playback stopped, or into the next episode; in a kids profile, to the
+ * title's Details first.
  */
 export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: ContinueRowProps) {
   const { t } = useTranslation();
@@ -208,6 +214,12 @@ export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: Con
       const index = previews.indexOf(preview);
       const item = items[index];
       if (!item) return;
+      if (isKidsProfile()) {
+        push({ name: 'details', type: preview.type, id: preview.id, preview }, () =>
+          returnTile(preview.id, index),
+        );
+        return;
+      }
       push(
         {
           name: 'player',

@@ -51,14 +51,39 @@ export async function pressTo(page: Page, key: string, label: string): Promise<v
   await page.waitForTimeout(KEY_GAP_MS);
 }
 
-const SECTIONS = ['home', 'search', 'discover', 'library', 'addons', 'settings'];
+/** The rail's sections, top down, as the page shows them: Sports only with a sports addon. */
+export async function railSections(page: Page): Promise<string[]> {
+  const keys = await page
+    .locator('nav [data-focus-key^="rail-"]')
+    .evaluateAll((items) => items.map((item) => item.getAttribute('data-focus-key') ?? ''));
+  return keys.map((key) => key.replace(/^rail-/, ''));
+}
 
 /** From Home's first tile, opens a section through the rail. */
 export async function openSection(page: Page, section: string): Promise<void> {
   await press(page, 'ArrowLeft', 'rail-home');
-  for (const item of SECTIONS.slice(1, SECTIONS.indexOf(section) + 1)) {
+  const sections = await railSections(page);
+  for (const item of sections.slice(1, sections.indexOf(section) + 1)) {
     await press(page, 'ArrowDown', `rail-${item}`);
   }
   await page.keyboard.press('Enter');
   await page.waitForTimeout(KEY_GAP_MS);
+}
+
+/** The focus key of what has focus now, or '' when nothing has. */
+export async function focusedKey(page: Page): Promise<string> {
+  return (await page.locator('[data-focused="true"]').getAttribute('data-focus-key')) ?? '';
+}
+
+/**
+ * Whether the stack of rows that holds `rowKey` has slid that row to the
+ * top of its window, as Home, Search and Sports do with the focused row.
+ */
+export function slidTo(page: Page, rowKey: string): Promise<boolean> {
+  return page.locator(`[data-row-key="${rowKey}"]`).evaluate((row: HTMLElement) => {
+    const transform = row.parentElement?.style.transform ?? '';
+    return row.offsetTop === 0
+      ? transform === '' || transform === 'translateY(0px)'
+      : transform === `translateY(${-row.offsetTop}px)`;
+  });
 }

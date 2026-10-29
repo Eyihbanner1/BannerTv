@@ -64,6 +64,23 @@ describe('parseMetaPreview', () => {
     expect(preview?.description).toBe('Line one\nline "two"\nbad()été');
     expect(preview?.posterShape).toBe('landscape');
   });
+
+  it("keeps a sports item's team badges with the team they belong to, safe addresses only", () => {
+    const preview = parseMetaPreview({
+      id: 'match:1',
+      type: 'tv',
+      name: 'Los Angeles Lakers vs Portland Trail Blazers',
+      team1: { name: 'Los Angeles Lakers', logo: 'https://img.example/badge/lakers.png' },
+      team2: { name: 'Portland Trail Blazers', logo: 'javascript:alert(1)' },
+    });
+    expect(preview?.sport).toEqual({
+      home: 'Los Angeles Lakers',
+      homeLogo: 'https://img.example/badge/lakers.png',
+      away: 'Portland Trail Blazers',
+    });
+    const plain = parseMetaPreview({ id: 'm', type: 'tv', name: 'A vs B', homeTeam: 'A' });
+    expect(plain?.sport).toEqual({ home: 'A' });
+  });
 });
 
 describe('parseMetaResponse', () => {

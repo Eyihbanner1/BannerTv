@@ -1,0 +1,81 @@
+/* Over the rail and the screens, like the welcome. */
+.picker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  z-index: 40;
+  padding-top: 220px;
+  background: var(--bt-bg);
+  text-align: center;
+}
+
+.title {
+  margin-bottom: 96px;
+  font: var(--bt-text-display);
+}
+
+.row {
+  white-space: nowrap;
+}
+
+.tile {
+  display: inline-block;
+  width: 248px;
+  margin: 0 20px;
+  padding: 24px 0;
+  border-radius: 24px;
+  color: var(--bt-text-muted);
+  vertical-align: top;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.current {
+  color: var(--bt-text);
+}
+
+.focused {
+  color: var(--bt-text);
+  background: var(--bt-surface-2);
+  box-shadow: var(--bt-focus-ring);
+  transform: scale(var(--bt-focus-scale));
+}
+
+.name {
+  display: block;
+  margin-top: 24px;
+  overflow: hidden;
+  font: var(--bt-text-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badges {
+  display: block;
+  height: 40px;
+  margin-top: 8px;
+  color: var(--bt-text-subtle);
+}
+
+.badges svg {
+  vertical-align: middle;
+}
+
+.kids {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--bt-accent);
+  color: #fff;
+  font: var(--bt-text-label);
+  line-height: 40px;
+  vertical-align: middle;
+}
+
+.hint {
+  margin-top: 80px;
+  color: var(--bt-text-subtle);
+  font: var(--bt-text-label);
+}

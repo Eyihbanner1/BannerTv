@@ -13,6 +13,9 @@ export default defineConfig(
       '**/test-results/**',
       '**/playwright-report/**',
       'brand/**',
+      // Built by the demo addon's media script: HLS segments end in .ts.
+      'services/demo/public/**',
+      'services/demo/.work/**',
     ],
   },
   js.configs.recommended,
@@ -31,7 +34,13 @@ export default defineConfig(
     },
   },
   {
-    files: ['tools/**/*.mjs', 'apps/webos/build/**', 'apps/webos/e2e/**', '**/*.config.{js,ts}'],
+    files: [
+      'tools/**/*.mjs',
+      'services/*/scripts/**/*.mjs',
+      'apps/webos/build/**',
+      'apps/webos/e2e/**',
+      '**/*.config.{js,ts}',
+    ],
     languageOptions: { globals: globals.node },
   },
 );
