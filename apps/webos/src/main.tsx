@@ -6,6 +6,7 @@ import './styles/base.css';
 import { App } from './app/App';
 import { startAddons } from './data/addons';
 import { startPlaybackData } from './data/playback';
+import { startSports } from './data/sports';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { bootInfo } from './platform/boot';
@@ -40,6 +41,7 @@ function start() {
   initLifecycle();
   startAddons();
   startPlaybackData();
+  void startSports();
 
   createRoot(root).render(
     <StrictMode>

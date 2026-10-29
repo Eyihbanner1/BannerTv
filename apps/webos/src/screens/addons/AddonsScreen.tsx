@@ -1,4 +1,4 @@
-import type { InstalledAddon } from '@bannertv/core';
+import type { InstalledAddon, SportsSetting } from '@bannertv/core';
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,10 +6,12 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Menu } from '../../components/Menu';
 import { fallbackArt } from '../../components/Tile';
 import { addonCollection } from '../../data/addons';
 import { addonFocusId, typeLabel } from '../../data/describe';
 import { PAIR_SERVICE } from '../../data/pairing';
+import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '../../data/sports';
 import { canSlide } from '../../platform/input-mode';
 import { ConfigureDialog } from './ConfigureDialog';
 import { InstallDialog } from './InstallDialog';
@@ -31,6 +33,8 @@ const RESOURCE_LABELS: ReadonlyArray<readonly [resource: string, key: string]> =
 const upKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-up`;
 const removeKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-remove`;
 const settingsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-settings`;
+const sportsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-sports`;
+const SPORTS_SETTINGS: readonly SportsSetting[] = ['auto', 'yes', 'no'];
 // Settings come through the phone, so they need the pairing relay too.
 const hasSettings = (addon: InstalledAddon) =>
   Boolean(PAIR_SERVICE) && addon.manifest.behaviorHints.configurable;
@@ -43,11 +47,13 @@ interface AddonCardProps {
   onMove: (offset: number) => void;
   /** Absent when the addon has no settings page, or no phone can reach the TV. */
   onSettings?: () => void;
+  /** "Show in Sports", for addons that may hold sport. */
+  onSports?: () => void;
   onRemove: () => void;
 }
 
 function AddonCard(props: AddonCardProps) {
-  const { addon, index, count, onFocus, onMove, onSettings, onRemove } = props;
+  const { addon, index, count, onFocus, onMove, onSettings, onSports, onRemove } = props;
   const { t } = useTranslation();
   const { manifest } = addon;
   const id = addonFocusId(addon.transportUrl);
@@ -109,6 +115,19 @@ function AddonCard(props: AddonCardProps) {
             {t('addons.settings')}
           </Button>
         )}
+        {onSports && (
+          <Button
+            focusKey={`${id}-sports`}
+            label={t('addons.sportsLabel', {
+              name: manifest.name,
+              value: t(`addons.sportsValue.${sportsSetting(addon)}`),
+            })}
+            onFocus={onFocus}
+            onPress={onSports}
+          >
+            {t('addons.sports')}
+          </Button>
+        )}
         <Button
           focusKey={`${id}-remove`}
           label={t('addons.removeLabel', { name: manifest.name })}
@@ -133,6 +152,9 @@ export function AddonsScreen() {
   const [installing, setInstalling] = useState(installRequested);
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
   const [configuring, setConfiguring] = useState<InstalledAddon | null>(null);
+  const [sportsFor, setSportsFor] = useState<InstalledAddon | null>(null);
+  // Detection changes which addons offer "Show in Sports".
+  useSyncExternalStore(sportsState.subscribe, sportsState.get);
   const [notice, setNotice] = useState<string | null>(null);
   const afterRemove = useRef<string | null>(null);
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
@@ -209,6 +231,7 @@ export function AddonsScreen() {
                     );
                   }}
                   onSettings={hasSettings(addon) ? () => setConfiguring(addon) : undefined}
+                  onSports={mayHoldSports(addon) ? () => setSportsFor(addon) : undefined}
                   onRemove={() => setRemoving(addon)}
                 />
               ))}
@@ -244,6 +267,23 @@ export function AddonsScreen() {
             setConfiguring(null);
           }}
           onClose={() => setConfiguring(null)}
+        />
+      )}
+      {sportsFor && (
+        <Menu
+          focusKey="addon-sports-menu"
+          title={t('addons.sportsTitle', { name: sportsFor.manifest.name })}
+          options={SPORTS_SETTINGS.map((value) => ({
+            value,
+            label: t(`addons.sportsValue.${value}`),
+          }))}
+          selected={sportsSetting(sportsFor)}
+          returnFocusKey={sportsKey(sportsFor)}
+          onSelect={(value) => {
+            setSportsSetting(sportsFor, value as SportsSetting);
+            setSportsFor(null);
+          }}
+          onClose={() => setSportsFor(null)}
         />
       )}
       {removing && (

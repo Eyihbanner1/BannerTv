@@ -4,7 +4,7 @@ import {
   findExtra,
   type ManifestCatalog,
 } from '@bannertv/protocol';
-import { slug } from './board';
+import { type CatalogFilter, slug } from './board';
 import type { InstalledAddon } from './collection';
 
 /** One catalog of one addon, as a screen lists it. */
@@ -29,12 +29,12 @@ export function orderedTypes(sources: readonly CatalogSource[]): ContentType[] {
 
 function collect(
   addons: readonly InstalledAddon[],
-  accept: (catalog: ManifestCatalog) => boolean,
+  accept: (catalog: ManifestCatalog, addon: InstalledAddon) => boolean,
 ): CatalogSource[] {
   const sources: CatalogSource[] = [];
   addons.forEach((addon, index) => {
     for (const catalog of addon.manifest.catalogs) {
-      if (!accept(catalog)) continue;
+      if (!accept(catalog, addon)) continue;
       sources.push({ key: `${index}-${slug(catalog.type)}-${slug(catalog.id)}`, addon, catalog });
     }
   });
@@ -53,10 +53,18 @@ function groupByType<T extends CatalogSource>(sources: readonly T[]): T[] {
 /**
  * The catalogs a search goes to, one result row each: every catalog that
  * takes a search term and needs nothing else, grouped by type, then in addon
- * priority order.
+ * priority order. Catalogs `leaveOut` names are not asked.
  */
-export function searchSources(addons: readonly InstalledAddon[]): CatalogSource[] {
-  return groupByType(collect(addons, (catalog) => catalogAccepts(catalog, ['search'])));
+export function searchSources(
+  addons: readonly InstalledAddon[],
+  leaveOut?: CatalogFilter,
+): CatalogSource[] {
+  return groupByType(
+    collect(
+      addons,
+      (catalog, addon) => catalogAccepts(catalog, ['search']) && !leaveOut?.(addon, catalog),
+    ),
+  );
 }
 
 export interface DiscoverSource extends CatalogSource {

@@ -1,10 +1,13 @@
+import type { SportEvent } from '@bannertv/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   back,
   canGoBack,
   currentSection,
+  eventPlay,
   openSection,
   push,
+  remembersPlace,
   replace,
   router,
   takePendingFocus,
@@ -81,5 +84,41 @@ describe('router', () => {
     replace({ name: 'streams', type: 'movie', metaId: 'tt2', videoId: 'tt2' });
     expect(router.get().stack).toHaveLength(2);
     expect(currentSection()).toBe('home');
+  });
+});
+
+describe('playing a sports event', () => {
+  const event = (kind: SportEvent['kind']): Pick<SportEvent, 'key' | 'sources' | 'kind'> => ({
+    key: '0-tsport-arsenal-brighton',
+    kind,
+    sources: [
+      {
+        addonIndex: 0,
+        addonId: 'org.test.sports',
+        transportUrl: 'https://sports.example.com/manifest.json',
+        type: 'sport',
+        id: 'tsport:arsenal-brighton',
+        name: 'Arsenal v Brighton',
+        catalogId: 'replays',
+      },
+    ],
+  });
+
+  it('keeps the place of a replay, like any other video', () => {
+    const play = eventPlay(event('replay'));
+    expect(play).toMatchObject({ key: '0-tsport-arsenal-brighton', replay: true });
+    expect(remembersPlace({ event: play })).toBe(true);
+  });
+
+  it('saves nothing for a match, live or still to come', () => {
+    const play = eventPlay(event('event'));
+    expect(play.replay).toBe(false);
+    expect(remembersPlace({ event: play })).toBe(false);
+  });
+
+  it('saves nothing for the Lab, and keeps the place of other videos', () => {
+    expect(remembersPlace({ lab: true })).toBe(false);
+    expect(remembersPlace({ lab: true, event: eventPlay(event('replay')) })).toBe(false);
+    expect(remembersPlace({})).toBe(true);
   });
 });

@@ -1,0 +1,99 @@
+.screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--bt-content-width);
+  height: 1080px;
+}
+
+.header {
+  flex: none;
+  padding: 72px var(--bt-safe-x) 24px var(--bt-content-inset);
+}
+
+.title {
+  margin-bottom: 20px;
+  font: var(--bt-text-title);
+}
+
+.days {
+  white-space: nowrap;
+}
+
+.day {
+  display: inline-block;
+  vertical-align: top;
+  margin-right: 16px;
+  padding: 10px 24px;
+  border-radius: 32px;
+  border: 3px solid transparent;
+  background: var(--bt-surface-1);
+  font: var(--bt-text-label);
+  line-height: 36px;
+  color: var(--bt-text-muted);
+}
+
+.selected {
+  border-color: var(--bt-accent);
+  color: var(--bt-text);
+}
+
+.dayFocused {
+  box-shadow: var(--bt-focus-ring);
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+}
+
+.problem {
+  margin-top: 24px;
+}
+
+/* The button sits under the text at the left, where Down from the strip finds it. */
+.problemText {
+  max-width: 1100px;
+  margin-bottom: 12px;
+  color: var(--bt-text-muted);
+}
+
+.note {
+  margin-top: 16px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.rows {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.track {
+  /* Rows measure offsetTop against this box. */
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+/* Tuning switches, see src/platform/tuning.ts. */
+:global(.tune-motion-layer) .track {
+  will-change: transform;
+}
+
+:global(.tune-motion-jump) .track {
+  transition: none;
+}
+
+.message {
+  max-width: 1100px;
+  padding: 16px 0 0 var(--bt-content-inset);
+  color: var(--bt-text-muted);
+}
+
+.loadingMore {
+  position: absolute;
+  right: var(--bt-safe-x);
+  bottom: var(--bt-safe-y);
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}

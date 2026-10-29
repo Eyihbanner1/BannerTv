@@ -19,10 +19,12 @@ import { TextField } from '../../components/TextField';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { loadRecentSearches, recentSearches } from '../../data/search';
+import { sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { forgetFocus } from '../../navigation/focus-memory';
 import { canSlide } from '../../platform/input-mode';
 import { openDetails } from '../home/Hero';
+import { SportsResults } from './SportsResults';
 import styles from './SearchScreen.module.css';
 
 /** Searching starts once typing pauses this long. */
@@ -30,6 +32,7 @@ const TYPING_PAUSE_MS = 500;
 /** Shorter terms match too much to be useful. */
 const MIN_TERM_LENGTH = 2;
 const RESULT_PREFIX = 'search-res-';
+const NO_SOURCES: readonly CatalogSource[] = [];
 
 export const SEARCH_FIELD = 'search-field';
 
@@ -86,10 +89,22 @@ function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: Res
   );
 }
 
-function Results({ term, sources }: { term: string; sources: readonly CatalogSource[] }) {
+interface ResultsProps {
+  term: string;
+  sources: readonly CatalogSource[];
+  /** With sport installed: the Sports group's searches, or null without sport. */
+  sportsSources: readonly CatalogSource[] | null;
+}
+
+function Results({ term, sources, sportsSources }: ResultsProps) {
   const { t } = useTranslation();
   const [empty, setEmpty] = useState<ReadonlySet<string>>(() => new Set());
+  const [sportsContent, setSportsContent] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
+  const latest = useRef({ sources, empty });
+  useLayoutEffect(() => {
+    latest.current = { sources, empty };
+  });
 
   // Two catalogs of one addon and type need the catalog name to tell them apart.
   const tags = useMemo(
@@ -108,6 +123,15 @@ function Results({ term, sources }: { term: string; sources: readonly CatalogSou
   );
 
   useLayoutEffect(() => slideTrack(trackRef.current, memory.slideRow), [empty]);
+  // The Sports group above the other rows grows and shrinks by itself, as its
+  // rows come and go: the view goes back to the row it was on.
+  const onSportsLayout = useCallback(() => slideTrack(trackRef.current, memory.slideRow), []);
+  // Focus leaving the Sports group goes to the first row under it, or the box.
+  const onSportsLeave = useCallback(() => {
+    const { sources: list, empty: none } = latest.current;
+    const below = list.find((source) => !none.has(source.key));
+    void setFocus(below ? `${RESULT_PREFIX}${below.key}` : SEARCH_FIELD);
+  }, []);
 
   const onEmpty = useCallback((key: string) => {
     setEmpty((previous) => new Set(previous).add(key));
@@ -125,12 +149,21 @@ function Results({ term, sources }: { term: string; sources: readonly CatalogSou
     [term],
   );
 
-  if (sources.every((source) => empty.has(source.key))) {
-    return <p className={styles.message}>{t('search.nothingFound', { term })}</p>;
-  }
+  const nothing = sources.every((source) => empty.has(source.key)) && !sportsContent;
   return (
     <div className={styles.results}>
+      {nothing && <p className={styles.message}>{t('search.nothingFound', { term })}</p>}
       <div ref={trackRef} className={styles.track}>
+        {sportsSources && (
+          <SportsResults
+            term={term}
+            sources={sportsSources}
+            onFocusRow={onItemFocus}
+            onContent={setSportsContent}
+            onLayout={onSportsLayout}
+            onLeave={onSportsLeave}
+          />
+        )}
         {sources.map((source, index) => (
           <ResultRow
             key={source.key}
@@ -180,7 +213,22 @@ function RecentSearches({ onPick }: { onPick: (term: string) => void }) {
 export function SearchScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  const sources = useMemo(() => searchSources(collection.addons), [collection.addons]);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  // Once sport is settled too, so a sports addon's search is never asked for
+  // the moment before it is known to be one.
+  const ready = collection.ready && sports.ready;
+  // Sports catalogs leave the fan-out: Search answers for them from its own copy.
+  const sources = useMemo(
+    () => (ready ? searchSources(collection.addons, sports.searchLeaveOut) : NO_SOURCES),
+    [ready, collection.addons, sports.searchLeaveOut],
+  );
+  const sportsSources = useMemo(() => {
+    const leaveOut = sports.searchLeaveOut;
+    if (!ready || !sports.shown || !leaveOut) return null;
+    return searchSources(collection.addons).filter((source) =>
+      leaveOut(source.addon, source.catalog),
+    );
+  }, [ready, collection.addons, sports.shown, sports.searchLeaveOut]);
   const [text, setText] = useState(memory.text);
   const [term, setTerm] = useState(memory.term);
 
@@ -203,7 +251,7 @@ export function SearchScreen() {
   }, [text, search]);
 
   let body;
-  if (collection.ready && sources.length === 0) {
+  if (ready && sources.length === 0 && !sportsSources) {
     body = <p className={styles.message}>{t('search.noAddons')}</p>;
   } else if (term === '') {
     body = (
@@ -216,8 +264,8 @@ export function SearchScreen() {
         }}
       />
     );
-  } else {
-    body = <Results key={term} term={term} sources={sources} />;
+  } else if (ready) {
+    body = <Results key={term} term={term} sources={sources} sportsSources={sportsSources} />;
   }
 
   return (

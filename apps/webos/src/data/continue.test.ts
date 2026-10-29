@@ -205,6 +205,25 @@ describe('fillPlayedCards', () => {
     expect(stores.played.get('tt7:1:2')?.next).toMatchObject({ videoId: 'tt7:1:3' });
   });
 
+  it('asks no addon about a video kept off the row, such as a sports replay', () => {
+    // Twenty films played before it: a replay taking a place would leave the oldest out.
+    for (let i = 0; i < 20; i++) watch(`tt${i}`, 'movie', `tt${i}`, 600);
+    stores.time += 1;
+    stores.progress.record({
+      metaId: 'tsport:replay',
+      type: 'sport',
+      videoId: 'tsport:replay',
+      position: 600,
+      duration: 3000,
+      continueRow: false,
+    });
+
+    fillPlayedCards();
+    expect(metas.asked).not.toContain('tsport:replay');
+    expect(metas.asked).toHaveLength(20);
+    expect(stores.played.get('tsport:replay')).toBeUndefined();
+  });
+
   it('saves from the cached answer when the fresh one fails', () => {
     watch('tt7', 'series', 'tt7:1:2', 2990);
     const cached = meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2)]);
@@ -253,6 +272,19 @@ describe('cardsMissing', () => {
       stale: false,
     });
     expect(stores.played.get('tt7:9:9')?.episode).toBeUndefined();
+    expect(cardsMissing()).toBe(false);
+  });
+
+  it('holds for nothing while a video kept off the row has no card', () => {
+    stores.time += 1;
+    stores.progress.record({
+      metaId: 'tsport:replay',
+      type: 'sport',
+      videoId: 'tsport:replay',
+      position: 600,
+      duration: 3000,
+      continueRow: false,
+    });
     expect(cardsMissing()).toBe(false);
   });
 

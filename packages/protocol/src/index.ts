@@ -37,6 +37,7 @@ export type {
   PosterShape,
   ProxyHeaders,
   ResourceName,
+  SportHints,
   Stream,
   StreamResponse,
   StreamSource,

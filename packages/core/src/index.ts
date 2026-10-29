@@ -1,4 +1,10 @@
-export { buildBoard, type BoardRow, GENRE_PICKS, type RowStyle } from './addons/board';
+export {
+  buildBoard,
+  type BoardRow,
+  type CatalogFilter,
+  GENRE_PICKS,
+  type RowStyle,
+} from './addons/board';
 export {
   type AddonAnswer,
   type AddonClient,
@@ -6,11 +12,13 @@ export {
   CATALOG_POLICY,
   type CatalogOptions,
   createAddonClient,
+  type ItemSource,
   META_POLICY,
   metahubAtSize,
   type MetahubSize,
   NotFoundError,
   PLAY_TIMEOUT_MS,
+  SOURCE_META_POLICY,
   STREAM_POLICY,
   type SubtitleHints,
   SUBTITLES_POLICY,
@@ -46,6 +54,7 @@ export {
   searchSources,
 } from './addons/sources';
 export { type FetchJson, type FetchJsonOptions, HttpError, type HttpErrorKind } from './http';
+export { createLane, DroppedError, type Lane } from './lane';
 export { createLimiter, type Limiter } from './limiter';
 export {
   type CachePolicy,
@@ -87,6 +96,7 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './sports';
 export { createStore } from './store';
 export { assessStream, SEVERE_WARNINGS } from './streams/assess';
 export { DEFAULT_MAX_BITRATE, estimateBitrate, isLighter, parseRuntime } from './streams/bitrate';
@@ -121,3 +131,4 @@ export {
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
+export type { Timers } from './timers';

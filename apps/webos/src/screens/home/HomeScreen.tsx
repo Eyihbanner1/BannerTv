@@ -3,6 +3,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
   memo,
+  type ReactElement,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -20,6 +21,7 @@ import { Row, RowPlaceholder } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
+import { noteFirstPage, sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { activityGap } from '../../navigation/activity';
 import { focusedKey } from '../../navigation/spatial';
@@ -29,10 +31,13 @@ import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
 import { cancelHero, heroItem, showInHero } from './hero-item';
+import { LIVE_SPORT_ROW_KEY, LiveSportRow } from './LiveSportRow';
 import styles from './HomeScreen.module.css';
 
 /** Rows show the first titles of a catalog; Discover pages through the rest. */
 const MAX_ROW_ITEMS = 40;
+/** The Live sport row is the third row on Home, counting Continue Watching. */
+const LIVE_SPORT_PLACE = 2;
 /** Rows further than this from the focused one are drawn as empty boxes and not fetched yet. */
 const ROWS_AROUND = tuning.rowsAround;
 /** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
@@ -51,6 +56,7 @@ function pointedAt(): boolean {
 
 const emptyRows = new Set<string>();
 const NO_ITEMS: readonly MetaPreview[] = [];
+const NO_ROWS: readonly BoardRow[] = [];
 
 interface HomeRowProps {
   row: BoardRow;
@@ -112,6 +118,10 @@ const HomeRow = memo(function HomeRow({
   useEffect(() => {
     if (first && items && items.length > 0 && heroItem.get() === null) heroItem.set(items[0]!);
   }, [first, items]);
+  // What a first page looked like settles whether a catalog is sport (data/sports.ts).
+  useEffect(() => {
+    if (state.data && row.extra.length === 0) noteFirstPage(row.addon, row.catalog, state.data);
+  }, [state.data, row]);
 
   const title = row.name;
   const tag = typeLabel(t, row.type);
@@ -140,7 +150,15 @@ const HomeRow = memo(function HomeRow({
 export function HomeScreen() {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  const board = useMemo(() => buildBoard(collection.addons), [collection.addons]);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  const ready = collection.ready && sports.ready;
+  // Sports catalogs leave the board: the Live sport row stands in for them. The
+  // board waits for sport to be settled too, so a sports catalog is never drawn,
+  // or fetched, for the moment before it is known to be one.
+  const board = useMemo(
+    () => (ready ? buildBoard(collection.addons, sports.homeLeaveOut) : NO_ROWS),
+    [ready, collection.addons, sports.homeLeaveOut],
+  );
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const rows = useMemo(() => board.filter((row) => !hidden.has(row.key)), [board, hidden]);
   // The hero starts on the first row whose addon answered: on a new TV whose
@@ -163,10 +181,17 @@ export function HomeScreen() {
     : rows.length > 0
       ? rowFocusKey(rows[0]!)
       : undefined;
-  const focusedIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.key === focusedRow),
-  );
+  // The Live sport row sits before the catalog row at this index, while sport is installed.
+  const liveAt = sports.shown
+    ? Math.max(0, Math.min(LIVE_SPORT_PLACE - (continuing ? 1 : 0), rows.length))
+    : -1;
+  const focusedIndex =
+    focusedRow === LIVE_SPORT_ROW_KEY
+      ? liveAt
+      : Math.max(
+          0,
+          rows.findIndex((row) => row.key === focusedRow),
+        );
   // Rows coming into the drawn window mount after the focus move has painted,
   // in a render React can interrupt, so a press rarely waits on a new row. The
   // rows next to focus are drawn at once, so the next press has a row to go to.
@@ -175,7 +200,7 @@ export function HomeScreen() {
   // Saved progress is read first, so the first focus lands on Continue Watching.
   // A title can leave the row while the player is on top, so focus falls back.
   // A tile the pointer moved onto while Home waited for that keeps focus.
-  const focusReady = collection.ready && continueItems !== null;
+  const focusReady = ready && continueItems !== null;
   useScreenFocus(firstRowKey, focusReady, true, pointedAt);
 
   // The hero starts on the first title focus will land on.
@@ -203,10 +228,42 @@ export function HomeScreen() {
   // rows above it disappear or Continue Watching comes or goes, and on return,
   // so Home comes back as it was. A first focus on a row still loading has not
   // slid anything yet, so the row holding focus counts first.
+  const drawnRows = useRef(rows);
   useLayoutEffect(() => {
+    const before = drawnRows.current;
+    drawnRows.current = rows;
+    const onHome = (rowKey: string) =>
+      rowKey === LIVE_SPORT_ROW_KEY ||
+      (rowKey === CONTINUE_ROW_KEY && continuing) ||
+      rows.some((row) => row.key === rowKey);
+    // The row now in the place of one that has left, as for an empty row.
+    const inPlaceOf = (rowKey: string) => {
+      const index = before.findIndex((row) => row.key === rowKey);
+      if (index === -1) return undefined;
+      return (
+        rows[Math.min(index, rows.length - 1)]?.key ?? (continuing ? CONTINUE_ROW_KEY : undefined)
+      );
+    };
     const key = focusedKey();
     const tile = key.indexOf('home-') === 0 ? key.lastIndexOf('-tile-') : -1;
-    if (tile > 0 && canSlide()) slideRow.current = key.slice('home-'.length, tile);
+    const focused = tile > 0 ? key.slice('home-'.length, tile) : undefined;
+    if (focused !== undefined && onHome(focused)) {
+      if (canSlide()) slideRow.current = focused;
+    } else if (focused !== undefined && !emptyRows.has(focused)) {
+      // The row left the board under focus, once its first page showed it is
+      // sport. Before its tiles unregister, while focus is still on one of them.
+      // (A row that turned out empty has handed its place on already.)
+      const next = inPlaceOf(focused);
+      if (next) {
+        slideRow.current = next;
+        setFocusedRow(next);
+        void setFocus(`home-${next}`);
+      }
+    }
+    // The same for the row the view was on while focus was elsewhere, in the rail.
+    if (slideRow.current && !onHome(slideRow.current)) {
+      slideRow.current = inPlaceOf(slideRow.current);
+    }
     slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
   }, [rows, continuing]);
 
@@ -275,16 +332,70 @@ export function HomeScreen() {
     showInHero(item, activityGap() < BUSY_GAP_MS ? HERO_BUSY_MS : HERO_DELAY_MS);
   }, []);
 
-  if (collection.ready && rows.length === 0 && !continuing) {
+  // The Live sport row comes and goes by itself, as matches start and end. When
+  // nothing is live any more, focus in it moves to the row that takes its place,
+  // as for an empty catalog row. Either way the rows under it have moved, so the
+  // view goes back to the row it was on.
+  const latestLiveAt = useRef(liveAt);
+  useLayoutEffect(() => {
+    latestLiveAt.current = liveAt;
+  });
+  const onLiveShown = useCallback((shown: boolean, focused: boolean) => {
+    if (!shown) {
+      const list = latestRows.current;
+      const at = latestLiveAt.current;
+      const next =
+        list[at]?.key ??
+        list[at - 1]?.key ??
+        (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
+      if (slideRow.current === LIVE_SPORT_ROW_KEY) slideRow.current = next;
+      setFocusedRow((row) => (row === LIVE_SPORT_ROW_KEY ? next : row));
+      if (focused && next) void setFocus(`home-${next}`);
+    }
+    slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
+  }, []);
+
+  if (ready && rows.length === 0 && !continuing) {
+    // Addons with sport only: their catalogs are all on the Sports screen.
     return (
       <div className={styles.home}>
         <div className={styles.empty}>
-          <h1 className={styles.emptyTitle}>{t('home.noAddons')}</h1>
-          <p className={styles.emptyLead}>{t('home.noAddonsLead')}</p>
+          <h1 className={styles.emptyTitle}>
+            {t(sports.shown ? 'home.sportsOnly' : 'home.noAddons')}
+          </h1>
+          <p className={styles.emptyLead}>
+            {t(sports.shown ? 'home.sportsOnlyLead' : 'home.noAddonsLead')}
+          </p>
         </div>
       </div>
     );
   }
+
+  // One flat, keyed list, so the Live sport row moving never remounts a catalog row.
+  const catalogRows: ReactElement[] = [];
+  const liveRow = (
+    <LiveSportRow
+      key={LIVE_SPORT_ROW_KEY}
+      near={Math.abs(liveAt - focusedIndex) <= 1 || Math.abs(liveAt - nearIndex) <= ROWS_AROUND}
+      onItemFocus={onItemFocus}
+      onShown={onLiveShown}
+    />
+  );
+  rows.forEach((row, index) => {
+    if (index === liveAt) catalogRows.push(liveRow);
+    catalogRows.push(
+      <HomeRow
+        key={row.key}
+        row={row}
+        first={continueItems !== null && !continuing && index === heroIndex}
+        near={Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND}
+        onEmpty={onEmpty}
+        onFailed={onFailed}
+        onItemFocus={onItemFocus}
+      />,
+    );
+  });
+  if (liveAt === rows.length) catalogRows.push(liveRow);
 
   return (
     <div className={styles.home}>
@@ -292,19 +403,7 @@ export function HomeScreen() {
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
           {continuing && <ContinueRow items={continueItems} onItemFocus={onItemFocus} />}
-          {rows.map((row, index) => (
-            <HomeRow
-              key={row.key}
-              row={row}
-              first={continueItems !== null && !continuing && index === heroIndex}
-              near={
-                Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND
-              }
-              onEmpty={onEmpty}
-              onFailed={onFailed}
-              onItemFocus={onItemFocus}
-            />
-          ))}
+          {catalogRows}
         </div>
       </div>
     </div>
