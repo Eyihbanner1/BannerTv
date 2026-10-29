@@ -15,16 +15,20 @@ interface OverlayProps {
   onClose: () => void;
   /** 'side' slides in from the right (menus), 'center' is a dialog. */
   placement: 'side' | 'center';
+  /** Whether a pointer click outside closes it. Not for a layer whose closing leaves the screen. */
+  closeOnOutsideClick?: boolean;
   children: ReactNode;
 }
 
 /**
  * A focus-isolated layer over the whole app: focus cannot leave it, Back and
- * a pointer click outside close it, and focus returns where it came from.
+ * (unless told otherwise) a pointer click outside close it, and focus returns
+ * where it came from.
  * It covers the rail too, so it is drawn at the root of the page.
  */
 export function Overlay(props: OverlayProps) {
   const { focusKey, label, defaultFocusKey, onClose, placement, children } = props;
+  const closeOnOutsideClick = props.closeOnOutsideClick ?? true;
   const { ref } = useFocusable<object, HTMLDivElement>({
     focusKey,
     isFocusBoundary: true,
@@ -57,7 +61,7 @@ export function Overlay(props: OverlayProps) {
   return createPortal(
     <FocusContext.Provider value={focusKey}>
       <div className={styles.layer}>
-        <div className={styles.backdrop} onClick={onClose} />
+        <div className={styles.backdrop} onClick={closeOnOutsideClick ? onClose : undefined} />
         <div
           ref={ref}
           role="dialog"

@@ -1,8 +1,14 @@
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import { type MouseEvent, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
+import { markActivity } from '../../navigation/activity';
+import { inputMode } from '../../platform/input-mode';
 import { formatTime } from '../../player/media';
 import styles from './PlayerScreen.module.css';
+
+/** How far beside the bar the pointer still reaches its start or end. */
+const BAR_REACH_PX = 16;
 
 export interface ControlButton {
   focusKey: string;
@@ -21,27 +27,61 @@ interface PlayerControlsProps {
   /** Where a scrub would land, while the viewer is moving along the bar. */
   scrubTo: number | null;
   buttons: readonly ControlButton[];
-  onScrub: (direction: -1 | 1) => void;
+  onScrub: (direction: -1 | 1, repeats: number) => void;
+  /** OK on the bar. */
+  onCommit: () => void;
+  /** A click on the bar, in seconds. */
+  onSeekTo: (seconds: number) => void;
 }
 
+/**
+ * Where the video is, and where a skip will land. Left and Right skip, OK
+ * lands a skip at once; the pointer shows the time under it and a click
+ * jumps there. The whole height of the 64 px row is the pointer's target,
+ * across the bar but not the times beside it.
+ */
 function SeekBar({
   position,
   duration,
   scrubTo,
   onScrub,
-}: Pick<PlayerControlsProps, 'position' | 'duration' | 'scrubTo' | 'onScrub'>) {
+  onCommit,
+  onSeekTo,
+}: Pick<
+  PlayerControlsProps,
+  'position' | 'duration' | 'scrubTo' | 'onScrub' | 'onCommit' | 'onSeekTo'
+>) {
   const { t } = useTranslation();
-  const { ref, focused } = useFocusable<object, HTMLDivElement>({
+  // Whether the pointer is over the row, where its OK is a click.
+  const pointerOver = useRef(false);
+  const { ref, focused, focusSelf } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-seek',
     accessibilityLabel: t('player.seek'),
-    onArrowPress: (direction) => {
+    onArrowPress: (direction, _props, details) => {
       if (direction === 'left' || direction === 'right') {
-        onScrub(direction === 'left' ? -1 : 1);
+        onScrub(direction === 'left' ? -1 : 1, (details.pressedKeys[direction] ?? 1) - 1);
         return false;
       }
       return direction === 'down';
     },
+    // The Magic Remote OK over the bar also arrives as a click, which jumps:
+    // the key press must not play or pause as well.
+    onEnterPress: () => {
+      if (inputMode.get() === 'pointer' && pointerOver.current) return;
+      onCommit();
+    },
   });
+  const bar = useRef<HTMLDivElement>(null);
+  // The fraction of the video under the pointer, while it is over the bar.
+  const [hover, setHover] = useState<number | null>(null);
+  const fractionAt = (event: MouseEvent): number | null => {
+    const rect = bar.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || duration <= 0) return null;
+    // A little either side of the bar reaches its ends; the times beside it are not a target.
+    const x = event.clientX - rect.left;
+    if (x < -BAR_REACH_PX || x > rect.width + BAR_REACH_PX) return null;
+    return Math.max(0, Math.min(1, x / rect.width));
+  };
   const shown = scrubTo ?? position;
   const fraction = duration > 0 ? Math.max(0, Math.min(1, shown / duration)) : 0;
   const played = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
@@ -55,9 +95,31 @@ function SeekBar({
       aria-label={t('player.seek')}
       aria-valuetext={formatTime(shown)}
       className={focused ? `${styles.seek} ${styles.seekFocused}` : styles.seek}
+      onMouseMove={(event) => {
+        if (inputMode.get() !== 'pointer') return;
+        pointerOver.current = true;
+        setHover(fractionAt(event));
+        if (!focused) {
+          markActivity();
+          focusSelf();
+        }
+      }}
+      onMouseLeave={() => {
+        pointerOver.current = false;
+        setHover(null);
+      }}
+      onClick={(event) => {
+        const at = fractionAt(event);
+        if (at !== null) onSeekTo(at * duration);
+      }}
     >
       <span className={styles.time}>{formatTime(shown)}</span>
-      <div className={styles.bar}>
+      <div ref={bar} className={styles.bar}>
+        {hover !== null && (
+          <span className={styles.hoverTime} style={{ left: `${hover * 100}%` }}>
+            {formatTime(hover * duration)}
+          </span>
+        )}
         <div className={styles.played} style={{ width: `${played * 100}%` }} />
         {scrubTo !== null && (
           <div
@@ -93,7 +155,7 @@ export function PlayerControls(props: PlayerControlsProps) {
         ref={ref}
         className={visible ? `${styles.controls} ${styles.controlsShown}` : styles.controls}
       >
-        <div className={styles.top}>
+        <div className={styles.top} data-player-chrome>
           <h1 className={styles.title}>{title}</h1>
           {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
           {facts.length > 0 && (
@@ -106,12 +168,14 @@ export function PlayerControls(props: PlayerControlsProps) {
             </p>
           )}
         </div>
-        <div className={styles.bottom}>
+        <div className={styles.bottom} data-player-chrome>
           <SeekBar
             position={props.position}
             duration={props.duration}
             scrubTo={props.scrubTo}
             onScrub={props.onScrub}
+            onCommit={props.onCommit}
+            onSeekTo={props.onSeekTo}
           />
           <div className={styles.buttons}>
             {buttons.map((button, index) => (

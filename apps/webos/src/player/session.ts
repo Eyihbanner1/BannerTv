@@ -103,9 +103,10 @@ export interface PlaybackSession {
   subscribe(listener: () => void): () => void;
   /**
    * Opens a stream at `startAt` seconds. `chosen`: the viewer picked this
-   * stream, so it is not swapped for a lighter one when it buffers.
+   * stream, so it is not swapped for a lighter one when it buffers. `paused`:
+   * the viewer had paused the one it replaces (Quality), so it opens paused.
    */
-  play(entry: StreamEntry, startAt: number, options?: { chosen?: boolean }): void;
+  play(entry: StreamEntry, startAt: number, options?: { chosen?: boolean; paused?: boolean }): void;
   /** Moves to the best stream not tried yet, where playback is now. False when none is left. */
   playNext(): boolean;
   /** Whether playNext has somewhere to go. */
@@ -175,6 +176,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let limitBefore: number | undefined;
   // Set from pause() until resume(), so an engine starting the stream does not undo it.
   let pausedByViewer = false;
+  // Whether the viewer moved to a place in this stream before its first picture,
+  // once its length was known (a stream opened paused can be).
+  let seekedToPlace = false;
   let reportedWorked = false;
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
@@ -226,7 +230,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       const entry = state.get().entry;
       const chosen = viewerChose;
       window.setTimeout(() => {
-        if (current === attempt && !destroyed && entry) session.play(entry, 0, { chosen });
+        if (current === attempt && !destroyed && entry) {
+          session.play(entry, 0, { chosen, paused: pausedByViewer });
+        }
       }, 0);
     }
   }
@@ -245,12 +251,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
   /**
    * Where another stream starts: here, or the live edge of a live one. A jump
-   * made before the first picture is not a place yet: the stream may still
-   * turn out to be live, or never start.
+   * made before the first picture is not a place yet while the stream's
+   * length is unknown: it may still turn out to be live, or never start.
    */
   function carryOn(): number {
     if (live) return 0;
-    return startedPlaying ? (tracker?.position() ?? lastStartAt) : lastStartAt;
+    return startedPlaying || seekedToPlace ? (tracker?.position() ?? lastStartAt) : lastStartAt;
   }
 
   /** Saves where playback is; a sports event's place is marked to stay off Continue Watching. */
@@ -286,7 +292,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     const next = options.autoFailover && failovers < MAX_FAILOVERS ? finder.next(tried) : undefined;
     if (next) {
       failovers++;
-      session.play(next, resumeAt);
+      // A film the viewer paused stays paused on the stream that takes over.
+      session.play(next, resumeAt, { paused: pausedByViewer });
       patch({ failedOver: true });
       return;
     }
@@ -564,7 +571,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       tracker = createProgressTracker({ startAt });
       lastStartAt = startAt;
       startedPlaying = false;
-      pausedByViewer = false;
+      seekedToPlace = false;
+      pausedByViewer = playOptions?.paused === true;
       reportedWorked = false;
       viewerChose = playOptions?.chosen === true;
       rebuffers = [];
@@ -590,7 +598,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         text: [],
         streamCues: {},
       });
-      armStart(current);
+      // Like a pause before the first picture: no start clock until the viewer plays.
+      if (!pausedByViewer) armStart(current);
 
       const engines = new Set<EngineName>();
       const seenCues: Record<string, Record<string, true>> = {};
@@ -640,7 +649,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
           engine = created;
           patch({ engine: created.name });
-          await created.load(url, startAt);
+          // A fallback engine opens where the viewer moved a stream opened paused.
+          await created.load(url, engines.size > 1 ? carryOn() : startAt);
         } catch (error) {
           listener.fatal(
             error instanceof PlaybackError ? error : new PlaybackError('other', String(error)),
@@ -693,9 +703,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       judgeTimer = undefined;
       lastSeekAt = Date.now();
       video.currentTime = target;
+      engine?.seeked?.();
       tracker?.seeked(target);
       patch({ position: target });
       save();
+      if (!live && savedLength() > 0) seekedToPlace = true;
     },
 
     selectAudio(id) {

@@ -6,11 +6,12 @@ import {
   DEFAULT_STREAMS,
   HLS_PATH,
   LIVE_HLS_PATH,
+  MEDIA_HOST,
   mockPlayback,
   readKv,
   seedStreamAddon,
 } from './play';
-import { APP_URL, expectFocus, press, pressBack } from './tv';
+import { APP_URL, expectFocus, focusedKey, press, pressBack } from './tv';
 
 /** Elephants Dream, the first title on Home. */
 const MOVIE = 'tt0807840';
@@ -176,7 +177,7 @@ test('Watch passes over a disc remux too big for the connection', async ({ page 
   await expect(page.getByText('15 GB', { exact: true })).toBeVisible();
 });
 
-test('OK while a stream starts pauses it with Play ready, as does coming back from another app', async ({
+test('OK while a stream starts lets it start and then shows the controls, and coming back from another app has Play ready', async ({
   page,
 }) => {
   await mockAddons(page);
@@ -195,11 +196,14 @@ test('OK while a stream starts pauses it with Play ready, as does coming back fr
     .toBe(true);
   await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
 
-  await press(page, 'Enter', 'player-play');
-  await expect(page.getByRole('status', { name: 'Starting' })).toHaveCount(0);
-  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
-  await press(page, 'Enter', 'player-play');
+  // Nothing to pause yet: the stream goes on starting, and nothing hidden takes the remote.
+  await press(page, 'Enter', 'player-surface');
+  for (const key of ['ArrowRight', 'ArrowUp', 'ArrowDown'])
+    await press(page, key, 'player-surface');
+  await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
   await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expectFocus(page, 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Pause');
 
   // Hidden, the stream pauses; shown again, Play is ready even with the controls hidden before.
   await pressBack(page);
@@ -265,6 +269,12 @@ test('when nothing plays, the player says why and offers the list', async ({ pag
   // The torrent cannot play on a TV, so there is nothing left to try.
   await expect(page.locator('[data-focus-key="player-problem-another"]')).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
+  // A stray click beside the box neither leaves nor brings the controls up behind it.
+  await page.mouse.move(80, 80);
+  await page.mouse.click(60, 60);
+  await page.waitForTimeout(300);
+  await expect(page.getByText("This stream won't play")).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   await press(page, 'Enter', 'streams-item-0');
   expect(errors).toEqual([]);
 });
@@ -580,11 +590,20 @@ test('Quality leaves the resolution playing alone, and another starts without it
   await expect(page.locator('video[data-reloaded]')).toHaveCount(0);
   expect((await video(page)).src).toBe('/movie-1080p.webm');
 
+  // The 720p stream answers late, so the note shows while it opens.
+  await page.route(`${MEDIA_HOST}/movie-720p.webm`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fallback();
+  });
   await press(page, 'Enter', 'player-quality-0');
   await press(page, 'ArrowDown', 'player-quality-1');
-  await press(page, 'Enter', 'player-quality-button');
+  // The controls give way while the other stream opens, and stay away once it plays.
+  await press(page, 'Enter', 'player-surface');
+  await expect(page.getByText('Switching to 720p…')).toBeVisible();
   await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(500);
+  await expectControlsHidden(page);
   // The 720p stream's own file is missing; the 1080p stream's lines must not stand in for it.
   await expect(page.getByText("Those subtitles couldn't be loaded.")).toBeVisible();
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
@@ -696,4 +715,288 @@ test('BannerTV Demo’s subtitle checks wait to be picked, and leave the languag
   await expectFocus(page, 'player-tracks-button');
   const saved = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
   expect(JSON.parse(saved ?? '{}')).toMatchObject({ subtitleLanguage: 'eng' });
+});
+
+/** A remote key a desktop keyboard cannot type, such as Fast forward (417) or Blue (406). */
+async function pressCode(page: Page, keyCode: number, repeat = false) {
+  await page.evaluate(
+    ({ code, held }) => {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, repeat: held });
+      Object.defineProperty(event, 'keyCode', { get: () => code });
+      Object.defineProperty(event, 'which', { get: () => code });
+      (document.activeElement ?? document.body).dispatchEvent(event);
+    },
+    { code: keyCode, held: repeat },
+  );
+  await page.waitForTimeout(120);
+}
+
+/**
+ * The controls are hidden right now. Checked once: a retry could outlast the
+ * 5 s they take to hide by themselves if they had wrongly shown.
+ */
+async function expectControlsHidden(page: Page) {
+  expect(await focusedKey(page)).toBe('player-surface');
+  expect(await page.locator('[data-focus-key="player-play"]').isVisible()).toBe(false);
+}
+
+const FAST_FORWARD = 417;
+const REWIND = 412;
+const BLUE = 406;
+
+/** Counts the player's seeks from now on. */
+async function countSeeks(page: Page): Promise<() => Promise<number>> {
+  await page.locator('video:not([aria-hidden])').evaluate((element: HTMLVideoElement) => {
+    element.dataset.seeks = '0';
+    element.addEventListener('seeking', () => {
+      element.dataset.seeks = String(Number(element.dataset.seeks) + 1);
+    });
+  });
+  return () =>
+    page
+      .locator('video:not([aria-hidden])')
+      .evaluate((element: HTMLVideoElement) => Number(element.dataset.seeks));
+}
+
+async function playMovie(page: Page) {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+}
+
+test('every way of skipping adds 10 s a press and lands once, with a note while the controls stay hidden', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const seeks = await countSeeks(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+  const from = (await video(page)).time;
+
+  // Two quick presses: one jump of 20 s, a moment after the last, and the picture stays clear.
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByText('+20 s', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^0:[23]\d of 0:40$/)).toBeVisible();
+  await expectFocus(page, 'player-surface');
+  await expect(play).toBeHidden();
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 18);
+  expect(await seeks()).toBe(1);
+
+  // Rewind takes the same 10 s.
+  const before = (await video(page)).time;
+  await pressCode(page, REWIND);
+  await expect(page.getByText('−10 s', { exact: true })).toBeVisible();
+  await expect.poll(seeks).toBe(2);
+  expect((await video(page)).time).toBeLessThan(before - 8);
+
+  // So does a notch of the wheel.
+  const wheeled = (await video(page)).time;
+  await page.mouse.wheel(0, 100);
+  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
+  await expect.poll(seeks).toBe(3);
+  expect((await video(page)).time).toBeGreaterThan(wheeled + 8);
+  await expectFocus(page, 'player-surface');
+
+  // OK lands a skip there and then, well before it would land by itself, and leaves the film playing.
+  await pressCode(page, FAST_FORWARD);
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks, { timeout: 400 }).toBe(4);
+  await page.waitForTimeout(1000);
+  expect(await seeks()).toBe(4);
+  expect((await video(page)).playing).toBe(true);
+  await expectControlsHidden(page);
+});
+
+test('Start over is always there, and offers for a moment to go back to where the film was', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
+
+  await press(page, 'ArrowUp', 'player-play');
+  const restart = page.locator('[data-focus-key="player-restart"]');
+  await expect(restart).toHaveText('Start over');
+  for (const key of [
+    'player-tracks-button',
+    'player-quality-button',
+    'player-streams-button',
+    'player-restart',
+  ]) {
+    await press(page, 'ArrowRight', key);
+  }
+  // A skip still to land gives way to Start over.
+  await pressCode(page, FAST_FORWARD);
+  await press(page, 'Enter', 'player-restart');
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(5);
+  await expect(restart).toHaveText(/^Back to 0:[12]\d$/);
+  await page.waitForTimeout(1000);
+  expect((await video(page)).time).toBeLessThan(5);
+
+  await press(page, 'Enter', 'player-restart');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
+  await expect(restart).toHaveText('Start over');
+  expect((await video(page)).playing).toBe(true);
+});
+
+test('Blue opens and closes audio and subtitles, which stay open while the film plays on, and Back from Style goes back to them', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const focused = page.locator('[data-focused="true"]');
+  const panel = page.getByRole('dialog', { name: 'Audio and subtitles' });
+
+  // From anywhere, with the controls hidden. Held down, it does not close again.
+  await pressCode(page, BLUE);
+  await pressCode(page, BLUE, true);
+  await expect(panel).toBeVisible();
+  await expect(focused).toHaveAttribute('data-focus-key', /^player-tracks-/);
+  await pressCode(page, BLUE);
+  await expect(panel).toHaveCount(0);
+  await expectFocus(page, 'player-surface');
+
+  // Opened from the controls, the panel outlasts their 5 s, a skip included.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  await pressCode(page, FAST_FORWARD);
+  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
+  await page.waitForTimeout(5500);
+  await expect(panel).toBeVisible();
+  await expect(focused).toHaveAttribute('data-focus-key', /^player-tracks-/);
+
+  // Down to Style, in and back out, one level at a time.
+  for (let step = 0; step < 8; step++) {
+    if ((await focused.getAttribute('data-focus-key')) === 'player-tracks-style') break;
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+  }
+  await expectFocus(page, 'player-tracks-style');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Subtitle style' })).toBeVisible();
+  await pressBack(page);
+  await expect(panel).toBeVisible();
+  await expectFocus(page, 'player-tracks-style');
+  await pressBack(page);
+  await expect(panel).toHaveCount(0);
+  await expectFocus(page, 'player-tracks-button');
+});
+
+test('Back just after the controls fade by themselves asks again before leaving', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const faded = () =>
+    expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+      'data-focus-key',
+      'player-surface',
+      { timeout: 8000 },
+    );
+
+  // Brought back and hidden by hand since, the controls had their Back: the next one leaves.
+  await press(page, 'ArrowUp', 'player-play');
+  await faded();
+  await press(page, 'ArrowUp', 'player-play');
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
+
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await press(page, 'ArrowUp', 'player-play');
+  await faded();
+  await pressBack(page);
+  await expect(page.getByText('Press Back again to leave.')).toBeVisible();
+  await expectFocus(page, 'player-surface');
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
+});
+
+test('Quality on a paused film opens the other stream paused, with Play ready', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+  await press(page, 'Enter', 'player-play');
+  await expect(play).toHaveText('Play');
+
+  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'Enter', 'player-quality-0');
+  await press(page, 'ArrowDown', 'player-quality-1');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  await expectFocus(page, 'player-play');
+  await expect(play).toHaveText('Play');
+  await page.waitForTimeout(1000);
+  expect(
+    await page
+      .locator('video:not([aria-hidden])')
+      .evaluate((element: HTMLVideoElement) => element.paused),
+  ).toBe(true);
+
+  await press(page, 'Enter', 'player-play');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect(play).toHaveText('Pause');
+});
+
+test('the pointer brings the controls up, shows the time over the bar, and a click goes there', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+  await page.mouse.move(900, 500);
+  await page.mouse.move(960, 540, { steps: 3 });
+  await expect(play).toBeVisible();
+
+  const bar = page.locator('[data-focus-key="player-seek"] > div');
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-seek');
+  await expect(bar.getByText('0:20', { exact: true })).toBeVisible();
+
+  // The Magic Remote's OK there comes as a key press and a click: it jumps, and the film plays on.
+  await page.mouse.move(box.x + box.width / 4, box.y + box.height / 2, { steps: 3 });
+  await page.keyboard.press('Enter');
+  await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(9);
+  expect((await video(page)).time).toBeLessThan(14);
+  expect((await video(page)).playing).toBe(true);
+  await expect(play).toHaveText('Pause');
+
+  // Resting on the bar keeps the controls up past their 5 s.
+  await page.waitForTimeout(5500);
+  await expect(play).toBeVisible();
+
+  // Over the time beside the bar, a click does nothing.
+  const end = page.locator('[data-focus-key="player-seek"] > span').last();
+  const label = (await end.boundingBox())!;
+  const before = (await video(page)).time;
+  await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2, { steps: 3 });
+  await page.mouse.click(label.x + label.width / 2, label.y + label.height / 2);
+  await page.waitForTimeout(300);
+  const after = await video(page);
+  expect(after.playing).toBe(true);
+  expect(after.time).toBeLessThan(before + 3);
+});
+
+test('Back while a stream starts leaves at once, even after the pointer moved', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, { mediaDelayMs: 3000 });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
+  await page.mouse.move(900, 500);
+  await page.mouse.move(960, 540, { steps: 3 });
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
 });

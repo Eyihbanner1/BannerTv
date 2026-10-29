@@ -64,12 +64,16 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
     cleanup = [];
   }
 
+  // Whether the viewer has moved the clock since this load, which its start correction must respect.
+  let moved = false;
+
   const engine: Engine = {
     name: 'native',
 
     load(url, startAt) {
       detach();
       resetVideo(video);
+      moved = false;
       mime = guessMimeType(url);
       const resume = startAt > 0 && isWebOS();
       // webOS holds adaptive streams to 1080p unless told the screen is bigger.
@@ -103,7 +107,7 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
       });
       if (startAt > 0 && !resume) {
         on('loadedmetadata', () => {
-          if (video.currentTime < startAt - START_SLACK_S) video.currentTime = startAt;
+          if (!moved && video.currentTime < startAt - START_SLACK_S) video.currentTime = startAt;
         });
       }
       if (resume) {
@@ -113,7 +117,8 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
         const check = () => {
           if (checked) return;
           checked = true;
-          if (video.currentTime < startAt - START_SLACK_S) video.currentTime = startAt;
+          // A stream opened paused can be moved before its first picture: Start over stays at 0:00.
+          if (!moved && video.currentTime < startAt - START_SLACK_S) video.currentTime = startAt;
         };
         on('playing', () => {
           if (checkAt === null) checkAt = window.setTimeout(check, LATE_CLOCK_MS);
@@ -171,6 +176,10 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
     // webOS lists no embedded subtitles through textTracks (ADR 0001), so none are offered.
     textTracks: () => [],
     selectText: () => undefined,
+
+    seeked() {
+      moved = true;
+    },
 
     destroy() {
       detach();

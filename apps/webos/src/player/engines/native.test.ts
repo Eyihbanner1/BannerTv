@@ -67,6 +67,29 @@ describe('the native engine', () => {
     expect(fatal.mock.calls[0]![0].kind).toBe('network');
   });
 
+  it('moves a resumed stream to its place once, unless the viewer moved it first', () => {
+    for (const viewerMoved of [false, true]) {
+      const { video, engine } = open(2400);
+      if (viewerMoved) {
+        // Start over on a stream opened paused, before its first picture.
+        video.currentTime = 0;
+        engine.seeked?.();
+      }
+      video.dispatchEvent(new Event('playing'));
+      video.currentTime = 0.7;
+      video.dispatchEvent(new Event('timeupdate'));
+      expect(video.currentTime).toBe(viewerMoved ? 0.7 : 2400);
+    }
+
+    tv.webOS = false;
+    for (const viewerMoved of [false, true]) {
+      const { video, engine } = open(2400);
+      if (viewerMoved) engine.seeked?.();
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(video.currentTime).toBe(viewerMoved ? 0 : 2400);
+    }
+  });
+
   it('counts a link the TV could not open as a network failure, not a format it lacks', () => {
     tv.webOS = false;
     const { video, fatal } = open(0);
