@@ -2,12 +2,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import type { Page, Route } from '@playwright/test';
+import demoWorker from '../../../services/demo/src/worker';
 import { PAIR_SERVICE } from '../src/data/pairing';
 
 /**
  * A fake Cinemeta and OpenSubtitles for the journeys, so they never touch the
  * network. Catalogs are built from the Blender open movies; one series has
- * two seasons. Every image host gets a small PNG.
+ * two seasons. Every image host gets a small PNG. BannerTV Demo is the real
+ * Worker from services/demo, run in the test.
  */
 
 const CORE = resolve(import.meta.dirname, '../../../packages/core/src/addons');
@@ -16,6 +18,28 @@ const SUBTITLES_MANIFEST = readFileSync(resolve(CORE, 'opensubtitles-v3.manifest
 
 export const FIRST_ROW = 'home-0-movie-top';
 export const SERIES_ROW = 'home-0-series-top';
+/** On a first launch BannerTV Demo comes first, so its row leads Home. */
+export const DEMO_ROW = 'home-0-movie-blender';
+
+/**
+ * Later launches start from the addons a viewer had before BannerTV Demo was
+ * preinstalled, so the journeys keep browsing Cinemeta's rows. The first-run
+ * journeys see the Demo.
+ */
+const EARLIER_ADDONS = [
+  {
+    transportUrl: 'https://v3-cinemeta.strem.io/manifest.json',
+    manifest: JSON.parse(CINEMETA_MANIFEST) as unknown,
+    official: true,
+    fetchedAt: 0,
+  },
+  {
+    transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
+    manifest: JSON.parse(SUBTITLES_MANIFEST) as unknown,
+    official: true,
+    fetchedAt: 0,
+  },
+];
 
 /** An addon the journeys can install by its address. */
 export const EXTRA_ADDON_URL = 'https://addon.example.com/bannertv/manifest.json';
@@ -236,6 +260,28 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
 
   if (!options.firstRun) {
     await page.addInitScript(() => localStorage.setItem('bannertv.welcomed', '1'));
+    // Stored once per test, and only if nothing else (seedStreamAddon) stored a list first.
+    await page.addInitScript((stored) => {
+      if (sessionStorage.getItem('bannertv.test.addons')) return;
+      sessionStorage.setItem('bannertv.test.addons', '1');
+      const request = indexedDB.open('bannertv', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('cache')) {
+          db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('kv', 'readwrite');
+        // add() rather than get() then put(): it never reads, so a journey holding the
+        // app's read of 'addons' cannot hold this write too.
+        const added = tx.objectStore('kv').add(stored, 'addons');
+        added.onerror = (event) => event.preventDefault(); // a list is already stored
+        tx.oncomplete = () => db.close();
+      };
+    }, EARLIER_ADDONS);
   }
 
   // Anything not mocked below fails, so a stray request shows up as an error.
@@ -252,6 +298,23 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   await page.route('https://opensubtitles-v3.strem.io/manifest.json', (route) =>
     json(route, JSON.parse(SUBTITLES_MANIFEST)),
   );
+  await page.route(/^https:\/\/demo\.bannertv\.workers\.dev\//, async (route) => {
+    const url = route.request().url();
+    if (new URL(url).pathname.startsWith('/art/')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        headers: { 'access-control-allow-origin': '*' },
+        body: IMAGE,
+      });
+    }
+    const response = await demoWorker.fetch(new Request(url));
+    return route.fulfill({
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: await response.text(),
+    });
+  });
   await page.route(/^https:\/\/addon\.example\.com\/bannertv\//, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/bannertv/manifest.json' || path === new URL(LONG_ADDON_URL).pathname) {

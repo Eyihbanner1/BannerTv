@@ -1,4 +1,4 @@
-import { parseManifest } from '@bannertv/protocol';
+import { boardCatalogs, parseManifest } from '@bannertv/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../http';
 import { createLimiter } from '../limiter';
@@ -6,7 +6,7 @@ import { createQueryCache } from '../query';
 import { memoryKeyValueStore } from '../storage';
 import { createAddonClient, metahubAtSize, NotFoundError, withArtwork } from './client';
 import { createAddonCollection } from './collection';
-import { CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
+import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './defaults';
 
 // Lets queued promise callbacks run. The core has no timers to wait on.
 async function flush() {
@@ -56,9 +56,8 @@ describe('createAddonClient', () => {
           ],
         }),
     });
-    const query = client.catalog(collection.get().addons[0]!, 'movie', 'top', [
-      ['genre', 'Action'],
-    ]);
+    const cinemeta = collection.get().addons.find((a) => a.transportUrl === CINEMETA_URL)!;
+    const query = client.catalog(cinemeta, 'movie', 'top', [['genre', 'Action']]);
     query.load();
     await flush();
     expect(fetchJson).toHaveBeenCalledWith(url, { timeoutMs: 10000 });
@@ -132,10 +131,16 @@ describe('withArtwork', () => {
   });
 });
 
-describe('the bundled Cinemeta manifest', () => {
-  it('still reads, and is the first default', () => {
-    expect(DEFAULT_ADDONS[0]!.transportUrl).toBe(CINEMETA_URL);
-    expect(parseManifest(DEFAULT_ADDONS[0]!.manifest).catalogs.length).toBeGreaterThan(0);
+describe('the bundled manifests', () => {
+  it('still read, with BannerTV Demo first and then Cinemeta, each with a Home row', () => {
+    expect(DEFAULT_ADDONS.map((a) => a.transportUrl)).toEqual([
+      BANNERTV_DEMO_URL,
+      CINEMETA_URL,
+      OPENSUBTITLES_V3_URL,
+    ]);
+    for (const addon of DEFAULT_ADDONS.slice(0, 2)) {
+      expect(boardCatalogs(parseManifest(addon.manifest)).length).toBeGreaterThan(0);
+    }
   });
 });
 
