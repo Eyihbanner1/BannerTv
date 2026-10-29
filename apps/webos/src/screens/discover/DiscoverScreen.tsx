@@ -17,7 +17,7 @@ import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { isKidsProfile } from '../../data/profiles';
-import { eventForItem, noteFirstPage, prepareItems } from '../../data/sports';
+import { eventForItem, noteFirstPage, prepareItems, sportsState } from '../../data/sports';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
@@ -99,11 +99,15 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
     ? `see-all:${preset.transportUrl}|${preset.type}|${preset.catalogId}|${preset.genre ?? ''}`
     : 'section';
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
-  // A kids profile browses Family catalogs only (ADR 0004).
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  // A kids profile browses Family catalogs only (ADR 0004), and has no Sports,
+  // so sports catalogs leave its Discover as they leave its Home.
   const sources = useMemo(() => {
     const all = discoverSources(collection.addons);
-    return isKidsProfile() ? kidsDiscoverSources(all) : all;
-  }, [collection.addons]);
+    if (!isKidsProfile()) return all;
+    const leaveOut = sports.homeLeaveOut;
+    return kidsDiscoverSources(all).filter((s) => !leaveOut?.(s.addon, s.catalog));
+  }, [collection.addons, sports.homeLeaveOut]);
   const [wanted, setWanted] = useState(() => memoryFor(memoryKey).selection ?? preset);
   const resolved = useMemo(() => resolve(sources, wanted), [sources, wanted]);
   const source = resolved?.source;
@@ -158,19 +162,24 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
   }, [source, genre, firstItems]);
 
   // A match in a sports catalog opens its event page, which asks only this addon. The
-  // list is read for its clock-only times once drawn, not on the press.
+  // list is read for its clock-only times once drawn, not on the press. A kids
+  // profile never opens an event page: every title goes through Details' checks.
   const items = state.items;
+  const sportsSource = isKidsProfile() ? undefined : source;
   useEffect(
-    () => (source ? prepareItems(source.addon, source.catalog, items) : undefined),
-    [source, items],
+    () =>
+      sportsSource ? prepareItems(sportsSource.addon, sportsSource.catalog, items) : undefined,
+    [sportsSource, items],
   );
   const onPress = useCallback(
     (item: MetaPreview) => {
-      const event = source ? eventForItem(source.addon, source.catalog, item) : undefined;
+      const event = sportsSource
+        ? eventForItem(sportsSource.addon, sportsSource.catalog, item)
+        : undefined;
       if (event) push({ name: 'event', event });
       else openDetails(item);
     },
-    [source],
+    [sportsSource],
   );
 
   const restored =

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, type Page, type Route, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
 import { seedStreamAddon } from './play';
@@ -299,6 +301,120 @@ test('a kids profile sees Family rows only, no Addons, a short Settings, and no 
   await press(page, 'Enter', 'settings-subtitle-style');
   await expect(page.locator('[data-focus-key="settings-profiles"]')).toHaveCount(0);
   await expect(page.locator('[data-focus-key="settings-diagnostics"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("a kids profile's Discover leaves out a sports catalog, even one offering Family titles", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // Made-up: a film catalog that names a sport and can filter by Family, set
+  // to Show in Sports by a grown-up, first in the list so Discover would open on it.
+  const replaysUrl = 'https://replays.example.com/bannertv/manifest.json';
+  const replays = {
+    id: 'org.bannertv.test-replays',
+    version: '1.0.0',
+    name: 'Test Replays',
+    types: ['movie'],
+    resources: ['catalog', 'meta', 'stream'],
+    idPrefixes: ['trep:'],
+    catalogs: [
+      {
+        type: 'movie',
+        id: 'football_replays',
+        name: 'Football replays',
+        extra: [{ name: 'genre', options: ['Family', 'Drama'] }],
+      },
+    ],
+  };
+  const core = resolve(import.meta.dirname, '../../../packages/core/src/addons');
+  const manifest = (name: string) =>
+    JSON.parse(readFileSync(resolve(core, `${name}.manifest.json`), 'utf8')) as unknown;
+  const addons = [
+    { transportUrl: replaysUrl, manifest: replays, official: false, fetchedAt: 0 },
+    {
+      transportUrl: 'https://v3-cinemeta.strem.io/manifest.json',
+      manifest: manifest('cinemeta'),
+      official: true,
+      fetchedAt: 0,
+    },
+    {
+      transportUrl: 'https://opensubtitles-v3.strem.io/manifest.json',
+      manifest: manifest('opensubtitles-v3'),
+      official: true,
+      fetchedAt: 0,
+    },
+  ];
+  // Before mockAddons, so its usual list is not stored over this one.
+  await page.addInitScript(
+    ({ stored, settings }) => {
+      if (sessionStorage.getItem('bannertv.test.addons')) return;
+      sessionStorage.setItem('bannertv.test.addons', '1');
+      const request = indexedDB.open('bannertv', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('cache')) {
+          db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(stored, 'addons');
+        tx.objectStore('kv').put(settings, 'sports.settings');
+        tx.oncomplete = () => db.close();
+      };
+    },
+    { stored: addons, settings: { [replays.id]: 'yes' } },
+  );
+  await mockAddons(page, {
+    catalogs: {
+      'movie/top/genre=Family': (route) =>
+        json(route, {
+          metas: [{ id: 'tt1254207', type: 'movie', name: 'Big Buck Bunny', genres: ['Family'] }],
+        }),
+    },
+  });
+  const replayRequests: string[] = [];
+  await page.route(/^https:\/\/replays\.example\.com\//, (route) => {
+    const path = decodeURIComponent(new URL(route.request().url()).pathname);
+    replayRequests.push(path);
+    if (path === '/bannertv/manifest.json') return json(route, replays);
+    return json(route, {
+      metas: [{ id: 'trep:1', type: 'movie', name: 'Arsenal vs Celtic', genres: ['Family'] }],
+    });
+  });
+  await page.route('https://v3-cinemeta.strem.io/meta/movie/tt1254207.json', (route) =>
+    json(route, {
+      meta: { id: 'tt1254207', type: 'movie', name: 'Big Buck Bunny', genres: ['Family'] },
+    }),
+  );
+  await seedProfiles(page, {
+    profiles: [main(), { id: KIDS_ID, name: 'Robin', colour: 3, kids: 'PG' }],
+    lastId: KIDS_ID,
+    askAtLaunch: false,
+  });
+  await page.goto(APP_URL);
+
+  // Home leaves the sports catalog out: its first row is Cinemeta's.
+  await expectFocus(page, 'home-1-movie-top-genre-family-tile-0');
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  await expect(page.locator('[data-focus-key="discover-catalog"]')).toHaveAttribute(
+    'aria-label',
+    'Catalog: Popular',
+  );
+  await press(page, 'ArrowUp', 'discover-type');
+  await press(page, 'ArrowRight', 'discover-catalog');
+  await press(page, 'Enter', 'discover-catalog-menu-0');
+  await expect(page.getByRole('dialog', { name: 'Catalog' })).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Football replays')).toHaveCount(0);
+  await pressBack(page);
+  await press(page, 'ArrowDown', 'discover-tile-0');
+  // A title opens its own page, with the kids checks, never a match page.
+  await press(page, 'Enter', 'details-watch');
+  expect(replayRequests.filter((path) => path.indexOf('/catalog/') !== -1)).toEqual([]);
   expect(errors).toEqual([]);
 });
 
