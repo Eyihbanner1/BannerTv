@@ -10,7 +10,9 @@
  * defaults are the lightest set from the TV comparison of 28 October 2026:
  * moving along a row went from a p95 frame gap of 200-300 ms to about 17 ms.
  * Before that they were `{"motion":"slide","zoom":"animate","heroBusyMs":250,
- * "heroArt":"large","heroPan":true,"mips":true}`.
+ * "heroArt":"large","heroPan":true,"mips":true}`. The comparison of 29 October
+ * dropped the hero's fade (`"heroFade":true` before): the pauses of 1-1.5 s
+ * moving along a row went to at most 50 ms.
  */
 export interface Tuning {
   /** Home's rows and each row's tiles slide, slide on a layer kept between presses, or jump. */
@@ -26,6 +28,13 @@ export interface Tuning {
    * backdrops measured 1920x1080 on the TV, the same as large ones did.
    */
   heroArt: 'large' | 'medium';
+  /**
+   * Size of the wide tiles' art in Featured rows, drawn at 768 device px.
+   * Medium is 1920x1080, the same image as the hero's; small is far fewer
+   * pixels to decode (about 480 wide, not yet measured on the TV) and may
+   * look soft.
+   */
+  wideArt: 'medium' | 'small';
   /** The hero backdrop's slow pan. */
   heroPan: boolean;
   /** Rows either side of the focused one that are drawn and fetched, at least 1. */
@@ -44,7 +53,8 @@ export interface Tuning {
   /**
    * Between presses, the posters and logos of the row the next Down brings
    * into view, and of the row above, are decoded, so the press only uploads
-   * them. Wide art is left out: decoding ahead decodes at full size.
+   * them. Art far bigger than it is drawn, like the wide tiles' medium art,
+   * is left out: decoding ahead decodes at full size.
    */
   decodeAhead: boolean;
   /** A new hero backdrop fades in over the old one, or replaces it at once. */
@@ -64,6 +74,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   heroDelayMs: 250,
   heroBusyMs: 800,
   heroArt: 'medium',
+  wideArt: 'medium',
   heroPan: false,
   rowsAround: 2,
   overscan: 2,
@@ -71,7 +82,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   mips: false,
   homeLayer: false,
   decodeAhead: false,
-  heroFade: true,
+  heroFade: false,
   marks: false,
 };
 
@@ -103,6 +114,7 @@ export function parseTuning(raw: string | null): Tuning {
     heroDelayMs: count(stored.heroDelayMs, 0, 5000, d.heroDelayMs),
     heroBusyMs: count(stored.heroBusyMs, 0, 5000, d.heroBusyMs),
     heroArt: oneOf(stored.heroArt, ['large', 'medium'], d.heroArt),
+    wideArt: oneOf(stored.wideArt, ['medium', 'small'], d.wideArt),
     heroPan: flag(stored.heroPan, d.heroPan),
     rowsAround: count(stored.rowsAround, 1, 10, d.rowsAround),
     overscan: count(stored.overscan, 1, 10, d.overscan),

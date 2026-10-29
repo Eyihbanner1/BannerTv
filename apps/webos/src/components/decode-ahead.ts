@@ -1,3 +1,4 @@
+import { sinceActivity } from '../navigation/activity';
 import { mark } from '../platform/marks';
 import { tuning } from '../platform/tuning';
 
@@ -8,99 +9,159 @@ import { tuning } from '../platform/tuning';
  * 1920 px, would cost a full-size copy where drawing it keeps a half-size one.
  */
 const MAX_OVERSIZE = 1.5;
+/** No decode starts until the remote has been still this long, so a press's own frames go first. */
+const QUIET_MS = 150;
+/** Frames closer than this count as flowing again: the last press has been drawn. */
+const FLOWING_MS = 25;
+/**
+ * Art asked within this long is not asked again, so going back over rows
+ * whose art was just decoded costs nothing. Later, its decoded copy may
+ * have been dropped, and asking again is cheap if it was not.
+ */
+const ASK_AGAIN_MS = 20000;
 
-const asked = new WeakSet<HTMLImageElement>();
+/** When each address was asked, oldest first. Addresses, not elements: a row drawn again has new ones. */
+const asked = new Map<string, number>();
 const watched = new WeakSet<HTMLElement>();
 /**
  * The key of the row a stack last moved to. A key, not the element, so a
  * screen that has closed is not kept in memory.
  */
 let currentKey: string | null = null;
+let movedUp = false;
+let decoding = false;
 let frame = 0;
-
-function noop(): void {}
+let lastFrameAt = 0;
+let flowingFrames = 0;
 
 function isRow(element: Element | null | undefined): element is HTMLElement {
   return element instanceof HTMLElement && element.hasAttribute('data-row-key');
 }
 
+function rowElement(key: string | null): Element | null {
+  return key ? document.querySelector(`[data-row-key="${key}"]`) : null;
+}
+
 /**
  * The row after next, which the next Down brings into view (the next row
- * already shows its top), and the row above, for Up. Looked up each time:
- * a row far from focus is an empty box until it is drawn, and drawing it
- * puts a new element in its place.
+ * already shows its top), and after an Up, first the row above. Looked up
+ * each time: a row far from focus is an empty box until it is drawn, and
+ * drawing it puts a new element in its place.
  */
 function targets(): HTMLElement[] {
-  const current = currentKey ? document.querySelector(`[data-row-key="${currentKey}"]`) : null;
+  const current = rowElement(currentKey);
   if (!current) return [];
   const next = current.nextElementSibling;
-  return [next && next.nextElementSibling, current.previousElementSibling].filter(isRow);
+  const afterNext = next && next.nextElementSibling;
+  return (movedUp ? [current.previousElementSibling, afterNext] : [afterNext]).filter(isRow);
+}
+
+function wasAsked(src: string, now: number): boolean {
+  const at = asked.get(src);
+  return at !== undefined && now - at < ASK_AGAIN_MS;
+}
+
+function noteAsked(src: string, now: number): void {
+  asked.delete(src);
+  asked.set(src, now);
+  // Oldest first, so the stale ones are at the front.
+  for (const [old, at] of asked) {
+    if (now - at < ASK_AGAIN_MS) break;
+    asked.delete(old);
+  }
 }
 
 /** Loaded, drawn across the screen (not a tile drawn past the row's edge), and about its drawn size. */
-function worthDecoding(image: HTMLImageElement): boolean {
-  if (asked.has(image) || !image.complete || image.naturalWidth === 0) return false;
+function worthDecoding(image: HTMLImageElement, now: number): boolean {
+  if (!image.complete || image.naturalWidth === 0 || wasAsked(image.src, now)) return false;
   const box = image.getBoundingClientRect();
   if (box.width === 0 || box.right <= 0 || box.left >= window.innerWidth) return false;
   return image.naturalWidth <= box.width * (window.devicePixelRatio || 1) * MAX_OVERSIZE;
 }
 
-function decode(images: HTMLImageElement[], row: HTMLElement): void {
-  if (images.length === 0) return;
-  const key = row.getAttribute('data-row-key');
-  mark(`ahead:${key}:${images.length}`);
-  const done = images.map((image) => {
-    asked.add(image);
-    return image.decode().then(noop, noop);
-  });
-  if (tuning.marks) void Promise.all(done).then(() => mark(`ahead-done:${key}`));
-}
-
-function decodeRow(row: HTMLElement): void {
-  const found = row.getElementsByTagName('img');
-  const images: HTMLImageElement[] = [];
-  for (let i = 0; i < found.length; i++) if (worthDecoding(found[i]!)) images.push(found[i]!);
-  decode(images, row);
-}
-
-/** Artwork that loads in a target row after its batch went: decoded on its own. */
-function onLoad(event: Event): void {
-  const image = event.target;
-  if (frame !== 0 || !(image instanceof HTMLImageElement)) return;
+/** The first art across the screen, left to right, of the first target row that has some. */
+function nextImage(now: number): { image: HTMLImageElement; row: HTMLElement } | null {
   for (const row of targets()) {
-    if (row.contains(image)) {
-      if (worthDecoding(image)) decode([image], row);
-      return;
+    const found = row.getElementsByTagName('img');
+    for (let i = 0; i < found.length; i++) {
+      if (worthDecoding(found[i]!, now)) return { image: found[i]!, row };
     }
   }
+  return null;
+}
+
+function decode(image: HTMLImageElement, row: HTMLElement, now: number): void {
+  const key = row.getAttribute('data-row-key');
+  decoding = true;
+  noteAsked(image.src, now);
+  mark(`ahead:${key}`);
+  const settled = () => {
+    decoding = false;
+    mark(`ahead-done:${key}`);
+    schedule();
+  };
+  image.decode().then(settled, settled);
 }
 
 /**
- * With the `decodeAhead` switch, decodes the artwork of the rows either side
- * of the one a vertical stack of rows has just moved to (see targets), as it
- * loads. Rows clipped out of view are never drawn, so their art would
- * otherwise decode in the frame that first shows it. The decoded copy is
- * kept for drawing, so that frame only has to upload it.
+ * Each frame while there is art to decode: starts one decode once the
+ * remote is quiet and frames flow, and stops asking for frames when there
+ * is nothing left. While a decode runs it asks for none: the decode's end
+ * asks again, and the frames after it have to flow before the next.
+ */
+function tick(time: number): void {
+  frame = 0;
+  flowingFrames = lastFrameAt > 0 && time - lastFrameAt < FLOWING_MS ? flowingFrames + 1 : 0;
+  lastFrameAt = time;
+  if (decoding) return;
+  if (flowingFrames < 2 || sinceActivity() < QUIET_MS) return schedule();
+  const now = Date.now();
+  const next = nextImage(now);
+  if (next) decode(next.image, next.row, now);
+  else lastFrameAt = 0;
+}
+
+function schedule(): void {
+  if (frame === 0) frame = requestAnimationFrame(tick);
+}
+
+/** Art that loads in a target row after its slide: it joins the queue. */
+function onLoad(event: Event): void {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement)) return;
+  if (targets().some((row) => row.contains(image))) schedule();
+}
+
+/**
+ * With the `decodeAhead` switch, decodes the posters and logos across the
+ * screen of the row the next press will show, once it has loaded: the row
+ * after next, and after an Up the row above too. Rows clipped out of view
+ * are never drawn, so their art would otherwise decode in the frame that
+ * first shows it. The decoded copy is kept for drawing, so that frame only
+ * has to upload it.
  *
- * The batch waits two frames. The TV's Chromium starts no frame until the
- * last one is ready to draw, so it goes once the press has been drawn, not
- * alongside it, and a press in between takes its place.
+ * One image at a time, and only while the remote is still and frames flow:
+ * the browser decodes in the order asked and cannot drop a decode once
+ * asked, so a press never waits behind more than one. Holding an arrow
+ * decodes nothing until it is let go.
  */
 export function decodeAheadOf(track: HTMLElement, row: HTMLElement | null): void {
   if (!tuning.decodeAhead || typeof HTMLImageElement.prototype.decode !== 'function') return;
-  cancelAnimationFrame(frame);
-  frame = 0;
-  currentKey = row ? row.getAttribute('data-row-key') : null;
+  const key = row ? row.getAttribute('data-row-key') : null;
+  if (key !== currentKey) {
+    const before = rowElement(currentKey);
+    movedUp = !!(
+      row &&
+      before &&
+      row.compareDocumentPosition(before) & Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    currentKey = key;
+  }
   if (!currentKey) return;
   if (!watched.has(track)) {
     watched.add(track);
     // Load events do not bubble, but they can be caught on the way down.
     track.addEventListener('load', onLoad, true);
   }
-  frame = requestAnimationFrame(() => {
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      targets().forEach(decodeRow);
-    });
-  });
+  schedule();
 }

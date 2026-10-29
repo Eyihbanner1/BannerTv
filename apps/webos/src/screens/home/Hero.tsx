@@ -42,10 +42,13 @@ function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  // Once the fade is over, drop what it covered or faded out.
+  // Once the fade is over, drop what it covered or faded out. With no fade,
+  // in the same render, so no frame draws both backdrops and none draws the
+  // hero twice.
   const settle = () => {
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => dispatch({ type: 'settled' }), FADE_MS);
+    if (FADE_MS === 0) dispatch({ type: 'settled' });
+    else timer.current = setTimeout(() => dispatch({ type: 'settled' }), FADE_MS);
   };
 
   const show = (id: number, image: HTMLImageElement) => {

@@ -51,27 +51,32 @@ const heroBackdrops = (page: Page) =>
       .map((img) => /tt\d+/.exec(img.src)?.[0]),
   );
 
-test('the hero follows focus back to a title whose backdrop just faded out', async ({ page }) => {
-  await mockAddons(page);
-  // The keys are timed against a 250 ms hero wait. By default quick presses
-  // wait 800 ms, which a single press after a rest can still race.
-  await page.addInitScript(() =>
-    localStorage.setItem('bannertv.tuning', JSON.stringify({ heroBusyMs: 250 })),
-  );
-  await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
-  // Back just as the next title's backdrop has faded in, before the old one is dropped.
-  // The keys go straight in, since waiting to see focus move would blur the timing.
-  for (const rest of [300, 350, 400, 300, 350, 400]) {
-    await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(rest);
-    await page.keyboard.press('ArrowLeft');
-    await page.waitForTimeout(1000);
+for (const heroFade of [true, false]) {
+  test(`the hero follows focus back to a title whose backdrop just ${heroFade ? 'faded out' : 'went'}`, async ({
+    page,
+  }) => {
+    await mockAddons(page);
+    // The keys are timed against a 250 ms hero wait. By default quick presses
+    // wait 800 ms, which a single press after a rest can still race.
+    await page.addInitScript(
+      (stored) => localStorage.setItem('bannertv.tuning', stored),
+      JSON.stringify({ heroBusyMs: 250, heroFade }),
+    );
+    await page.goto(APP_URL);
     await expectFocus(page, `${FIRST_ROW}-tile-0`);
     await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
-  }
-});
+    // Back just as the next title's backdrop has shown, while the old one may be under it.
+    // The keys go straight in, since waiting to see focus move would blur the timing.
+    for (const rest of [300, 350, 400, 300, 350, 400]) {
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(rest);
+      await page.keyboard.press('ArrowLeft');
+      await page.waitForTimeout(1000);
+      await expectFocus(page, `${FIRST_ROW}-tile-0`);
+      await expect.poll(() => heroBackdrops(page)).toEqual(['tt0807840']);
+    }
+  });
+}
 
 test('a title with no backdrop clears the last one from the hero', async ({ page }) => {
   await mockAddons(page);
@@ -216,5 +221,21 @@ test.describe('on a 4K TV', () => {
     await expectFocus(page, `${FIRST_ROW}-tile-0`);
     const hero = page.locator('section[aria-label="Elephants Dream"]');
     await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/large\/tt/);
+  });
+
+  test('wide tiles can ask for small art from tuning, and the hero keeps its own size', async ({
+    page,
+  }) => {
+    await mockAddons(page);
+    await page.addInitScript(() =>
+      localStorage.setItem('bannertv.tuning', JSON.stringify({ wideArt: 'small' })),
+    );
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    await expect(
+      page.locator('[data-focus-key="home-0-movie-imdbrating-tile-0"] img').first(),
+    ).toHaveAttribute('src', /\/background\/small\/tt/);
+    const hero = page.locator('section[aria-label="Elephants Dream"]');
+    await expect(hero.locator('img').first()).toHaveAttribute('src', /\/background\/medium\/tt/);
   });
 });
