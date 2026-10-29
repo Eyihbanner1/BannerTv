@@ -369,7 +369,7 @@ describe('a paused stream', () => {
   it('opens a fallback engine where the viewer moved a stream opened paused', async () => {
     fake.plays = true;
     fake.fallback = 'native';
-    const { session } = setup();
+    const { video, session } = setup();
     session.play(first, 2400, { chosen: true, paused: true });
     await settle();
     session.seek(2430);
@@ -378,6 +378,11 @@ describe('a paused stream', () => {
     await settle();
     expect(lastEngine()).toMatchObject({ name: 'native', startAt: 2430 });
     expect(session.get()).toMatchObject({ status: 'paused', entry: first });
+
+    // The element the first engine let go of reads 0 for a moment: that is not a place.
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(session.carryOn()).toBe(2430);
   });
 
   it('stays paused when the engine starts the video after the viewer paused', async () => {

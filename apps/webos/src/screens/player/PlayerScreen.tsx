@@ -379,11 +379,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
    * the controls stay away.
    */
   function scrubBy(direction: -1 | 1, repeats = 0) {
-    if (!session || state.duration <= 0 || waiting) return;
+    // A broadcast has no bar to skip along (Fast forward and Rewind jump at once, below).
+    if (!session || waiting || state.live) return;
     const current = scrub.current;
     const origin = current ? current.origin : (session.trustedPosition() ?? state.position);
     const from = current ? current.target : origin;
-    const target = Math.max(0, Math.min(state.duration - 1, from + direction * skipStep(repeats)));
+    const wanted = Math.max(0, from + direction * skipStep(repeats));
+    // A film whose file gives no length is only kept from going before its start.
+    const target = state.duration > 0 ? Math.min(state.duration - 1, wanted) : wanted;
     if (current) clearTimeout(current.timer);
     const timer = window.setTimeout(commitScrub, SCRUB_COMMIT_MS);
     scrub.current = { origin, target, timer };
@@ -500,10 +503,17 @@ export function PlayerScreen(props: PlayerScreenProps) {
         back();
         break;
       case KeyCode.FastForward:
-      case KeyCode.Rewind:
+      case KeyCode.Rewind: {
         heldSkip.current = event.repeat ? heldSkip.current + 1 : 0;
-        scrubBy(event.keyCode === KeyCode.FastForward ? 1 : -1, heldSkip.current);
+        const direction = event.keyCode === KeyCode.FastForward ? 1 : -1;
+        if (state.live && session && !waiting) {
+          // Within what the broadcast keeps, and the controls show where that is.
+          const at = session.trustedPosition() ?? state.position;
+          session.seek(at + direction * skipStep(heldSkip.current));
+          show();
+        } else scrubBy(direction, heldSkip.current);
         break;
+      }
       case KeyCode.Blue:
         // Held down, it would open and close the panel over and over.
         if (event.repeat) break;
@@ -789,23 +799,27 @@ export function PlayerScreen(props: PlayerScreenProps) {
           {toast}
         </p>
       )}
-      {skipNote && (!controls || panel) && state.duration > 0 && (
+      {skipNote && (!controls || panel) && (
         <>
           <div className={styles.skipNote} role="status">
             <p className={styles.skipTotal}>{formatSkip(skipNote.delta)}</p>
-            <p className={styles.skipWhere}>
-              {t('player.skipWhere', {
-                time: formatTime(skipNote.target),
-                length: formatTime(state.duration),
-              })}
-            </p>
+            {state.duration > 0 && (
+              <p className={styles.skipWhere}>
+                {t('player.skipWhere', {
+                  time: formatTime(skipNote.target),
+                  length: formatTime(state.duration),
+                })}
+              </p>
+            )}
           </div>
-          <div className={styles.skipBar}>
-            <div
-              className={styles.skipPlayed}
-              style={{ width: `${Math.min(1, skipNote.target / state.duration) * 100}%` }}
-            />
-          </div>
+          {state.duration > 0 && (
+            <div className={styles.skipBar}>
+              <div
+                className={styles.skipPlayed}
+                style={{ width: `${Math.min(1, skipNote.target / state.duration) * 100}%` }}
+              />
+            </div>
+          )}
         </>
       )}
 

@@ -606,6 +606,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       const open = async (name: EngineName) => {
         if (current !== attempt || destroyed) return;
         engines.add(name);
+        // A fallback engine opens where the viewer moved a stream opened paused:
+        // read before the first engine's element is reset.
+        const takingOver = engines.size > 1;
+        const at = takingOver ? carryOn() : startAt;
         const listener = {
           tracks: () => {
             if (current !== attempt) return;
@@ -649,8 +653,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
           engine = created;
           patch({ engine: created.name });
-          // A fallback engine opens where the viewer moved a stream opened paused.
-          await created.load(url, engines.size > 1 ? carryOn() : startAt);
+          if (takingOver) {
+            // It trusts no reading from the element the first engine reset.
+            tracker = createProgressTracker({ startAt: at });
+            lastStartAt = at;
+            seekedToPlace = false;
+            firstTrusted = undefined;
+            lastPosition = undefined;
+          }
+          await created.load(url, at);
         } catch (error) {
           listener.fatal(
             error instanceof PlaybackError ? error : new PlaybackError('other', String(error)),

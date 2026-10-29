@@ -629,6 +629,11 @@ test('a live broadcast plays with no end shown, and saves nothing to resume or c
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect((await video(page)).src).toMatch(/^blob:/);
 
+  // Rewind jumps back within the broadcast at once, and the controls show where it is.
+  await pressCode(page, REWIND);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
+  await expect(page.getByText('−10 s', { exact: true })).toHaveCount(0);
+
   // The controls give no length to a broadcast.
   await press(page, 'ArrowUp', 'player-play');
   await expect(page.locator('[data-focus-key="player-seek"] > span').last()).toHaveText('');
@@ -837,10 +842,25 @@ test('Start over is always there, and offers for a moment to go back to where th
   await page.waitForTimeout(1000);
   expect((await video(page)).time).toBeLessThan(5);
 
+  // The controls stay up while it offers to go back, past their usual 5 s.
+  await page.waitForTimeout(4500);
+  expect(await focusedKey(page)).toBe('player-restart');
+  expect(await restart.textContent()).toMatch(/^Back to 0:[12]\d$/);
   await press(page, 'Enter', 'player-restart');
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
   await expect(restart).toHaveText('Start over');
   expect((await video(page)).playing).toBe(true);
+
+  // The offer goes after 8 s.
+  await press(page, 'Enter', 'player-restart');
+  await expect(restart).toHaveText(/^Back to /);
+  await page.waitForTimeout(8500);
+  expect(await restart.textContent()).toBe('Start over');
+  // Under 10 s in, there is nothing worth going back to.
+  expect((await video(page)).time).toBeLessThan(10);
+  await press(page, 'Enter', 'player-restart');
+  await page.waitForTimeout(300);
+  expect(await restart.textContent()).toBe('Start over');
 });
 
 test('Blue opens and closes audio and subtitles, which stay open while the film plays on, and Back from Style goes back to them', async ({
@@ -869,6 +889,15 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
   await page.waitForTimeout(5500);
   await expect(panel).toBeVisible();
   await expect(focused).toHaveAttribute('data-focus-key', /^player-tracks-/);
+
+  // So it does with the Magic Remote pointer resting over it.
+  const box = (await panel.boundingBox())!;
+  await page.mouse.move(box.x - 40, box.y + 200);
+  await page.mouse.move(box.x + box.width / 2, box.y + 200, { steps: 3 });
+  await page.waitForTimeout(6000);
+  expect(await panel.isVisible()).toBe(true);
+  expect(await focusedKey(page)).toMatch(/^player-tracks-/);
+  expect(await page.locator('[data-focus-key="player-play"]').isVisible()).toBe(true);
 
   // Down to Style, in and back out, one level at a time.
   for (let step = 0; step < 8; step++) {
