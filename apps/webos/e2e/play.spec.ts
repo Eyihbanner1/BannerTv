@@ -630,9 +630,11 @@ test('a live broadcast plays with no end shown, and saves nothing to resume or c
   expect((await video(page)).src).toMatch(/^blob:/);
 
   // Rewind jumps back within the broadcast at once, and the controls show where it is.
+  // hls.js joins a few seconds behind the live edge of the 10 s window, so there is room.
+  const before = (await video(page)).time;
   await pressCode(page, REWIND);
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(before);
   await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
-  await expect(page.getByText('−10 s', { exact: true })).toHaveCount(0);
 
   // The controls give no length to a broadcast.
   await press(page, 'ArrowUp', 'player-play');

@@ -387,13 +387,13 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 
 | Input | Action |
 | --- | --- |
-| OK | Play or pause, and show the controls |
-| Left, Right | Scrub 10 seconds; repeated presses step 30 then 60 seconds, and the seek happens when the presses stop |
+| OK | Play or pause, and show the controls; land a skip on its way at once |
+| Left, Right | Skip 10 seconds a press, 30 then 60 while held; the total lands 0.8 seconds after the last press |
 | Up, Down | Show the controls (Play, Audio and subtitles, Quality, Other streams, Start over, Next episode) |
-| Blue | Audio and subtitles |
+| Blue | Open or close Audio and subtitles |
 | Play, Pause, Stop | Mapped to transport; Stop leaves the player |
-| Fast forward, Rewind | Forward 30 seconds, back 10 seconds |
-| Back | Cancel a scrub, hide the controls, then leave the player (progress saved) |
+| Fast forward, Rewind, wheel | The same 10 second skips as Left and Right (the wheel only while the controls are hidden); on a live broadcast Fast forward and Rewind jump at once |
+| Back | Cancel a skip, hide the controls, then leave the player (progress saved); just after the controls fade by themselves, ask again first |
 
 **Known limits to explain in the UI**
 
