@@ -487,7 +487,7 @@ On 28 October 2026 Phase 3 started before PR #4 and PR #6 merged, built on the p
 - [x] BannerTV's API Worker (`services/api`), which holds the Trakt and TMDB keys so the app and the repository never do
 - [x] Trakt: sign-in with a code entered at trakt.tv, sync of paused progress, watched ticks and My List both ways, and scrobbling from the player
 - [x] TMDB on Details: UK rating, studio or network, cast photos, episode stills and summaries, and a logo and backdrop where the addon has none; a kids profile cannot play a title rated above its rating
-- [ ] Deploy the API Worker and put its three secrets (Eyitayo, from the laptop: see `services/api/README.md`). Until then Trakt and TMDB stay hidden in the app
+- [ ] Deploy the API Worker and put its secrets, `TRAKT_CLIENT_ID` and `TMDB_API_KEY` (plus `TRAKT_CLIENT_SECRET` only for a Trakt app that has one; Trakt issues none to apps made since October 2026), as Eyitayo, from the laptop: see `services/api/README.md`. Until then Trakt and TMDB stay hidden in the app
 - [ ] Try Trakt and TMDB on the TV once the Worker is up
 
 Still to come, as ADR 0004 lists: settings backup to a phone, the addon catalog browser, per-title reuse of the last link, and the sports organisation that the sports thread plans in PR #7.

@@ -121,8 +121,18 @@ describe('status', () => {
       trakt: false,
       tmdb: false,
     });
-    const partial: Env = { TRAKT_CLIENT_ID: 'trakt-client-id', TRAKT_CLIENT_SECRET: ' ' };
-    expect((await call('GET', '/status', { env: partial })).json()).toEqual({
+    // Trakt issues no secret to newer apps, so the client id alone is enough.
+    for (const idOnly of [
+      { TRAKT_CLIENT_ID: 'trakt-client-id' },
+      { TRAKT_CLIENT_ID: 'trakt-client-id', TRAKT_CLIENT_SECRET: ' ' },
+    ]) {
+      expect((await call('GET', '/status', { env: idOnly })).json()).toEqual({
+        trakt: true,
+        tmdb: false,
+      });
+    }
+    const secretOnly: Env = { TRAKT_CLIENT_ID: ' ', TRAKT_CLIENT_SECRET: 'trakt-client-secret' };
+    expect((await call('GET', '/status', { env: secretOnly })).json()).toEqual({
       trakt: false,
       tmdb: false,
     });
@@ -241,7 +251,7 @@ describe('trakt', () => {
     const started = await trakt({ method: 'POST', path: '/oauth/device/code', body: {} });
     expect(started.json()).toEqual({ status: 200, data: code });
     expect(asked()).toEqual({
-      url: 'https://api.trakt.tv/oauth/device/code',
+      url: 'https://auth.trakt.tv/oauth/device/code',
       body: { client_id: 'trakt-client-id' },
     });
 
@@ -250,7 +260,7 @@ describe('trakt', () => {
     const poll = { method: 'POST', path: '/oauth/device/token', body: { code: 'device-code' } };
     expect((await trakt(poll)).json()).toEqual({ status: 400, data: null });
     expect(asked()).toEqual({
-      url: 'https://api.trakt.tv/oauth/device/token',
+      url: 'https://auth.trakt.tv/oauth/device/token',
       body: {
         code: 'device-code',
         client_id: 'trakt-client-id',
@@ -269,7 +279,7 @@ describe('trakt', () => {
       body: { refresh_token: 'new-refresh', client_id: 'another-app', grant_type: 'password' },
     });
     expect(asked()).toEqual({
-      url: 'https://api.trakt.tv/oauth/token',
+      url: 'https://auth.trakt.tv/oauth/token',
       body: {
         refresh_token: 'new-refresh',
         client_id: 'trakt-client-id',
@@ -287,13 +297,56 @@ describe('trakt', () => {
     });
     expect(revoked.json()).toEqual({ status: 200, data: null });
     expect(asked()).toEqual({
-      url: 'https://api.trakt.tv/oauth/revoke',
+      url: 'https://auth.trakt.tv/oauth/revoke',
       body: {
         token: 'new-access',
         client_id: 'trakt-client-id',
         client_secret: 'trakt-client-secret',
       },
     });
+  });
+
+  it('signs in, refreshes and revokes with the client id alone for an app without a secret', async () => {
+    const sent = fakeUpstream(() => reply('{}'));
+    const idOnly: Env = { TRAKT_CLIENT_ID: 'trakt-client-id', TMDB_API_KEY: 'tmdb-v3-key' };
+    const asked = () => {
+      const request = sent[sent.length - 1]!;
+      return { url: request.url, body: JSON.parse(request.body!) as unknown };
+    };
+
+    expect((await trakt({ method: 'POST', path: '/oauth/device/code' }, idOnly)).status).toBe(200);
+    expect(asked()).toEqual({
+      url: 'https://auth.trakt.tv/oauth/device/code',
+      body: { client_id: 'trakt-client-id' },
+    });
+    const poll = { method: 'POST', path: '/oauth/device/token', body: { code: 'device-code' } };
+    await trakt(poll, { ...idOnly, TRAKT_CLIENT_SECRET: ' ' });
+    expect(asked()).toEqual({
+      url: 'https://auth.trakt.tv/oauth/device/token',
+      body: { code: 'device-code', client_id: 'trakt-client-id' },
+    });
+    await trakt({ method: 'POST', path: '/oauth/token', body: { refresh_token: 'r' } }, idOnly);
+    expect(asked()).toEqual({
+      url: 'https://auth.trakt.tv/oauth/token',
+      body: {
+        refresh_token: 'r',
+        client_id: 'trakt-client-id',
+        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+        grant_type: 'refresh_token',
+      },
+    });
+    await trakt({ method: 'POST', path: '/oauth/revoke', body: { token: 'access' } }, idOnly);
+    expect(asked()).toEqual({
+      url: 'https://auth.trakt.tv/oauth/revoke',
+      body: { token: 'access', client_id: 'trakt-client-id' },
+    });
+
+    // Every other call still goes to the API host with the client id as its key.
+    await trakt({ method: 'GET', path: '/sync/watchlist', token: 'viewer-token' }, idOnly);
+    const listed = sent[sent.length - 1]!;
+    expect(listed.url).toBe('https://api.trakt.tv/sync/watchlist');
+    expect(listed.headers.get('trakt-api-key')).toBe('trakt-client-id');
+    expect(sent).toHaveLength(5);
   });
 
   it('refuses what it does not pass on, without asking Trakt', async () => {
@@ -355,12 +408,13 @@ describe('trakt', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('answers 503 without both Trakt keys, without asking Trakt', async () => {
+  it('answers 503 without a Trakt client id, without asking Trakt', async () => {
     const sent = fakeUpstream(() => reply('{}'));
     for (const env of [
       {},
-      { TRAKT_CLIENT_ID: 'trakt-client-id' },
-      { ...ENV, TRAKT_CLIENT_SECRET: '' },
+      { TRAKT_CLIENT_SECRET: 'trakt-client-secret', TMDB_API_KEY: 'tmdb-v3-key' },
+      { ...ENV, TRAKT_CLIENT_ID: '' },
+      { ...ENV, TRAKT_CLIENT_ID: ' ' },
     ]) {
       const response = await trakt({ method: 'GET', path: '/sync/watchlist' }, env);
       expect(response.status).toBe(503);

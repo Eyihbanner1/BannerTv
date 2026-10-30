@@ -198,7 +198,7 @@ describe('traktRequest', () => {
     expect(empty.body).toBe('{}');
   });
 
-  it('builds each OAuth body with the app keys, and no Trakt headers', () => {
+  it("builds each OAuth body with the app keys for Trakt's auth host, and no Trakt headers", () => {
     const oauth = (path: string, body?: unknown) => {
       const request = traktRequest(
         readTraktCall({ method: 'POST', path, body, token: 'viewer-token' })!,
@@ -206,7 +206,7 @@ describe('traktRequest', () => {
         AGENT,
       );
       expect(request.method).toBe('POST');
-      expect(request.url).toBe(`https://api.trakt.tv${path}`);
+      expect(request.url).toBe(`https://auth.trakt.tv${path}`);
       expect(request.headers).toEqual({ 'Content-Type': 'application/json', 'User-Agent': AGENT });
       return JSON.parse(request.body!) as unknown;
     };
@@ -228,6 +228,31 @@ describe('traktRequest', () => {
       client_id: 'client-id',
       client_secret: 'client-secret',
     });
+  });
+
+  it('leaves the secret out of every OAuth body for an app Trakt issued none', () => {
+    for (const keys of [{ clientId: 'client-id' }, { clientId: 'client-id', clientSecret: '' }]) {
+      const oauth = (path: string, body?: unknown) => {
+        const request = traktRequest(readTraktCall({ method: 'POST', path, body })!, keys, AGENT);
+        expect(request.url).toBe(`https://auth.trakt.tv${path}`);
+        return JSON.parse(request.body!) as unknown;
+      };
+      expect(oauth('/oauth/device/code')).toEqual({ client_id: 'client-id' });
+      expect(oauth('/oauth/device/token', { code: 'device-code' })).toEqual({
+        code: 'device-code',
+        client_id: 'client-id',
+      });
+      expect(oauth('/oauth/token', { refresh_token: 'refresh' })).toEqual({
+        refresh_token: 'refresh',
+        client_id: 'client-id',
+        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+        grant_type: 'refresh_token',
+      });
+      expect(oauth('/oauth/revoke', { token: 'access' })).toEqual({
+        token: 'access',
+        client_id: 'client-id',
+      });
+    }
   });
 });
 
