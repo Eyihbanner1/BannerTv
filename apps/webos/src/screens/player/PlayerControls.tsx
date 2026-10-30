@@ -1,5 +1,5 @@
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { type MouseEvent, useRef, useState } from 'react';
+import { type MouseEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { markActivity } from '../../navigation/activity';
@@ -74,6 +74,16 @@ function SeekBar({
   const bar = useRef<HTMLDivElement>(null);
   // The fraction of the video under the pointer, while it is over the bar.
   const [hover, setHover] = useState<number | null>(null);
+  const pointing = useSyncExternalStore(inputMode.subscribe, inputMode.get) === 'pointer';
+  // An arrow hides the pointer without it leaving the bar, so no mouseleave
+  // comes: the time goes now, and only a move over the bar brings it back.
+  useEffect(
+    () =>
+      inputMode.subscribe(() => {
+        if (inputMode.get() !== 'pointer') setHover(null);
+      }),
+    [],
+  );
   const fractionAt = (event: MouseEvent): number | null => {
     const rect = bar.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || duration <= 0) return null;
@@ -115,7 +125,7 @@ function SeekBar({
     >
       <span className={styles.time}>{formatTime(shown)}</span>
       <div ref={bar} className={styles.bar}>
-        {hover !== null && (
+        {hover !== null && pointing && focused && (
           <span className={styles.hoverTime} style={{ left: `${hover * 100}%` }}>
             {formatTime(hover * duration)}
           </span>

@@ -1017,6 +1017,35 @@ test('the pointer brings the controls up, shows the time over the bar, and a cli
   expect(after.time).toBeLessThan(before + 3);
 });
 
+test('an arrow takes the time off the bar, and only a move over the bar brings it back', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await page.mouse.move(900, 500);
+  await page.mouse.move(960, 540, { steps: 3 });
+  const bar = page.locator('[data-focus-key="player-seek"] > div');
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-seek');
+  await expect(bar.getByText('0:20', { exact: true })).toBeVisible();
+
+  // Down hides the pointer where it rests, so no mouseleave comes: the time goes anyway.
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => focusedKey(page)).not.toBe('player-seek');
+  await expect(bar.locator('span')).toHaveCount(0);
+
+  // The TV can show the pointer again before it moves: the old time stays off.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: true } })),
+  );
+  await expect(page.locator('html')).toHaveClass(/pointer-mode/);
+  await page.waitForTimeout(300);
+  await expect(bar.locator('span')).toHaveCount(0);
+
+  await page.mouse.move(box.x + box.width / 4, box.y + box.height / 2, { steps: 3 });
+  await expect(bar.getByText('0:10', { exact: true })).toBeVisible();
+});
+
 test('Back while a stream starts leaves at once, even after the pointer moved', async ({
   page,
 }) => {
