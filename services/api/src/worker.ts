@@ -1,7 +1,8 @@
 /**
  * BannerTV's service for Trakt and TMDB (ADR 0004, item 9): a Cloudflare
- * Worker that holds the Trakt client id and secret and the TMDB key, so
- * neither the app package nor the repository does.
+ * Worker that holds the Trakt client id (and secret, for an app old enough
+ * to have one) and the TMDB key, so neither the app package nor the
+ * repository does.
  *
  * The TV posts Trakt calls to /trakt as a plain-text JSON body and gets
  * Trakt's status and data back as JSON; it asks TMDB through /tmdb/<path>.
@@ -38,6 +39,7 @@ declare global {
 
 export interface Env {
   TRAKT_CLIENT_ID?: string;
+  /** Optional: Trakt issues no secret to apps made since October 2026. */
   TRAKT_CLIENT_SECRET?: string;
   TMDB_API_KEY?: string;
 }
@@ -130,8 +132,8 @@ async function send(request: UpstreamRequest): Promise<Upstream | undefined> {
 
 async function trakt(request: Request, env: Env): Promise<Response> {
   const clientId = secret(env.TRAKT_CLIENT_ID);
+  if (!clientId) return json({ error: 'unconfigured' }, 503);
   const clientSecret = secret(env.TRAKT_CLIENT_SECRET);
-  if (!clientId || !clientSecret) return json({ error: 'unconfigured' }, 503);
 
   let call: TraktCall | undefined;
   try {
@@ -211,7 +213,7 @@ export default {
 
     if (request.method === 'GET' && pathname === '/status') {
       return json({
-        trakt: Boolean(secret(env.TRAKT_CLIENT_ID) && secret(env.TRAKT_CLIENT_SECRET)),
+        trakt: Boolean(secret(env.TRAKT_CLIENT_ID)),
         tmdb: Boolean(secret(env.TMDB_API_KEY)),
       });
     }

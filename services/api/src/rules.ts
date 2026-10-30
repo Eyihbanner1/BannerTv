@@ -8,6 +8,8 @@ export const MAX_TOKEN_LENGTH = 4096;
 export const TMDB_CACHE_SECONDS = 24 * 60 * 60;
 
 export const TRAKT_ORIGIN = 'https://api.trakt.tv';
+/** Trakt takes every OAuth call (device codes, tokens, refresh, revoke) here, not on the API host. */
+export const TRAKT_AUTH_ORIGIN = 'https://auth.trakt.tv';
 export const TMDB_BASE = 'https://api.themoviedb.org/3';
 /** The redirect URI of a Trakt app without a web page, as registered with BannerTV's. */
 export const TRAKT_REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob';
@@ -175,7 +177,11 @@ export function readTraktCall(value: unknown): TraktCall | undefined {
 
 export interface TraktSecrets {
   clientId: string;
-  clientSecret: string;
+  /**
+   * Only apps made before October 2026 have one: Trakt issues none to newer
+   * apps, and their device sign-in, refresh and revoke need the client id alone.
+   */
+  clientSecret?: string;
 }
 
 /** A request for Trakt or TMDB, ready for fetch. */
@@ -187,25 +193,30 @@ export interface UpstreamRequest {
 }
 
 /**
- * The request to Trakt for a checked call. OAuth paths take the app's keys in
- * the body; every other path takes the client id as a header, with the
- * viewer's token when the TV sent one.
+ * The request to Trakt for a checked call. OAuth paths go to Trakt's auth
+ * host and take the app's keys in the body (the secret only when the app has
+ * one); every other path takes the client id as a header, with the viewer's
+ * token when the TV sent one.
  */
 export function traktRequest(
   call: TraktCall,
   secrets: TraktSecrets,
   userAgent: string,
 ): UpstreamRequest {
-  const url = `${TRAKT_ORIGIN}${call.path}${call.query ? `?${call.query}` : ''}`;
+  const oauth = OAUTH_FIELDS.has(call.path);
+  const origin = oauth ? TRAKT_AUTH_ORIGIN : TRAKT_ORIGIN;
+  const url = `${origin}${call.path}${call.query ? `?${call.query}` : ''}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'User-Agent': userAgent,
   };
 
-  if (OAUTH_FIELDS.has(call.path)) {
+  if (oauth) {
     const body: Record<string, unknown> = isObject(call.body) ? { ...call.body } : {};
     body.client_id = secrets.clientId;
-    if (call.path !== '/oauth/device/code') body.client_secret = secrets.clientSecret;
+    if (secrets.clientSecret && call.path !== '/oauth/device/code') {
+      body.client_secret = secrets.clientSecret;
+    }
     if (call.path === '/oauth/token') {
       body.redirect_uri = TRAKT_REDIRECT_URI;
       body.grant_type = 'refresh_token';
