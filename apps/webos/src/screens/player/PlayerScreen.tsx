@@ -1,6 +1,7 @@
 import {
   findBingeStream,
   languageKey,
+  languageName,
   nextVideo,
   parseRuntime,
   playedCard,
@@ -24,16 +25,17 @@ import { back, type EventPlay, remembersPlace, replace } from '../../app/router'
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
-import { addonClient, addonCollection } from '../../data/addons';
+import { addonClient } from '../../data/addons';
 import { playedVideos, progress } from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
 import { markActivity } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
+import { clickCameWithOk } from '../../navigation/ok-click';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
-import { resolutionLabel, streamBadges } from '../../player/describe';
+import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, streamFinder } from '../../player/finder';
 import { formatTime } from '../../player/media';
@@ -42,14 +44,14 @@ import {
   INITIAL_SESSION_STATE,
   type PlaybackSession,
 } from '../../player/session';
-import { type ControlButton, PlayerControls } from './PlayerControls';
+import { type PlayerAction, PlayerControls } from './PlayerControls';
 import { PlayerProblem } from './PlayerProblem';
 import { SubtitleLayer } from './SubtitleLayer';
 import { SubtitleStylePanel } from './SubtitleStylePanel';
 import { TracksPanel } from './TracksPanel';
 import { UpNext } from './UpNext';
 import { useScrobble } from './use-scrobble';
-import { useSubtitles } from './use-subtitles';
+import { type Subtitles, useSubtitles } from './use-subtitles';
 import styles from './PlayerScreen.module.css';
 
 /** Controls hide after this long without a key press, while playing. */
@@ -68,6 +70,8 @@ const UNDO_FROM_S = 10;
 const BACK_AFTER_HIDE_MS = 2000;
 /** How long "Press Back again to leave" shows. */
 const LEAVE_HINT_MS = 3000;
+/** What the pointer can press in the player; anywhere else is the picture. */
+const CONTROL = '[role="button"], [role="slider"]';
 /** The Up Next card shows this long before the end. */
 const UP_NEXT_BEFORE_END_S = 30;
 /** The next episode's streams are asked for this long before the end. */
@@ -101,16 +105,23 @@ function skipStep(repeats: number): number {
   return 10;
 }
 
+/** The language of the subtitles showing, for the Audio & subtitles chip; none when off. */
+function subtitleValue(subtitles: Subtitles): string | undefined {
+  const { choice } = subtitles;
+  if (!choice) return undefined;
+  if (choice.kind === 'track') {
+    const track = subtitles.tracks.find((candidate) => candidate.id === choice.id);
+    return (track?.lang && languageName(track.lang)) || track?.label || undefined;
+  }
+  const option = subtitles.options.find((candidate) => candidate.key === choice.key);
+  return option ? languageName(option.lang) || undefined : undefined;
+}
+
 /** A skip's total, such as "+30 s" or "−1:30". */
 function formatSkip(seconds: number): string {
   const amount = Math.abs(Math.round(seconds));
   const sign = seconds < 0 ? '−' : '+';
   return amount < 60 ? `${sign}${amount} s` : `${sign}${formatTime(amount)}`;
-}
-
-function addonName(addonId: string): string {
-  const addon = addonCollection.get().addons.find((a) => a.manifest.id === addonId);
-  return addon?.manifest.name ?? addonId;
 }
 
 /**
@@ -160,6 +171,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const hideTimer = useRef<number | undefined>(undefined);
   // Whether the Magic Remote pointer rests on the title or the bar, which keeps them up.
   const pointerOnChrome = useRef(false);
+  // Whether it rests on a control, whose OK is that control's; elsewhere it is the picture's.
+  const pointerOnControl = useRef(false);
   const lastAutoHide = useRef(0);
   const [leaveHint, setLeaveHint] = useState(false);
   const leaveTimer = useRef<number | undefined>(undefined);
@@ -192,8 +205,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     !upNextDismissed &&
     !panel &&
     (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
-  // While the Up Next card is open, the controls stay and focus stays on the card.
-  // Nor do they hide behind a panel, or while Start over offers to go back.
+  // The controls wait to hide while the Up Next card is open (they give way to
+  // it, and focus stays on the card), behind a panel, and while Start over
+  // offers to go back.
   const upNextOpen = useRef(showUpNext);
   const panelOpen = useRef(false);
   const offeringUndo = useRef(false);
@@ -204,6 +218,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   });
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
+  // Whether the controls show. Up Next takes the bottom of the screen and focus
+  // while it shows: the controls give way and come back when it goes.
+  const chrome = controls && !waiting && !showUpNext;
 
   const subtitles = useSubtitles(
     type,
@@ -553,8 +570,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // distance when the picture changes under a still pointer: they only say
   // what the pointer rests on.
   const onPointer = (event: MouseEvent) => {
-    pointerOnChrome.current =
-      event.target instanceof Element && event.target.closest('[data-player-chrome]') !== null;
+    const target = event.target instanceof Element ? event.target : null;
+    pointerOnChrome.current = target?.closest('[data-player-chrome]') != null;
+    pointerOnControl.current = target?.closest(CONTROL) != null;
     // Behind the problem box, or while a stream opens, the controls would not show.
     if (problem || waiting || (event.movementX === 0 && event.movementY === 0)) return;
     if (!controls) show();
@@ -575,6 +593,40 @@ export function PlayerScreen(props: PlayerScreenProps) {
     markActivity();
     scrubBy(event.deltaY > 0 ? 1 : -1);
   };
+
+  // A click on the picture shows the controls, or hides them. A click on a
+  // control is that control's.
+  const picturePressable = () => !problem && !waiting && !panel && !showUpNext;
+  function pressPicture() {
+    if (controls) hide();
+    else show('player-play');
+  }
+  const onPictureClick = (event: MouseEvent) => {
+    if (clickCameWithOk()) return;
+    if (event.target instanceof Element && event.target.closest(CONTROL)) return;
+    if (picturePressable()) pressPicture();
+  };
+
+  // The Magic Remote OK can come as a key press as well as a click. With the
+  // pointer on the picture it is the picture's, before the control that kept
+  // focus takes it: Pause, or Sources, which would leave. A skip under way
+  // lands on it, as OK lands one everywhere else.
+  const onOkFirst = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  onOkFirst.current = (event) => {
+    if (event.keyCode !== KeyCode.Ok || inputMode.get() !== 'pointer') return;
+    // A control the pointer rests on is the picture while the controls are hidden.
+    if ((chrome && pointerOnControl.current) || !picturePressable()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    if (commitScrub()) armHide();
+    else pressPicture();
+  };
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => onOkFirst.current(event);
+    window.addEventListener('keydown', listener, true);
+    return () => window.removeEventListener('keydown', listener, true);
+  }, []);
 
   // While another stream opens (Quality, or one after a failure) the controls
   // give way, so no hidden button takes the remote. Once it shows, they come
@@ -674,9 +726,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         .filter(Boolean)
         .join(' · ')
     : undefined;
-  const facts = state.entry
-    ? streamBadges(state.entry.facts).concat(addonName(state.entry.addonId))
-    : [];
+  const facts = state.entry ? headlineBadges(state.entry.facts) : [];
   // One note at a time, the most useful first, so they never sit on top of each other.
   // Those about another stream last while it opens: one that opened paused, as
   // the film was, shows Play and nothing more.
@@ -695,32 +745,93 @@ export function PlayerScreen(props: PlayerScreenProps) {
     else toast = t('player.keepsBufferingPlain');
   } else if (subtitles.failed && !waiting) toast = t('player.subtitlesFailed');
 
-  const buttons: ControlButton[] = [
+  // Two tiers with fixed places: nothing comes or goes while the video plays.
+  // What can't be used now stays, dimmed, and says why when focused.
+  function skipButton(direction: -1 | 1) {
+    if (!session || waiting) return;
+    if (state.live) {
+      // As Rewind on a broadcast: at once, within what it keeps.
+      const at = session.trustedPosition() ?? state.position;
+      session.seek(at + direction * skipStep(0));
+      armHide();
+    } else scrubBy(direction);
+  }
+  const showsPause = state.status !== 'paused' && state.status !== 'ended';
+  function noNextReason(): string {
+    if (!meta) return t('player.noEpisodeList');
+    // The next one listed, aired or not.
+    return nextVideo(meta, videoId, Infinity) ? t('player.nextNotOut') : t('player.lastEpisode');
+  }
+  const transport: (PlayerAction | null)[] = [
+    {
+      focusKey: 'player-restart',
+      icon: 'start',
+      label: undo !== null ? t('player.backTo', { time: formatTime(undo) }) : t('player.startOver'),
+      // A broadcast's clock begins wherever it was joined.
+      unavailable: state.live ? t('player.liveNoStart') : undefined,
+      onPress: startOver,
+    },
+    {
+      focusKey: 'player-back10',
+      icon: 'back10',
+      label: t('player.back10'),
+      onPress: () => skipButton(-1),
+    },
     {
       focusKey: 'player-play',
-      label:
-        state.status === 'paused' || state.status === 'ended'
-          ? t('player.play')
-          : t('player.pause'),
+      icon: showsPause ? 'pause' : 'play',
+      label: showsPause ? t('player.pause') : t('player.play'),
       onPress: () => session?.togglePlay(),
     },
     {
+      focusKey: 'player-fwd10',
+      icon: 'fwd10',
+      label: t('player.forward10'),
+      onPress: () => skipButton(1),
+    },
+    // Anything with an episode list has a place for it, whatever its type.
+    metaQuery && !state.live
+      ? {
+          focusKey: 'player-next',
+          icon: 'next',
+          label: t('player.nextEpisode'),
+          unavailable: offersNext ? undefined : noNextReason(),
+          onPress: playNextEpisode,
+        }
+      : null,
+  ];
+
+  // What Quality found to choose from, which may not be what plays: a stream
+  // picked in All streams can be one it left out.
+  const onlyChoice = choices.length === 1 ? resolutionLabel(choices[0]?.resolution) : undefined;
+  const tools: PlayerAction[] = [
+    {
       focusKey: 'player-tracks-button',
+      icon: 'subs',
       label: t('player.audioAndSubtitles'),
+      value: subtitleValue(subtitles) ?? t('player.subtitlesOffValue'),
+      colourKey: 'blue',
       onPress: () => openTracks('player-tracks-button'),
     },
-  ];
-  if (choices.length > 1) {
-    buttons.push({
+    {
       focusKey: 'player-quality-button',
+      icon: 'quality',
       label: t('player.quality'),
+      value: resolutionLabel(state.entry?.facts.resolution),
+      unavailable:
+        choices.length > 1
+          ? undefined
+          : onlyChoice
+            ? t('player.onlyQuality', { quality: onlyChoice })
+            : t('player.noOtherQuality'),
       onPress: () => openPanel('quality', 'player-quality-button'),
-    });
-  }
+    },
+  ];
   if (!props.lab) {
-    buttons.push({
+    tools.push({
       focusKey: 'player-streams-button',
-      label: t('player.otherStreams'),
+      icon: 'sources',
+      label: t('player.sources'),
       onPress: () =>
         replace({
           name: 'streams',
@@ -734,21 +845,6 @@ export function PlayerScreen(props: PlayerScreenProps) {
         }),
     });
   }
-  // Whenever there is a start to go back to: a broadcast's clock begins wherever it was joined.
-  if (!state.live) {
-    buttons.push({
-      focusKey: 'player-restart',
-      label: undo !== null ? t('player.backTo', { time: formatTime(undo) }) : t('player.startOver'),
-      onPress: startOver,
-    });
-  }
-  if (offersNext) {
-    buttons.push({
-      focusKey: 'player-next',
-      label: t('player.nextEpisode'),
-      onPress: playNextEpisode,
-    });
-  }
 
   const chooseAudio = (track: EngineTrack) => {
     session?.selectAudio(track.id);
@@ -756,14 +852,20 @@ export function PlayerScreen(props: PlayerScreenProps) {
   };
 
   return (
-    <section className={styles.player} aria-label={title} onMouseMove={onPointer} onWheel={onWheel}>
+    <section
+      className={styles.player}
+      aria-label={title}
+      onMouseMove={onPointer}
+      onWheel={onWheel}
+      onClick={onPictureClick}
+    >
       {createPortal(<video ref={videoRef} className={styles.video} />, document.body)}
       <SubtitleLayer
         video={video}
         cues={subtitles.cues}
         offset={subtitles.offset}
         look={look}
-        raised={controls}
+        raised={chrome}
       />
       <div
         ref={surface.ref}
@@ -824,14 +926,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
       )}
 
       <PlayerControls
-        visible={controls && !waiting}
+        visible={chrome}
         title={title}
         subtitle={subtitle}
         facts={facts}
+        live={state.live}
         position={state.position}
         duration={state.duration}
         scrubTo={scrubTo}
-        buttons={buttons}
+        transport={transport}
+        tools={tools}
         onScrub={scrubBy}
         onCommit={() => {
           // OK on the bar lands a skip at once; with none under way it plays or pauses.
@@ -839,6 +943,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           armHide();
         }}
         onSeekTo={seekTo}
+        onLeave={back}
       />
 
       {showUpNext && next && (

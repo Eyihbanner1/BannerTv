@@ -19,9 +19,14 @@
   top: 64px;
 }
 
-/* Above the seek bar and buttons while they show. */
+/* Above the seek bar and the two rows under it while they show. */
 .raised {
-  bottom: 300px;
+  bottom: 400px;
+}
+
+/* Below the title, the facts and the clock while they show. */
+.lowered {
+  top: 250px;
 }
 
 .cue {

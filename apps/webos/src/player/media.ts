@@ -52,6 +52,12 @@ export function formatTime(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
+/** A time of day on the TV's clock, 24-hour: 21:47. */
+export function formatClock(ms: number): string {
+  const at = new Date(ms);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
 /** Media error codes from the HTML spec, as words. */
 export function describeMediaError(code: number): string {
   switch (code) {

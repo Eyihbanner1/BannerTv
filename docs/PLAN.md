@@ -389,11 +389,21 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 | --- | --- |
 | OK | Play or pause, and show the controls; land a skip on its way at once |
 | Left, Right | Skip 10 seconds a press, 30 then 60 while held; the total lands 0.8 seconds after the last press |
-| Up, Down | Show the controls (Play, Audio and subtitles, Quality, Other streams, Start over, Next episode) |
-| Blue | Open or close Audio and subtitles |
+| Up, Down | Show the controls, on Pause. Down from the transport reaches the tools, Up from the tools comes back to Pause, Up again reaches the bar |
+| Blue | Open or close Audio & subtitles |
 | Play, Pause, Stop | Mapped to transport; Stop leaves the player |
 | Fast forward, Rewind, wheel | The same 10 second skips as Left and Right (the wheel only while the controls are hidden); on a live broadcast Fast forward and Rewind jump at once |
 | Back | Cancel a skip, hide the controls, then leave the player (progress saved); just after the controls fade by themselves, ask again first |
+| Magic Remote pointer | Moving shows the controls; a click on the picture shows or hides them; a click on the bar jumps there; the back arrow at the top left leaves |
+
+The controls are two tiers over the bottom of the picture, from the redesign Eyitayo picked on 29 October 2026 (built in four steps, each tried on the TV first):
+
+- Top: a back arrow for the pointer, the title, three facts (resolution, HDR, sound), the clock and "Ends at".
+- The bar: time played, then the bar, then time left ("−12:40"), or LIVE on a broadcast.
+- Transport, icons with their names under them, in fixed places: Start over, Back 10 s, Play or Pause (larger, in the middle), Forward 10 s, Next episode (anything with an episode list).
+- Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams).
+- Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why when focused: Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
+- While the Up Next card shows, the controls give way to it.
 
 **Known limits to explain in the UI**
 

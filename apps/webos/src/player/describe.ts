@@ -29,6 +29,11 @@ export function streamBadges(facts: StreamFacts): string[] {
   return badges;
 }
 
+/** The three the player's header shows: resolution, HDR and sound. */
+export function headlineBadges(facts: StreamFacts): string[] {
+  return streamBadges({ ...facts, sizeBytes: undefined });
+}
+
 /** The addon's own first line for a stream, which usually names the release. */
 export function streamTitle(entry: StreamEntry): string {
   const { name, description, behaviorHints } = entry.stream;

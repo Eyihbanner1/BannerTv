@@ -13,7 +13,7 @@ interface SubtitleLayerProps {
   /** Seconds added to every cue: positive shows them later. */
   offset: number;
   look: SubtitleStyle;
-  /** The controls are showing, so bottom subtitles move up out of their way. */
+  /** The controls are showing: bottom subtitles move up out of their way, top ones down. */
   raised: boolean;
 }
 
@@ -45,7 +45,7 @@ export function SubtitleLayer({ video, cues, offset, look, raised }: SubtitleLay
   if (showing.length === 0) return null;
   const bottom = showing.filter((cue) => !cue.top);
   const top = showing.filter((cue) => cue.top);
-  const lift = look.position === 'top' ? undefined : raised ? styles.raised : undefined;
+  const lift = raised ? (look.position === 'top' ? styles.lowered : styles.raised) : undefined;
   const placement = [styles[`at-${look.position}`], lift].filter(Boolean).join(' ');
   const text = [styles.text, styles[`size-${look.size}`], styles[`colour-${look.colour}`]].join(
     ' ',
@@ -79,7 +79,15 @@ export function SubtitleLayer({ video, cues, offset, look, raised }: SubtitleLay
 
   return (
     <div className={text} aria-hidden="true">
-      {top.length > 0 && <div className={`${styles.area} ${styles['at-top']}`}>{draw(top)}</div>}
+      {top.length > 0 && (
+        <div
+          className={[styles.area, styles['at-top'], raised && styles.lowered]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          {draw(top)}
+        </div>
+      )}
       {bottom.length > 0 && <div className={`${styles.area} ${placement}`}>{draw(bottom)}</div>}
     </div>
   );

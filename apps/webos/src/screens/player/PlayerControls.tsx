@@ -1,18 +1,39 @@
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { type MouseEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '../../components/Button';
+import { Pressable } from '../../components/Pressable';
 import { markActivity } from '../../navigation/activity';
 import { inputMode } from '../../platform/input-mode';
-import { formatTime } from '../../player/media';
+import { formatClock, formatTime } from '../../player/media';
+import { PlayerIcon, type PlayerIconName } from './PlayerIcon';
 import styles from './PlayerScreen.module.css';
 
 /** How far beside the bar the pointer still reaches its start or end. */
 const BAR_REACH_PX = 16;
+/** How often the clock is read while the controls show. */
+const CLOCK_TICK_MS = 5000;
+/** Where the transport sits: five places, 170 px apart, Play and Pause in the middle. */
+const TRANSPORT_SLOT_PX = 170;
 
-export interface ControlButton {
+/** One control: a transport icon with its name under it, or a tool chip. */
+export interface PlayerAction {
   focusKey: string;
+  icon: PlayerIconName;
+  /** Its name, shown and read by Audio Guidance. */
   label: string;
+  /** On a tool, what is on now: "English", "1080p". */
+  value?: string;
+  /** Why it can't be used now. It keeps its place, dimmed, and says this when focused. */
+  unavailable?: string;
+  /** The coloured key on the remote that does the same. */
+  colourKey?: 'blue';
   onPress: () => void;
 }
 
@@ -20,25 +41,31 @@ interface PlayerControlsProps {
   visible: boolean;
   title: string;
   subtitle?: string;
-  /** Picture, HDR, audio and the addon, as badges. */
+  /** Resolution, HDR and sound, as badges. */
   facts: readonly string[];
+  live: boolean;
   position: number;
   duration: number;
   /** Where a scrub would land, while the viewer is moving along the bar. */
   scrubTo: number | null;
-  buttons: readonly ControlButton[];
+  /** Start over, back 10 s, Play or Pause, forward 10 s, Next episode; null leaves a place empty. */
+  transport: readonly (PlayerAction | null)[];
+  tools: readonly PlayerAction[];
   onScrub: (direction: -1 | 1, repeats: number) => void;
   /** OK on the bar. */
   onCommit: () => void;
   /** A click on the bar, in seconds. */
   onSeekTo: (seconds: number) => void;
+  /** The back arrow at the top left, for the pointer: the same as Back with the controls hidden. */
+  onLeave: () => void;
 }
 
 /**
- * Where the video is, and where a skip will land. Left and Right skip, OK
- * lands a skip at once; the pointer shows the time under it and a click
- * jumps there. The whole height of the 64 px row is the pointer's target,
- * across the bar but not the times beside it.
+ * Where the video is, and where a skip will land: the time played, the bar
+ * and the time left, or LIVE on a broadcast. Left and Right skip, OK lands a
+ * skip at once; the pointer shows the time under it and a click jumps there.
+ * The whole height of the 64 px row is the pointer's target, across the bar
+ * but not the times beside it.
  */
 function SeekBar({
   position,
@@ -47,9 +74,10 @@ function SeekBar({
   onScrub,
   onCommit,
   onSeekTo,
+  live,
 }: Pick<
   PlayerControlsProps,
-  'position' | 'duration' | 'scrubTo' | 'onScrub' | 'onCommit' | 'onSeekTo'
+  'position' | 'duration' | 'scrubTo' | 'onScrub' | 'onCommit' | 'onSeekTo' | 'live'
 >) {
   const { t } = useTranslation();
   // Whether the pointer is over the row, where its OK is a click.
@@ -123,7 +151,16 @@ function SeekBar({
         if (at !== null) onSeekTo(at * duration);
       }}
     >
-      <span className={styles.time}>{formatTime(shown)}</span>
+      {live ? (
+        <span className={styles.time}>
+          <span className={styles.live}>
+            <span className={styles.liveDot} />
+            {t('player.live')}
+          </span>
+        </span>
+      ) : (
+        <span className={styles.time}>{formatTime(shown)}</span>
+      )}
       <div ref={bar} className={styles.bar}>
         {hover !== null && pointing && focused && (
           <span className={styles.hoverTime} style={{ left: `${hover * 100}%` }}>
@@ -142,23 +179,142 @@ function SeekBar({
         )}
         <div className={styles.thumb} style={{ left: `${fraction * 100}%` }} />
       </div>
-      <span className={styles.time}>{duration > 0 ? formatTime(duration) : ''}</span>
+      <span className={`${styles.time} ${styles.timeLeft}`}>
+        {!live && duration > 0 ? `−${formatTime(Math.max(0, duration - shown))}` : ''}
+      </span>
     </div>
   );
 }
 
+/** The time now, to the last tick, read every few seconds while `active`. */
+function useNow(active: boolean): number {
+  return useSyncExternalStore(active ? subscribeClock : subscribeNever, readTick) * CLOCK_TICK_MS;
+}
+function subscribeClock(listener: () => void): () => void {
+  const timer = window.setInterval(listener, CLOCK_TICK_MS);
+  return () => window.clearInterval(timer);
+}
+function subscribeNever(): () => void {
+  return () => undefined;
+}
+function readTick(): number {
+  return Math.floor(Date.now() / CLOCK_TICK_MS);
+}
+
+function classes(...names: (string | false | undefined)[]): string {
+  return names.filter(Boolean).join(' ');
+}
+
 /**
- * The title, the seek bar and a row of buttons, over gradients at the top
- * and bottom of the picture. They stay mounted while hidden, so focus can
+ * A round transport icon with its name under it. A control that can't be
+ * used now stays in its place, dimmed, and says why when focused.
+ */
+function TransportButton({ action, index }: { action: PlayerAction; index: number }) {
+  const large = action.icon === 'play' || action.icon === 'pause';
+  const dim = action.unavailable !== undefined;
+  return (
+    <Pressable
+      focusKey={action.focusKey}
+      label={dim ? `${action.label}. ${action.unavailable}` : action.label}
+      className={classes(styles.transportButton, large && styles.transportLarge, dim && styles.dim)}
+      focusedClassName={styles.transportFocused}
+      style={{ left: index * TRANSPORT_SLOT_PX }}
+      onPress={dim ? undefined : action.onPress}
+    >
+      <span className={styles.disc}>
+        <PlayerIcon name={action.icon} size={large ? 60 : 45} />
+      </span>
+      <span className={styles.transportName}>{action.label}</span>
+      {dim && <span className={styles.reason}>{action.unavailable}</span>}
+    </Pressable>
+  );
+}
+
+/**
+ * A tool: its icon, its name and what is on now, with the coloured key that
+ * opens it. One that can't be used says why in place of the value, so the
+ * row keeps its width whatever has focus.
+ */
+function ToolChip({ action }: { action: PlayerAction }) {
+  const dim = action.unavailable !== undefined;
+  return (
+    <Pressable
+      focusKey={action.focusKey}
+      label={
+        dim
+          ? `${action.label}. ${action.unavailable}`
+          : action.value
+            ? `${action.label}, ${action.value}`
+            : action.label
+      }
+      className={classes(styles.chip, dim && styles.dim)}
+      focusedClassName={styles.chipFocused}
+      onPress={dim ? undefined : action.onPress}
+    >
+      <PlayerIcon name={action.icon} size={32} />
+      <span className={styles.chipLabel}>{action.label}</span>
+      {dim ? (
+        <span className={styles.reason}>{action.unavailable}</span>
+      ) : (
+        action.value && <span className={styles.chipValue}>{action.value}</span>
+      )}
+      {action.colourKey && <span className={`${styles.colourKey} ${styles.blueKey}`} />}
+    </Pressable>
+  );
+}
+
+/**
+ * A row of controls. Up or Down from the row next to it lands on `first`.
+ * Left and Right stay in the row: the back arrow at the top is the pointer's.
+ */
+function ControlRow({
+  focusKey,
+  first,
+  className,
+  children,
+}: {
+  focusKey: string;
+  first: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const { ref, focusKey: rowKey } = useFocusable<object, HTMLDivElement>({
+    focusKey,
+    saveLastFocusedChild: false,
+    preferredChildFocusKey: first,
+    isFocusBoundary: true,
+    focusBoundaryDirections: ['left', 'right'],
+  });
+  return (
+    <FocusContext.Provider value={rowKey}>
+      <div ref={ref} className={className}>
+        {children}
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
+/**
+ * Two tiers over the bottom of the picture: the seek bar, the transport
+ * with a name under each icon, and the tools saying what is on now. At the
+ * top: a back arrow for the pointer, the title, three facts, the clock and
+ * when it ends. Down from Pause reaches Audio and subtitles; Up from the
+ * tools comes back to Pause. They stay mounted while hidden, so focus can
  * land on them the moment they show.
  */
 export function PlayerControls(props: PlayerControlsProps) {
-  const { visible, title, subtitle, facts, buttons } = props;
+  const { visible, title, subtitle, facts, transport, tools, live, duration, position } = props;
+  const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-controls',
     saveLastFocusedChild: false,
-    preferredChildFocusKey: buttons[0]?.focusKey,
+    preferredChildFocusKey: 'player-transport',
   });
+  const now = useNow(visible);
+  const shown = props.scrubTo ?? position;
+  // Neither on a broadcast nor before the file gives its length.
+  const endsAt = !live && duration > 0 ? now + Math.max(0, duration - shown) * 1000 : null;
+  const pause = transport.find((action) => action?.icon === 'play' || action?.icon === 'pause');
   return (
     <FocusContext.Provider value={focusKey}>
       <div
@@ -166,38 +322,66 @@ export function PlayerControls(props: PlayerControlsProps) {
         className={visible ? `${styles.controls} ${styles.controlsShown}` : styles.controls}
       >
         <div className={styles.top} data-player-chrome>
-          <h1 className={styles.title}>{title}</h1>
-          {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
-          {facts.length > 0 && (
-            <p className={styles.facts}>
-              {facts.map((fact) => (
-                <span key={fact} className={styles.fact}>
-                  {fact}
-                </span>
-              ))}
-            </p>
-          )}
+          <Pressable
+            focusKey="player-back"
+            label={t('player.leave')}
+            className={styles.backButton}
+            focusedClassName={styles.backFocused}
+            onPress={props.onLeave}
+          >
+            <span className={styles.disc}>
+              <PlayerIcon name="back" size={44} />
+            </span>
+          </Pressable>
+          <div className={styles.heading}>
+            <h1 className={styles.title}>{title}</h1>
+            {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
+            {facts.length > 0 && (
+              <p className={styles.facts}>
+                {facts.map((fact) => (
+                  <span key={fact} className={styles.fact}>
+                    {fact}
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
+          <div className={styles.clock}>
+            <p className={styles.now}>{formatClock(now)}</p>
+            {endsAt !== null && (
+              <p className={styles.endsAt}>{t('player.endsAt', { time: formatClock(endsAt) })}</p>
+            )}
+          </div>
         </div>
         <div className={styles.bottom} data-player-chrome>
           <SeekBar
-            position={props.position}
-            duration={props.duration}
+            position={position}
+            duration={duration}
             scrubTo={props.scrubTo}
+            live={live}
             onScrub={props.onScrub}
             onCommit={props.onCommit}
             onSeekTo={props.onSeekTo}
           />
-          <div className={styles.buttons}>
-            {buttons.map((button, index) => (
-              <Button
-                key={button.focusKey}
-                focusKey={button.focusKey}
-                label={button.label}
-                variant={index === 0 ? 'primary' : 'secondary'}
-                onPress={button.onPress}
-              />
+          <ControlRow
+            focusKey="player-transport"
+            first={pause?.focusKey ?? 'player-play'}
+            className={styles.transport}
+          >
+            {transport.map(
+              (action, index) =>
+                action && <TransportButton key={action.focusKey} action={action} index={index} />,
+            )}
+          </ControlRow>
+          <ControlRow
+            focusKey="player-tools"
+            first={tools[0]?.focusKey ?? 'player-tracks-button'}
+            className={styles.tools}
+          >
+            {tools.map((action) => (
+              <ToolChip key={action.focusKey} action={action} />
             ))}
-          </div>
+          </ControlRow>
         </div>
       </div>
     </FocusContext.Provider>
