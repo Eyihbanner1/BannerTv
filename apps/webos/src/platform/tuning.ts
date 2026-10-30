@@ -12,7 +12,9 @@
  * Before that they were `{"motion":"slide","zoom":"animate","heroBusyMs":250,
  * "heroArt":"large","heroPan":true,"mips":true}`. The comparison of 29 October
  * dropped the hero's fade (`"heroFade":true` before): the pauses of 1-1.5 s
- * moving along a row went to at most 50 ms.
+ * moving along a row went to at most 50 ms. That of 30 October turned decoding
+ * ahead on (`"decodeAhead":false` before): the first walk down Home had a p95
+ * frame gap of 50-100 ms with it, against 83-167 ms without.
  */
 export interface Tuning {
   /** Home's rows and each row's tiles slide, slide on a layer kept between presses, or jump. */
@@ -81,7 +83,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   decoding: 'auto',
   mips: false,
   homeLayer: false,
-  decodeAhead: false,
+  decodeAhead: true,
   heroFade: false,
   marks: false,
 };

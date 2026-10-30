@@ -16,7 +16,7 @@ describe('TUNING_DEFAULTS', () => {
       decoding: 'auto',
       mips: false,
       homeLayer: false,
-      decodeAhead: false,
+      decodeAhead: true,
       heroFade: false,
       marks: false,
     });
@@ -33,7 +33,7 @@ describe('parseTuning', () => {
   it('takes valid switches and keeps the default for the rest', () => {
     expect(
       parseTuning(
-        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","wideArt":"small","heroPan":true,"decoding":"async","mips":true,"homeLayer":true,"decodeAhead":true,"heroFade":true,"marks":true}',
+        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","wideArt":"small","heroPan":true,"decoding":"async","mips":true,"homeLayer":true,"decodeAhead":false,"heroFade":true,"marks":true}',
       ),
     ).toEqual({
       ...TUNING_DEFAULTS,
@@ -46,7 +46,7 @@ describe('parseTuning', () => {
       decoding: 'async',
       mips: true,
       homeLayer: true,
-      decodeAhead: true,
+      decodeAhead: false,
       heroFade: true,
       marks: true,
     });
@@ -105,7 +105,7 @@ describe('applyTuning', () => {
       'tune-home-layer',
     ]);
     // Switches that work in code add no class.
-    expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: true, marks: true })).toEqual(
+    expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
       classesFor({ ...TUNING_DEFAULTS }),
     );
     expect(

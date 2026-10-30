@@ -3,9 +3,10 @@ import { FIRST_ROW, mockAddons, png, SERIES_ROW } from './addons';
 import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
 
 /**
- * The switches the TV comparison of the first walk down Home tries (see
+ * The switches the TV comparisons of the first walk down Home tried (see
  * src/platform/tuning.ts): decoding ahead, Home's rows box on its own layer,
- * the hero without its fade, and timing marks. All are off by default.
+ * the hero without its fade, small wide art, and timing marks. Decoding
+ * ahead and the hero without its fade are the defaults.
  */
 
 /** Home's first rows from the mock Cinemeta, top to bottom. Featured rows have wide tiles. */
@@ -433,7 +434,7 @@ test('timing marks name the remote keys, slides, rows and hero changes, and noth
   ).toEqual([]);
 });
 
-test('by default nothing is decoded ahead or marked, the rows box has no layer, and the hero does not fade', async ({
+test('by default art is decoded ahead, nothing is marked, the rows box has no layer, and the hero does not fade', async ({
   page,
 }) => {
   await recordDecodes(page);
@@ -443,15 +444,27 @@ test('by default nothing is decoded ahead or marked, the rows box has no layer, 
   await expect(
     page.locator('section[aria-label="Elephants Dream"] img[src*="/background/"]').first(),
   ).toHaveCSS('transition-duration', '0s');
+  await expect.poll(() => decodedTiles(page, FEATURED_MOVIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${FEATURED_MOVIES}-tile-0`);
-  await page.waitForTimeout(500);
-  expect(await allDecodes(page)).toEqual([]);
+  await expect.poll(() => decodedTiles(page, ACTION)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  expect((await decodes(page)).mostPending).toBe(1);
   expect(await page.evaluate(() => performance.getEntriesByType('mark').length)).toBe(0);
   await expect(page.locator('[data-row-key]').first().locator('xpath=..')).toHaveCSS(
     'will-change',
     'auto',
   );
+});
+
+test('decodeAhead false decodes nothing ahead', async ({ page }) => {
+  await tune(page, { decodeAhead: false });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${FEATURED_MOVIES}-tile-0`);
+  await page.waitForTimeout(500);
+  expect(await allDecodes(page)).toEqual([]);
 });
 
 test('the hero fade comes back with heroFade true', async ({ page }) => {
