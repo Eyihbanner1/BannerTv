@@ -215,6 +215,35 @@
     "backTo": "Back to {{time}}",
     "nextEpisode": "Next episode",
     "nextIn": "Next in {{seconds}} s",
+    "sleep": {
+      "title": "Sleep timer",
+      "off": "Off",
+      "minutes_one": "{{count}} min",
+      "minutes_other": "{{count}} min",
+      "endOfEpisode": "End of episode",
+      "endOfFilm": "End of film",
+      "until": "Until {{time}}",
+      "chosen": "Set",
+      "offNote": "Off: the TV plays on.",
+      "untilNote": "Pauses at {{time}}, playing or paused.",
+      "endOfEpisodeNote": "Pauses when this episode ends, instead of playing the next one.",
+      "endOfFilmNote": "Pauses when the film ends.",
+      "pausingAt": "Pausing at {{time}}",
+      "pausingEndOfEpisode": "Pausing when this episode ends",
+      "pausingEndOfFilm": "Pausing when the film ends",
+      "add": "Add 15 min",
+      "turnOff": "Turn off",
+      "paused": "Paused by the sleep timer",
+      "wake": "Carry on watching",
+      "chip": "Sleep {{time}}",
+      "chipEnd": "Sleep at end"
+    },
+    "stillWatching": {
+      "title": "Still watching?",
+      "message": "The next episode of {{title}} is ready.",
+      "play": "Play next episode",
+      "stop": "Stop"
+    },
     "back10": "Back 10 s",
     "forward10": "Forward 10 s",
     "leave": "Back",
@@ -417,6 +446,7 @@
     "services": "Services",
     "trakt": "Trakt",
     "tmdb": "Extra details from TMDB: {{value}}",
+    "stillWatching": "Ask \"Still watching?\": {{value}}",
     "tmdbCredit": "Extra details and images from TMDB. BannerTV uses the TMDB API but is not endorsed or certified by TMDB."
   },
   "diagnostics": {

@@ -2,9 +2,13 @@ import {
   languageName,
   otherLanguages,
   type QualityReference,
+  type SleepChoice,
+  type SleepTimer,
   type StreamEntry,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
 import { Pressable } from '../../components/Pressable';
@@ -13,24 +17,27 @@ import { formatDate, metaFacts } from '../../data/describe';
 import { formatSize, resolutionLabel, streamRowText, streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { formatTime } from '../../player/media';
+import { focusedKey } from '../../navigation/spatial';
+import { SheetTabs } from './SheetTabs';
+import { SleepChoices, sleepValue } from './SleepTimer';
 import styles from './InfoSheet.module.css';
 
 const SHEET = 'player-info';
+type InfoTab = 'about' | 'sleep';
+const TABS: readonly InfoTab[] = ['about', 'sleep'];
 /** Starring, as Details names them. */
 const CAST = 4;
 
 interface Line {
   label: string;
   value: string;
-  /** Two lines rather than one. */
-  long?: boolean;
 }
 
 /**
  * What plays and what it is, over the picture, which keeps playing: the
  * stream on the left (the addon, the release, its size and how it is
  * played), the title or episode on the right. It asks for nothing: what it
- * shows is what the player already has.
+ * shows is what the player already has. A second tab sets the sleep timer.
  */
 export function InfoSheet({
   title,
@@ -44,6 +51,8 @@ export function InfoSheet({
   engine,
   heavy,
   reference,
+  sleep,
+  onSleep,
   returnFocusKey,
   onBack,
   onClose,
@@ -61,22 +70,25 @@ export function InfoSheet({
   engine: 'native' | 'hls.js' | 'shaka' | null;
   heavy: boolean;
   reference?: QualityReference;
+  sleep: SleepTimer;
+  onSleep: (choice: SleepChoice) => void;
   returnFocusKey: () => string;
   onBack: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [tab, setTab] = useState<InfoTab>('about');
   const facts = entry?.facts;
   const playing = audio.find((track) => track.active);
   const lines: Line[] = [];
-  const add = (label: string, value: string | undefined, long?: boolean) => {
-    if (value) lines.push({ label: t(`player.infoRow.${label}`), value, long });
+  const add = (label: string, value: string | undefined) => {
+    if (value) lines.push({ label: t(`player.infoRow.${label}`), value });
   };
   if (entry && facts) {
     add('source', addonNames().get(entry.addonId));
     // The addon's own words, unless they hold a link.
     const release = streamTitle(entry);
-    add('release', release.indexOf('://') < 0 ? release : undefined, true);
+    add('release', release.indexOf('://') < 0 ? release : undefined);
     add('size', facts.sizeBytes ? formatSize(facts.sizeBytes) : undefined);
     const codec = facts.videoCodec
       ? facts.bitDepth
@@ -150,49 +162,70 @@ export function InfoSheet({
     .map((part) => part!.replace(/[.!?]\s*$/, ''))
     .join('. ');
 
+  const names: Record<InfoTab, string> = {
+    about: t('player.info'),
+    sleep: t('player.sleep.title'),
+  };
+  const values: Record<InfoTab, string> = {
+    about: subtitle ?? title,
+    sleep: sleepValue(t, sleep, !!episode),
+  };
+  // Back from a tab's choices goes to the tabs; from the tabs, or from what
+  // plays, which has nothing to choose, it closes.
+  const back = () => {
+    const at = focusedKey();
+    if (at.startsWith(`${SHEET}-`) && !at.startsWith(`${SHEET}-tab-`) && tab !== 'about') {
+      void setFocus(`${SHEET}-tab-${tab}`);
+      return true;
+    }
+    onBack();
+    return true;
+  };
+
   return (
     <Overlay
       focusKey={SHEET}
       label={t('player.info')}
-      defaultFocusKey={`${SHEET}-body`}
+      defaultFocusKey={`${SHEET}-about`}
       returnFocusKey={returnFocusKey}
       onClose={onClose}
-      onBack={() => {
-        onBack();
-        return true;
-      }}
+      onBack={back}
       placement="bottom"
     >
-      {/* Nothing to choose: OK, as Back, closes it. */}
-      <Pressable
-        focusKey={`${SHEET}-body`}
-        label={spoken}
-        className={styles.body}
-        focusedClassName={styles.body}
-        onPress={onBack}
-      >
-        <p className={styles.heading}>
-          <span className={styles.title}>{title}</span>
-          {subtitle && <span className={styles.episode}>{subtitle}</span>}
-        </p>
-        <div className={styles.stream}>
-          {lines.map((line) => (
-            <p
-              key={line.label}
-              className={line.long ? `${styles.line} ${styles.long}` : styles.line}
-            >
-              <span className={styles.label}>{line.label}</span>
-              <span className={styles.value}>{line.value}</span>
-            </p>
-          ))}
-          {notes.length > 0 && <p className={styles.notes}>{notes.join(' ')}</p>}
-        </div>
-        <div className={styles.about}>
-          {about && <p className={styles.facts}>{about}</p>}
-          {story && <p className={styles.story}>{story}</p>}
-          {cast && <p className={styles.cast}>{cast}</p>}
-        </div>
-      </Pressable>
+      <SheetTabs sheet={SHEET} tabs={TABS} names={names} values={values} tab={tab} onTab={setTab} />
+      {tab === 'about' ? (
+        // Nothing to choose: OK, as Back, closes it.
+        <Pressable
+          focusKey={`${SHEET}-about`}
+          label={spoken}
+          className={styles.body}
+          focusedClassName={styles.body}
+          onPress={onBack}
+        >
+          <div className={styles.stream}>
+            {lines.map((line) => (
+              <p key={line.label} className={styles.line}>
+                <span className={styles.label}>{line.label}</span>
+                <span className={styles.value}>{line.value}</span>
+              </p>
+            ))}
+            {notes.length > 0 && <p className={styles.notes}>{notes.join(' ')}</p>}
+          </div>
+          <div className={styles.about}>
+            {about && <p className={styles.facts}>{about}</p>}
+            {story && <p className={styles.story}>{story}</p>}
+            {cast && <p className={styles.cast}>{cast}</p>}
+          </div>
+        </Pressable>
+      ) : (
+        <SleepChoices
+          focusKey={`${SHEET}-sleep`}
+          timer={sleep}
+          episode={!!episode}
+          live={live}
+          onChoose={onSleep}
+        />
+      )}
     </Overlay>
   );
 }

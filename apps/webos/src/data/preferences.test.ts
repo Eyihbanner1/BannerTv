@@ -18,6 +18,7 @@ describe('readPreferences', () => {
         subtitleLanguage: null,
         subtitleStyle: { size: 'huge', colour: 'pink', background: 'box' },
         tmdb: 'yes',
+        stillWatching: 'no',
       }),
     );
     expect(prefs).toEqual({
@@ -28,11 +29,16 @@ describe('readPreferences', () => {
       subtitleLanguage: null,
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
       tmdb: true,
+      stillWatching: true,
     });
   });
 
   it('keeps TMDB turned off', () => {
     expect(readPreferences(JSON.stringify({ tmdb: false })).tmdb).toBe(false);
+  });
+
+  it('keeps "Still watching?" turned off', () => {
+    expect(readPreferences(JSON.stringify({ stillWatching: false })).stillWatching).toBe(false);
   });
 
   it('treats an empty language as not chosen', () => {

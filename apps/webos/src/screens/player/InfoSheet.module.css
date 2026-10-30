@@ -1,47 +1,27 @@
 /*
- * The sheet is 560px tall (Overlay's .bottom): 32px, a 44px heading, 16px,
- * then the two columns, which leave the safe area below.
+ * Under the tabs, 352px: the stream on the left as label and value lines,
+ * the title or episode on the right.
  */
 .body {
   position: relative;
-  height: 470px;
-}
-
-.heading {
-  height: 44px;
-  margin: 0 0 16px;
-  padding: 0 28px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.title {
-  margin-right: 20px;
-  font: var(--bt-text-heading);
-  color: var(--bt-text);
-}
-
-.episode {
-  font: var(--bt-text-body);
-  color: var(--bt-text-muted);
+  height: 352px;
 }
 
 /* This stream, as label and value lines. */
 .stream {
   position: absolute;
-  top: 60px;
+  top: 0;
   left: 28px;
   width: 972px;
 }
 
 .line {
   position: relative;
-  height: 38px;
+  height: 36px;
   margin: 0;
   padding-left: 164px;
   font: var(--bt-text-body);
-  line-height: 38px;
+  line-height: 36px;
   color: var(--bt-text);
   white-space: nowrap;
   overflow: hidden;
@@ -54,22 +34,8 @@
   left: 0;
   width: 164px;
   font: var(--bt-text-label);
-  line-height: 38px;
+  line-height: 36px;
   color: var(--bt-text-subtle);
-}
-
-/* The release: two lines, broken anywhere, as release names have no spaces. */
-.long {
-  height: 76px;
-  white-space: normal;
-  word-break: break-all;
-}
-
-.long .value {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .notes {
@@ -85,7 +51,7 @@
 /* The title or episode. */
 .about {
   position: absolute;
-  top: 60px;
+  top: 0;
   left: 1064px;
   width: 636px;
 }
@@ -93,7 +59,7 @@
 .facts {
   margin: 0;
   font: var(--bt-text-label);
-  line-height: 38px;
+  line-height: 36px;
   color: var(--bt-text-subtle);
   white-space: nowrap;
   overflow: hidden;
@@ -105,7 +71,7 @@
   font: var(--bt-text-body);
   color: var(--bt-text-muted);
   display: -webkit-box;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

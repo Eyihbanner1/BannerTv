@@ -1,10 +1,13 @@
 import {
+  addSleepTime,
+  askStillWatching,
   bingeEntry,
   type BingeHint,
   bingeHint,
   endAction,
   inLastStretch,
   languageName,
+  nextSleepCheck,
   nextVideo,
   parseRuntime,
   playedCard,
@@ -12,6 +15,10 @@ import {
   qualityChoices,
   rearms,
   secondsToEnd,
+  type SleepChoice,
+  sleepPhase,
+  startSleep,
+  stopsBeforeNext,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
 } from '@bannertv/core';
@@ -37,7 +44,7 @@ import { playedVideos, progress } from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
-import { markActivity } from '../../navigation/activity';
+import { markActivity, sinceActivity } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
 import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
 import { focusedKey, pressFocused } from '../../navigation/spatial';
@@ -48,17 +55,26 @@ import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
-import { formatTime } from '../../player/media';
+import { formatClock, formatTime } from '../../player/media';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
   type PlaybackSession,
 } from '../../player/session';
+import {
+  autoplaysSinceInput,
+  countAutoplay,
+  keepSleepTimer,
+  SLEEP_OFF,
+  sleepTimerFor,
+} from '../../player/sleep';
 import { EpisodesSheet } from './EpisodesSheet';
 import { InfoSheet } from './InfoSheet';
 import { type PlayerAction, PlayerControls } from './PlayerControls';
 import { PlayerProblem } from './PlayerProblem';
+import { SleepScreen, SleepWarning } from './SleepTimer';
 import { SourcesSheet } from './SourcesSheet';
+import { StillWatching } from './StillWatching';
 import { SubtitleLayer } from './SubtitleLayer';
 import { type SheetTab, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
@@ -86,6 +102,8 @@ const LEAVE_HINT_MS = 3000;
 const CONTROL = '[role="button"], [role="slider"]';
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
+/** A minutes sleep timer is read again at least this often: does it run out before the next episode? */
+const SLEEP_TICK_MS = 30 * 1000;
 
 type Panel = 'tracks' | 'sources' | 'episodes' | 'info' | 'quality' | null;
 /** The panels that rise from the bottom over the picture: the controls make way for them. */
@@ -194,6 +212,17 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // OK pressed while the stream was starting: the controls show once it plays.
   const wantsControls = useRef(false);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
+  // The sleep timer, kept for this title through All streams and the next episode.
+  const [sleep, setSleep] = useState(() => sleepTimerFor(metaId));
+  // The time it is read at, moved on as it nears a change.
+  const [sleepNow, setSleepNow] = useState(() => Date.now());
+  const [sleepWarningGone, setSleepWarningGone] = useState(false);
+  // Paused by the sleep timer, under its dark screen.
+  const [asleep, setAsleep] = useState(false);
+  const askPreference = useSyncExternalStore(
+    preferences.subscribe,
+    () => preferences.get().stillWatching,
+  );
 
   // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
@@ -226,18 +255,49 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const ended = state.status === 'ended';
   const running = state.status === 'playing' || state.status === 'buffering';
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
-  // What holds the end, and keeps the card away: a sheet or menu, a skip on
-  // its way, a stream starting, the problem box.
-  const held = panel !== null || scrubTo !== null || waiting || problem;
+  // The sleep timer. Minutes pause the video wherever it is; the end of what
+  // plays, or minutes that would run out early in the next episode, stop at this end.
+  const sleepAt = sleepPhase(sleep, sleepNow, {
+    remainingS: state.duration > 0 ? state.duration - state.position : Infinity,
+    ended,
+    live: state.live,
+    rate: state.rate,
+  });
+  const sleepsHere =
+    stopsBeforeNext(sleep, sleepNow) && !state.live && (offersNext || sleep.choice === 'end');
+  if (sleepAt === 'due' && sleep.choice !== 'end' && !asleep) {
+    setAsleep(true);
+    setSleep(SLEEP_OFF);
+    setPanel(null);
+    setControls(false);
+  }
+  // What holds the end, and keeps the cards away: a sheet or menu, a skip on
+  // its way, a stream starting, the problem box, the sleep timer's dark screen.
+  const held = panel !== null || scrubTo !== null || waiting || problem || asleep;
   // A rewind well back from the end brings a dismissed Up Next back.
   if (upNextDismissed && !waiting && rearms(state.position, state.duration, state.rate)) {
     setUpNextDismissed(false);
   }
-  const counting = inStretch && !upNextDismissed && !held;
+  // Not when the sleep timer stops at this end.
+  const counting = inStretch && !upNextDismissed && !held && !sleepsHere;
   // Whether the count was on screen as the episode played into its end: the
   // next one then starts as it ends. Kept through the pause the video makes as it ends.
   const [countSeen, setCountSeen] = useState(false);
   if (running && countSeen !== counting) setCountSeen(counting);
+  // "Still watching?", decided once as the video ends: the next episode would
+  // be the third in a row to start by itself, or nothing was pressed for 90
+  // minutes. Kept until the viewer answers, whatever they press meanwhile.
+  const [askAtEnd, setAskAtEnd] = useState<boolean | null>(null);
+  if (!ended && askAtEnd !== null) setAskAtEnd(null);
+  if (ended && askAtEnd === null) {
+    setAskAtEnd(
+      askPreference &&
+        askStillWatching({
+          autoplaysSinceInput: autoplaysSinceInput(),
+          sinceInputMs: sinceActivity(),
+        }),
+    );
+  }
   // Whether anything has held the end since the video ended.
   const [heldAtEnd, setHeldAtEnd] = useState(false);
   const holdsEnd = ended && (heldAtEnd || held);
@@ -252,17 +312,26 @@ export function PlayerScreen(props: PlayerScreenProps) {
         dismissed: upNextDismissed,
         held,
         countedOnScreen: (countSeen && !heldAtEnd) || afterEnd === 0,
-        sleepsHere: false,
-        stillWatching: false,
+        sleepsHere,
+        stillWatching: askAtEnd === true,
       })
     : null;
+  if (decision === 'sleep') {
+    setAsleep(true);
+    setSleep(SLEEP_OFF);
+    setControls(false);
+  }
+  const asking = decision === 'ask';
   const countsAfterEnd = decision === 'hold' && !held;
   const showsCount = !upNextDismissed && (ended ? countsAfterEnd : counting && running);
   const count = ended
     ? (afterEnd ?? UP_NEXT_AFTER_END_S)
     : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
+  // The sleep timer's last minute, in the corner as Up Next is.
+  const warns = sleepAt === 'warning' && !sleepWarningGone && !held;
   // The controls win: with them up, the count is on Next episode instead.
-  const cardUp = showsCount && !chrome;
+  const cardUp = showsCount && !chrome && !warns;
+  const warningUp = warns && !chrome;
 
   const subtitles = useSubtitles(
     type,
@@ -569,8 +638,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const onKey = useRef<(event: KeyboardEvent) => void>(() => undefined);
   onKey.current = (event) => {
     if (controls && !panel) armHide();
-    // Behind the problem box only Stop reaches the player; the box has its own ways on.
-    if (problem && event.keyCode !== KeyCode.Stop) return;
+    // Behind the problem box, the dark screen or "Still watching?" only Stop
+    // reaches the player; each has its own ways on.
+    if ((problem || asleep || asking) && event.keyCode !== KeyCode.Stop) return;
     switch (event.keyCode) {
       case KeyCode.Play:
         session?.resume();
@@ -641,7 +711,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Behind the problem box, or while a stream opens, the controls would not
     // show; nor under a sheet, which they make way for. Nor over Up Next,
     // which would go from under the pointer heading for it.
-    if (problem || waiting || isSheet(panel) || cardUp) return;
+    if (problem || waiting || isSheet(panel) || card || asleep || asking) return;
     if (!controls) show();
     else armHide();
   };
@@ -650,7 +720,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // a notch shows them, on Pause, as Up and Down do. Otherwise it moves between
   // rows, as everywhere else, and keeps the controls up.
   const onWheel = (event: WheelEvent) => {
-    if (event.deltaY === 0 || panel || problem || cardUp) return;
+    if (event.deltaY === 0 || panel || problem || card || asleep || asking) return;
     const now = Date.now();
     const at = focusedKey();
     // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
@@ -682,7 +752,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // A click on the picture shows the controls, or hides them. A click on a
   // control is that control's, and so is a click after the wheel moved focus
   // to one: the Magic Remote sends its OK as a click alone while the pointer shows.
-  const picturePressable = () => !problem && !waiting && !panel && !cardUp;
+  const picturePressable = () => !problem && !waiting && !panel && !card && !asleep && !asking;
   function pressPicture() {
     if (controls) hide();
     else show('player-play');
@@ -795,25 +865,60 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (next) playEpisode(next);
   }
 
-  // As Up Next goes with focus, focus goes to the controls that came up in its
-  // place, else to the picture; a sheet or the problem box takes it itself.
-  const hadCard = useRef(cardUp);
+  // As a card (Up Next, the sleep timer's warning) goes with focus, focus goes
+  // to the controls that came up in its place, else to the picture. A sheet,
+  // a dialog or the dark screen takes it itself.
+  const card = cardUp || warningUp;
+  const hadCard = useRef(card);
   useEffect(() => {
-    if (cardUp === hadCard.current) return;
-    hadCard.current = cardUp;
-    if (cardUp || panel || problem || focusedKey().indexOf('player-upnext') !== 0) return;
+    if (card === hadCard.current) return;
+    hadCard.current = card;
+    if (card || panel || problem || asleep || asking) return;
+    const at = focusedKey();
+    if (at.indexOf('player-upnext') !== 0 && at.indexOf('player-sleepwarn') !== 0) return;
     void setFocus(chrome ? 'player-play' : 'player-surface');
     // Only the card going matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cardUp]);
+  }, [card]);
 
   // The end: back to the title's page, or on to the next episode, once nothing holds it.
   useEffect(() => {
     if (decision === 'leave') back();
-    else if (decision === 'play') playNextEpisode();
+    else if (decision === 'play') {
+      countAutoplay();
+      playNextEpisode();
+    }
     // Only the decision matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decision]);
+  // The sleep timer: kept for the next screen of this title, read again as it
+  // nears its warning and its end, and it pauses the video under its dark screen.
+  useEffect(() => keepSleepTimer(metaId, sleep), [metaId, sleep]);
+  useEffect(() => {
+    const wait = nextSleepCheck(sleep, sleepNow);
+    if (wait === null) return;
+    const timer = window.setTimeout(() => setSleepNow(Date.now()), Math.min(wait, SLEEP_TICK_MS));
+    return () => clearTimeout(timer);
+  }, [sleep, sleepNow]);
+  useEffect(() => {
+    if (asleep) session?.pause();
+  }, [asleep, session]);
+  function chooseSleep(choice: SleepChoice) {
+    const now = Date.now();
+    setSleep(startSleep(choice, now));
+    setSleepNow(now);
+    setSleepWarningGone(false);
+  }
+  function addSleep() {
+    const now = Date.now();
+    setSleep(addSleepTime(sleep, now));
+    setSleepNow(now);
+    setSleepWarningGone(false);
+  }
+  function wake() {
+    setAsleep(false);
+    show('player-play');
+  }
   // An end nobody saw counted down gets a short count of its own, on the
   // clock: a busy TV runs timers late, and the count must not stretch.
   useEffect(() => {
@@ -986,6 +1091,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     focusKey: 'player-info-button',
     icon: 'info',
     label: t('player.info'),
+    // The sleep timer, which Info sets, while it is on.
+    value:
+      sleep.choice === 'off'
+        ? undefined
+        : sleep.choice === 'end'
+          ? t('player.sleep.chipEnd')
+          : t('player.sleep.chip', { time: formatClock(sleep.endsAt ?? 0) }),
     onPress: () => openPanel('info', 'player-info-button'),
   });
 
@@ -1147,6 +1259,15 @@ export function PlayerScreen(props: PlayerScreenProps) {
         onLeave={back}
       />
 
+      {warningUp && (
+        <SleepWarning
+          timer={sleep}
+          episode={!!episode}
+          onAdd={addSleep}
+          onOff={() => chooseSleep('off')}
+          onDismiss={() => setSleepWarningGone(true)}
+        />
+      )}
       {cardUp && next && (
         <UpNext
           video={next}
@@ -1210,6 +1331,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
           engine={state.engine}
           heavy={!!state.entry && isHeavy(state.entry, finder.runtimeSeconds())}
           reference={reference}
+          sleep={sleep}
+          onSleep={chooseSleep}
           returnFocusKey={sheetReturn('player-info-button')}
           onBack={backFromSheet}
           onClose={() => setPanel(null)}
@@ -1247,6 +1370,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onClose={() => setPanel(null)}
         />
       )}
+
+      {asking && <StillWatching title={title} onPlay={playNextEpisode} onStop={back} />}
+      {asleep && <SleepScreen onWake={wake} />}
 
       {problem && (
         <PlayerProblem

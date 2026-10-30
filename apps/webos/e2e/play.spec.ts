@@ -640,6 +640,192 @@ test('an end held by a sheet waits for it, then counts 10 s to the next episode'
   expect(await episodePlaying(page)).toMatch(/^S1:E2/);
 });
 
+/** From the controls' Pause, through the tools to Info's Sleep timer tab. */
+async function openSleepTimer(page: Page, tools: readonly string[]) {
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  for (const tool of tools) await press(page, 'ArrowRight', `player-${tool}-button`);
+  await press(page, 'ArrowRight', 'player-info-button');
+  await press(page, 'Enter', 'player-info-about');
+  await press(page, 'ArrowUp', 'player-info-tab-about');
+  await press(page, 'ArrowRight', 'player-info-tab-sleep');
+}
+
+const SLEEP_WARNING = /^Sleep timer\. /;
+const ASLEEP = 'Paused by the sleep timer';
+
+test('the sleep timer, set in Info, warns a minute before, takes 15 minutes more, then pauses under a dark screen', async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(2026, 9, 30, 22, 0, 0).getTime() });
+  await playMovie(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await openSleepTimer(page, ['quality', 'streams']);
+  const tab = page.locator('[data-focus-key="player-info-tab-sleep"]');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Off');
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await press(page, 'ArrowRight', 'player-info-sleep-15');
+  await page.keyboard.press('Enter');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Until 22:15');
+  await expect(page.getByText('Pauses at 22:15, playing or paused.')).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-info-sleep-15"]')).toHaveAttribute(
+    'aria-label',
+    '15 min. Set',
+  );
+  // Back goes to the tabs, then closes onto the chip, which says the timer is on.
+  await pressBack(page);
+  await expectFocus(page, 'player-info-tab-sleep');
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info, Sleep 22:15',
+  );
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+
+  // A minute before, the warning takes focus from the picture; Add 15 min moves the time on.
+  await page.clock.fastForward(14 * 60 * 1000 + 5000);
+  const warning = page.getByRole('dialog', { name: SLEEP_WARNING });
+  await expect(warning).toHaveAttribute('aria-label', 'Sleep timer. Pausing at 22:15');
+  await expectFocus(page, 'player-sleepwarn-add');
+  await page.keyboard.press('Enter');
+  await expect(warning).toHaveCount(0);
+  await expectFocus(page, 'player-surface');
+  await page.clock.fastForward(15 * 60 * 1000);
+  await expect(warning).toHaveAttribute('aria-label', 'Sleep timer. Pausing at 22:30');
+
+  // Then the film pauses under the dark screen, and OK wakes it, paused, with the timer off.
+  await page.clock.fastForward(60 * 1000);
+  await expect(page.getByRole('dialog', { name: ASLEEP })).toBeVisible();
+  await expectFocus(page, 'player-asleep-wake');
+  await expect.poll(async () => (await video(page)).playing).toBe(false);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: ASLEEP })).toHaveCount(0);
+  await expectFocus(page, 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info',
+  );
+});
+
+test('"End of episode" pauses at its end in place of the next one, and waking counts 10 s to it', async ({
+  page,
+}) => {
+  test.slow();
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await playFirstEpisode(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await openSleepTimer(page, ['quality', 'streams', 'episodes']);
+  // OK on the tab goes on to its choices.
+  await press(page, 'Enter', 'player-info-sleep-off');
+  for (const choice of ['15', '30', '45', '60', '90', 'end']) {
+    await press(page, 'ArrowRight', `player-info-sleep-${choice}`);
+  }
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByText('Pauses when this episode ends, instead of playing the next one.'),
+  ).toBeVisible();
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info, Sleep at end',
+  );
+  await pressBack(page);
+
+  // The 40 s file is all its last minute: the warning shows, and Up Next does not.
+  const warning = page.getByRole('dialog', { name: SLEEP_WARNING });
+  await expect(warning).toHaveAttribute(
+    'aria-label',
+    'Sleep timer. Pausing when this episode ends',
+  );
+  await expectFocus(page, 'player-sleepwarn-off');
+  await pressCode(page, FAST_FORWARD);
+  await pressCode(page, FAST_FORWARD);
+  await expectFocus(page, 'player-sleepwarn-off');
+  await expect(page.getByText('Up next')).toHaveCount(0);
+
+  // At the end it pauses under the dark screen, and nothing plays on.
+  await expect(page.getByRole('dialog', { name: ASLEEP })).toBeVisible({ timeout: 25000 });
+  await page.waitForTimeout(1500);
+  expect(
+    await page
+      .locator('video:not([aria-hidden])')
+      .evaluate((element: HTMLVideoElement) => element.ended),
+  ).toBe(true);
+
+  // Awake, the controls count 10 s on Next episode, then it plays.
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'player-play');
+  await expect(page.locator('[data-focus-key="player-next"]')).toHaveAttribute(
+    'aria-label',
+    /^Next in (10|9) s$/,
+  );
+  await expect.poll(async () => (await video(page)).time, { timeout: 13000 }).toBeLessThan(5);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect(await episodePlaying(page)).toMatch(/^S1:E2/);
+});
+
+test('after 90 minutes with nothing pressed the next episode asks "Still watching?" first, unless Settings turns that off', async ({
+  page,
+}) => {
+  test.slow();
+  await page.clock.install({ time: new Date(2026, 9, 30, 22, 0, 0).getTime() });
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  /** From the first episode's start, to its end 91 minutes after the last key. */
+  const sitThrough = async () => {
+    await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+      'data-focus-key',
+      'player-upnext-play',
+      { timeout: 15000 },
+    );
+    await pressCode(page, FAST_FORWARD);
+    await pressCode(page, FAST_FORWARD);
+    await expectFocus(page, 'player-upnext-play');
+    await page.clock.fastForward(91 * 60 * 1000);
+  };
+  await playFirstEpisode(page);
+  await sitThrough();
+  const still = page.getByRole('dialog', { name: 'Still watching?' });
+  await expect(still).toBeVisible({ timeout: 20000 });
+  await expectFocus(page, 'player-still-play');
+  await expect(still.getByText('The next episode of Morevna Project is ready.')).toBeVisible();
+  // Stop goes back to the series.
+  await press(page, 'ArrowRight', 'player-still-stop');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^details-/,
+  );
+
+  // Turned off in Settings, the next episode plays on without asking.
+  await pressBack(page);
+  await expectFocus(page, `${SERIES_ROW}-tile-0`);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  await press(page, 'ArrowDown', 'settings-probing');
+  await press(page, 'ArrowDown', 'settings-subtitle-style');
+  await press(page, 'ArrowDown', 'settings-still-watching');
+  const setting = page.locator('[data-focus-key="settings-still-watching"]');
+  await expect(setting).toHaveAttribute('aria-label', 'Ask "Still watching?": On');
+  await page.keyboard.press('Enter');
+  await expect(setting).toHaveAttribute('aria-label', 'Ask "Still watching?": Off');
+  // Continue Watching has the next episode.
+  await pressBack(page);
+  await expectFocus(page, 'home-continue-tile-0');
+  await press(page, 'Enter', 'player-surface');
+  await sitThrough();
+  await expect.poll(async () => (await video(page)).time, { timeout: 20000 }).toBeLessThan(5);
+  await expect(still).toHaveCount(0);
+  expect(await episodePlaying(page)).toMatch(/^S1:E3/);
+});
+
 test('HLS with audio and subtitle choices plays through hls.js, and both show in the sheet', async ({
   page,
 }) => {
@@ -1954,9 +2140,9 @@ test('Info says what plays and what it is over the picture, and OK or Back close
   await press(page, 'ArrowRight', 'player-info-button');
   await page.keyboard.press('ArrowRight');
   await expectFocus(page, 'player-info-button');
-  await press(page, 'Enter', 'player-info-body');
+  await press(page, 'Enter', 'player-info-about');
   const sheet = page.getByRole('dialog', { name: 'Info' });
-  const body = page.locator('[data-focus-key="player-info-body"]');
+  const body = page.locator('[data-focus-key="player-info-about"]');
   // The addon's name and the size are back, with how the stream is played.
   await expect(body).toHaveAttribute(
     'aria-label',
@@ -1970,7 +2156,7 @@ test('Info says what plays and what it is over the picture, and OK or Back close
   await page.keyboard.press('Enter');
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-info-button');
-  await press(page, 'Enter', 'player-info-body');
+  await press(page, 'Enter', 'player-info-about');
   await pressBack(page);
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-info-button');
@@ -1995,6 +2181,7 @@ test('the tools row fits the screen at its widest: a series, subtitles off, and 
   await expect(page.locator('[data-focus-key="player-quality-button"]')).toContainText(
     'No other quality found',
   );
+  await press(page, 'ArrowUp', 'player-play');
   const keys = await page
     .locator('[data-focus-key^="player-"][data-focus-key$="-button"]')
     .evaluateAll((chips) => chips.map((chip) => chip.getAttribute('data-focus-key')));
@@ -2006,8 +2193,20 @@ test('the tools row fits the screen at its widest: a series, subtitles off, and 
     'player-info-button',
   ]);
   // Inside the safe area: 96px from each side of the 1920px screen.
-  const last = (await page.locator('[data-focus-key="player-info-button"]').boundingBox())!;
+  const info = page.locator('[data-focus-key="player-info-button"]');
+  const last = (await info.boundingBox())!;
   expect(last.x + last.width).toBeLessThanOrEqual(1920 - 96);
+  // With the sleep timer on, Info says until when, and still fits.
+  await openSleepTimer(page, ['quality', 'streams', 'episodes']);
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await press(page, 'ArrowRight', 'player-info-sleep-15');
+  await page.keyboard.press('Enter');
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+  await expect(info).toHaveAttribute('aria-label', /^Info, Sleep \d\d:\d\d$/);
+  const widest = (await info.boundingBox())!;
+  expect(widest.x + widest.width).toBeLessThanOrEqual(1920 - 96);
 });
 
 /** Repeats a held OK as the remote does, more slowly than navigation's 100 ms throttle, then lets go. */
