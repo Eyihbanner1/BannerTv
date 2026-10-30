@@ -473,3 +473,102 @@ describe('describeStream, tricky tokens', () => {
     expect(read({ url: 'https://cdn.example.org/play/abcdef' }).container).toBeUndefined();
   });
 });
+
+describe('describeStream, samples and release groups', () => {
+  /** The facts of one fixture stream, by its id. */
+  function fixtureFacts(id: string): StreamFacts {
+    const raw = STREAMS.find((stream) => stream._fixture.id === id);
+    const stream = raw && parseFixture(raw);
+    if (!stream) throw new Error(`no fixture stream ${id}`);
+    return describeStream(stream);
+  }
+
+  it('marks samples, trailers, teasers and featurettes', () => {
+    expect(
+      read({ behaviorHints: { filename: 'Film.2020.1080p.WEB-DL.x264-GRP.sample.mkv' } }).sample,
+    ).toBe(true);
+    expect(read({ description: 'Film 2020 Official Trailer 1080p' }).sample).toBe(true);
+    expect(read({ description: 'Film.2020.Teaser.1080p.WEB' }).sample).toBe(true);
+    expect(read({ description: 'Film 2020 Featurette 720p' }).sample).toBe(true);
+    expect(read({ url: 'https://cdn.example.org/Sample/film-sample.mkv' }).sample).toBe(true);
+    expect(read({ name: 'Trailer' }).sample).toBe(true);
+  });
+
+  it('does not mark a title with the word in it, nor a longer word', () => {
+    expect(read({ description: 'Trailer.Park.Boys.S01E01.1080p.WEB.h264-GRP' }).sample).toBe(
+      undefined,
+    );
+    expect(read({ description: 'The Teaser (2019) 1080p' }).sample).toBeUndefined();
+    expect(read({ description: 'Film.2020.1080p.WEB-DL.x264-GRP' }).sample).toBeUndefined();
+    expect(read({ description: 'Film.2020.1080p.Samples.Included' }).sample).toBeUndefined();
+  });
+
+  it('reads the release group from the file name first', () => {
+    expect(
+      read({
+        behaviorHints: {
+          filename:
+            'Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv',
+        },
+      }).releaseGroup,
+    ).toBe('framestor');
+    expect(
+      read({
+        description: 'Show.S01.1080p.WEB-DL.x264-PACK',
+        behaviorHints: { filename: 'Show.S01E02.1080p.WEB-DL.x264-EPGRP.mkv' },
+      }).releaseGroup,
+    ).toBe('epgrp');
+  });
+
+  it('else from the first line of the description that names a release', () => {
+    expect(
+      read({ description: 'Film.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX\n💾 5.2 GB' }),
+    ).toMatchObject({ releaseGroup: 'flux' });
+    expect(
+      read({
+        description: 'Quality: WEB-DL\nName: Show.S02E10.2160p.WEB-DL.H.265-NTb.mkv\nSize: 8.4 GB',
+      }).releaseGroup,
+    ).toBe('ntb');
+    // The file name has none, so the description's goes.
+    expect(
+      read({
+        description: 'Film.2020.1080p.BluRay.x264-AMIABLE',
+        behaviorHints: { filename: 'film.mkv' },
+      }).releaseGroup,
+    ).toBe('amiable');
+  });
+
+  it('reads no group from words that only look like one', () => {
+    expect(read({ description: 'Film.2020.1080p.WEB-DL' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Film.2020.720p.BluRay.x264-ITA' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Spider-Man' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Film.2020.1080p.x264-GRP-sample' }).releaseGroup).toBeUndefined();
+    // A line naming no year, episode or resolution is not a release name.
+    expect(read({ description: 'Open Movie - Directors-Cut' }).releaseGroup).toBeUndefined();
+  });
+
+  it('never reads the group from the link, which can carry account keys', () => {
+    expect(
+      read({ url: 'https://cdn.example.org/play/Film.2020.1080p.WEB-DL.x264-SECRETKEY' })
+        .releaseGroup,
+    ).toBeUndefined();
+  });
+
+  it('reads the fixture streams', () => {
+    expect(fixtureFacts('torrentio-p2p-4k-dv-remux').releaseGroup).toBe('framestor');
+    expect(fixtureFacts('torrentio-tb-cached-1080p-web-atmos').releaseGroup).toBe('flux');
+    expect(fixtureFacts('torrentio-p2p-4k-hdr10plus-web').releaseGroup).toBe('ntb');
+    expect(fixtureFacts('aiostreams-torrentio-style-p2p-mib').releaseGroup).toBe('ethel');
+    expect(fixtureFacts('stremthru-torz-rd-cached-2160p').releaseGroup).toBe('framestor');
+    expect(fixtureFacts('comet-v1-p2p-1080p').releaseGroup).toBe('3li');
+    expect(fixtureFacts('torrentio-p2p-cam').releaseGroup).toBeUndefined();
+    expect(fixtureFacts('torrentio-p2p-1080p-pack-multisubs').releaseGroup).toBeUndefined();
+    expect(fixtureFacts('youtube-trailer').sample).toBe(true);
+    for (const raw of STREAMS) {
+      const stream = parseFixture(raw);
+      if (stream && raw._fixture.id !== 'youtube-trailer') {
+        expect(describeStream(stream).sample, raw._fixture.id).toBeUndefined();
+      }
+    }
+  });
+});

@@ -182,7 +182,7 @@ async function start(
   video: FakeVideo,
   entry: StreamEntry,
   at = 0,
-  options?: { chosen?: boolean },
+  options?: { chosen?: boolean; handPicked?: boolean },
 ) {
   session.play(entry, at, options);
   await settle();
@@ -451,7 +451,12 @@ describe('a stream that keeps buffering', () => {
     wait(video, 999);
     expect(session.get().entry).toBe(remux);
     vi.advanceTimersByTime(1);
-    expect(lighter).toHaveBeenCalledWith(remux, expect.anything());
+    // With what plays, so the step down keeps to its language and length.
+    expect(lighter).toHaveBeenCalledWith(
+      remux,
+      expect.anything(),
+      expect.objectContaining({ entry: remux }),
+    );
     expect(session.get()).toMatchObject({ entry: bluray, position: 340, steppedDown: true });
     expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
     await settle();
@@ -867,7 +872,55 @@ describe('a live stream', () => {
   });
 });
 
+describe('a stream picked from the list', () => {
+  it('stops at the problem box when it fails, rather than move to another', async () => {
+    const { video, session, markFailed } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get()).toMatchObject({ status: 'failed', entry: second, failedOver: false });
+    expect(markFailed).toHaveBeenCalledWith(second);
+  });
+
+  it('lets a stream opened afterwards by the session fail over again', async () => {
+    const { video, session } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    session.play(second, 600);
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get()).toMatchObject({ entry: first, failedOver: true });
+  });
+});
+
 describe('a stream with an end', () => {
+  it('is paused, not ended, once the viewer goes back from the end, and plays on from there', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 7190);
+    video.currentTime = 7200;
+    video.fire('ended');
+    expect(session.get().status).toBe('ended');
+    session.seek(7100);
+    expect(session.get()).toMatchObject({ status: 'paused', position: 7100 });
+    session.resume();
+    expect(video.currentTime).toBe(7100);
+  });
+
+  it('stays ended when a seek lands on the end itself', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 7190);
+    video.fire('ended');
+    session.seek(7300);
+    expect(session.get().status).toBe('ended');
+  });
+
+  it('starts at normal speed', async () => {
+    const { video, session } = setup();
+    expect(session.get().rate).toBe(1);
+    await start(session, video, first, 600);
+    expect(session.get().rate).toBe(1);
+  });
+
   it('carries on from where it is', async () => {
     const { video, session } = setup();
     await start(session, video, first, 600);

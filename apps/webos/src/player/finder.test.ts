@@ -1,7 +1,7 @@
 import type { EventSource, InstalledAddon, ItemSource, QueryState } from '@bannertv/core';
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { entryKey, isHeavy, streamFinder } from './finder';
+import { BINGE_WAIT_MS, entryKey, isHeavy, SETTLE_AFTER_FIRST_MS, streamFinder } from './finder';
 
 interface FakeQuery {
   listeners: Set<() => void>;
@@ -337,6 +337,93 @@ describe('stepping down', () => {
     expect(files([uhd!, other!, hd!])).toEqual(['uhd', 'uhd-other', 'hd']);
     expect(finder.lighter(uhd!, new Set([entryKey(uhd!)]))).toBe(hd);
     expect(finder.lighter(hd!, new Set([entryKey(hd!)]))).toBeUndefined();
+  });
+
+  it('keeps to the language heard and passes over a clip', () => {
+    addons.installs = [
+      {
+        id: 'org.test.streams',
+        streams: [
+          { ...offer('big', '2160p', 72), description: '🗣 EN' },
+          { ...offer('spanish', '1080p', 20), description: '🗣 ES' },
+          { ...offer('sample', '1080p', 1), description: 'Sample 1080p' },
+          { ...offer('english', '1080p', 22), description: '🗣 EN' },
+        ],
+      },
+    ];
+    const finder = streamFinder('movie', 'tt-lighter-language');
+    finder.start();
+    const big = finder.get().entries.find((entry) => fileOf(entry) === 'big')!;
+    const tried = new Set([entryKey(big)]);
+    expect(fileOf(finder.lighter(big, tried, { entry: big, audioLanguage: 'en' }))).toBe('english');
+    // Nothing in the language heard: none, rather than a change of language.
+    tried.add(entryKey(finder.get().entries.find((entry) => fileOf(entry) === 'english')!));
+    expect(finder.lighter(big, tried, { entry: big, audioLanguage: 'en' })).toBeUndefined();
+  });
+});
+
+describe('the next episode', () => {
+  const release = (file: string, resolution: string, bingeGroup: string) => ({
+    url: `https://media.example.com/${file}.mkv`,
+    name: `Test\n${resolution}`,
+    behaviorHints: { bingeGroup },
+  });
+  const hint = { addonId: 'org.test.second', bingeGroup: 'second-720p' };
+
+  /** Answers one install's request, as its addon would. */
+  function answer(videoId: string, index: number) {
+    const query = addons.queries[videoId]![index]!;
+    const install = addons.installs[index]!;
+    query.state = {
+      status: 'success',
+      stale: false,
+      data: install.streams.map((raw) => parseStream(raw as Record<string, unknown>)!),
+    };
+    query.listeners.forEach((listener) => listener());
+  }
+
+  beforeEach(() => {
+    addons.installs = [
+      { id: 'org.test.first', streams: [release('best', '2160p', 'first-4k')] },
+      { id: 'org.test.second', streams: [release('same', '720p', 'second-720p')] },
+    ];
+  });
+
+  it('starts on the release the episode before played, ahead of the best ranked', async () => {
+    const finder = streamFinder('series', 'tt-binge:1:2');
+    expect(fileOf(await finder.choose())).toBe('best');
+    expect(fileOf(await finder.choose(hint))).toBe('same');
+  });
+
+  it("waits a little for that release's addon after the rest have settled", async () => {
+    addons.answering = false;
+    const finder = streamFinder('series', 'tt-binge:1:3');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose(hint).then((entry) => (chosen = fileOf(entry)));
+    answer('tt-binge:1:3', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS);
+    expect(finder.get().settled).toBe(true);
+    await vi.advanceTimersByTimeAsync(BINGE_WAIT_MS - 1000);
+    expect(chosen).toBe('none yet');
+    answer('tt-binge:1:3', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(chosen).toBe('same');
+  });
+
+  it('takes the usual choice once the wait is over, or when the release is not there', async () => {
+    addons.answering = false;
+    const finder = streamFinder('series', 'tt-binge:1:4');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose(hint).then((entry) => (chosen = fileOf(entry)));
+    answer('tt-binge:1:4', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS + BINGE_WAIT_MS - 1);
+    expect(chosen).toBe('none yet');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(chosen).toBe('best');
+
+    addons.answering = true;
+    const other = streamFinder('series', 'tt-binge:1:5');
+    expect(fileOf(await other.choose({ ...hint, bingeGroup: 'gone' }))).toBe('best');
   });
 });
 

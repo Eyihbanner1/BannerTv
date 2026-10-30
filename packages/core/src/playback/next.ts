@@ -1,4 +1,5 @@
 import type { MetaDetail, Stream, Video } from '@bannertv/protocol';
+import type { StreamEntry } from '../streams/types';
 
 type Episode = Video & { season: number; episode: number };
 
@@ -72,6 +73,15 @@ export function nextVideo(meta: MetaDetail, videoId: string, now: number): Video
   return next && hasAired(next, now) ? next : undefined;
 }
 
+/** Whether a stream is in the binge group and the player can play it by itself. */
+function inBingeGroup(stream: Stream, bingeGroup: string): boolean {
+  return (
+    stream.source.kind === 'url' &&
+    stream.behaviorHints.bingeGroup === bingeGroup &&
+    stream.behaviorHints.proxyHeaders === undefined
+  );
+}
+
 /**
  * The first playable stream in the same binge group, for playing the next episode straight on.
  * Streams that need proxy headers are left out because the `<video>` element cannot send them.
@@ -81,10 +91,48 @@ export function findBingeStream(
   bingeGroup: string | undefined,
 ): Stream | undefined {
   if (!bingeGroup) return undefined;
-  return streams.find(
-    (stream) =>
-      stream.source.kind === 'url' &&
-      stream.behaviorHints.bingeGroup === bingeGroup &&
-      stream.behaviorHints.proxyHeaders === undefined,
+  return streams.find((stream) => inBingeGroup(stream, bingeGroup));
+}
+
+/**
+ * The release to carry on with into another episode: the addon that sent the
+ * playing stream and the binge group it named. Only these two names, never a
+ * link, so it can travel in a route.
+ */
+export interface BingeHint {
+  /** The addon's manifest id. */
+  addonId: string;
+  /** The addon's name for the release, such as "torrentio|1080p|WEB-DL". */
+  bingeGroup?: string;
+}
+
+/**
+ * The hint for the stream playing now. Undefined when there is no stream, or
+ * it names no binge group: then there is no release to carry on with.
+ */
+export function bingeHint(entry: StreamEntry | null | undefined): BingeHint | undefined {
+  const bingeGroup = entry?.stream.behaviorHints.bingeGroup;
+  return entry && bingeGroup ? { addonId: entry.addonId, bingeGroup } : undefined;
+}
+
+/**
+ * The same addon's stream of the same release, as Stremio's binge watching
+ * picks it: the first, in the order given, that the player can play. Streams
+ * that can't play are passed over, so one first in the group does not hide
+ * another that can. Undefined when the hint has no group or the release is
+ * not there; the caller then picks as it would for any video, never another
+ * of the addon's releases.
+ */
+export function bingeEntry(
+  entries: readonly StreamEntry[],
+  hint: BingeHint,
+): StreamEntry | undefined {
+  const { addonId, bingeGroup } = hint;
+  if (!bingeGroup) return undefined;
+  return entries.find(
+    (entry) =>
+      entry.addonId === addonId &&
+      entry.assessment.action.kind === 'play' &&
+      inBingeGroup(entry.stream, bingeGroup),
   );
 }

@@ -4,6 +4,8 @@
  * where they were while more arrive.
  */
 
+import { releaseGroup } from '../streams/release';
+
 /** What a release name says about the release, where it says it. */
 interface ReleaseFeatures {
   /** "s01e04". */
@@ -17,9 +19,6 @@ interface ReleaseFeatures {
 }
 
 const EXTENSION = /\.(?:srt|vtt|ass|ssa|sub|txt|mkv|mp4|m4v|webm|avi|ts|mov)$/i;
-// Words a release name ends on that are not a group: "WEB-DL", "x264", "5.1".
-const NOT_A_GROUP =
-  /^(?:dl|rip|web|webdl|webrip|bluray|remux|hdtv|dvd|x26[45]|h26[45]|hevc|avc|aac|ac3|eac3|ddp?\d?|dts|atmos|hdr|hdr10|dv|\d+p|\d+)$/i;
 
 function features(name: string): ReleaseFeatures {
   const found: ReleaseFeatures = {};
@@ -44,9 +43,8 @@ function features(name: string): ReleaseFeatures {
     found.source = 'web';
   }
 
-  // "…x264-GROUP", not the "DL" of "WEB-DL".
-  const group = /-([a-z0-9]{2,})(?:\[[^\]]*\])?$/i.exec(text);
-  if (group && !NOT_A_GROUP.test(group[1]!)) found.group = group[1]!.toLowerCase();
+  const group = releaseGroup(text);
+  if (group) found.group = group;
   return found;
 }
 

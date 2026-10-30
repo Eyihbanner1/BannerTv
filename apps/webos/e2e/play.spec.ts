@@ -18,6 +18,8 @@ import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from 
 const MOVIE = 'tt0807840';
 /** The start of the focus key of an OpenSubtitles version row: its addon id, then the file's. */
 const OPENSUBTITLES = 'player-tracks-file-org.stremio.opensubtitlesv3';
+/** A row of the Sources sheet: the test addon's stream at this place in its answer. */
+const source = (rank: number) => `player-sources-row-0:org.bannertv.test-streams#${rank}`;
 
 /** What the player's video element is doing. */
 function video(page: Page) {
@@ -442,8 +444,8 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
   await press(page, 'ArrowRight', 'player-streams-button');
-  await press(page, 'Enter', 'streams-item-0');
-  await press(page, 'ArrowDown', 'streams-item-1');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowDown', source(1));
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
 
@@ -985,7 +987,7 @@ test('the wheel never skips: a notch brings the controls up on Pause, and with t
   expect(await seeks()).toBe(0);
 });
 
-test('Back from Sources goes back to the film where it was, on the same stream', async ({
+test('Sources comes over the film, which plays on, and Back from All streams goes back to it where it was', async ({
   page,
 }) => {
   await playMovie(page);
@@ -998,6 +1000,39 @@ test('Back from Sources goes back to the film where it was, on the same stream',
   await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
   await press(page, 'ArrowRight', 'player-streams-button');
+  // On the stream playing, ticked, with the addon, the release and its facts.
+  await press(page, 'Enter', source(0));
+  const sheet = page.getByRole('dialog', { name: 'Sources' });
+  await expect(sheet).toContainText('3 streams');
+  await expect(page.locator(`[data-focus-key="${source(0)}"]`)).toHaveAttribute(
+    'aria-label',
+    'Test Streams. Open Movie 1080p WEB-DL x264. 1080p, 1.4 GB, Cached. Playing now',
+  );
+  await expect(page.locator(`[data-focus-key="${source(1)}"]`)).toContainText('700 MB');
+  expect((await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe(src);
+
+  // Back closes it onto its chip; the film never stopped.
+  await pressBack(page);
+  await expect(sheet).toHaveCount(0);
+  await expectFocus(page, 'player-streams-button');
+  expect((await video(page)).playing).toBe(true);
+
+  // The playing stream again: the sheet just closes.
+  await press(page, 'Enter', source(0));
+  await press(page, 'Enter', 'player-surface');
+  await expect(sheet).toHaveCount(0);
+  expect((await video(page)).src).toBe(src);
+
+  // All streams is in its header, and Back from it goes back to the film where it was.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowUp', 'player-sources-all');
+  await press(page, 'ArrowLeft', 'player-sources-sort');
+  await press(page, 'ArrowRight', 'player-sources-all');
   const at = (await video(page)).time;
   await press(page, 'Enter', 'streams-item-0');
   await pressBack(page);
@@ -1009,6 +1044,147 @@ test('Back from Sources goes back to the film where it was, on the same stream',
   // Back from the film still leaves for the title it was opened from.
   await pressBack(page);
   await expectFocus(page, 'details-watch');
+});
+
+test('a stream picked in Sources plays from where the film was, and one that fails stops at the problem box', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    broken: ['/movie-480p.webm'],
+    streams: {
+      [MOVIE]: [
+        DEFAULT_STREAMS[0]!,
+        DEFAULT_STREAMS[1]!,
+        {
+          name: 'Test Streams\n480p',
+          description: 'Open Movie 480p\n💾 300 MB',
+          path: '/movie-480p.webm',
+        },
+        {
+          name: 'Test Streams\n360p',
+          description: 'Open Movie 360p\n💾 200 MB',
+          path: '/movie-360p.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowDown', source(1));
+  // It answers late, so the note shows while it opens.
+  await page.route(`${MEDIA_HOST}/movie-720p.webm`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fallback();
+  });
+  const at = (await video(page)).time;
+  await press(page, 'Enter', 'player-surface');
+  await expect(page.getByText('Switching to another stream…')).toBeVisible();
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).time).toBeGreaterThan(at - 2);
+
+  // Picked by hand, a stream that fails is not swapped for another behind the viewer's back.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(1));
+  await press(page, 'ArrowDown', source(2));
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-problem-another"]')).toBeVisible();
+  expect((await video(page)).src).not.toBe('/movie-360p.webm');
+});
+
+test('in Sources, rows keep their places as a late addon answers, Sort is kept for All streams, and a click picks', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { slowAddon: true });
+  const mock = await mockPlayback(page);
+  // The slow addon answers only once the sheet is open, with a release that ranks first.
+  let answer = () => undefined as void;
+  const gate = new Promise<void>((done) => (answer = done));
+  await page.route(/^https:\/\/slow\.example\.com\/bannertv\/stream\//, async (route) => {
+    await gate;
+    mock.slowAnswers++;
+    await route.fulfill({
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({
+        streams: [
+          {
+            name: 'Slow Streams\n1080p',
+            description: 'Open Movie 1080p BluRay REMUX\n💾 1.6 GB ⚡ Cached',
+            url: `${MEDIA_HOST}/movie-1080p-remux.webm`,
+            behaviorHints: { filename: 'movie-1080p-remux.webm' },
+          },
+        ],
+      }),
+    });
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  const sheet = page.getByRole('dialog', { name: 'Sources' });
+  await expect(sheet).toContainText('Asking 1 addon…');
+  // Once the sheet has risen.
+  await page.waitForTimeout(500);
+  const playing = page.locator(`[data-focus-key="${source(0)}"]`);
+  const where = (await playing.boundingBox())!;
+
+  // Its remux ranks first, but the rows shown stay put: it goes after them.
+  answer();
+  await expect.poll(() => mock.slowAnswers).toBe(1);
+  await expect(sheet).toContainText('4 streams');
+  const late = page.locator('[data-focus-key$=":org.bannertv.slow-streams#0"]');
+  expect(await playing.boundingBox()).toEqual(where);
+  await expectFocus(page, source(0));
+  expect((await late.boundingBox())!.y).toBeGreaterThan(
+    (await page.locator(`[data-focus-key="${source(1)}"]`).boundingBox())!.y,
+  );
+
+  // Sort goes round the orders, and All streams keeps the one chosen.
+  await press(page, 'ArrowUp', 'player-sources-all');
+  await press(page, 'ArrowLeft', 'player-sources-sort');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-sources-sort"]')).toHaveText(
+    'Sort: Fastest start',
+  );
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem('bannertv.preferences') ?? '{}').allStreamsOrder,
+    ),
+  ).toBe('fast');
+
+  // The pointer over a row takes focus, and a click plays it (well after that OK,
+  // which a click would otherwise be part of).
+  await page.waitForTimeout(500);
+  const row = page.locator(`[data-focus-key="${source(1)}"]`);
+  const box = (await row.boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + 40, { steps: 5 });
+  await expectFocus(page, source(1));
+  await expect(sheet).toBeVisible();
+  await page.mouse.click(box.x + 300, box.y + 40);
+  await expect(sheet).toHaveCount(0);
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
 });
 
 test('Start over is always there, and offers for a moment to go back to where the film was', async ({
@@ -1312,6 +1488,8 @@ test('the controls are two rows, the transport over the tools, with the time lef
   await press(page, 'ArrowRight', 'player-quality-button');
   await press(page, 'ArrowRight', 'player-streams-button');
   await expect(page.locator('[data-focus-key="player-streams-button"]')).toHaveText('Sources');
+  // A film has no Episodes.
+  await expect(page.locator('[data-focus-key="player-episodes-button"]')).toHaveCount(0);
   await press(page, 'ArrowUp', 'player-play');
   await press(page, 'ArrowUp', 'player-seek');
   await press(page, 'ArrowDown', 'player-play');
@@ -1367,6 +1545,159 @@ test('on a series, Next episode sits after Forward 10 s and plays the next one; 
   expect((await video(page)).playing).toBe(true);
 });
 
+/** Plays the series' first episode from its page, as the viewer would. */
+async function playFirstEpisode(page: Page) {
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+}
+
+async function openEpisodes(page: Page, focusKey: string) {
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'ArrowRight', 'player-episodes-button');
+  await press(page, 'Enter', focusKey);
+}
+
+test('Episodes opens on the episode playing, says where each one is, and plays another from the same release', async ({
+  page,
+}) => {
+  await mockAddons(page, { upcoming: ['tt8000001:2:3'] });
+  await seedStreamAddon(page, { kv: { traktWatched: ['tt8000001:1:2'] } });
+  const mock = await mockPlayback(page);
+  await playFirstEpisode(page);
+
+  // The 720p release, picked in Quality: auto-play chooses 1080p.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'Enter', 'player-quality-0');
+  await press(page, 'ArrowDown', 'player-quality-1');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(3);
+
+  // Over the picture, which plays on: the series, and the focused episode's story.
+  await openEpisodes(page, 'player-episodes-ep-0');
+  const sheet = page.getByRole('dialog', { name: 'Episodes' });
+  await expect(sheet).toContainText('Morevna Project');
+  await expect(sheet).toContainText('What happens in season 1, episode 1.');
+  await expect(page.locator('[data-focus-key="player-episodes-ep-0"]')).toHaveAttribute(
+    'aria-label',
+    '1. Season 1 episode 1, Playing now',
+  );
+  await expect(page.locator('[data-focus-key="player-episodes-season-1"]')).toHaveAttribute(
+    'aria-label',
+    'Season 1, 8 episodes',
+  );
+  expect((await video(page)).playing).toBe(true);
+  // Watched on Trakt, so ticked here too.
+  await press(page, 'ArrowDown', 'player-episodes-ep-1');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'aria-label',
+    '2. Season 1 episode 2, Watched',
+  );
+  await expect(sheet).toContainText('What happens in season 1, episode 2.');
+
+  // Left to the seasons, on the one playing; down a season shows its episodes beside it.
+  await press(page, 'ArrowLeft', 'player-episodes-season-1');
+  await press(page, 'ArrowDown', 'player-episodes-season-2');
+  await expect(page.locator('[data-focus-key="player-episodes-ep-2"]')).toHaveAttribute(
+    'aria-label',
+    /^3\. Season 2 episode 3, Coming /,
+  );
+  await press(page, 'ArrowRight', 'player-episodes-ep-0');
+  // One not out yet says when, and does nothing.
+  await press(page, 'ArrowDown', 'player-episodes-ep-1');
+  await press(page, 'ArrowDown', 'player-episodes-ep-2');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  await expectFocus(page, 'player-episodes-ep-2');
+  expect(mock.streams).not.toContain('series/tt8000001:2:3');
+
+  // Another plays from the release playing: auto-play would pick 1080p again.
+  await press(page, 'ArrowUp', 'player-episodes-ep-1');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(() => mock.streams).toContain('series/tt8000001:2:2');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe('/movie-720p.webm');
+  await expect(sheet).toHaveCount(0);
+
+  // The one left part way says how much is left, with a bar.
+  await openEpisodes(page, 'player-episodes-ep-1');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'aria-label',
+    '2. Season 2 episode 2, Playing now',
+  );
+  await press(page, 'ArrowLeft', 'player-episodes-season-2');
+  await press(page, 'ArrowUp', 'player-episodes-season-1');
+  await press(page, 'ArrowRight', 'player-episodes-ep-0');
+  const first = page.locator('[data-focus-key="player-episodes-ep-0"]');
+  await expect(first).toHaveAttribute('aria-label', '1. Season 1 episode 1, 1 minute left');
+  await expect(first.locator('span > span')).toHaveCount(1);
+
+  // Back closes onto the chip it was opened from, and the episode plays on.
+  await pressBack(page);
+  await expect(sheet).toHaveCount(0);
+  await expectFocus(page, 'player-episodes-button');
+  expect((await video(page)).playing).toBe(true);
+});
+
+test('with the pointer, passing over a season changes nothing, a click shows it, and a click above closes', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const mock = await mockPlayback(page);
+  await playFirstEpisode(page);
+  await openEpisodes(page, 'player-episodes-ep-0');
+  // Once the sheet has risen, and well after the OK that opened it.
+  await page.waitForTimeout(500);
+
+  const second = page.locator('[data-focus-key="player-episodes-season-2"]');
+  const box = (await second.boundingBox())!;
+  await page.mouse.move(1500, 300);
+  await page.mouse.move(box.x + 100, box.y + 30, { steps: 8 });
+  await expectFocus(page, 'player-episodes-season-2');
+  // Still season 1's eight episodes beside it.
+  await expect(page.locator('[data-focus-key="player-episodes-ep-0"]')).toHaveAttribute(
+    'aria-label',
+    '1. Season 1 episode 1, Playing now',
+  );
+  await page.mouse.click(box.x + 100, box.y + 30);
+  const episode = page.locator('[data-focus-key="player-episodes-ep-0"]');
+  await expect(episode).toHaveAttribute('aria-label', '1. Season 2 episode 1');
+  // The pointer stays where it was clicked: focus does not jump to the episodes.
+  await expectFocus(page, 'player-episodes-season-2');
+
+  // A click above the sheet closes it; the episode plays on.
+  await page.mouse.click(900, 200);
+  await expect(page.getByRole('dialog', { name: 'Episodes' })).toHaveCount(0);
+  expect((await video(page)).playing).toBe(true);
+
+  // Opened again with a click on its chip, a click on an episode plays it.
+  await page.mouse.move(960, 540, { steps: 3 });
+  const chip = page.locator('[data-focus-key="player-episodes-button"]');
+  await expect(chip).toBeVisible();
+  const where = (await chip.boundingBox())!;
+  await page.mouse.move(where.x + where.width / 2, where.y + where.height / 2, { steps: 3 });
+  await page.mouse.click(where.x + where.width / 2, where.y + where.height / 2);
+  await expect(page.getByRole('dialog', { name: 'Episodes' })).toBeVisible();
+  // Once the sheet has risen.
+  await page.waitForTimeout(500);
+  const row = (await page.locator('[data-focus-key="player-episodes-ep-1"]').boundingBox())!;
+  await page.mouse.move(row.x + 200, row.y + 30, { steps: 3 });
+  await expectFocus(page, 'player-episodes-ep-1');
+  await page.mouse.click(row.x + 200, row.y + 30);
+  await expect.poll(() => mock.streams).toContain('series/tt8000001:1:2');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+});
+
 test('Back 10 s and Forward 10 s add up as the skip keys do, and land once', async ({ page }) => {
   await playMovie(page);
   const seeks = await countSeeks(page);
@@ -1391,6 +1722,63 @@ test('Back 10 s and Forward 10 s add up as the skip keys do, and land once', asy
   await expectFocus(page, 'player-back10');
 });
 
+test('Quality keeps to the language heard, says when a resolution has only another, and offers no clip', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          ...DEFAULT_STREAMS[0]!,
+          description: 'Open Movie 1080p WEB-DL x264\n🗣 EN\n💾 1.4 GB ⚡ Cached',
+        },
+        // Ranked before the English 720p, but in Spanish.
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL\n🗣 ES\n💾 700 MB',
+          path: '/movie-720p-es.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEBRip\n🗣 EN\n💾 700 MB',
+          path: '/movie-720p.webm',
+        },
+        {
+          name: 'Test Streams\n480p',
+          description: 'Open Movie 480p WEB-DL\n🗣 ES\n💾 400 MB',
+          path: '/movie-480p-es.webm',
+        },
+        {
+          name: 'Test Streams\n360p',
+          description: 'Open Movie sample 360p\n💾 5 MB',
+          path: '/movie-360p-sample.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe('/movie-1080p.webm');
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'Enter', 'player-quality-0');
+  const labels = await page
+    .locator('[data-focus-key^="player-quality-"]:not([data-focus-key="player-quality-button"])')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')));
+  expect(labels).toEqual(['1080p', '720p', '480p, Spanish audio']);
+
+  // 720p is the English one, though the Spanish one ranks first.
+  await press(page, 'ArrowDown', 'player-quality-1');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+});
+
 test('Quality with one stream found keeps its place, dimmed, says why, and does nothing', async ({
   page,
 }) => {
@@ -1412,6 +1800,112 @@ test('Quality with one stream found keeps its place, dimmed, says why, and does 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expectFocus(page, 'player-quality-button');
   await press(page, 'ArrowRight', 'player-streams-button');
+});
+
+test('Info says what plays and what it is over the picture, and OK or Back closes it onto its chip', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  // A film has no Episodes: Info comes straight after Sources, last.
+  await press(page, 'ArrowRight', 'player-info-button');
+  await page.keyboard.press('ArrowRight');
+  await expectFocus(page, 'player-info-button');
+  await press(page, 'Enter', 'player-info-body');
+  const sheet = page.getByRole('dialog', { name: 'Info' });
+  const body = page.locator('[data-focus-key="player-info-body"]');
+  // The addon's name and the size are back, with how the stream is played.
+  await expect(body).toHaveAttribute(
+    'aria-label',
+    "Elephants Dream. Source, Test Streams. Release, Open Movie 1080p WEB-DL x264. Size, 1.4 GB. Picture, 1080p · H.264. Length, 0:40. Played by, The TV's own player. 2006 · IMDb 7.1 · 15 min · Animation, Short. Elephants Dream is a Blender Studio open project. Starring Proog, Emo",
+  );
+  await expect(sheet).toContainText('1.4 GB');
+  expect((await video(page)).playing).toBe(true);
+
+  // Nothing to choose: OK closes it, as Back does, onto its chip.
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Enter');
+  await expect(sheet).toHaveCount(0);
+  await expectFocus(page, 'player-info-button');
+  await press(page, 'Enter', 'player-info-body');
+  await pressBack(page);
+  await expect(sheet).toHaveCount(0);
+  await expectFocus(page, 'player-info-button');
+  expect((await video(page)).playing).toBe(true);
+});
+
+test('the tools row fits the screen at its widest: a series, subtitles off, and Quality saying why it has nothing', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      'tt8000001:1:1': [
+        { name: 'Test Streams', description: 'Open Movie WEBRip', path: '/movie-other.webm' },
+      ],
+    },
+  });
+  await playFirstEpisode(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await expect(page.locator('[data-focus-key="player-quality-button"]')).toContainText(
+    'No other quality found',
+  );
+  const keys = await page
+    .locator('[data-focus-key^="player-"][data-focus-key$="-button"]')
+    .evaluateAll((chips) => chips.map((chip) => chip.getAttribute('data-focus-key')));
+  expect(keys).toEqual([
+    'player-tracks-button',
+    'player-quality-button',
+    'player-streams-button',
+    'player-episodes-button',
+    'player-info-button',
+  ]);
+  // Inside the safe area: 96px from each side of the 1920px screen.
+  const last = (await page.locator('[data-focus-key="player-info-button"]').boundingBox())!;
+  expect(last.x + last.width).toBeLessThanOrEqual(1920 - 96);
+});
+
+/** Repeats a held OK as the remote does, more slowly than navigation's 100 ms throttle, then lets go. */
+async function holdOk(page: Page, repeats: number) {
+  for (let i = 0; i < repeats; i++) {
+    await page.waitForTimeout(150);
+    await page.keyboard.down('Enter');
+  }
+  await page.keyboard.up('Enter');
+}
+
+test('a held OK opens a menu and leaves it open, but still repeats on what it went down on', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  // The remote sends a held OK as one press and then its repeats: they must
+  // not press the choice the menu opened on, which would close it again.
+  await page.keyboard.down('Enter');
+  await expectFocus(page, 'player-quality-0');
+  await holdOk(page, 3);
+  await page.waitForTimeout(300);
+  await expectFocus(page, 'player-quality-0');
+  await press(page, 'Enter', 'player-quality-button');
+  // Held on Forward 10 s, which had focus when it went down, OK keeps adding 10 s.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  const from = (await video(page)).time;
+  await page.keyboard.down('Enter');
+  await holdOk(page, 2);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 28);
 });
 
 test('a click on the picture hides the controls and another brings them back; the arrow at the top leaves', async ({

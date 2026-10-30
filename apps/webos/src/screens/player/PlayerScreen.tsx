@@ -1,12 +1,16 @@
 import {
-  findBingeStream,
+  bingeEntry,
+  type BingeHint,
+  bingeHint,
+  languageName,
   nextVideo,
   parseRuntime,
   playedCard,
+  type QualityReference,
   qualityChoices,
   type StreamEntry,
 } from '@bannertv/core';
-import type { MetaPreview } from '@bannertv/protocol';
+import type { MetaPreview, Video } from '@bannertv/protocol';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import {
   type MouseEvent,
@@ -34,18 +38,22 @@ import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
 import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
+import { playTrailer } from '../../platform/youtube';
 import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
-import { entryKey, holdProbing, streamFinder } from '../../player/finder';
+import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
 import { formatTime } from '../../player/media';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
   type PlaybackSession,
 } from '../../player/session';
+import { EpisodesSheet } from './EpisodesSheet';
+import { InfoSheet } from './InfoSheet';
 import { type PlayerAction, PlayerControls } from './PlayerControls';
 import { PlayerProblem } from './PlayerProblem';
+import { SourcesSheet } from './SourcesSheet';
 import { SubtitleLayer } from './SubtitleLayer';
 import { type SheetTab, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
@@ -76,7 +84,10 @@ const UP_NEXT_BEFORE_END_S = 30;
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
 
-type Panel = 'tracks' | 'quality' | null;
+type Panel = 'tracks' | 'sources' | 'episodes' | 'info' | 'quality' | null;
+/** The panels that rise from the bottom over the picture: the controls make way for them. */
+const SHEETS: readonly Panel[] = ['tracks', 'sources', 'episodes', 'info'];
+const isSheet = (panel: Panel) => panel !== null && SHEETS.indexOf(panel) >= 0;
 
 interface PlayerScreenProps {
   type: string;
@@ -85,6 +96,8 @@ interface PlayerScreenProps {
   preview?: MetaPreview;
   stream?: StreamEntry;
   chosen?: boolean;
+  /** The release the episode before played, which goes first when its addon has this one. */
+  binge?: BingeHint;
   startAt?: number;
   lab?: boolean;
   /** A sports event: its own sources only, and no Continue Watching card. */
@@ -145,9 +158,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const [controls, setControls] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [panelFrom, setPanelFrom] = useState('player-play');
-  // The audio and subtitle sheet's tab, and whether Back closed it: then focus goes to the controls.
+  // The audio and subtitle sheet's tab.
   const [sheetTab, setSheetTab] = useState<SheetTab>('subtitles');
-  const closedByBack = useRef(false);
+  // How a sheet closed: Back goes to its own chip, a pick to the picture,
+  // anything else (Blue, a click above it) back to where it was opened.
+  const closedBy = useRef<'back' | 'pick' | null>(null);
+  // A stream picked in Sources stays the viewer's own through All streams and back.
+  const pickedHere = useRef(false);
   const [scrubTo, setScrubTo] = useState<number | null>(null);
   // A skip in progress: where it began, where it will land, and the timer that lands it.
   const scrub = useRef<{ origin: number; target: number; timer: number } | null>(null);
@@ -290,7 +307,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         if (cancelled) return;
         const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
         setResumedAt(start);
-        const entry = props.stream ?? (await finder.choose());
+        const entry = props.stream ?? (await finder.choose(props.binge));
         if (cancelled) return;
         if (entry) created.play(entry, start);
         else setNothing(true);
@@ -463,13 +480,30 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
 
   function openPanel(which: Panel, from: string) {
+    closedBy.current = null;
     setPanelFrom(from);
     setPanel(which);
   }
   function openTracks(from: string) {
     setSheetTab('subtitles');
-    closedByBack.current = false;
     openPanel('tracks', from);
+  }
+  /** Where focus goes when a sheet opened from its chip closes. */
+  function sheetReturn(chip: string) {
+    return () =>
+      closedBy.current === 'back'
+        ? chip
+        : closedBy.current === 'pick'
+          ? 'player-surface'
+          : panelFrom;
+  }
+  /** Back from a sheet: one level at a time, onto the controls. */
+  function backFromSheet() {
+    setPanel(null);
+    // Not while a stream opens: they would show without a picture.
+    if (waiting) return;
+    closedBy.current = 'back';
+    show();
   }
 
   // The surface holds focus while the controls are hidden, and turns keys into player actions.
@@ -570,8 +604,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
     // Behind the problem box, or while a stream opens, the controls would not
-    // show; nor under the audio and subtitle sheet, which they make way for.
-    if (problem || waiting || panel === 'tracks') return;
+    // show; nor under a sheet, which they make way for.
+    if (problem || waiting || isSheet(panel)) return;
     if (!controls) show();
     else armHide();
   };
@@ -627,7 +661,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   // The Magic Remote OK can come as a key press as well as a click. With the
   // pointer on the picture it is the picture's, before the control that kept
-  // focus takes it: Pause, or Sources, which would leave. A skip under way
+  // focus takes it: Pause, or a chip, which would open its sheet. A skip under way
   // lands on it, as OK lands one everywhere else.
   const onOkFirst = useRef<(event: KeyboardEvent) => void>(() => undefined);
   onOkFirst.current = (event) => {
@@ -709,22 +743,20 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (nearEnd && next) streamFinder(type, next.id).start();
   }, [nearEnd, next, type]);
 
-  function playNextEpisode() {
-    if (!next) return;
+  /**
+   * Plays another episode of the series (Next episode, Up Next, Episodes) on
+   * the same release from the same addon, as Stremio's binge watching does.
+   */
+  function playEpisode(target: Video) {
     session?.saveProgress();
-    const nextFinder = streamFinder(type, next.id);
-    const current = state.entry;
-    let stream: StreamEntry | undefined;
-    if (current) {
-      // The same release group from the same addon, as Stremio's binge watching does.
-      const same = nextFinder.get().entries.filter((e) => e.addonId === current.addonId);
-      const found = findBingeStream(
-        same.map((e) => e.stream),
-        current.stream.behaviorHints.bingeGroup,
-      );
-      stream = same.find((e) => e.stream === found && e.assessment.action.kind === 'play');
-    }
-    replace({ name: 'player', type, metaId, videoId: next.id, preview, stream });
+    const binge = bingeHint(state.entry);
+    // Up Next asked for the next episode's streams already: that one starts at once.
+    // Otherwise the new player waits a little for the addon's answer.
+    const stream = binge && bingeEntry(streamFinder(type, target.id).get().candidates, binge);
+    replace({ name: 'player', type, metaId, videoId: target.id, preview, stream, binge });
+  }
+  function playNextEpisode() {
+    if (next) playEpisode(next);
   }
 
   // When a film or a broadcast ends, or the viewer turned Up Next away, go back to the title's page.
@@ -732,8 +764,19 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (state.status === 'ended' && (!offersNext || upNextDismissed)) back();
   }, [state.status, offersNext, upNextDismissed]);
 
-  // Quality.
-  const choices = useMemo(() => qualityChoices(finderState.candidates), [finderState.candidates]);
+  // Quality: at each resolution, the stream closest to what plays, in the
+  // language heard and at its length, never a clip.
+  const heard = state.audio.find((track) => track.active)?.lang || undefined;
+  const length = state.duration > 0 ? state.duration : undefined;
+  const reference = useMemo(
+    (): QualityReference | undefined =>
+      state.entry ? { entry: state.entry, audioLanguage: heard, lengthSeconds: length } : undefined,
+    [state.entry, heard, length],
+  );
+  const choices = useMemo(
+    () => qualityChoices(finderState.candidates, reference, finder.orderOptions()),
+    [finderState.candidates, reference, finder],
+  );
   const currentQuality = state.entry?.facts.resolution ?? 'other';
   // Whether the Quality menu offers something smaller than what is playing.
   const lowerChoice = useMemo(() => {
@@ -861,32 +904,81 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-streams-button',
       icon: 'sources',
       label: t('player.sources'),
-      onPress: () => {
-        // Before a stream has opened, where the viewer asked to start.
-        const startAt = session && state.entry ? session.carryOn() : resumedAt;
-        const film: PlayerRoute = {
-          name: 'player',
-          type,
-          metaId,
-          videoId,
-          preview,
-          stream: state.entry ?? props.stream,
-          chosen: props.chosen,
-          startAt,
-          event: sportsEvent,
-        };
-        replace({
-          name: 'streams',
-          type,
-          metaId,
-          videoId,
-          preview,
-          startAt,
-          event: sportsEvent,
-          backTo: film,
-        });
-      },
+      onPress: () => openPanel('sources', 'player-streams-button'),
     });
+  }
+  // Anything with an episode list has Episodes, from the first frame: it
+  // never comes or goes while the video plays, only waits for the list.
+  if (metaQuery) {
+    tools.push({
+      focusKey: 'player-episodes-button',
+      icon: 'episodes',
+      label: t('player.episodes'),
+      unavailable: meta && meta.videos.length > 0 ? undefined : t('player.noEpisodeList'),
+      onPress: () => openPanel('episodes', 'player-episodes-button'),
+    });
+  }
+  // Last, and in the Lab too: what plays and what it is.
+  tools.push({
+    focusKey: 'player-info-button',
+    icon: 'info',
+    label: t('player.info'),
+    onPress: () => openPanel('info', 'player-info-button'),
+  });
+
+  /** All streams, in place of the film: Back from it comes back to the film where it was. */
+  function openAllStreams() {
+    // Before a stream has opened, where the viewer asked to start.
+    const startAt = session && state.entry ? session.carryOn() : resumedAt;
+    const film: PlayerRoute = {
+      name: 'player',
+      type,
+      metaId,
+      videoId,
+      preview,
+      stream: state.entry ?? props.stream,
+      chosen: props.chosen || pickedHere.current,
+      startAt,
+      event: sportsEvent,
+    };
+    replace({
+      name: 'streams',
+      type,
+      metaId,
+      videoId,
+      preview,
+      startAt,
+      event: sportsEvent,
+      backTo: film,
+    });
+  }
+
+  /** A stream picked in Sources plays from where the film is, and does not fail over. */
+  function chooseSource(entry: StreamEntry) {
+    const action = entry.assessment.action;
+    // The one playing: nothing to change, as with Quality.
+    if (state.entry && entryKey(entry) === entryKey(state.entry)) {
+      closedBy.current = 'pick';
+      setPanel(null);
+      return;
+    }
+    if (action.kind === 'play') {
+      closedBy.current = 'pick';
+      setPanel(null);
+      if (!session) return;
+      pickedHere.current = true;
+      // A paused film stays paused, and a note says what is coming.
+      session.play(entry, session.carryOn(), {
+        chosen: true,
+        handPicked: true,
+        paused: state.status === 'paused',
+      });
+      setSwitching({ entry });
+    } else if (action.kind === 'youtube' && entry.stream.source.kind === 'youtube') {
+      session?.pause();
+      void playTrailer(entry.stream.source.ytId).catch(() => undefined);
+    }
+    // Anything else says on its row why it can't play here.
   }
 
   const chooseAudio = (track: EngineTrack) => {
@@ -908,7 +1000,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         cues={subtitles.cues}
         offset={subtitles.offset}
         look={look}
-        lift={panel === 'tracks' ? 'sheet' : chrome ? 'controls' : 'none'}
+        lift={isSheet(panel) ? 'sheet' : chrome ? 'controls' : 'none'}
         // While the style changes, a line shows how it looks when nobody speaks.
         sample={panel === 'tracks' && sheetTab === 'style' ? t('player.sampleLine') : undefined}
       />
@@ -971,8 +1063,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       )}
 
       <PlayerControls
-        // They make way for the audio and subtitle sheet, and come back when it goes.
-        visible={chrome && panel !== 'tracks'}
+        // They make way for a sheet, and come back when it goes.
+        visible={chrome && !isSheet(panel)}
         title={title}
         subtitle={subtitle}
         facts={facts}
@@ -1008,16 +1100,55 @@ export function PlayerScreen(props: PlayerScreenProps) {
           entry={state.entry}
           tab={sheetTab}
           onTab={setSheetTab}
-          returnFocusKey={() => (closedByBack.current ? 'player-tracks-button' : panelFrom)}
+          returnFocusKey={sheetReturn('player-tracks-button')}
           onAudio={chooseAudio}
-          onBack={() => {
-            setPanel(null);
-            // Back goes one level at a time: from the tabs to the controls.
-            // Not while a stream opens: they would show without a picture.
-            if (waiting) return;
-            closedByBack.current = true;
-            show();
+          onBack={backFromSheet}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === 'sources' && (
+        <SourcesSheet
+          finder={finder}
+          playing={state.entry}
+          reference={reference}
+          returnFocusKey={sheetReturn('player-streams-button')}
+          onPick={chooseSource}
+          onAllStreams={openAllStreams}
+          onBack={backFromSheet}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === 'episodes' && meta && (
+        <EpisodesSheet
+          meta={meta}
+          videoId={videoId}
+          returnFocusKey={sheetReturn('player-episodes-button')}
+          onPlay={(target) => {
+            // The one playing: nothing to change.
+            if (target.id === videoId) {
+              closedBy.current = 'pick';
+              setPanel(null);
+            } else playEpisode(target);
           }}
+          onBack={backFromSheet}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === 'info' && (
+        <InfoSheet
+          title={title}
+          subtitle={subtitle}
+          item={item}
+          episode={episode}
+          entry={state.entry}
+          audio={state.audio}
+          duration={state.duration}
+          live={state.live}
+          engine={state.engine}
+          heavy={!!state.entry && isHeavy(state.entry, finder.runtimeSeconds())}
+          reference={reference}
+          returnFocusKey={sheetReturn('player-info-button')}
+          onBack={backFromSheet}
           onClose={() => setPanel(null)}
         />
       )}
@@ -1028,6 +1159,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
           options={choices.map((choice) => ({
             value: choice.resolution ?? 'other',
             label: resolutionLabel(choice.resolution) ?? t('player.otherQuality'),
+            detail: choice.otherLanguages
+              ? t('player.otherAudio', {
+                  languages: choice.otherLanguages.map(languageName).join(', '),
+                })
+              : undefined,
           }))}
           selected={currentQuality}
           returnFocusKey={panelFrom}

@@ -10,6 +10,8 @@ export type PlayerIconName =
   | 'subs'
   | 'quality'
   | 'sources'
+  | 'episodes'
+  | 'info'
   | 'back';
 
 const LINE = {
@@ -99,6 +101,21 @@ const GLYPHS: Record<PlayerIconName, ReactNode> = {
     <>
       <path d="M12 3.6 20.8 8 12 12.4 3.2 8Z" {...LINE} />
       <path d="M3.2 12.2 12 16.6l8.8-4.4M3.2 16.2 12 20.6l8.8-4.4" {...LINE} />
+    </>
+  ),
+  // Stacked cards.
+  episodes: (
+    <>
+      <rect x="3.4" y="8.4" width="17.2" height="11.6" rx="2.2" {...LINE} />
+      <path d="M5.8 5.4h12.4M8.2 2.6h7.6" {...LINE} />
+    </>
+  ),
+  // An i in a circle.
+  info: (
+    <>
+      <circle cx="12" cy="12" r="8.6" {...LINE} />
+      <path d="M12 11v5.4" {...LINE} />
+      <circle cx="12" cy="7.8" r="0.4" {...LINE} />
     </>
   ),
   back: (

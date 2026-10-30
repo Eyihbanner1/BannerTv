@@ -1,6 +1,9 @@
 import {
   type AddonAnswer,
   assessStream,
+  bingeEntry,
+  type BingeHint,
+  closestCandidate,
   createStore,
   describeStream,
   estimateBitrate,
@@ -10,6 +13,7 @@ import {
   type OrderOptions,
   orderStreams,
   playableCandidates,
+  type QualityReference,
   type QueryState,
   type StreamEntry,
   type StreamOrder,
@@ -26,6 +30,11 @@ import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe
 
 /** Once one stream could play, slower addons get this much longer to offer a better one. */
 export const SETTLE_AFTER_FIRST_MS = 2000;
+/**
+ * After the rest have settled, how much longer the addon whose release was
+ * playing gets to answer for the next episode, before the usual choice.
+ */
+export const BINGE_WAIT_MS = 3000;
 /** Auto-play tests at most this many links before giving up and trusting the ranking. */
 const PROBE_LIMIT = 3;
 /** A finder is reused for this long, matching how long stream lists are cached. */
@@ -63,18 +72,26 @@ export interface StreamFinder {
   /**
    * The stream auto-play should start: the best one known to work, else the
    * best ranked. Waits until the finder settles; undefined when nothing can
-   * play.
+   * play. `prefer`: the release of the episode before (Next episode, Up Next,
+   * Episodes), which goes first when its addon has it here too.
    */
-  choose(): Promise<StreamEntry | undefined>;
+  choose(prefer?: BingeHint): Promise<StreamEntry | undefined>;
   /** The next candidate to fail over to, skipping links already tried or known to fail. */
   next(tried: ReadonlySet<string>): StreamEntry | undefined;
   /** A link that failed in the player, so it is not offered again for a while. */
   markFailed(entry: StreamEntry): void;
   /**
    * The best candidate needing clearly less data than `current`, which kept
-   * buffering, skipping links already tried or known to fail.
+   * buffering, skipping links already tried or known to fail. Never a clip,
+   * nor one only in other languages than `reference` plays.
    */
-  lighter(current: StreamEntry, tried: ReadonlySet<string>): StreamEntry | undefined;
+  lighter(
+    current: StreamEntry,
+    tried: ReadonlySet<string>,
+    reference?: QualityReference,
+  ): StreamEntry | undefined;
+  /** What the order weighs streams by now: the connection, the addons' record. */
+  orderOptions(): OrderOptions;
   /** The video's running time in seconds, for judging which streams are too heavy. */
   setRuntime(seconds: number | undefined): void;
   /** The running time bitrates are worked out with: the video's own, or an assumed one. */
@@ -258,24 +275,47 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       void runProbes();
     },
 
-    choose() {
+    choose(prefer) {
       finder.start();
+      // Whether the addon of the release playing before is still to answer.
+      const answering = (addonId: string) =>
+        answers.some((answer) => {
+          const { status } = answer.query.get();
+          return (
+            answer.addon.manifest.id === addonId && (status === 'idle' || status === 'loading')
+          );
+        });
       // The ranking needs the TV's answer, which can come after the addons'.
       return tvCapabilities().then(
         () =>
           new Promise<StreamEntry | undefined>((resolve) => {
+            let waitUntil: number | undefined;
+            let timer: number | undefined;
+            let unsubscribe: (() => void) | undefined;
+            let done = false;
             const decide = () => {
+              if (done) return;
               const current = state.get();
-              if (!current.settled) return false;
+              if (!current.settled) return;
+              const binge = prefer && bingeEntry(current.candidates, prefer);
+              // A hint naming no release can find nothing: no wait for it.
+              if (prefer?.bingeGroup && !binge && answering(prefer.addonId)) {
+                waitUntil = waitUntil ?? Date.now() + BINGE_WAIT_MS;
+                const left = waitUntil - Date.now();
+                if (left > 0) {
+                  if (timer === undefined) timer = window.setTimeout(decide, left);
+                  return;
+                }
+              }
+              done = true;
+              clearTimeout(timer);
+              unsubscribe?.();
               const works = current.candidates.find((e) => probes[entryKey(e)] === 'works');
               const untried = current.candidates.find((e) => probes[entryKey(e)] !== 'failed');
-              resolve(works ?? untried ?? current.candidates[0]);
-              return true;
+              resolve(binge || works || untried || current.candidates[0]);
             };
-            if (decide()) return;
-            const unsubscribe = state.subscribe(() => {
-              if (decide()) unsubscribe();
-            });
+            decide();
+            if (!done) unsubscribe = state.subscribe(decide);
           }),
       );
     },
@@ -293,17 +333,20 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       refresh();
     },
 
-    lighter(current, tried) {
+    lighter(current, tried, reference) {
       const seconds = runtimeSeconds();
-      return state
+      const lighter = state
         .get()
-        .candidates.find(
+        .candidates.filter(
           (entry) =>
             !tried.has(entryKey(entry)) &&
             probes[entryKey(entry)] !== 'failed' &&
             isLighter(entry.facts, current.facts, seconds),
         );
+      return closestCandidate(lighter, reference ?? { entry: current });
     },
+
+    orderOptions,
 
     setRuntime(seconds) {
       const known = seconds !== undefined && isFinite(seconds) && seconds > 0 ? seconds : undefined;

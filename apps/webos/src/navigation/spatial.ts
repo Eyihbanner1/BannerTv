@@ -13,6 +13,7 @@ import { markActivity } from './activity';
 import { backStack } from './back';
 import { timeBack } from './back-timing';
 import { isBackKey, SPATIAL_KEY_MAP } from './keys';
+import { watchOkHold } from './ok-click';
 
 const WHEEL_STEP_MS = 150;
 /** Keys a timing mark names. Anything else, typing included, is "other", so marks never spell out an address. */
@@ -83,6 +84,7 @@ export function initNavigation(): void {
     layoutAdapter: RowTileAdapter,
   });
   setKeyMap(SPATIAL_KEY_MAP);
+  watchOkHold();
 
   window.addEventListener('keydown', markActivity, { capture: true, passive: true });
   if (tuning.marks) {

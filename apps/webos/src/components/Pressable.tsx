@@ -1,5 +1,6 @@
 import {
   type FocusableComponentLayout,
+  type KeyPressDetails,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -13,7 +14,7 @@ import {
 import { useScreenSlot } from '../app/screen-slot';
 import { whilePressing } from '../navigation/focus-memory';
 import { markActivity } from '../navigation/activity';
-import { answeredOk, clickCameWithOk } from '../navigation/ok-click';
+import { answeredOk, clickCameWithOk, okWentDownOn } from '../navigation/ok-click';
 import { inputMode } from '../platform/input-mode';
 
 export interface PressableProps {
@@ -43,13 +44,21 @@ export const Pressable = memo(function Pressable(props: PressableProps) {
   });
   const slot = useScreenSlot();
 
-  const onEnterPress = useCallback(() => {
-    // Focus can sit on a screen for a moment after another opens on top of it.
-    if (!slot.get()) return;
-    answeredOk();
-    const { focusKey: key, onPress } = latest.current;
-    if (onPress) whilePressing(key, onPress);
-  }, [slot]);
+  const onEnterPress = useCallback(
+    (_props: object, details?: KeyPressDetails) => {
+      // Focus can sit on a screen for a moment after another opens on top of it.
+      if (!slot.get()) return;
+      // A held OK repeats. It presses on only what had focus when it went down,
+      // never what it just opened: a sheet's first row, a menu's current choice.
+      if ((details?.pressedKeys.enter ?? 1) > 1 && okWentDownOn() !== latest.current.focusKey) {
+        return;
+      }
+      answeredOk();
+      const { focusKey: key, onPress } = latest.current;
+      if (onPress) whilePressing(key, onPress);
+    },
+    [slot],
+  );
   const onArrowPress = useCallback(() => slot.get(), [slot]);
   const onFocus = useCallback(
     (layout: FocusableComponentLayout) => latest.current.onFocus?.(layout),

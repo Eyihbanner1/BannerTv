@@ -1,4 +1,4 @@
-import { parseRuntime, SEVERE_WARNINGS, type StreamEntry, type StreamOrder } from '@bannertv/core';
+import { otherLanguages, parseRuntime, type StreamEntry, type StreamOrder } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -8,13 +8,13 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
 import { Pressable } from '../../components/Pressable';
-import { addonClient, addonCollection } from '../../data/addons';
+import { addonClient, addonNames } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
 import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
-import { streamBadges, streamTitle, warningText } from '../../player/describe';
+import { streamRowText, streamsStatus } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, streamFinder } from '../../player/finder';
 import styles from './StreamsScreen.module.css';
 
@@ -34,10 +34,6 @@ interface StreamsScreenProps {
   event?: EventPlay;
   /** Sent from the player's Sources: Back goes back to the film, where it was. */
   backTo?: PlayerRoute;
-}
-
-function addonNames(): Map<string, string> {
-  return new Map(addonCollection.get().addons.map((a) => [a.manifest.id, a.manifest.name]));
 }
 
 /**
@@ -122,33 +118,17 @@ export function StreamsScreen(props: StreamsScreenProps) {
   const rows = [];
   for (let index = first; index < last; index++) {
     const entry = entries[index]!;
-    const playable = entry.assessment.action.kind === 'play';
-    const badges = streamBadges(entry.facts);
-    if (entry.facts.cached === true) badges.push(t('streams.cached'));
-    // Most serious first: what stops a picture or sound, then a file too big for the connection.
-    const warnings = entry.assessment.warnings;
-    const severe = warnings.filter((w) => SEVERE_WARNINGS.has(w)).length;
-    const notes = warnings.map((w) => warningText(t, w));
-    if (playable && isHeavy(entry, finder.runtimeSeconds()))
-      notes.splice(severe, 0, t('streams.heavy'));
+    const { title, badges, playable, note, notes } = streamRowText(t, entry, {
+      heavy: isHeavy(entry, finder.runtimeSeconds()),
+      languages: otherLanguages(entry.facts),
+    });
     const probe = state.probes[entryKey(entry)];
     const name = names.get(entry.addonId) ?? entry.addonId;
-    const title = streamTitle(entry);
-    const reason = playable
-      ? notes[0] &&
-        (notes.length > 1
-          ? t('streams.moreNotes', { note: notes[0], count: notes.length - 1 })
-          : notes[0])
-      : t(
-          `streams.cannot.${entry.assessment.action.kind === 'unavailable' ? entry.assessment.action.reason : entry.assessment.action.kind}`,
-        );
     rows.push(
       <Pressable
         key={entryKey(entry)}
         focusKey={`streams-item-${index}`}
-        label={[name, title, badges.join(', '), ...(playable ? notes : [reason])]
-          .filter(Boolean)
-          .join('. ')}
+        label={[name, title, badges.join(', '), ...notes].filter(Boolean).join('. ')}
         className={playable ? styles.stream : `${styles.stream} ${styles.unplayable}`}
         focusedClassName={styles.focused}
         style={{ top: index * ITEM_HEIGHT }}
@@ -169,18 +149,13 @@ export function StreamsScreen(props: StreamsScreenProps) {
             ))}
             {probe === 'works' && <span className={styles.works}>{t('streams.tested')}</span>}
           </p>
-          {reason && <p className={playable ? styles.warning : styles.reason}>{reason}</p>}
+          {note && <p className={playable ? styles.warning : styles.reason}>{note}</p>}
         </div>
       </Pressable>,
     );
   }
 
-  const status =
-    state.pending > 0
-      ? t('streams.asking', { count: state.pending })
-      : state.failed.length > 0
-        ? t('streams.failed', { count: state.failed.length })
-        : t('streams.count', { count: entries.length });
+  const status = streamsStatus(t, state, entries.length);
 
   return (
     <section className={styles.screen} aria-label={t('streams.title')}>

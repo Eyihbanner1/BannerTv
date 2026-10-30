@@ -104,7 +104,7 @@ function preview(type: string, [id, name, year]: readonly [string, string, strin
   };
 }
 
-function seriesMeta(id: string) {
+function seriesMeta(id: string, upcoming: readonly string[] = []) {
   const entry = SERIES.find(([seriesId]) => seriesId === id);
   if (!entry) return null;
   const videos = [];
@@ -119,7 +119,9 @@ function seriesMeta(id: string) {
         name: season === 0 ? 'Behind the scenes' : `Season ${season} episode ${episode}`,
         season,
         number: episode,
-        released: `202${season}-0${episode > 9 ? 9 : episode}-01T00:00:00.000Z`,
+        released: upcoming.includes(`${id}:${season}:${episode}`)
+          ? '2099-01-01T00:00:00.000Z'
+          : `202${season}-0${episode > 9 ? 9 : episode}-01T00:00:00.000Z`,
         thumbnail: `https://episodes.metahub.space/${id}/${season}/${episode}/w780.jpg`,
         overview: `What happens in season ${season}, episode ${episode}.`,
       });
@@ -205,6 +207,8 @@ export interface MockOptions {
    * undefined instead of a promise falls through to the usual list.
    */
   catalogs?: Record<string, (route: Route) => Promise<void> | undefined>;
+  /** Episodes, by video id, that the series lists as not out yet. */
+  upcoming?: readonly string[];
 }
 
 /** The pairing relay, played by the test: it plays the phone too. */
@@ -376,7 +380,9 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
     const meta = /^\/meta\/(movie|series)\/([^/]+)\.json$/.exec(path);
     if (meta) {
       const id = decodeURIComponent(meta[2]!);
-      return json(route, { meta: meta[1] === 'series' ? seriesMeta(id) : movieMeta(id) });
+      return json(route, {
+        meta: meta[1] === 'series' ? seriesMeta(id, options.upcoming) : movieMeta(id),
+      });
     }
     return json(route, { error: 'not found' }, 404);
   });

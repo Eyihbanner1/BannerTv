@@ -5,6 +5,7 @@ import {
   estimateBitrate,
   type ProgressTracker,
   type ProgressUpdate,
+  type QualityReference,
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
@@ -77,6 +78,8 @@ export interface SessionState {
   text: EngineTrack[];
   /** Cues from the stream's own subtitle tracks, by track id. */
   streamCues: Readonly<Record<string, Cue[]>>;
+  /** The playback speed; every stream starts at 1. */
+  rate: number;
 }
 
 export interface SessionOptions {
@@ -105,8 +108,14 @@ export interface PlaybackSession {
    * Opens a stream at `startAt` seconds. `chosen`: the viewer picked this
    * stream, so it is not swapped for a lighter one when it buffers. `paused`:
    * the viewer had paused the one it replaces (Quality), so it opens paused.
+   * `handPicked`: the viewer picked it from a list (Sources), so it does not
+   * fail over to another either; the problem box says it won't play.
    */
-  play(entry: StreamEntry, startAt: number, options?: { chosen?: boolean; paused?: boolean }): void;
+  play(
+    entry: StreamEntry,
+    startAt: number,
+    options?: { chosen?: boolean; paused?: boolean; handPicked?: boolean },
+  ): void;
   /** Moves to the best stream not tried yet, where playback is now. False when none is left. */
   playNext(): boolean;
   /** Whether playNext has somewhere to go. */
@@ -146,6 +155,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   audio: [],
   text: [],
   streamCues: {},
+  rate: 1,
 };
 
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
@@ -163,6 +173,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let startedPlaying = false;
   // The viewer picked the stream playing now (the Quality menu), so buffering does not replace it.
   let viewerChose = false;
+  // Picked from the list of streams (Sources), so a failure stops at the problem box.
+  let handPicked = false;
   // Buffering of this attempt that the connection caused: when each began and how long it lasted.
   let rebuffers: Array<{ at: number; ms: number }> = [];
   let bufferingSince: number | undefined;
@@ -289,7 +301,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       finder.markFailed(entry);
     }
     const resumeAt = carryOn();
-    const next = options.autoFailover && failovers < MAX_FAILOVERS ? finder.next(tried) : undefined;
+    const next =
+      options.autoFailover && !handPicked && failovers < MAX_FAILOVERS
+        ? finder.next(tried)
+        : undefined;
     if (next) {
       failovers++;
       // A film the viewer paused stays paused on the stream that takes over.
@@ -348,7 +363,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (bitrate !== undefined && keep) bandwidth.struggled(bitrate, limitBefore);
     const lighter =
       options.autoFailover && !viewerChose && stepDowns < MAX_STEP_DOWNS
-        ? finder.lighter(entry, tried)
+        ? finder.lighter(entry, tried, reference(entry))
         : undefined;
     if (!lighter) {
       patch({ struggling: true });
@@ -357,6 +372,16 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     stepDowns++;
     session.play(lighter, carryOn());
     patch({ steppedDown: true });
+  }
+
+  /** What plays, as a lighter stream should match it: the language heard, the length. */
+  function reference(entry: StreamEntry): QualityReference {
+    const length = durationNow();
+    return {
+      entry,
+      audioLanguage: engine?.audioTracks().find((track) => track.active)?.lang || undefined,
+      lengthSeconds: length > 0 ? length : undefined,
+    };
   }
 
   function armStall(current: number) {
@@ -575,6 +600,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       pausedByViewer = playOptions?.paused === true;
       reportedWorked = false;
       viewerChose = playOptions?.chosen === true;
+      handPicked = playOptions?.handPicked === true;
       rebuffers = [];
       bufferingSince = undefined;
       judgedStruggling = false;
@@ -597,6 +623,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         audio: [],
         text: [],
         streamCues: {},
+        rate: 1,
       });
       // Like a pause before the first picture: no start clock until the viewer plays.
       if (!pausedByViewer) armStart(current);
@@ -716,7 +743,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       video.currentTime = target;
       engine?.seeked?.();
       tracker?.seeked(target);
-      patch({ position: target });
+      // Back from the end it is paused there, not ended: Play goes on from it.
+      if (state.get().status === 'ended' && target < duration - 1) {
+        patch({ status: 'paused', position: target });
+      } else patch({ position: target });
       save();
       if (!live && savedLength() > 0) seekedToPlace = true;
     },

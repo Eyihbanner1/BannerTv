@@ -1,4 +1,5 @@
 import type { Stream } from '@bannertv/protocol';
+import { releaseGroup } from './release';
 import type {
   AudioFormat,
   Channels,
@@ -50,6 +51,8 @@ interface Draft {
   /** The worst cinema recording named: it decides, whatever else the text says. */
   cinema?: ReleaseSource;
   multi: boolean;
+  /** Named a sample, trailer, teaser or featurette. */
+  sample: boolean;
   languages: string[];
   /** Where the description starts in the text: the file name and link before it have lost their extensions. */
   descriptionFrom: number;
@@ -228,6 +231,14 @@ const RULES: readonly Rule[] = [
     pattern: 'multi(?:[ ._-]?(?:audio|lang(?:uage)?)s?)?|dual(?:[ ._-]?audio)?',
     apply: (draft) => {
       draft.multi = true;
+    },
+    titleWord: true,
+  },
+  // A short clip, not the video. "Trailer.Park.Boys.S01E01" is a title.
+  {
+    pattern: 'sample|trailer|teaser|featurette',
+    apply: (draft) => {
+      draft.sample = true;
     },
     titleWord: true,
   },
@@ -740,17 +751,40 @@ function readCache(name: string, description: string): CacheState {
   return state;
 }
 
+/** A line that names a release: a year, a season or episode, or a resolution. */
+const RELEASE_LINE = /(?:^|[^a-z0-9])(?:(?:19|20)\d\d|s\d\d?(?:e\d{1,3})?|\d{3,4}[pi])(?![a-z0-9])/;
+
+function groupOnLine(line: string): string | undefined {
+  return RELEASE_LINE.test(line) ? releaseGroup(line) : undefined;
+}
+
+/**
+ * The release group, from the file name, else from the first line of the
+ * description that names a release. Never from the link, which can carry
+ * account keys.
+ */
+function readReleaseGroup(fileWords: string, description: string): string | undefined {
+  const fromFile = groupOnLine(fileWords);
+  if (fromFile !== undefined) return fromFile;
+  for (const line of description.split('\n')) {
+    const group = groupOnLine(line);
+    if (group !== undefined) return group;
+  }
+  return undefined;
+}
+
 function containerOf(fileName: string): Container | undefined {
   const match = EXTENSION.exec(fileName);
   return match ? CONTAINERS[match[1]!] : undefined;
 }
 
 /**
- * Reads resolution, HDR, codecs, audio, size, seeders, cache state, languages
- * and container out of a stream's name, description, filename and URL.
- * Addons write these as free text in many styles (Torrentio, Comet,
- * MediaFusion, AIOStreams …), so this is a set of tolerant patterns, never a
- * strict grammar; anything it cannot read is left out.
+ * Reads resolution, HDR, codecs, audio, size, seeders, cache state,
+ * languages, container, release group and the sample mark out of a stream's
+ * name, description, filename and URL. Addons write these as free text in
+ * many styles (Torrentio, Comet, MediaFusion, AIOStreams …), so this is a set
+ * of tolerant patterns, never a strict grammar; anything it cannot read is
+ * left out.
  *
  * Where the parts disagree, the file name wins, then the link's file name,
  * then the description, then the name: an addon's name tag is its own guess
@@ -779,6 +813,7 @@ export function describeStream(stream: Stream): StreamFacts {
     audio: 0,
     remux: false,
     multi: false,
+    sample: false,
     languages: [],
     descriptionFrom: fileWords.length + urlWords.length + 2,
   };
@@ -859,5 +894,9 @@ export function describeStream(stream: Stream): StreamFacts {
 
   const container = containerOf(fileName) ?? containerOf(urlName);
   if (container) facts.container = container;
+
+  const group = readReleaseGroup(fileWords, description);
+  if (group !== undefined) facts.releaseGroup = group;
+  if (draft.sample) facts.sample = true;
   return facts;
 }

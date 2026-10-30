@@ -1,4 +1,4 @@
-import { createStore, type SportEvent, type StreamEntry } from '@bannertv/core';
+import { type BingeHint, createStore, type SportEvent, type StreamEntry } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
@@ -68,6 +68,11 @@ export type Route =
       stream?: StreamEntry;
       /** The viewer picked `stream` by hand, so the player asks before moving to another. */
       chosen?: boolean;
+      /**
+       * The release the episode before played (Next episode, Up Next,
+       * Episodes): it goes first when its addon has this video too. Never a link.
+       */
+      binge?: BingeHint;
       startAt?: number;
       /** A Lab test stream: no addons are asked and nothing is remembered. */
       lab?: boolean;
