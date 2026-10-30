@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSubtitles } from './subtitles';
+import { loadSubtitles, plainId } from './subtitles';
 
 const CHUNK = new Uint8Array(64 * 1024);
 const MB = 1024 * 1024;
@@ -30,6 +30,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('plainId', () => {
+  it('keeps an addon’s plain id, and hashes a link, so no key ever holds one', () => {
+    expect(plainId('en1')).toBe('en1');
+    expect(plainId('1954741')).toBe('1954741');
+    const link = 'https://subs.example.com/account-key/file.srt';
+    const hashed = plainId(link);
+    expect(hashed).toMatch(/^h[0-9a-z]+$/);
+    expect(hashed).toBe(plainId(link));
+    expect(hashed).not.toBe(plainId('https://subs.example.com/account-key/other.srt'));
+  });
 });
 
 describe('loadSubtitles', () => {

@@ -677,17 +677,6 @@
   margin-right: 20px;
 }
 
-.panelTitle {
-  margin: 0 0 16px;
-  font: var(--bt-text-heading);
-}
-
-.panelHint {
-  margin: 0 0 16px;
-  font: var(--bt-text-body);
-  color: var(--bt-text-muted);
-}
-
 .problemTitle {
   margin: 0 0 24px;
   font: var(--bt-text-heading);

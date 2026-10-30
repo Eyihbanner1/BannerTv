@@ -1,6 +1,7 @@
 import {
   createHomeLayout,
   createLibrary,
+  createSubtitleOffsets,
   createTrackMemory,
   createWatchedSet,
 } from '@bannertv/core';
@@ -15,6 +16,9 @@ export const watchedSet = createWatchedSet({ storage: profileKv });
 /** Audio and subtitle languages chosen per title (ADR 0004, item 7). */
 export const trackMemory = createTrackMemory({ storage: profileKv });
 
+/** How much later or earlier the viewer moved each subtitle file. */
+export const subtitleOffsets = createSubtitleOffsets({ storage: profileKv });
+
 /** The order and visibility of the profile's Home rows (ADR 0004, item 8). */
 export const homeLayout = createHomeLayout({ storage: profileKv });
 
@@ -23,5 +27,6 @@ export function startLibraryData(): void {
   void library.load();
   void watchedSet.load();
   void trackMemory.load();
+  void subtitleOffsets.load();
   void homeLayout.load();
 }
