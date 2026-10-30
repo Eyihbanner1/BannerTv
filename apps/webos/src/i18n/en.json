@@ -214,6 +214,7 @@
     "startOver": "Start over",
     "backTo": "Back to {{time}}",
     "nextEpisode": "Next episode",
+    "nextIn": "Next in {{seconds}} s",
     "back10": "Back 10 s",
     "forward10": "Forward 10 s",
     "leave": "Back",

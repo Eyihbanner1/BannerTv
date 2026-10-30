@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { DEMO_ROW, FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import {
   COMMENTARY_HLS_PATH,
@@ -449,13 +449,19 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
 
-  // In the last 30 seconds (10 s into the 40 s file) the card takes focus.
+  // In the last 30 seconds (10 s into the 40 s file) the card takes focus,
+  // counting to the real end of the episode.
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
     'data-focus-key',
     'player-upnext-play',
     { timeout: 15000 },
   );
   await expect(page.getByText('Up next')).toBeVisible();
+  await expectCountToEnd(
+    page,
+    page.locator('[data-focus-key="player-upnext-play"]'),
+    /^Play now \((\d+)\)$/,
+  );
 
   // The pointer heading for the card does not bring the controls up and move it.
   const card = page.getByRole('dialog', { name: 'Up next' });
@@ -471,19 +477,30 @@ test('near the end of an episode, Up Next plays the next one from the same relea
     document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: false } })),
   );
 
-  // Pause closes it, and focus goes to the controls Pause brought up.
+  // Pause closes it, and focus goes to the controls Pause brought up. Paused, nothing counts.
   await page.keyboard.press('Pause');
   await expect(page.getByText('Up next')).toHaveCount(0);
   await expectFocus(page, 'player-play');
+  const nextButton = page.locator('[data-focus-key="player-next"]');
+  await expect(nextButton).toHaveAttribute('aria-label', 'Next episode');
 
-  // Playing again brings it back: the controls give way to it and do not take focus from it.
-  await press(page, 'Enter', 'player-upnext-play');
+  // Playing again, the controls stay and the count goes on Next episode, to the
+  // same end; once they hide, the card comes back with focus.
+  await press(page, 'Enter', 'player-play');
+  await expect(card).toHaveCount(0);
+  await expectCountToEnd(page, nextButton, /^Next in (\d+) s$/);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 8000 },
+  );
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
-  await page.waitForTimeout(6000);
-  await expectFocus(page, 'player-upnext-play');
-  // A skip behind the card says where it lands, as with the controls hidden.
+  // A skip takes the card away, and its note says where it lands; the card
+  // comes back with focus once it has.
   await pressCode(page, FAST_FORWARD);
+  await expect(card).toHaveCount(0);
   await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
+  await expectFocus(page, 'player-upnext-play');
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(() => mock.streams).toContain('series/tt8000001:1:2');
@@ -498,6 +515,129 @@ test('near the end of an episode, Up Next plays the next one from the same relea
     'data-focus-key',
     /^details-/,
   );
+});
+
+/**
+ * Up Next's count, on `where`, is the seconds left to the end of the 40 s
+ * file: its ending is never cut.
+ */
+async function expectCountToEnd(page: Page, where: Locator, pattern: RegExp) {
+  await expect(where).toHaveAttribute('aria-label', pattern);
+  const label = (await where.getAttribute('aria-label')) ?? '';
+  const { time } = await video(page);
+  const count = Number(pattern.exec(label)?.[1]);
+  expect(count).toBeLessThanOrEqual(30);
+  expect(Math.abs(count - (40 - time))).toBeLessThanOrEqual(1.5);
+}
+
+/** The episode playing, as the controls name it. */
+async function episodePlaying(page: Page) {
+  await press(page, 'ArrowUp', 'player-play');
+  const name = await page
+    .locator('section[aria-label="Morevna Project"]:visible')
+    .getByText(/^S\d+:E\d+/)
+    .first()
+    .textContent();
+  await pressBack(page);
+  return name;
+}
+
+test('Up Next comes back after a rewind, and the next episode starts as this one ends', async ({
+  page,
+}) => {
+  test.slow();
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await playFirstEpisode(page);
+  await page.evaluate(() =>
+    document.addEventListener(
+      'ended',
+      () => document.body.setAttribute('data-ended', String(performance.now())),
+      true,
+    ),
+  );
+
+  // Kept watching: the card goes, and stays gone into the end.
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
+  await pressBack(page);
+  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expectFocus(page, 'player-surface');
+  await page.waitForTimeout(1500);
+  await expect(page.getByText('Up next')).toHaveCount(0);
+
+  // A rewind well back from the end brings it back for the end.
+  await pressCode(page, REWIND);
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(8);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
+
+  // Left to count, it plays on into the next episode only once this one has ended.
+  await pressCode(page, FAST_FORWARD);
+  await pressCode(page, FAST_FORWARD);
+  await expectFocus(page, 'player-upnext-play');
+  expect(await page.locator('body').getAttribute('data-ended')).toBeNull();
+  await expect.poll(async () => (await video(page)).time, { timeout: 15000 }).toBeLessThan(5);
+  expect(await page.locator('body').getAttribute('data-ended')).not.toBeNull();
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect(await episodePlaying(page)).toMatch(/^S1:E2/);
+});
+
+test('an end held by a sheet waits for it, then counts 10 s to the next episode', async ({
+  page,
+}) => {
+  test.slow();
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await playFirstEpisode(page);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
+  await pressCode(page, FAST_FORWARD);
+  await pressCode(page, FAST_FORWARD);
+  await expectFocus(page, 'player-upnext-play');
+
+  // Audio & subtitles over the end: the card gives way, and the end waits for the sheet.
+  await pressCode(page, BLUE);
+  const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
+  await expect(sheet).toBeVisible();
+  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect
+    .poll(
+      () =>
+        page
+          .locator('video:not([aria-hidden])')
+          .evaluate((element: HTMLVideoElement) => element.ended),
+      { timeout: 15000 },
+    )
+    .toBe(true);
+  await page.waitForTimeout(1500);
+  await expect(sheet).toBeVisible();
+  expect(
+    await page.locator('video:not([aria-hidden])').evaluate((e: HTMLVideoElement) => e.ended),
+  ).toBe(true);
+
+  // Closed, the card counts 10 s, then the next episode plays.
+  await pressCode(page, BLUE);
+  await expect(sheet).toHaveCount(0);
+  const play = page.locator('[data-focus-key="player-upnext-play"]');
+  await expect(play).toHaveAttribute('aria-label', /^Play now \((10|9)\)$/);
+  await expectFocus(page, 'player-upnext-play');
+  await page.waitForTimeout(3000);
+  await expect(play).toHaveAttribute('aria-label', /^Play now \([5-7]\)$/);
+  await expect.poll(async () => (await video(page)).time, { timeout: 12000 }).toBeLessThan(5);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect(await episodePlaying(page)).toMatch(/^S1:E2/);
 });
 
 test('HLS with audio and subtitle choices plays through hls.js, and both show in the sheet', async ({

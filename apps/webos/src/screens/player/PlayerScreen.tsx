@@ -2,13 +2,18 @@ import {
   bingeEntry,
   type BingeHint,
   bingeHint,
+  endAction,
+  inLastStretch,
   languageName,
   nextVideo,
   parseRuntime,
   playedCard,
   type QualityReference,
   qualityChoices,
+  rearms,
+  secondsToEnd,
   type StreamEntry,
+  UP_NEXT_AFTER_END_S,
 } from '@bannertv/core';
 import type { MetaPreview, Video } from '@bannertv/protocol';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
@@ -79,8 +84,6 @@ const BACK_AFTER_HIDE_MS = 2000;
 const LEAVE_HINT_MS = 3000;
 /** What the pointer can press in the player; anywhere else is the picture. */
 const CONTROL = '[role="button"], [role="slider"]';
-/** The Up Next card shows this long before the end. */
-const UP_NEXT_BEFORE_END_S = 30;
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
 
@@ -204,30 +207,62 @@ export function PlayerScreen(props: PlayerScreenProps) {
     () => (meta ? nextVideo(meta, videoId, Date.now()) : undefined),
     [meta, videoId],
   );
-  // Up Next: the last 30 seconds of an episode, or its end. Never during a live broadcast.
-  const offersNext = !!next && !state.live;
-  const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
-  const showUpNext =
-    offersNext &&
-    !upNextDismissed &&
-    !panel &&
-    (state.status === 'ended' || (remaining <= UP_NEXT_BEFORE_END_S && state.status === 'playing'));
-  // The controls wait to hide while the Up Next card is open (they give way to
-  // it, and focus stays on the card), behind a panel, and while Start over
-  // offers to go back.
-  const upNextOpen = useRef(showUpNext);
+  // The controls wait to hide behind a panel, and while Start over offers to go back.
   const panelOpen = useRef(false);
   const offeringUndo = useRef(false);
   useEffect(() => {
-    upNextOpen.current = showUpNext;
     panelOpen.current = panel !== null;
     offeringUndo.current = undo !== null;
   });
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
-  // Whether the controls show. Up Next takes the bottom of the screen and focus
-  // while it shows: the controls give way and come back when it goes.
-  const chrome = controls && !waiting && !showUpNext;
+  // Whether the controls show.
+  const chrome = controls && !waiting;
+
+  // Up Next, in the last 30 seconds of an episode: a card while nothing else
+  // is on screen, else the count on Next episode. It counts to the real end,
+  // in watching seconds, so the ending is never cut. Never on a broadcast.
+  const offersNext = !!next && !state.live;
+  const ended = state.status === 'ended';
+  const running = state.status === 'playing' || state.status === 'buffering';
+  const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
+  // What holds the end, and keeps the card away: a sheet or menu, a skip on
+  // its way, a stream starting, the problem box.
+  const held = panel !== null || scrubTo !== null || waiting || problem;
+  // A rewind well back from the end brings a dismissed Up Next back.
+  if (upNextDismissed && !waiting && rearms(state.position, state.duration, state.rate)) {
+    setUpNextDismissed(false);
+  }
+  const counting = inStretch && !upNextDismissed && !held;
+  // Whether the count was on screen as the episode played into its end: the
+  // next one then starts as it ends. Kept through the pause the video makes as it ends.
+  const [countSeen, setCountSeen] = useState(false);
+  if (running && countSeen !== counting) setCountSeen(counting);
+  // Whether anything has held the end since the video ended.
+  const [heldAtEnd, setHeldAtEnd] = useState(false);
+  const holdsEnd = ended && (heldAtEnd || held);
+  if (heldAtEnd !== holdsEnd) setHeldAtEnd(holdsEnd);
+  // The short count after an end nobody saw counted down, once nothing holds it.
+  const [afterEnd, setAfterEnd] = useState<number | null>(null);
+  if (afterEnd !== null && (!ended || held)) setAfterEnd(null);
+  const decision = ended
+    ? endAction({
+        hasNext: offersNext,
+        live: state.live,
+        dismissed: upNextDismissed,
+        held,
+        countedOnScreen: (countSeen && !heldAtEnd) || afterEnd === 0,
+        sleepsHere: false,
+        stillWatching: false,
+      })
+    : null;
+  const countsAfterEnd = decision === 'hold' && !held;
+  const showsCount = !upNextDismissed && (ended ? countsAfterEnd : counting && running);
+  const count = ended
+    ? (afterEnd ?? UP_NEXT_AFTER_END_S)
+    : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
+  // The controls win: with them up, the count is on Next episode instead.
+  const cardUp = showsCount && !chrome;
 
   const subtitles = useSubtitles(
     type,
@@ -361,7 +396,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   function armHide() {
     clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (session?.get().status !== 'playing' || upNextOpen.current || panelOpen.current) return;
+      if (session?.get().status !== 'playing' || panelOpen.current) return;
       if ((pointerOnChrome.current && inputMode.get() === 'pointer') || offeringUndo.current) {
         armHide();
         return;
@@ -391,13 +426,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     },
     [],
   );
-  // Paused, buffering, failed or offering the next episode: the controls stay up.
+  // Paused, buffering or failed: the controls stay up.
   useEffect(() => {
-    if (controls && !panel && !showUpNext && state.status === 'playing') armHide();
+    if (controls && !panel && state.status === 'playing') armHide();
     else clearTimeout(hideTimer.current);
     // armHide only reads refs and the session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controls, panel, state.status, showUpNext]);
+  }, [controls, panel, state.status]);
 
   /**
    * One press of a skip: each adds to a total that lands once, a moment after
@@ -604,8 +639,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
     // Behind the problem box, or while a stream opens, the controls would not
-    // show; nor under a sheet, which they make way for.
-    if (problem || waiting || isSheet(panel)) return;
+    // show; nor under a sheet, which they make way for. Nor over Up Next,
+    // which would go from under the pointer heading for it.
+    if (problem || waiting || isSheet(panel) || cardUp) return;
     if (!controls) show();
     else armHide();
   };
@@ -614,7 +650,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // a notch shows them, on Pause, as Up and Down do. Otherwise it moves between
   // rows, as everywhere else, and keeps the controls up.
   const onWheel = (event: WheelEvent) => {
-    if (event.deltaY === 0 || panel || problem || showUpNext) return;
+    if (event.deltaY === 0 || panel || problem || cardUp) return;
     const now = Date.now();
     const at = focusedKey();
     // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
@@ -646,7 +682,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // A click on the picture shows the controls, or hides them. A click on a
   // control is that control's, and so is a click after the wheel moved focus
   // to one: the Magic Remote sends its OK as a click alone while the pointer shows.
-  const picturePressable = () => !problem && !waiting && !panel && !showUpNext;
+  const picturePressable = () => !problem && !waiting && !panel && !cardUp;
   function pressPicture() {
     if (controls) hide();
     else show('player-play');
@@ -699,8 +735,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const wanted = wantsControls.current;
     wantsControls.current = false;
     if (problem || panel) return;
-    // Up Next, showing from this render, has focus: the controls wait behind it.
-    if (wanted || state.status === 'paused') show(showUpNext ? undefined : 'player-play');
+    if (wanted || state.status === 'paused') show('player-play');
     // Only the change of waiting matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waiting]);
@@ -736,9 +771,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel]);
 
-  // Up Next. The next episode's streams are asked for well before the card,
-  // so reading them does not slow the countdown and the episode starts at once.
-  const nearEnd = showUpNext || remaining <= NEXT_STREAMS_BEFORE_END_S;
+  // The next episode's streams are asked for well before Up Next, so reading
+  // them does not hold up the count, and the episode starts at once.
+  const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
+  const nearEnd = ended || remaining <= NEXT_STREAMS_BEFORE_END_S;
   useEffect(() => {
     if (nearEnd && next) streamFinder(type, next.id).start();
   }, [nearEnd, next, type]);
@@ -759,10 +795,36 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (next) playEpisode(next);
   }
 
-  // When a film or a broadcast ends, or the viewer turned Up Next away, go back to the title's page.
+  // As Up Next goes with focus, focus goes to the controls that came up in its
+  // place, else to the picture; a sheet or the problem box takes it itself.
+  const hadCard = useRef(cardUp);
   useEffect(() => {
-    if (state.status === 'ended' && (!offersNext || upNextDismissed)) back();
-  }, [state.status, offersNext, upNextDismissed]);
+    if (cardUp === hadCard.current) return;
+    hadCard.current = cardUp;
+    if (cardUp || panel || problem || focusedKey().indexOf('player-upnext') !== 0) return;
+    void setFocus(chrome ? 'player-play' : 'player-surface');
+    // Only the card going matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardUp]);
+
+  // The end: back to the title's page, or on to the next episode, once nothing holds it.
+  useEffect(() => {
+    if (decision === 'leave') back();
+    else if (decision === 'play') playNextEpisode();
+    // Only the decision matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision]);
+  // An end nobody saw counted down gets a short count of its own, on the
+  // clock: a busy TV runs timers late, and the count must not stretch.
+  useEffect(() => {
+    if (!countsAfterEnd) return;
+    const ends = Date.now() + UP_NEXT_AFTER_END_S * 1000;
+    const timer = window.setInterval(
+      () => setAfterEnd(Math.max(0, Math.ceil((ends - Date.now()) / 1000))),
+      250,
+    );
+    return () => window.clearInterval(timer);
+  }, [countsAfterEnd]);
 
   // Quality: at each resolution, the stream closest to what plays, in the
   // language heard and at its length, never a clip.
@@ -866,7 +928,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       ? {
           focusKey: 'player-next',
           icon: 'next',
-          label: t('player.nextEpisode'),
+          // Up Next's count, while the controls hide its card.
+          label: showsCount ? t('player.nextIn', { seconds: count }) : t('player.nextEpisode'),
           unavailable: offersNext ? undefined : noNextReason(),
           onPress: playNextEpisode,
         }
@@ -1084,10 +1147,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
         onLeave={back}
       />
 
-      {showUpNext && next && (
+      {cardUp && next && (
         <UpNext
           video={next}
-          returnFocusKey={controls ? 'player-play' : 'player-surface'}
+          seconds={count}
           onPlay={playNextEpisode}
           onDismiss={() => setUpNextDismissed(true)}
         />

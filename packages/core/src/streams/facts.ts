@@ -68,6 +68,11 @@ interface Rule {
   digitsMayFollow?: boolean;
   /** Also an everyday word, so it does not count in a title: "Cam (2018)", "The Italian Job". */
   titleWord?: boolean;
+  /**
+   * Counts only after the title, in brackets, or as the whole line: a title
+   * may be nothing but the word's line ("Trailer Park Boys").
+   */
+  afterTitle?: boolean;
 }
 
 function hdr(format: HdrFormat): Apply {
@@ -236,11 +241,18 @@ const RULES: readonly Rule[] = [
   },
   // A short clip, not the video. "Trailer.Park.Boys.S01E01" is a title.
   {
-    pattern: 'sample|trailer|teaser|featurette',
+    pattern: 'sample',
     apply: (draft) => {
       draft.sample = true;
     },
     titleWord: true,
+  },
+  {
+    pattern: 'trailer|teaser|featurette',
+    apply: (draft) => {
+      draft.sample = true;
+    },
+    afterTitle: true,
   },
   // Language names and the three-letter tags release names use. Tags that are
   // also common words ("por", "fin", "dan", "vie") are left out.
@@ -335,6 +347,19 @@ function inTitle(text: string, start: number, end: number, line: TitleLine): boo
     line.titleEnd = anchor ? line.start + anchor.index : -1;
   }
   return line.titleEnd >= end;
+}
+
+/** The line a clip's name alone makes: "Trailer", "Official Teaser". */
+const CLIP_LINE = /^(?:official[ ._-]+)?(?:trailer|teaser|featurette)s?$/i;
+
+/** After the line's title, in brackets, or the whole line. */
+function afterTitle(text: string, start: number, end: number, line: TitleLine): boolean {
+  const before = text.charAt(start - 1);
+  if (before === '[' || before === '(') return true;
+  // Finds the line and where its title ends.
+  if (inTitle(text, start, end, line)) return false;
+  if (line.titleEnd >= 0) return true;
+  return CLIP_LINE.test(text.slice(line.start, line.end).trim());
 }
 
 /**
@@ -827,9 +852,10 @@ export function describeStream(stream: Stream): StreamFacts {
       if (token !== undefined) {
         const rule = RULES[group - 1]!;
         const start = end - token.length;
-        if (!rule.titleWord || !inTitle(text, start, end, line)) {
-          rule.apply(draft, text, start, end);
-        }
+        const counts = rule.afterTitle
+          ? afterTitle(text, start, end, line)
+          : !rule.titleWord || !inTitle(text, start, end, line);
+        if (counts) rule.apply(draft, text, start, end);
         break;
       }
     }

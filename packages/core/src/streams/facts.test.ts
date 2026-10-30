@@ -499,6 +499,10 @@ describe('describeStream, samples and release groups', () => {
       undefined,
     );
     expect(read({ description: 'The Teaser (2019) 1080p' }).sample).toBeUndefined();
+    // A line that is only the title, as some addons write it, is not a clip.
+    expect(read({ name: 'Trailer Park Boys', description: 'S01E01 1080p' }).sample).toBeUndefined();
+    expect(read({ description: 'Trailer Park Boys\n1080p WEB 1.2 GB' }).sample).toBeUndefined();
+    expect(read({ name: 'Official Trailer' }).sample).toBe(true);
     expect(read({ description: 'Film.2020.1080p.WEB-DL.x264-GRP' }).sample).toBeUndefined();
     expect(read({ description: 'Film.2020.1080p.Samples.Included' }).sample).toBeUndefined();
   });
