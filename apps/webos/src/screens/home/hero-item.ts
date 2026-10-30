@@ -1,5 +1,6 @@
 import { createStore } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
+import { mark } from '../../platform/marks';
 
 /** The title the hero banner shows: whatever tile has focus, or Home's first title. */
 export const heroItem = createStore<MetaPreview | null>(null);
@@ -18,6 +19,7 @@ export function showInHero(item: MetaPreview | undefined, delay: number): void {
   if (!item) return;
   const timer = setTimeout(() => {
     waiting = undefined;
+    mark('hero:set');
     heroItem.set(item);
   }, delay);
   waiting = { item, timer };

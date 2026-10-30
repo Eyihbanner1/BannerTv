@@ -35,6 +35,11 @@
   opacity: 0;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: a new backdrop replaces the old at once. */
+:global(.tune-no-hero-fade) .backdrop {
+  transition: none;
+}
+
 /* A slow pan that costs one composited transform: no layout, no repaint. */
 @keyframes drift {
   from {

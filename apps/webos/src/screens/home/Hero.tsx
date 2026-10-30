@@ -1,12 +1,14 @@
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useLayoutEffect, useReducer, useRef, useSyncExternalStore } from 'react';
+import { memo, useEffect, useLayoutEffect, useReducer, useRef, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { Artwork } from '../../components/Artwork';
 import { artworkUrl } from '../../components/artwork-size';
 import { Button } from '../../components/Button';
 import { metaFacts } from '../../data/describe';
+import { mark } from '../../platform/marks';
+import { tuning } from '../../platform/tuning';
 import { backdrops, firstBackdrops } from './backdrops';
 import { heroItem, showWaitingHero } from './hero-item';
 import styles from './Hero.module.css';
@@ -15,8 +17,8 @@ export function openDetails(item: MetaPreview): void {
   push({ name: 'details', type: item.type, id: item.id, preview: item });
 }
 
-/** How long a new backdrop takes to fade in over the old one (Hero.module.css). */
-const FADE_MS = 400;
+/** How long a new backdrop takes to fade in over the old one (Hero.module.css), if it fades. */
+const FADE_MS = tuning.heroFade ? 400 : 0;
 
 const LAYER_CLASS = {
   loading: styles.backdrop,
@@ -40,10 +42,13 @@ function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  // Once the fade is over, drop what it covered or faded out.
+  // Once the fade is over, drop what it covered or faded out. With no fade,
+  // in the same render, so no frame draws both backdrops and none draws the
+  // hero twice.
   const settle = () => {
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => dispatch({ type: 'settled' }), FADE_MS);
+    if (FADE_MS === 0) dispatch({ type: 'settled' });
+    else timer.current = setTimeout(() => dispatch({ type: 'settled' }), FADE_MS);
   };
 
   const show = (id: number, image: HTMLImageElement) => {
@@ -54,6 +59,19 @@ function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string
     if (typeof image.decode === 'function') image.decode().then(reveal, reveal);
     else reveal();
   };
+
+  // For a TV trace: a new backdrop on show, and the one it covered gone.
+  const top = layers[layers.length - 1];
+  const shownId = top && top.state === 'shown' ? top.id : -1;
+  useLayoutEffect(() => {
+    if (shownId >= 0) mark('backdrop:shown');
+  }, [shownId]);
+  const covering = layers.length > 1;
+  const wasCovering = useRef(false);
+  useLayoutEffect(() => {
+    if (wasCovering.current && !covering) mark('backdrop:settled');
+    wasCovering.current = covering;
+  }, [covering]);
 
   return (
     <>
@@ -76,9 +94,10 @@ function Backdrop({ src, retrySrc }: { src: string | undefined; retrySrc: string
 
 /**
  * The big banner at the top of Home, Netflix style: the focused title's
- * backdrop, its logo, the facts line and the synopsis.
+ * backdrop, its logo, the facts line and the synopsis. It follows the hero
+ * store alone, so Home drawing again on each focus move leaves it be.
  */
-export function Hero() {
+export const Hero = memo(function Hero() {
   const { t } = useTranslation();
   const item = useSyncExternalStore(heroItem.subscribe, heroItem.get);
   const { ref, focusKey } = useFocusable<object, HTMLElement>({ focusKey: 'home-hero' });
@@ -124,4 +143,4 @@ export function Hero() {
       </section>
     </FocusContext.Provider>
   );
-}
+});

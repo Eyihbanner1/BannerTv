@@ -18,11 +18,12 @@ export type ArtworkSurface =
  * enough; large ones would cost over twice the decoding for nothing a tile
  * can show. The hero and Details share a size, so Details reuses the hero's
  * image instead of fetching another: medium by default, which measured
- * 1920x1080 on the TV, as large did.
+ * 1920x1080 on the TV, as large did. Wide tiles take medium too, unless
+ * tuning asks for small to try lighter decoding.
  */
 const SHARP_SIZE: Record<ArtworkSurface, MetahubSize> = {
   posterTile: 'medium',
-  landscapeTile: 'medium',
+  landscapeTile: tuning.wideArt,
   tileLogo: 'medium',
   backdrop: tuning.heroArt,
   titleLogo: 'large',

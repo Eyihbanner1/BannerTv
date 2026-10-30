@@ -36,3 +36,8 @@ export function markActivity(): void {
 export function activityGap(): number {
   return gap;
 }
+
+/** How long ago the latest key press (or pointer move) came. */
+export function sinceActivity(): number {
+  return Date.now() - lastAt;
+}

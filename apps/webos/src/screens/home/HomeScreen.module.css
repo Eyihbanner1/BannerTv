@@ -26,6 +26,12 @@
   transition: none;
 }
 
+/* Only Home's rows box, not each row's track, so a Down moves a layer that
+   is already drawn instead of drawing the whole box again. */
+:global(.tune-home-layer) .track {
+  will-change: transform;
+}
+
 .empty {
   padding: 200px var(--bt-safe-x) 0 var(--bt-content-inset);
 }

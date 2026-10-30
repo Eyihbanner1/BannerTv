@@ -9,11 +9,16 @@ describe('TUNING_DEFAULTS', () => {
       heroDelayMs: 250,
       heroBusyMs: 800,
       heroArt: 'medium',
+      wideArt: 'medium',
       heroPan: false,
       rowsAround: 2,
       overscan: 2,
       decoding: 'auto',
       mips: false,
+      homeLayer: false,
+      decodeAhead: true,
+      heroFade: false,
+      marks: false,
     });
   });
 });
@@ -28,7 +33,7 @@ describe('parseTuning', () => {
   it('takes valid switches and keeps the default for the rest', () => {
     expect(
       parseTuning(
-        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","heroPan":true,"decoding":"async","mips":true}',
+        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","wideArt":"small","heroPan":true,"decoding":"async","mips":true,"homeLayer":true,"decodeAhead":false,"heroFade":true,"marks":true}',
       ),
     ).toEqual({
       ...TUNING_DEFAULTS,
@@ -36,15 +41,20 @@ describe('parseTuning', () => {
       heroDelayMs: 600,
       heroBusyMs: 250,
       heroArt: 'large',
+      wideArt: 'small',
       heroPan: true,
       decoding: 'async',
       mips: true,
+      homeLayer: true,
+      decodeAhead: false,
+      heroFade: true,
+      marks: true,
     });
   });
 
   it('ignores values out of range or of the wrong kind', () => {
     const value = parseTuning(
-      '{"motion":"fly","zoom":1,"heroDelayMs":-5,"heroBusyMs":9999,"heroArt":"small","rowsAround":"3","overscan":99,"heroPan":"no","decoding":"sync","mips":0}',
+      '{"motion":"fly","zoom":1,"heroDelayMs":-5,"heroBusyMs":9999,"heroArt":"small","wideArt":"large","rowsAround":"3","overscan":99,"heroPan":"no","decoding":"sync","mips":0,"homeLayer":1,"decodeAhead":"yes","heroFade":null,"marks":[]}',
     );
     expect(value).toEqual(TUNING_DEFAULTS);
     // Every row and tile beside focus is always drawn, so 0 would mean nothing.
@@ -78,13 +88,26 @@ describe('applyTuning', () => {
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
+      'tune-no-hero-fade',
     ]);
     expect(classesFor({ ...TUNING_DEFAULTS, motion: 'layer', zoom: 'off' })).toEqual([
       'tune-motion-layer',
       'tune-zoom-off',
       'tune-no-pan',
       'tune-no-mips',
+      'tune-no-hero-fade',
     ]);
+    expect(classesFor({ ...TUNING_DEFAULTS, homeLayer: true, heroFade: true })).toEqual([
+      'tune-motion-jump',
+      'tune-zoom-instant',
+      'tune-no-pan',
+      'tune-no-mips',
+      'tune-home-layer',
+    ]);
+    // Switches that work in code add no class.
+    expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
+      classesFor({ ...TUNING_DEFAULTS }),
+    );
     expect(
       classesFor({
         ...TUNING_DEFAULTS,
@@ -92,6 +115,7 @@ describe('applyTuning', () => {
         zoom: 'animate',
         heroPan: true,
         mips: true,
+        heroFade: true,
       }),
     ).toEqual([]);
   });

@@ -352,6 +352,7 @@ test('the earlier sliding look still works from tuning', async ({ page }) => {
     heroArt: 'large',
     heroPan: true,
     mips: true,
+    heroFade: true,
   };
   await page.addInitScript(
     (value) => localStorage.setItem('bannertv.tuning', value),
