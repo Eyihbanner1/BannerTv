@@ -19,10 +19,17 @@ interface FakeEngine extends Engine {
   startAt?: number;
   /** Whether the engine says the stream is live. */
   live?: boolean;
+  /** How often the session told it the viewer moved the clock. */
+  seeks: number;
 }
 
 // plays: whether load() starts the video, as the TV's player does at once.
-const fake = vi.hoisted(() => ({ engines: [] as FakeEngine[], plays: false }));
+// fallback: the engine that takes over, once, from one that refuses a stream.
+const fake = vi.hoisted(() => ({
+  engines: [] as FakeEngine[],
+  plays: false,
+  fallback: undefined as Engine['name'] | undefined,
+}));
 
 // What the session keeps: where playback was, which addons worked, and how much data plays smoothly.
 const kept = vi.hoisted(() => ({
@@ -46,13 +53,18 @@ vi.mock('../data/playback', () => ({
 // Engines that load at once and hold whatever tracks the test gives them.
 vi.mock('./engines/choose', () => ({
   chooseEngine: () => Promise.resolve('hls.js'),
-  fallbackEngine: () => undefined,
+  fallbackEngine: (_name: Engine['name'], _url: string, tried: ReadonlySet<Engine['name']>) =>
+    fake.fallback && !tried.has(fake.fallback) ? fake.fallback : undefined,
   createEngine: (name: Engine['name'], video: HTMLVideoElement, listener: EngineListener) => {
     const engine: FakeEngine = {
       name,
       listener,
       audio: [],
       text: [],
+      seeks: 0,
+      seeked: () => {
+        engine.seeks++;
+      },
       load: (_url, startAt) => {
         engine.startAt = startAt;
         if (fake.plays) void video.play();
@@ -221,6 +233,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   fake.engines.length = 0;
   fake.plays = false;
+  fake.fallback = undefined;
   kept.progress.mockClear();
   kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
@@ -301,6 +314,75 @@ describe('a paused stream', () => {
     expect(session.get().status).toBe('loading');
     await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
     expect(markFailed).toHaveBeenCalledWith(first);
+  });
+
+  it('opens paused when it replaces one the viewer had paused, and starts its clock on Play', async () => {
+    fake.plays = true;
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+    session.pause();
+
+    // Quality on the paused film: the other stream opens paused, with no start clock.
+    session.play(second, 12, { chosen: true, paused: true });
+    await settle();
+    expect(video.paused).toBe(true);
+    expect(session.get()).toMatchObject({ status: 'paused', entry: second });
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+
+    session.resume();
+    expect(session.get().status).toBe('loading');
+    await vi.advanceTimersByTimeAsync(START_TIMEOUT_MS);
+    expect(markFailed).toHaveBeenCalledWith(second);
+  });
+
+  it('stays paused on the stream that takes over when the one opened paused fails', async () => {
+    fake.plays = true;
+    const { video, session } = setup();
+    session.play(first, 12, { chosen: true, paused: true });
+    await settle();
+    expect(session.get().status).toBe('paused');
+
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get()).toMatchObject({ status: 'paused', entry: second, failedOver: true });
+    expect(video.paused).toBe(true);
+    expect(lastEngine().startAt).toBe(12);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('carries a place picked on a stream opened paused to the next one, and tells the engine', async () => {
+    fake.plays = true;
+    const { session } = setup();
+    session.play(first, 2400, { chosen: true, paused: true });
+    await settle();
+
+    // Start over before the first picture, with the film's length known.
+    session.seek(0);
+    expect(lastEngine().seeks).toBe(1);
+    expect(session.carryOn()).toBe(0);
+  });
+
+  it('opens a fallback engine where the viewer moved a stream opened paused', async () => {
+    fake.plays = true;
+    fake.fallback = 'native';
+    const { video, session } = setup();
+    session.play(first, 2400, { chosen: true, paused: true });
+    await settle();
+    session.seek(2430);
+
+    lastEngine().listener.fatal(new PlaybackError('format', 'hls.js cannot play this'));
+    await settle();
+    expect(lastEngine()).toMatchObject({ name: 'native', startAt: 2430 });
+    expect(session.get()).toMatchObject({ status: 'paused', entry: first });
+
+    // The element the first engine let go of reads 0 for a moment: that is not a place.
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(session.carryOn()).toBe(2430);
   });
 
   it('stays paused when the engine starts the video after the viewer paused', async () => {

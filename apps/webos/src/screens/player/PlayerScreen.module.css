@@ -153,6 +153,53 @@
   z-index: 2;
 }
 
+/*
+ * A skip made with the controls hidden: a small note at the top left with
+ * the total and where it lands, and a thin bar along the bottom, as LG's own
+ * TV apps do. The picture stays clear.
+ */
+.skipNote {
+  position: absolute;
+  top: var(--bt-safe-y);
+  left: var(--bt-safe-x);
+  min-width: 360px;
+  padding: 16px 28px;
+  box-sizing: border-box;
+  border-radius: 24px;
+  background: rgba(18, 14, 32, 0.86);
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  z-index: 2;
+}
+
+.skipTotal {
+  margin: 0;
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+}
+
+.skipWhere {
+  margin: 4px 0 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.skipBar {
+  position: absolute;
+  left: var(--bt-safe-x);
+  bottom: 42px;
+  width: 1728px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  z-index: 2;
+}
+
+.skipPlayed {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--bt-accent);
+}
+
 /* Controls fade rather than unmount, so focus can land on them at once. */
 .controls {
   position: absolute;
@@ -282,6 +329,26 @@
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* The time under the Magic Remote pointer, above the bar. */
+.hoverTime {
+  position: absolute;
+  bottom: 28px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: rgba(11, 8, 21, 0.9);
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: none;
+}
+
+/* An arrow hides the pointer without it leaving the bar: the time goes with it. */
+:global(.pointer-mode) .hoverTime {
+  display: block;
 }
 
 .buttons {

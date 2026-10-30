@@ -1,4 +1,5 @@
 import { groupByLanguage, languageName } from '@bannertv/core';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
 import { preferences } from '../../data/preferences';
@@ -27,6 +28,8 @@ export function formatOffset(offset: number): string {
 interface TracksPanelProps {
   audio: readonly EngineTrack[];
   subtitles: Subtitles;
+  /** Opens on Style rather than the subtitle playing: coming back from it. */
+  focusStyle?: boolean;
   returnFocusKey: string;
   onAudio: (track: EngineTrack) => void;
   onStyle: () => void;
@@ -35,12 +38,15 @@ interface TracksPanelProps {
 
 /**
  * Audio and subtitles in one panel. Subtitles are grouped by language, the
- * last chosen language first. Pressing the language already showing moves to
- * its next version, the usual fix for subtitles out of step with the picture.
+ * last chosen language first, as it was when the panel opened: the rows keep
+ * their places while the viewer picks. Pressing the language already showing
+ * moves to its next version, the usual fix for subtitles out of step with the
+ * picture.
  */
 export function TracksPanel(props: TracksPanelProps) {
   const { audio, subtitles, onAudio, onStyle, onClose } = props;
   const { t } = useTranslation();
+  const [firstLanguage] = useState(() => preferences.get().subtitleLanguage);
   const items: PanelItem[] = [];
   let focusIndex = -1;
   const mark = () => {
@@ -84,7 +90,7 @@ export function TracksPanel(props: TracksPanelProps) {
     if (selected) mark();
   }
 
-  const groups = groupByLanguage(subtitles.options, preferences.get().subtitleLanguage);
+  const groups = groupByLanguage(subtitles.options, firstLanguage);
   for (const group of groups) {
     const current =
       choice?.kind === 'file' ? group.items.findIndex((o) => o.key === choice.key) : -1;
@@ -125,7 +131,7 @@ export function TracksPanel(props: TracksPanelProps) {
   });
   items.push({ kind: 'option', key: 'style', label: t('player.style'), onPress: onStyle });
 
-  const initial = focusIndex === -1 ? 1 : focusIndex;
+  const initial = props.focusStyle ? items.length - 1 : focusIndex === -1 ? 1 : focusIndex;
   return (
     <Overlay
       focusKey={FOCUS_KEY}

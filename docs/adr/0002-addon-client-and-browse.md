@@ -31,5 +31,5 @@ Phase 1 turns the Phase 0 shell into a browser for real addons: Home rows and De
 - Addon URLs, which can carry debrid keys, are only used as request and cache keys. No error message or log names them.
 - The hero pan and Metahub images are untested on the TV. Images may look soft at the TV's device pixel ratio of 2 (ADR 0001); the poster size can move from Metahub's `small` to `medium` if they do.
 - The plan's stack table still says Zod; this ADR replaces that line.
-- Overlays (menus and dialogs) are focus boundaries drawn over the rail; Back and a pointer click outside close them, and focus returns to what opened them.
+- Overlays (menus and dialogs) are focus boundaries drawn over the rail; Back and a pointer click outside close them, and focus returns to what opened them. The player's "won't play" box is the exception to the click: closing it leaves the player, so a stray click beside it does nothing.
 - The relay is the one BannerTV server. It holds addon addresses in memory while passing them on, and for 30 seconds after the TV has them, which the phone page says. The free Workers plan covers a household; a store release with many users may need the paid plan ($5 a month), since each open Add an addon dialog makes a request every three seconds.

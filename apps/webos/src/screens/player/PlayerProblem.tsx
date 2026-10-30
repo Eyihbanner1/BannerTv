@@ -17,7 +17,10 @@ interface PlayerProblemProps {
   onBack: () => void;
 }
 
-/** What went wrong in plain words, and the ways on from it. Back leaves the player. */
+/**
+ * What went wrong in plain words, and the ways on from it. Back leaves the
+ * player; a stray click beside the box does not.
+ */
 export function PlayerProblem(props: PlayerProblemProps) {
   const { nothing, error, failedAddons, canTryAnother } = props;
   const { t } = useTranslation();
@@ -34,6 +37,7 @@ export function PlayerProblem(props: PlayerProblemProps) {
       returnFocusKey="player-surface"
       onClose={props.onBack}
       placement="center"
+      closeOnOutsideClick={false}
     >
       <h2 className={styles.problemTitle}>{title}</h2>
       <p className={styles.problemMessage}>{message}</p>

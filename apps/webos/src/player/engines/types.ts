@@ -52,6 +52,8 @@ export interface Engine {
   /** Subtitles carried by the stream (HLS or DASH renditions). Cues arrive through the listener. */
   textTracks(): EngineTrack[];
   selectText(id: string | null): void;
+  /** The viewer moved the clock: any correction the engine makes to its start must leave it. */
+  seeked?(): void;
   /**
    * Stops loading, detaches from the video element and frees the decoder.
    * Shaka finishes later, so the player waits before attaching another engine.
