@@ -1,9 +1,10 @@
-import type { Resolution, StreamEntry } from '@bannertv/core';
+import type { LiveWindow, Resolution, StreamEntry } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
   SMOOTH_AFTER_S,
@@ -19,6 +20,8 @@ interface FakeEngine extends Engine {
   startAt?: number;
   /** Whether the engine says the stream is live. */
   live?: boolean;
+  /** What the broadcast keeps, as the engine reads it. */
+  window?: LiveWindow;
   /** How often the session told it the viewer moved the clock. */
   seeks: number;
 }
@@ -71,6 +74,7 @@ vi.mock('./engines/choose', () => ({
         return Promise.resolve();
       },
       isLive: () => engine.live === true,
+      liveWindow: () => (engine.live ? (engine.window ?? null) : null),
       audioTracks: () => engine.audio,
       selectAudio: (id) => {
         engine.audio = engine.audio.map((track) => ({ ...track, active: track.id === id }));
@@ -766,6 +770,53 @@ describe('a live stream', () => {
     video.fire('playing');
     video.fire('timeupdate');
   }
+
+  it('says how far behind live it is, keeps jumps within what it keeps, and goes back to live', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ behind: 0, liveWindow: { start: 7000, live: 7200 } });
+    session.seek(7100);
+    expect(session.get().behind).toBe(100);
+    // Never past live, nor before what it keeps.
+    session.seek(7400);
+    expect(video.currentTime).toBe(7200);
+    expect(session.get().behind).toBe(0);
+    session.seek(6000);
+    expect(video.currentTime).toBe(7000);
+    expect(session.get().behind).toBe(200);
+    session.goToLive();
+    expect(video.currentTime).toBe(7200);
+    expect(session.get().behind).toBe(0);
+    session.destroy();
+  });
+
+  it('falls behind live while paused, with no clock moving to say so', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.fire('timeupdate');
+    session.pause();
+    video.fire('pause');
+    // Live moves on; the paused clock does not.
+    lastEngine().window = { start: 7030, live: 7230, slack: 6 };
+    vi.advanceTimersByTime(LIVE_TICK_MS);
+    expect(session.get()).toMatchObject({ status: 'paused', behind: 30 });
+    session.goToLive();
+    expect(session.get().behind).toBe(0);
+    session.destroy();
+  });
+
+  it('reads as live, and leaves jumps alone, when the engine cannot tell where live is', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    session.seek(7100);
+    expect(session.get()).toMatchObject({ behind: 0, liveWindow: null });
+    session.goToLive();
+    expect(video.currentTime).toBe(7100);
+    session.destroy();
+  });
 
   it('saves nothing to resume, whenever it stops or ends', async () => {
     const { video, session } = setup();

@@ -1,3 +1,4 @@
+import { liveFraction, type LiveWindow } from '@bannertv/core';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import {
   type MouseEvent,
@@ -45,6 +46,10 @@ interface PlayerControlsProps {
   /** Resolution, HDR and sound, as badges. */
   facts: readonly string[];
   live: boolean;
+  /** On a broadcast, what it keeps and where live is, when the engine can tell. */
+  liveWindow: LiveWindow | null;
+  /** Seconds behind live on a broadcast; 0 while it plays live. */
+  behind: number;
   position: number;
   duration: number;
   /** Where a scrub would land, while the viewer is moving along the bar. */
@@ -63,10 +68,12 @@ interface PlayerControlsProps {
 
 /**
  * Where the video is, and where a skip will land: the time played, the bar
- * and the time left, or LIVE on a broadcast. Left and Right skip, OK lands a
- * skip at once; the pointer shows the time under it and a click jumps there.
- * The whole height of the 64 px row is the pointer's target, across the bar
- * but not the times beside it.
+ * and the time left. On a broadcast LIVE takes the place of the time played,
+ * its dot red only while it plays live, and the bar is what the broadcast
+ * keeps, with how far behind live it is on the right. Left and Right skip,
+ * OK lands a skip at once; the pointer shows the time under it and a click
+ * jumps there. The whole height of the 64 px row is the pointer's target,
+ * across the bar but not the times beside it.
  */
 function SeekBar({
   position,
@@ -76,9 +83,19 @@ function SeekBar({
   onCommit,
   onSeekTo,
   live,
+  liveWindow,
+  behind,
 }: Pick<
   PlayerControlsProps,
-  'position' | 'duration' | 'scrubTo' | 'onScrub' | 'onCommit' | 'onSeekTo' | 'live'
+  | 'position'
+  | 'duration'
+  | 'scrubTo'
+  | 'onScrub'
+  | 'onCommit'
+  | 'onSeekTo'
+  | 'live'
+  | 'liveWindow'
+  | 'behind'
 >) {
   const { t } = useTranslation();
   // Whether the pointer is over the row, where its OK is a click.
@@ -114,17 +131,24 @@ function SeekBar({
       }),
     [],
   );
+  // What the bar spans: the video, or on a broadcast what it keeps, up to live.
+  const kept = live ? liveWindow : null;
+  const from = kept ? kept.start : 0;
+  const span = kept ? kept.live - kept.start : live ? 0 : duration;
   const fractionAt = (event: MouseEvent): number | null => {
     const rect = bar.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || duration <= 0) return null;
+    if (!rect || rect.width <= 0 || !(span > 0)) return null;
     // A little either side of the bar reaches its ends; the times beside it are not a target.
     const x = event.clientX - rect.left;
     if (x < -BAR_REACH_PX || x > rect.width + BAR_REACH_PX) return null;
     return Math.max(0, Math.min(1, x / rect.width));
   };
   const shown = scrubTo ?? position;
-  const fraction = duration > 0 ? Math.max(0, Math.min(1, shown / duration)) : 0;
-  const played = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
+  const share = (at: number) =>
+    kept ? liveFraction(kept, at) : span > 0 ? Math.max(0, Math.min(1, at / span)) : 0;
+  const fraction = share(shown);
+  const played = share(position);
+  const behindLive = live && behind > 0;
   return (
     <div
       ref={ref}
@@ -133,7 +157,13 @@ function SeekBar({
       data-focus-key="player-seek"
       data-focused={focused ? 'true' : undefined}
       aria-label={t('player.seek')}
-      aria-valuetext={formatTime(shown)}
+      aria-valuetext={
+        !live
+          ? formatTime(shown)
+          : behindLive
+            ? t('player.behindLive', { time: formatTime(behind) })
+            : t('player.atLive')
+      }
       className={focused ? `${styles.seek} ${styles.seekFocused}` : styles.seek}
       onMouseMove={(event) => {
         if (inputMode.get() !== 'pointer') return;
@@ -152,12 +182,12 @@ function SeekBar({
         // Not the click of an OK something else answered, such as the one that brought the bar up.
         if (clickCameWithOk()) return;
         const at = fractionAt(event);
-        if (at !== null) onSeekTo(at * duration);
+        if (at !== null) onSeekTo(from + at * span);
       }}
     >
       {live ? (
         <span className={styles.time}>
-          <span className={styles.live}>
+          <span className={behindLive ? `${styles.live} ${styles.liveBehind}` : styles.live}>
             <span className={styles.liveDot} />
             {t('player.live')}
           </span>
@@ -168,7 +198,7 @@ function SeekBar({
       <div ref={bar} className={styles.bar}>
         {hover !== null && pointing && focused && (
           <span className={styles.hoverTime} style={{ left: `${hover * 100}%` }}>
-            {formatTime(hover * duration)}
+            {kept ? `−${formatTime((1 - hover) * span)}` : formatTime(hover * span)}
           </span>
         )}
         <div className={styles.played} style={{ width: `${played * 100}%` }} />
@@ -184,7 +214,11 @@ function SeekBar({
         <div className={styles.thumb} style={{ left: `${fraction * 100}%` }} />
       </div>
       <span className={`${styles.time} ${styles.timeLeft}`}>
-        {!live && duration > 0 ? `−${formatTime(Math.max(0, duration - shown))}` : ''}
+        {behindLive
+          ? `−${formatTime(behind)}`
+          : !live && duration > 0
+            ? `−${formatTime(Math.max(0, duration - shown))}`
+            : ''}
       </span>
     </div>
   );
@@ -371,6 +405,8 @@ export function PlayerControls(props: PlayerControlsProps) {
             duration={duration}
             scrubTo={props.scrubTo}
             live={live}
+            liveWindow={props.liveWindow}
+            behind={props.behind}
             onScrub={props.onScrub}
             onCommit={props.onCommit}
             onSeekTo={props.onSeekTo}

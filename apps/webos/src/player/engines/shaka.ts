@@ -29,6 +29,8 @@ const MEDIA = 3;
 const FORMAT_CODES = [4012, 4032, 4036];
 /** LOAD_INTERRUPTED and OBJECT_DESTROYED: BannerTV stopped it, nothing went wrong. */
 const IGNORED_CODES = [7000, 7003];
+/** How far behind live still counts as live on a broadcast: about a segment. */
+const SHAKA_LIVE_SLACK_S = 6;
 
 let polyfilled = false;
 
@@ -227,6 +229,14 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
     // A dynamic manifest is a broadcast, endless or of a set length; Shaka can
     // give either a length where the TV takes no endless one.
     isLive: () => player?.isDynamic() === true,
+
+    // Shaka's seek range ends where it plays live, its delay already taken off.
+    liveWindow() {
+      if (!player?.isDynamic()) return null;
+      const { start, end } = player.seekRange();
+      if (!isFinite(start) || !isFinite(end) || end <= start) return null;
+      return { start, live: end, slack: SHAKA_LIVE_SLACK_S };
+    },
 
     audioTracks() {
       if (!player) return [];

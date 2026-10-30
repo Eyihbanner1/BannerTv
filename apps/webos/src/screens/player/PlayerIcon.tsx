@@ -12,6 +12,7 @@ export type PlayerIconName =
   | 'sources'
   | 'episodes'
   | 'info'
+  | 'live'
   | 'back';
 
 const LINE = {
@@ -116,6 +117,14 @@ const GLYPHS: Record<PlayerIconName, ReactNode> = {
       <circle cx="12" cy="12" r="8.6" {...LINE} />
       <path d="M12 11v5.4" {...LINE} />
       <circle cx="12" cy="7.8" r="0.4" {...LINE} />
+    </>
+  ),
+  // A broadcast: a dot sending out waves either side.
+  live: (
+    <>
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
+      <path d="M8.3 8.3a5.2 5.2 0 0 0 0 7.4M15.7 8.3a5.2 5.2 0 0 1 0 7.4" {...LINE} />
+      <path d="M5.4 5.4a9.3 9.3 0 0 0 0 13.2M18.6 5.4a9.3 9.3 0 0 1 0 13.2" {...LINE} />
     </>
   ),
   back: (

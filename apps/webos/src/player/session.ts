@@ -1,8 +1,11 @@
 import {
+  clampToWindow,
   createProgressTracker,
   createStore,
   type Cue,
   estimateBitrate,
+  judgeLive,
+  type LiveWindow,
   type ProgressTracker,
   type ProgressUpdate,
   type QualityReference,
@@ -37,6 +40,8 @@ export const SEEK_GRACE_MS = 10000;
 const MAX_STEP_DOWNS = 2;
 /** This much playback in a row without buffering shows the connection keeps up with the stream. */
 export const SMOOTH_AFTER_S = 600;
+/** How often a broadcast is judged against live, so it falls behind while paused too. */
+export const LIVE_TICK_MS = 1000;
 
 export type SessionStatus =
   /** Nothing loaded: still choosing a stream, or asking where to start. */
@@ -64,6 +69,10 @@ export interface SessionState {
    * and another stream of it starts at the live edge.
    */
   live: boolean;
+  /** On a broadcast, what it still keeps and where it plays live, when the engine can tell. */
+  liveWindow: LiveWindow | null;
+  /** Seconds behind live on a broadcast: 0 while it counts as live, or when nobody can tell. */
+  behind: number;
   error: PlaybackError | null;
   /** Set when auto-play moved to another stream after a failure, until playback resumes. */
   failedOver: boolean;
@@ -123,8 +132,10 @@ export interface PlaybackSession {
   togglePlay(): void;
   pause(): void;
   resume(): void;
-  /** Seconds. Clamped to the video. */
+  /** Seconds. Clamped to the video, and on a broadcast to what it keeps, up to live. */
   seek(position: number): void;
+  /** On a broadcast, back to where the engine plays live. */
+  goToLive(): void;
   selectAudio(id: string): void;
   selectText(id: string | null): void;
   /** Saves where playback is now, for leaving or hiding the app. */
@@ -148,6 +159,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   position: 0,
   duration: 0,
   live: false,
+  liveWindow: null,
+  behind: 0,
   error: null,
   failedOver: false,
   steppedDown: false,
@@ -199,6 +212,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let destroyed = false;
   // Whether this attempt's stream is live, once the engine can tell; and where its clock started.
   let live = false;
+  // Whether the broadcast was last judged behind live, so a wobble at the boundary does not flicker.
+  let wasBehind = false;
+  let liveTimer: number | undefined;
   let firstTrusted: number | undefined;
   // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
   let wantedAudio: string | null = null;
@@ -233,6 +249,18 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (live || engine?.isLive() !== true) return;
     live = true;
     patch({ live: true, duration: 0 });
+    // Paused, the clock stands still while live moves on: no timeupdate says so.
+    clearInterval(liveTimer);
+    liveTimer = window.setInterval(() => {
+      const before = state.get();
+      const now = judge(video.currentTime);
+      if (
+        Math.round(now.behind) !== Math.round(before.behind) ||
+        !now.liveWindow !== !before.liveWindow
+      ) {
+        patch(now);
+      }
+    }, LIVE_TICK_MS);
     if (!keep) return;
     // An older build saved broadcasts like films, with a place to resume.
     progress.clear(videoId);
@@ -250,6 +278,19 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   }
 
   const durationNow = () => (live || !isFinite(video.duration) ? 0 : video.duration);
+  const liveWindow = () => (live ? (engine?.liveWindow() ?? null) : null);
+
+  /** How far behind live a broadcast is, at `position`. */
+  function judge(position: number): Pick<SessionState, 'liveWindow' | 'behind'> {
+    const kept = liveWindow();
+    if (!kept) {
+      wasBehind = false;
+      return { liveWindow: null, behind: 0 };
+    }
+    const { behind, atLive } = judgeLive(kept, position, wasBehind);
+    wasBehind = !atLive;
+    return { liveWindow: kept, behind };
+  }
 
   /**
    * The length saved with the position. A film whose file gives no length
@@ -532,7 +573,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
-        patch({ position: trusted ?? lastStartAt, duration });
+        patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
       },
     ],
     [
@@ -609,6 +650,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       judgedSmooth = false;
       limitBefore = undefined;
       live = false;
+      wasBehind = false;
+      clearInterval(liveTimer);
       firstTrusted = undefined;
       patch({
         status: 'loading',
@@ -616,6 +659,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         engine: null,
         position: startAt,
         live: false,
+        liveWindow: null,
+        behind: 0,
         error: null,
         failedOver: false,
         steppedDown: false,
@@ -735,7 +780,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
     seek(position) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
-      const target = Math.max(0, Math.min(position, duration - 1));
+      const kept = liveWindow();
+      const wanted = kept ? clampToWindow(kept, position) : position;
+      const target = Math.max(0, Math.min(wanted, duration - 1));
       endBuffering();
       clearTimeout(judgeTimer);
       judgeTimer = undefined;
@@ -746,9 +793,17 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       // Back from the end it is paused there, not ended: Play goes on from it.
       if (state.get().status === 'ended' && target < duration - 1) {
         patch({ status: 'paused', position: target });
-      } else patch({ position: target });
+      } else patch({ position: target, ...judge(target) });
       save();
       if (!live && savedLength() > 0) seekedToPlace = true;
+    },
+
+    goToLive() {
+      const kept = liveWindow();
+      if (!kept) return;
+      // Live again at once, whatever the boundary the last reading was judged by.
+      wasBehind = false;
+      session.seek(kept.live);
     },
 
     selectAudio(id) {
@@ -774,6 +829,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       save();
       destroyed = true;
       clearTimers();
+      clearInterval(liveTimer);
       handlers.forEach(([event, handler]) => video.removeEventListener(event, handler));
       release();
     },

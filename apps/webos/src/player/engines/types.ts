@@ -1,4 +1,4 @@
-import type { Cue } from '@bannertv/core';
+import type { Cue, LiveWindow } from '@bannertv/core';
 
 /** An audio or subtitle track the stream itself carries. */
 export interface EngineTrack {
@@ -53,6 +53,11 @@ export interface Engine {
   load(url: string, startAt: number): Promise<void>;
   /** A live broadcast, which has no end: nothing to resume, and another stream starts at the live edge. */
   isLive(): boolean;
+  /**
+   * What a broadcast still keeps and where this engine plays it live, on
+   * the video's clock. Null when it is not live or the engine can't tell.
+   */
+  liveWindow(): LiveWindow | null;
   audioTracks(): EngineTrack[];
   selectAudio(id: string): void;
   /** Subtitles carried by the stream (HLS or DASH renditions). Cues arrive through the listener. */

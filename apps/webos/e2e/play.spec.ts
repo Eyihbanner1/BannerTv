@@ -1030,9 +1030,9 @@ test('a live broadcast plays with no end shown, and saves nothing to resume or c
   await expect.poll(async () => (await video(page)).time).toBeLessThan(before);
   await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
 
-  // The controls give no length to a broadcast.
+  // The controls give no length to a broadcast: on the right is how far behind live it is.
   await press(page, 'ArrowUp', 'player-play');
-  await expect(page.locator('[data-focus-key="player-seek"] > span').last()).toHaveText('');
+  await expect(page.locator('[data-focus-key="player-seek"] > span').last()).toHaveText(/^−0:0\d$/);
 
   // Hidden, shown and left: each would save the position of a film.
   await setHidden(page, true);
@@ -1098,12 +1098,88 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await page.keyboard.press('Enter');
   await expect.poll(seeks, { timeout: 500 }).toBe(2);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 5);
+  // Never past live: playing live, it has nowhere further to go.
+  await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
+    'aria-label',
+    'Forward 10 s. Playing live',
+  );
   await pressBack(page);
   await pressBack(page);
   await expectFocus(page, 'details-watch');
   await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Watch');
   const saved = ((await readKv(page, 'progress')) ?? []) as Array<{ videoId: string }>;
   expect(saved.map((entry) => entry.videoId)).not.toContain(MOVIE);
+});
+
+test('behind a broadcast, LIVE goes grey with how far behind, and Go to live comes back to it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        { name: 'Test Streams\nLive', description: 'Open Movie live', path: LIVE_HLS_PATH },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  const seekBar = page.locator('[data-focus-key="player-seek"]');
+  const goToLive = page.locator('[data-focus-key="player-live"]');
+  const forward = page.locator('[data-focus-key="player-fwd10"]');
+  const behindTime = seekBar.locator('> span').last();
+
+  // Playing live: Go to live takes Next episode's place, dimmed, as Forward 10 s is.
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live', {
+    timeout: 10000,
+  });
+  await press(page, 'ArrowUp', 'player-play');
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
+  await expect(behindTime).toHaveText('');
+  await expect(forward).toHaveAttribute('aria-label', 'Forward 10 s. Playing live');
+  await expect(page.locator('[class*="liveBehind"]')).toHaveCount(0);
+
+  // Back 10 s: behind live, and the controls say by how much.
+  const seeks = await countSeeks(page);
+  await press(page, 'ArrowLeft', 'player-back10');
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks, { timeout: 500 }).toBe(1);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
+  await expect(behindTime).toHaveText(/^−0:0\d$/);
+  await expect(page.locator('[class*="liveBehind"]')).toHaveText('LIVE');
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live');
+  await expect(forward).toHaveAttribute('aria-label', 'Forward 10 s');
+
+  // Go to live, from where Next episode would be.
+  await press(page, 'ArrowRight', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await press(page, 'ArrowRight', 'player-live');
+  const behind = (await video(page)).time;
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 3);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
+  await expect(behindTime).toHaveText('');
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live');
+  await expect(page.locator('[class*="liveBehind"]')).toHaveCount(0);
+  // Dimmed now, it does nothing.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  expect(await seeks()).toBe(2);
+
+  // The pointer: the bar is what the broadcast keeps, the time over it how
+  // far behind live a click lands, and the click goes there.
+  await page.mouse.move(900, 500);
+  const bar = seekBar.locator('> div');
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + 4, box.y + box.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-seek');
+  await expect(bar.getByText(/^−0:0\d$/)).toBeVisible();
+  await page.mouse.click(box.x + 4, box.y + box.height / 2);
+  await expect.poll(seeks, { timeout: 500 }).toBe(3);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
 });
 
 test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({

@@ -994,6 +994,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
       armHide();
     } else scrubBy(direction);
   }
+  function goToLive() {
+    if (!session || waiting) return;
+    session.goToLive();
+    armHide();
+  }
+  // On a broadcast whose live point the engine knows, playing live leaves
+  // Forward 10 s and Go to live nowhere to go.
+  const atLive = state.live && state.liveWindow !== null && state.behind === 0;
   const showsPause = state.status !== 'paused' && state.status !== 'ended';
   function noNextReason(): string {
     if (!meta) return t('player.noEpisodeList');
@@ -1025,20 +1033,33 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-fwd10',
       icon: 'fwd10',
       label: t('player.forward10'),
+      unavailable: atLive ? t('player.atLive') : undefined,
       onPress: () => skipButton(1),
     },
-    // Anything with an episode list has a place for it, whatever its type,
-    // kept while the list loads.
-    metaQuery && !state.live && (!meta || episode)
+    // A broadcast has Go to live in Next episode's place; anything with an
+    // episode list has Next, whatever its type, kept while the list loads.
+    state.live
       ? {
-          focusKey: 'player-next',
-          icon: 'next',
-          // Up Next's count, while the controls hide its card.
-          label: showsCount ? t('player.nextIn', { seconds: count }) : t('player.nextEpisode'),
-          unavailable: offersNext ? undefined : noNextReason(),
-          onPress: playNextEpisode,
+          focusKey: 'player-live',
+          icon: 'live',
+          label: t('player.goToLive'),
+          unavailable: !state.liveWindow
+            ? t('player.liveUnknownPoint')
+            : atLive
+              ? t('player.atLive')
+              : undefined,
+          onPress: goToLive,
         }
-      : null,
+      : metaQuery && (!meta || episode)
+        ? {
+            focusKey: 'player-next',
+            icon: 'next',
+            // Up Next's count, while the controls hide its card.
+            label: showsCount ? t('player.nextIn', { seconds: count }) : t('player.nextEpisode'),
+            unavailable: offersNext ? undefined : noNextReason(),
+            onPress: playNextEpisode,
+          }
+        : null,
   ];
 
   // What Quality found to choose from, which may not be what plays: a stream
@@ -1244,6 +1265,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
         subtitle={subtitle}
         facts={facts}
         live={state.live}
+        liveWindow={state.liveWindow}
+        behind={state.behind}
         position={state.position}
         duration={state.duration}
         scrubTo={scrubTo}

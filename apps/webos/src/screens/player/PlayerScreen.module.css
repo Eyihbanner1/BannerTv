@@ -352,6 +352,15 @@
   vertical-align: middle;
 }
 
+/* Behind live: the dot goes grey until Go to live. */
+.liveBehind {
+  color: var(--bt-text-muted);
+}
+
+.liveBehind .liveDot {
+  background: var(--bt-text-muted);
+}
+
 .bar {
   position: relative;
   flex: 1;
