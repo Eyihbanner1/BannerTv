@@ -10,6 +10,7 @@ Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, pac
 
 - [Project plan](docs/PLAN.md): scope, addon protocol, webOS specifics, architecture, stack, UX, player, repository layout, milestones, testing, LG Content Store submission and risks.
 - [TV setup](docs/TV_SETUP.md): Developer Mode, installing on the TV, and running the spikes.
+- [Sports rights](docs/SPORTS_RIGHTS.md): what it costs to stream or partner with the English National League and lower leagues in other countries (researched October 2026).
 - [ADR 0001](docs/adr/0001-react-norigin-classic-bundle.md): why React, Norigin and one classic ES2017 script, and the spike results.
 - [ADR 0002](docs/adr/0002-addon-client-and-browse.md): how BannerTV reads addons, caches them, and builds Home and Details.
 
