@@ -1,10 +1,12 @@
 import type { Cue, CueLine, CueSpan } from '@bannertv/core';
 import type shakaNs from 'shaka-player/dist/shaka-player.dash';
+import { channelName, codecFamily, formatName } from '../audio';
 import { resetVideo } from './native';
 import {
   type Engine,
   type EngineFactory,
   type EngineListener,
+  type EngineTrack,
   PlaybackError,
   type PlaybackErrorKind,
 } from './types';
@@ -29,6 +31,40 @@ const FORMAT_CODES = [4012, 4032, 4036];
 const IGNORED_CODES = [7000, 7003];
 
 let polyfilled = false;
+
+type ShakaAudio = shakaNs.extern.AudioTrack;
+
+/**
+ * Shaka leaves an audio track's id empty, and its list changes with the
+ * picture quality, so a track is known by what it is.
+ */
+export function shakaAudioId(track: ShakaAudio): string {
+  return [
+    track.language,
+    track.label ?? '',
+    track.roles.join('+'),
+    track.channelsCount ?? '',
+    // By family, as Shaka groups them: HE-AAC and AAC-LC are one track, under the codec playing.
+    codecFamily(track.codecs ?? ''),
+    track.spatialAudio ? 'spatial' : '',
+  ].join('|');
+}
+
+/** An audio track as the player lists it, with its channels, format and role. */
+export function shakaAudioTrack(track: ShakaAudio): EngineTrack {
+  const listed: EngineTrack = {
+    id: shakaAudioId(track),
+    lang: track.language,
+    label: track.label ?? '',
+    active: track.active,
+  };
+  const channels = channelName(track.channelsCount);
+  const format = formatName(track.codecs, track.spatialAudio);
+  if (channels) listed.channels = channels;
+  if (format) listed.format = format;
+  if (track.roles.indexOf('commentary') >= 0) listed.commentary = true;
+  return listed;
+}
 
 function loadShaka(): Promise<typeof shakaNs> {
   return loadVendorScript('shaka').then(
@@ -194,17 +230,19 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
 
     audioTracks() {
       if (!player) return [];
-      // Shaka leaves AudioTrack.id empty, so the position in this list is the id.
-      return player.getAudioTracks().map((track, index) => ({
-        id: String(index),
-        lang: track.language,
-        label: track.label ?? '',
-        active: track.active,
-      }));
+      const seen: Record<string, true> = {};
+      const tracks: EngineTrack[] = [];
+      for (const track of player.getAudioTracks()) {
+        const listed = shakaAudioTrack(track);
+        if (seen[listed.id]) continue;
+        seen[listed.id] = true;
+        tracks.push(listed);
+      }
+      return tracks;
     },
 
     selectAudio(id) {
-      const track = player?.getAudioTracks()[Number(id)];
+      const track = player?.getAudioTracks().find((t) => shakaAudioId(t) === id);
       if (player && track) player.selectAudioTrack(track);
     },
 

@@ -1,7 +1,15 @@
-import { BANNERTV_DEMO_ID, type Cue, languageKey, type StreamEntry } from '@bannertv/core';
+import {
+  BANNERTV_DEMO_ID,
+  type Cue,
+  languageKey,
+  type StreamEntry,
+  subtitleFileKey,
+} from '@bannertv/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
+import { subtitleOffsets } from '../../data/library';
 import { chooseSubtitleLanguage, wantedSubtitle } from '../../data/tracks';
+import { streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import {
@@ -14,6 +22,9 @@ import {
 /** A subtitle file from an addon, or one of the stream's own tracks (HLS through hls.js). */
 export type SubtitleChoice = { kind: 'file'; key: string } | { kind: 'track'; id: string } | null;
 
+/** A version's state for its row: its first line still to come, or a file that could not be read. */
+export type SubtitleStatus = 'loading' | 'failed';
+
 export interface Subtitles {
   options: SubtitleOption[];
   tracks: EngineTrack[];
@@ -25,11 +36,13 @@ export interface Subtitles {
   loading: boolean;
   /** The chosen file could not be read, nor any other in its language. */
   failed: boolean;
-  /** Seconds; positive shows subtitles later. */
+  /** Seconds; positive shows subtitles later. Kept for each file. */
   offset: number;
   /** The viewer chose; their choice becomes the language picked next time. */
   choose(choice: SubtitleChoice): void;
+  /** Moves the subtitles showing later or earlier, remembered for that file. */
   setOffset(offset: number): void;
+  statusOf(choice: NonNullable<SubtitleChoice>): SubtitleStatus | undefined;
 }
 
 const EMPTY: SubtitleListState = { options: [], pending: 0 };
@@ -42,6 +55,16 @@ const noop = () => () => undefined;
  */
 function isSubtitleCheck(entry: StreamEntry | null): boolean {
   return entry?.addonId === BANNERTV_DEMO_ID;
+}
+
+/**
+ * Who a subtitle file is, for its timing: an addon's file by its addon and id;
+ * a file or track the stream sent, only with that stream.
+ */
+function fileIdentity(choice: NonNullable<SubtitleChoice>, entry: StreamEntry): string {
+  if (choice.kind === 'file' && !choice.key.startsWith('stream#')) return choice.key;
+  const stream = entry.stream.behaviorHints.filename ?? streamTitle(entry);
+  return `${stream}\n${choice.kind === 'file' ? choice.key : `track:${choice.id}`}`;
 }
 
 function languageOf(
@@ -95,7 +118,6 @@ export function useSubtitles(
   // Kept by link, not key: two streams' own files can share a key.
   const [loaded, setLoaded] = useState<{ url: string; cues: Cue[] } | null>(null);
   const [failedChoice, setFailedChoice] = useState<SubtitleChoice>(null);
-  const [offset, setOffset] = useState(0);
   // The start-of-stream choice and the stream it was made for; the viewer's own choice also
   // counts. auto: made here, not by the viewer, so a track listed later may still take over.
   const decided = useRef<{
@@ -103,8 +125,15 @@ export function useSubtitles(
     choice: SubtitleChoice;
     auto: boolean;
   } | null>(null);
-  // Links of files that failed for this video, so a retry moves on to another.
+  // Links of files that failed for this video, so a retry moves on to another,
+  // and the same for the rows to show.
   const broken = useRef(new Set<string>());
+  const [failedLinks, setFailedLinks] = useState<ReadonlySet<string>>(() => new Set());
+  const markBroken = (url: string, failed: boolean) => {
+    if (failed) broken.current.add(url);
+    else broken.current.delete(url);
+    setFailedLinks(new Set(broken.current));
+  };
   const { options, pending } = listState;
   const tracks = state.text;
 
@@ -153,7 +182,9 @@ export function useSubtitles(
       }
       // Addon files often arrive first, but the stream's own track wins once listed.
       const { options: offered, pending: waiting } = list.get();
-      const file = offered.find((o) => languageKey(o.lang) === key);
+      // One that failed earlier for this video only when it is all there is.
+      const inLanguage = offered.filter((o) => languageKey(o.lang) === key);
+      const file = inLanguage.find((o) => !broken.current.has(o.url)) ?? inLanguage[0];
       if (file && tracksKnown) settle({ kind: 'file', key: file.key });
       else if (tracksKnown && waiting === 0) settle(null);
     };
@@ -184,11 +215,13 @@ export function useSubtitles(
       );
     loadSubtitles(option).then(
       (cues) => {
+        // A file that failed once and reads now is no longer marked.
+        if (broken.current.has(option.url)) markBroken(option.url, false);
         if (!cancelled) setLoaded({ url: option.url, cues });
       },
       () => {
         if (cancelled) return;
-        broken.current.add(option.url);
+        markBroken(option.url, true);
         const key = languageKey(option.lang);
         const nextIn = (offered: readonly SubtitleOption[]) =>
           offered.find((o) => languageKey(o.lang) === key && !broken.current.has(o.url));
@@ -229,6 +262,12 @@ export function useSubtitles(
   }, [session, trackId]);
   const trackCues = trackId === null ? null : (state.streamCues[trackId] ?? []);
 
+  // The timing kept for the file showing.
+  const offsetKey = choice && entry ? subtitleFileKey(videoId, fileIdentity(choice, entry)) : null;
+  const offset = useSyncExternalStore(subtitleOffsets.subscribe, () =>
+    offsetKey === null ? 0 : (subtitleOffsets.get(offsetKey) ?? 0),
+  );
+
   return {
     options,
     tracks,
@@ -238,17 +277,33 @@ export function useSubtitles(
     loading: fileKey !== null && fileCues === null && !fileFailed,
     failed: fileFailed,
     offset,
+    statusOf(version) {
+      const showing =
+        version.kind === 'file'
+          ? choice?.kind === 'file' && choice.key === version.key
+          : choice?.kind === 'track' && choice.id === version.id;
+      if (version.kind === 'track') {
+        // Until the stream hands over its first line.
+        return showing && state.streamCues[version.id] === undefined ? 'loading' : undefined;
+      }
+      const option = options.find((o) => o.key === version.key);
+      if (!option) return undefined;
+      if (failedLinks.has(option.url)) return 'failed';
+      return showing && fileCues === null ? 'loading' : undefined;
+    },
     choose(next) {
       decided.current = { entry, choice: next, auto: false };
       setChosen({ entry, choice: next });
       if (next?.kind === 'file') {
         const option = options.find((o) => o.key === next.key);
-        if (option) broken.current.delete(option.url);
+        if (option && broken.current.has(option.url)) markBroken(option.url, false);
       }
       if (!isSubtitleCheck(entry)) {
         chooseSubtitleLanguage(metaId, languageOf(next, options, tracks));
       }
     },
-    setOffset,
+    setOffset(next) {
+      if (offsetKey !== null) void subtitleOffsets.remember(offsetKey, next);
+    },
   };
 }

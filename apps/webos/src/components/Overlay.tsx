@@ -14,8 +14,16 @@ interface OverlayProps {
   /** Focused again when it closes: usually what opened it. A function is read at closing time. */
   returnFocusKey: string | (() => string);
   onClose: () => void;
-  /** 'side' slides in from the right (menus), 'center' is a dialog. */
-  placement: 'side' | 'center';
+  /**
+   * Back, in place of closing: a layer with levels goes back one. True when
+   * answered. Children's own Back handlers answer after this one.
+   */
+  onBack?: () => boolean;
+  /**
+   * 'side' slides in from the right (menus), 'center' is a dialog, 'bottom'
+   * rises from the bottom and leaves the picture above it clear.
+   */
+  placement: 'side' | 'center' | 'bottom';
   /** Whether a pointer click outside closes it. Not for a layer whose closing leaves the screen. */
   closeOnOutsideClick?: boolean;
   children: ReactNode;
@@ -42,6 +50,7 @@ export function Overlay(props: OverlayProps) {
   });
 
   useBack('overlay', () => {
+    if (props.onBack) return props.onBack();
     onClose();
     return true;
   });
@@ -68,7 +77,9 @@ export function Overlay(props: OverlayProps) {
     <FocusContext.Provider value={focusKey}>
       <div className={styles.layer}>
         <div
-          className={styles.backdrop}
+          className={
+            placement === 'bottom' ? `${styles.backdrop} ${styles.clear}` : styles.backdrop
+          }
           onClick={closeOnOutsideClick ? onOutsideClick : undefined}
         />
         <div

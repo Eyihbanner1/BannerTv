@@ -19,6 +19,11 @@ const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.we
 export const HLS_PATH = '/hls/master.m3u8';
 /** The same HLS as a live broadcast: its playlists have no end, so players treat it as live. */
 export const LIVE_HLS_PATH = '/hls-live/master.m3u8';
+/**
+ * The same HLS with English marked 5.1 and a second English track named
+ * "English Commentary", listed first, so the Commentary rule shows.
+ */
+export const COMMENTARY_HLS_PATH = '/hls-commentary/master.m3u8';
 const HLS_TYPES: Record<string, string> = {
   m3u8: 'application/vnd.apple.mpegurl',
   mp4: 'video/mp4',
@@ -61,9 +66,25 @@ export interface TestStream {
   path?: string;
   infoHash?: string;
   bingeGroup?: string;
-  /** Subtitles that come with the stream, as paths on SUBTITLE_HOST. */
-  subtitles?: ReadonlyArray<{ id: string; path: string; lang: string }>;
+  /** Subtitles that come with the stream, as paths on SUBTITLE_HOST, with a release name if given. */
+  subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
 }
+
+/** A file in OpenSubtitles' answer: SUBTITLE_HOST/<id>.srt, and its release name if given. */
+export interface TestSubtitle {
+  id: string;
+  lang: string;
+  label?: string;
+  /** Sent with no id, so its link stands in for one. */
+  withoutId?: boolean;
+}
+
+/** What OpenSubtitles answers unless a test passes its own list: no release names, as it sends. */
+export const DEFAULT_SUBTITLES: readonly TestSubtitle[] = [
+  { id: 'en1', lang: 'eng' },
+  { id: 'fr1', lang: 'fre' },
+  { id: 'en2', lang: 'eng' },
+];
 
 /** What the addon answers for every video, unless a test passes its own list. */
 export const DEFAULT_STREAMS: readonly TestStream[] = [
@@ -91,6 +112,7 @@ export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
   en2: '1\n00:00:00,500 --> 00:00:40,000\nThe second English file\n',
   fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
+  fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
 };
 
 export interface PlaybackMock {
@@ -119,6 +141,10 @@ export interface PlaybackOptions {
   mediaDelayMs?: number;
   /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
   subtitles?: boolean;
+  /** OpenSubtitles' answer. Default DEFAULT_SUBTITLES. */
+  subtitleList?: readonly TestSubtitle[];
+  /** How long each subtitle file, by id, takes to arrive. Default at once. */
+  subtitleDelayMs?: Readonly<Record<string, number>>;
   /** OpenSubtitles answers once this settles, so a test decides when. Default at once. */
   subtitlesGate?: Promise<unknown>;
 }
@@ -294,10 +320,11 @@ export async function mockPlayback(
           filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
         ...(stream.subtitles && {
-          subtitles: stream.subtitles.map(({ id, path, lang }) => ({
+          subtitles: stream.subtitles.map(({ id, path, lang, label }) => ({
             id,
             url: `${SUBTITLE_HOST}${path}`,
             lang,
+            ...(label && { label }),
           })),
         }),
       })),
@@ -336,13 +363,21 @@ export async function mockPlayback(
     if (options.refused?.[path]?.includes(route.request().resourceType())) {
       return route.fulfill({ status: 503, body: '' });
     }
-    const hls = /^\/hls(-live)?\//.exec(path);
+    const hls = /^\/hls(-live|-commentary)?\//.exec(path);
     if (hls) {
       const file = path.slice(hls[0].length);
       if (!/^[\w-]+\.(m3u8|mp4|m4s|vtt)$/.test(file)) return route.fulfill({ status: 404 });
       let body: string | Buffer = readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file));
-      if (hls[1] && file.endsWith('.m3u8')) {
+      if (hls[1] === '-live' && file.endsWith('.m3u8')) {
         body = body.toString('utf8').replace(/^#EXT-X-(ENDLIST|PLAYLIST-TYPE:VOD)\r?\n?/gm, '');
+      }
+      if (hls[1] === '-commentary' && file === 'master.m3u8') {
+        body = body
+          .toString('utf8')
+          .replace(
+            /^(#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",)DEFAULT=YES(.*)$/m,
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English Commentary",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="eng",URI="pEnglish.m3u8"\n$1DEFAULT=NO$2,CHANNELS="6"',
+          );
       }
       return route.fulfill({
         status: 200,
@@ -360,16 +395,21 @@ export async function mockPlayback(
     if (options.subtitlesGate) await options.subtitlesGate;
     if (options.subtitles === false) return json(route, { subtitles: [] });
     return json(route, {
-      subtitles: [
-        { id: 'en1', url: `${SUBTITLE_HOST}/en1.srt`, lang: 'eng' },
-        { id: 'fr1', url: `${SUBTITLE_HOST}/fr1.srt`, lang: 'fre' },
-        { id: 'en2', url: `${SUBTITLE_HOST}/en2.srt`, lang: 'eng' },
-      ],
+      subtitles: (options.subtitleList ?? DEFAULT_SUBTITLES).map(
+        ({ id, lang, label, withoutId }) => ({
+          ...(!withoutId && { id }),
+          url: `${SUBTITLE_HOST}/${id}.srt`,
+          lang,
+          ...(label && { label }),
+        }),
+      ),
     });
   });
 
-  await page.route(/^https:\/\/subs\.example\.com\//, (route) => {
+  await page.route(/^https:\/\/subs\.example\.com\//, async (route) => {
     const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
+    const delay = options.subtitleDelayMs?.[id];
+    if (delay) await new Promise((done) => setTimeout(done, delay));
     const text = SUBTITLE_FILES[id];
     if (text === undefined) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({

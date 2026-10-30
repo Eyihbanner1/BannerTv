@@ -117,6 +117,12 @@ export {
   type ProgressUpdate,
   WATCHED_FRACTION,
 } from './playback/progress';
+export {
+  createSubtitleOffsets,
+  MAX_SUBTITLE_OFFSETS,
+  type SubtitleOffsets,
+  subtitleFileKey,
+} from './playback/offsets';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
 export {
@@ -204,6 +210,7 @@ export {
   languageName,
 } from './subtitles/languages';
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
+export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
 export {

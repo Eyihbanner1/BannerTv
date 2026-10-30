@@ -5,6 +5,7 @@ import {
   detectEncoding,
   parseSubtitleText,
   type QueryState,
+  subtitleFileKey,
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
@@ -118,9 +119,18 @@ export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Pro
   return promise;
 }
 
+/**
+ * An addon's id for a file, fit for a key: a file sent with no id has its
+ * link as its id, which never goes into a key (they reach focus keys), so
+ * anything but a short plain id is hashed.
+ */
+export function plainId(id: string): string {
+  return /^[\w.-]{1,64}$/.test(id) ? id : `h${subtitleFileKey('', id)}`;
+}
+
 function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleOption {
   return {
-    key: `${prefix}#${subtitle.id}`,
+    key: `${prefix}#${plainId(subtitle.id)}`,
     lang: subtitle.lang,
     label: subtitle.label,
     source,

@@ -2,6 +2,7 @@ import { type Cue, parseCueMarkup } from '@bannertv/core';
 import type Hls from 'hls.js';
 import type { CuesParsedData, ErrorData, MediaPlaylist } from 'hls.js';
 import { isWebOS } from '../../platform/webos';
+import { channelName, formatName } from '../audio';
 import { resetVideo } from './native';
 import { type Engine, type EngineFactory, type EngineTrack, PlaybackError } from './types';
 import { loadVendorScript } from './vendor';
@@ -57,6 +58,27 @@ function toCue(cue: VTTCue): Cue | undefined {
 /** Tracks are told apart by language and name: hls.js renumbers ids within each group. */
 function trackId(track: MediaPlaylist): string {
   return `${track.lang ?? ''}|${track.name}`;
+}
+
+/** An audio rendition as the player lists it, with its channels and format where the playlist gives them. */
+export function hlsAudioTrack(track: MediaPlaylist, active: boolean): EngineTrack {
+  // "16/JOC" is Dolby Atmos, which gives no bed of channels.
+  const atmos = /\/JOC/i.test(track.channels ?? '');
+  const listed: EngineTrack = {
+    id: trackId(track),
+    lang: track.lang ?? '',
+    label: track.name,
+    active,
+  };
+  const channels = atmos ? undefined : channelName(track.channels);
+  // hls.js gives each rendition its group's whole codec list: when the codecs
+  // in it are of different formats, which is this rendition's is unknown.
+  const codecs = track.audioCodec?.split(',').filter((codec) => codec.trim()) ?? [];
+  const names = new Set(codecs.map((codec) => formatName(codec)));
+  const format = names.size > 1 ? (atmos ? 'Atmos' : undefined) : formatName(codecs[0], atmos);
+  if (channels) listed.channels = channels;
+  if (format) listed.format = format;
+  return listed;
 }
 
 /**
@@ -160,13 +182,16 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
       if (!hls) return [];
       const current = hls.audioTracks[hls.audioTrack];
       const active = current ? trackId(current) : '';
+      // A language can sit in an AAC group and an E-AC-3 one: the playing group's copy says what plays.
+      const playing: Record<string, MediaPlaylist> = {};
+      for (const track of hls.audioTracks) playing[trackId(track)] = track;
       const seen: Record<string, true> = {};
       const tracks: EngineTrack[] = [];
-      for (const track of hls.allAudioTracks) {
-        const id = trackId(track);
+      for (const listed of hls.allAudioTracks) {
+        const id = trackId(listed);
         if (seen[id]) continue;
         seen[id] = true;
-        tracks.push({ id, lang: track.lang ?? '', label: track.name, active: id === active });
+        tracks.push(hlsAudioTrack(playing[id] ?? listed, id === active));
       }
       return tracks;
     },

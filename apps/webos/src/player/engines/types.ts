@@ -7,6 +7,12 @@ export interface EngineTrack {
   lang: string;
   label: string;
   active: boolean;
+  /** Audio only, when the engine knows: '2.0', '5.1', '7.1'. */
+  channels?: string;
+  /** Audio only, when the engine knows, as boxes print it: 'AAC', 'DD+', 'Atmos'. */
+  format?: string;
+  /** Audio only: the stream marks it as commentary (its kind or DASH role). */
+  commentary?: boolean;
 }
 
 /**

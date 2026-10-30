@@ -371,8 +371,9 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 - Embedded subtitles, direct play: not exposed through `textTracks` on webOS 22. The webOS media pipeline's own Luna API (`com.webos.media`: `subscribe` for the track list, `setSubtitleEnable` and `selectTrack` keyed by the video element's `mediaId`) is used by Lampa, Stremio and Nuvio but is unofficial, and has frozen playback on webOS 25. On the webOS 22 TV (two runs on 28 October 2026) its calls answered OK and listed the tracks but drew no subtitle, so the player does not use it and the subtitle menu offers addon subtitles.
 - Addon subtitles are the main subtitle path: they always work because BannerTV renders them itself, so OpenSubtitles v3 stays a default addon.
 - Addon subtitles (OpenSubtitles v3 and others): asked with the stream's file name, hash and size so they match the release, fetched with `fetch` (webOS appears to relax CORS for packaged apps; checked on the TV in Phase 2), gunzipped when needed, and decoded after detecting the text encoding (byte-order mark, then strict UTF-8, then the language's code page such as Windows-1251 or 1256).
-- Subtitles are grouped by language, the last chosen language first; pressing the language already showing moves to its next version, the usual fix for subtitles out of step. A file that cannot be read is replaced by the next one in the same language.
-- Renderer: SRT, VTT and ASS/SSA (as styled text) parsed into cues, drawn in an overlay above the video plane. Settings for size, colour, background, vertical position and a timing offset adjustable in 100 ms steps. Cues from hls.js and Shaka go through the same renderer.
+- Subtitles are grouped by language, the last chosen language first; each language's versions (the stream's own tracks first, then each addon's files) are listed beside it. A file that cannot be read is replaced by the next one in the same language, and its row says so.
+- Renderer: SRT, VTT and ASS/SSA (as styled text) parsed into cues, drawn in an overlay above the video plane. Settings for size, colour, background and vertical position, and a timing offset in 0.1 and 0.5 second steps kept for each subtitle file. Cues from hls.js and Shaka go through the same renderer.
+- When the remembered audio language has two tracks, the one whose stream marks it, or whose name says it, is a commentary gives way to the other (the playing track stays if it is not a commentary, or if every track in that language is one; "No commentary" is not one). On sport, whose main sound is often named "commentary", only the stream's own mark counts.
 - ASS and SSA styling through JASSUB is a Phase 5 item for webOS 6+; until then ASS is shown as plain text.
 
 **Progress, resume and next episode**
@@ -390,7 +391,7 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 | OK | Play or pause, and show the controls; land a skip on its way at once. With the Magic Remote pointer on the picture, show or hide the controls instead, unless the wheel has moved focus or brought the controls up since the pointer last moved: then OK is the focused control's (Pause, after a notch with the controls hidden) |
 | Left, Right | Skip 10 seconds a press, 30 then 60 while held; the total lands 0.8 seconds after the last press |
 | Up, Down, wheel | Show the controls, on Pause. Down from the transport reaches the tools, Up from the tools comes back to Pause, Up again reaches the bar; with the controls up, the wheel moves a row a notch the same way, stopping at the bar as Up does (a notch with focus still on the picture, as the pointer leaves it, goes to Pause). The wheel never skips (Eyitayo, 30 October 2026) |
-| Blue | Open or close Audio & subtitles |
+| Blue | Open or close the audio and subtitle sheet |
 | Play, Pause, Stop | Mapped to transport; Stop leaves the player |
 | Fast forward, Rewind | The same 10 second skips as Left and Right; on a live broadcast they jump at once |
 | Back | Cancel a skip, hide the controls, then leave the player (progress saved); just after the controls fade by themselves, ask again first |
@@ -404,6 +405,15 @@ The controls are two tiers over the bottom of the picture, from the redesign Eyi
 - Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams; Back from the list goes back to the film, where it was, on the same stream).
 - Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why (an icon under it when focused, a chip in place of its value): Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
 - While the Up Next card shows, the controls give way to it.
+
+The audio and subtitle sheet (step 3) rises from the bottom over the lower half of the picture. The picture above stays bright, the controls make way for it, and the subtitle line sits just above it, so a style or timing change shows as it is made.
+
+- Tabs along its top say what is on now: Subtitles (the language, or Off), Audio ("English 5.1"), Timing ("+0.5 s"), Style ("Large, yellow"). Left and Right move along them; each shows its choices below as it takes focus. The pointer passing over a tab does not switch it: a click does.
+- Subtitles: Off and the languages on the left, the language in focus's versions on the right (with the pointer, the language clicked). Versions are named by source, numbered where a source sent several ("OpenSubtitles v3 2"), with the release name when the addon sends one. A version says "Loading…" until its first line is ready, "Couldn't load" (or "Couldn't load, skipped" once another took over) when it can't be read, and "Matches your video" when its release name agrees with the stream's on at least two of episode, resolution, source and group, and differs on none (a best guess, shown only when both names exist). The stream's own subtitles are one more version of their language, listed first. Pressing a language picks its first version that loads; pressing the language showing goes to its version.
+- Audio: one row per track, with its format and channels when the engine gives them (hls.js and Shaka do; the TV's own player gives only the language and the name inside the file) and the track's own name when it says more.
+- Timing: −0.5 s, −0.1 s, +0.1 s, +0.5 s and Reset, said as "Subtitles 0.5 s later" or "earlier", kept for that subtitle file (as a hash: never a link) and for at most 300 files.
+- Style: each choice shown as it looks (Aa at each size, colour swatches, Aa on each background, a picture of each position) and Reset to default. A sample line shows above the sheet while nobody speaks. Settings opens the same choices in the same sheet.
+- Back goes from a tab's choices to the tabs, then closes the sheet onto the controls; Blue or a click above it closes it where it was opened. The controls can't fade behind it, and rows keep their places while more addons answer.
 
 **Known limits to explain in the UI**
 

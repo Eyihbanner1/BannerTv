@@ -1,7 +1,5 @@
 import {
   findBingeStream,
-  languageKey,
-  languageName,
   nextVideo,
   parseRuntime,
   playedCard,
@@ -36,6 +34,7 @@ import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
 import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
+import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, streamFinder } from '../../player/finder';
@@ -48,11 +47,10 @@ import {
 import { type PlayerAction, PlayerControls } from './PlayerControls';
 import { PlayerProblem } from './PlayerProblem';
 import { SubtitleLayer } from './SubtitleLayer';
-import { SubtitleStylePanel } from './SubtitleStylePanel';
-import { TracksPanel } from './TracksPanel';
+import { type SheetTab, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
 import { useScrobble } from './use-scrobble';
-import { type Subtitles, useSubtitles } from './use-subtitles';
+import { useSubtitles } from './use-subtitles';
 import styles from './PlayerScreen.module.css';
 
 /** Controls hide after this long without a key press, while playing. */
@@ -78,7 +76,7 @@ const UP_NEXT_BEFORE_END_S = 30;
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
 
-type Panel = 'tracks' | 'style' | 'quality' | null;
+type Panel = 'tracks' | 'quality' | null;
 
 interface PlayerScreenProps {
   type: string;
@@ -104,18 +102,6 @@ function skipStep(repeats: number): number {
   if (repeats > 12) return 60;
   if (repeats > 4) return 30;
   return 10;
-}
-
-/** The language of the subtitles showing, for the Audio & subtitles chip; none when off. */
-function subtitleValue(subtitles: Subtitles): string | undefined {
-  const { choice } = subtitles;
-  if (!choice) return undefined;
-  if (choice.kind === 'track') {
-    const track = subtitles.tracks.find((candidate) => candidate.id === choice.id);
-    return (track?.lang && languageName(track.lang)) || track?.label || undefined;
-  }
-  const option = subtitles.options.find((candidate) => candidate.key === choice.key);
-  return option ? languageName(option.lang) || undefined : undefined;
 }
 
 /** A skip's total, such as "+30 s" or "−1:30". */
@@ -159,8 +145,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const [controls, setControls] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [panelFrom, setPanelFrom] = useState('player-play');
-  // Audio and subtitles open on the subtitle playing, or on Style when coming back from it.
-  const [tracksFocus, setTracksFocus] = useState<'choice' | 'style'>('choice');
+  // The audio and subtitle sheet's tab, and whether Back closed it: then focus goes to the controls.
+  const [sheetTab, setSheetTab] = useState<SheetTab>('subtitles');
+  const closedByBack = useRef(false);
   const [scrubTo, setScrubTo] = useState<number | null>(null);
   // A skip in progress: where it began, where it will land, and the timer that lands it.
   const scrub = useRef<{ origin: number; target: number; timer: number } | null>(null);
@@ -336,19 +323,22 @@ export function PlayerScreen(props: PlayerScreenProps) {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [session, panel]);
 
-  // The audio language chosen last time, once per stream.
+  // The audio language chosen last time, once per stream and engine: a stream
+  // the TV's player hands to hls.js lists its tracks again, under other ids.
+  // Not a commentary, when the language has another track: on sport, where
+  // the main sound is often called "commentary", only one the stream marks.
   const audioDecided = useRef<string | null>(null);
   useEffect(() => {
     const entry = state.entry;
     if (!session || !entry || state.audio.length < 2) return;
-    const key = entryKey(entry);
+    const key = `${entryKey(entry)}|${state.engine ?? ''}`;
     if (audioDecided.current === key) return;
     audioDecided.current = key;
     const wanted = wantedAudio(props.lab ? undefined : metaId);
     if (!wanted) return;
-    const match = state.audio.find((track) => languageKey(track.lang) === languageKey(wanted));
+    const match = pickAudio(state.audio, wanted, !sportsEvent);
     if (match && !match.active) session.selectAudio(match.id);
-  }, [session, state.entry, state.audio, props.lab, metaId]);
+  }, [session, state.entry, state.engine, state.audio, props.lab, metaId, sportsEvent]);
 
   // Controls.
   function armHide() {
@@ -477,7 +467,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setPanel(which);
   }
   function openTracks(from: string) {
-    setTracksFocus('choice');
+    setSheetTab('subtitles');
+    closedByBack.current = false;
     openPanel('tracks', from);
   }
 
@@ -537,7 +528,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       case KeyCode.Blue:
         // Held down, it would open and close the panel over and over.
         if (event.repeat) break;
-        if (panel === 'tracks' || panel === 'style') setPanel(null);
+        if (panel === 'tracks') setPanel(null);
         else openTracks(controls ? 'player-tracks-button' : 'player-surface');
         break;
       default:
@@ -578,8 +569,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     pointerOnControl.current = target?.closest(CONTROL) != null;
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
-    // Behind the problem box, or while a stream opens, the controls would not show.
-    if (problem || waiting) return;
+    // Behind the problem box, or while a stream opens, the controls would not
+    // show; nor under the audio and subtitle sheet, which they make way for.
+    if (problem || waiting || panel === 'tracks') return;
     if (!controls) show();
     else armHide();
   };
@@ -695,6 +687,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     over();
     return session.subscribe(over);
   }, [session, switching]);
+  // The problem box takes the remote: a panel open behind it goes, in the
+  // same render as the box comes, so its focus goes back before the box takes it.
+  const [hadProblem, setHadProblem] = useState(problem);
+  if (problem !== hadProblem) {
+    setHadProblem(problem);
+    if (problem) setPanel(null);
+  }
   // A panel closed while a stream opens (the player moved on to another
   // stream behind it) leaves the hidden controls behind: they give way too.
   useEffect(() => {
@@ -839,7 +838,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-tracks-button',
       icon: 'subs',
       label: t('player.audioAndSubtitles'),
-      value: subtitleValue(subtitles) ?? t('player.subtitlesOffValue'),
+      value: subtitlesValue(subtitles) ?? t('player.subtitlesOffValue'),
       colourKey: 'blue',
       onPress: () => openTracks('player-tracks-button'),
     },
@@ -909,7 +908,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
         cues={subtitles.cues}
         offset={subtitles.offset}
         look={look}
-        raised={chrome}
+        lift={panel === 'tracks' ? 'sheet' : chrome ? 'controls' : 'none'}
+        // While the style changes, a line shows how it looks when nobody speaks.
+        sample={panel === 'tracks' && sheetTab === 'style' ? t('player.sampleLine') : undefined}
       />
       <div
         ref={surface.ref}
@@ -970,7 +971,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       )}
 
       <PlayerControls
-        visible={chrome}
+        // They make way for the audio and subtitle sheet, and come back when it goes.
+        visible={chrome && panel !== 'tracks'}
         title={title}
         subtitle={subtitle}
         facts={facts}
@@ -1000,24 +1002,23 @@ export function PlayerScreen(props: PlayerScreenProps) {
       )}
 
       {panel === 'tracks' && (
-        <TracksPanel
+        <TracksSheet
           audio={state.audio}
           subtitles={subtitles}
-          focusStyle={tracksFocus === 'style'}
-          returnFocusKey={panelFrom}
+          entry={state.entry}
+          tab={sheetTab}
+          onTab={setSheetTab}
+          returnFocusKey={() => (closedByBack.current ? 'player-tracks-button' : panelFrom)}
           onAudio={chooseAudio}
-          onStyle={() => setPanel('style')}
-          onClose={() => setPanel(null)}
-        />
-      )}
-      {/* Back from Style goes back to Audio and subtitles, on Style. */}
-      {panel === 'style' && (
-        <SubtitleStylePanel
-          returnFocusKey={panelFrom}
-          onClose={() => {
-            setTracksFocus('style');
-            setPanel('tracks');
+          onBack={() => {
+            setPanel(null);
+            // Back goes one level at a time: from the tabs to the controls.
+            // Not while a stream opens: they would show without a picture.
+            if (waiting) return;
+            closedByBack.current = true;
+            show();
           }}
+          onClose={() => setPanel(null)}
         />
       )}
       {panel === 'quality' && (

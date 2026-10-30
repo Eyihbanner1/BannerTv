@@ -1,0 +1,138 @@
+/*
+ * The sheet is 560px tall (Overlay's .bottom): 32px, the tabs (104px), 24px,
+ * then four rows of 88px, which leaves the safe area below.
+ */
+.tabs {
+  position: relative;
+  height: 104px;
+  margin-bottom: 24px;
+  white-space: nowrap;
+}
+
+.tab {
+  display: inline-block;
+  width: 300px;
+  height: 104px;
+  margin-right: 16px;
+  padding: 14px 28px 0;
+  border-radius: 16px;
+  vertical-align: top;
+  color: var(--bt-text-muted);
+  box-shadow: inset 0 -4px 0 transparent;
+}
+
+/* The tab whose choices show below. */
+.current {
+  color: var(--bt-text);
+  box-shadow: inset 0 -4px 0 var(--bt-accent);
+}
+
+.tabFocused {
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.tabName {
+  display: block;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.tabValue {
+  display: block;
+  font: var(--bt-text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aside {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.content {
+  position: relative;
+  height: 352px;
+}
+
+.languages {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 520px;
+}
+
+.files {
+  position: absolute;
+  top: 0;
+  left: 552px;
+  width: 1176px;
+  height: 352px;
+}
+
+.wide {
+  width: 1200px;
+}
+
+.note {
+  padding: 22px 36px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.timing {
+  height: 88px;
+  padding-left: 36px;
+  line-height: 88px;
+}
+
+.offset {
+  margin-right: 24px;
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+}
+
+.way {
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+.steps {
+  height: 88px;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.step {
+  display: inline-block;
+  min-width: 160px;
+  height: 76px;
+  margin-right: 16px;
+  padding: 0 28px;
+  border-radius: 16px;
+  font: var(--bt-text-body);
+  line-height: 76px;
+  text-align: center;
+  color: var(--bt-text-muted);
+  box-shadow: inset 0 0 0 2px var(--bt-surface-3);
+}
+
+.resetStep {
+  margin-left: 32px;
+}
+
+.stepFocused {
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.kept {
+  padding: 24px 36px 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}

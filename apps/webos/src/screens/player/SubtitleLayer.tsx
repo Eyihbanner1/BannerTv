@@ -7,14 +7,22 @@ import styles from './SubtitleLayer.module.css';
 const TICK_MS = 100;
 const NONE: Cue[] = [];
 
+/**
+ * What subtitles make way for. controls: bottom ones move up above the
+ * controls, top ones down below the title. sheet: bottom ones sit just above
+ * the audio and subtitle sheet.
+ */
+export type SubtitleLift = 'none' | 'controls' | 'sheet';
+
 interface SubtitleLayerProps {
   video: HTMLVideoElement | null;
   cues: readonly Cue[] | null;
   /** Seconds added to every cue: positive shows them later. */
   offset: number;
   look: SubtitleStyle;
-  /** The controls are showing: bottom subtitles move up out of their way, top ones down. */
-  raised: boolean;
+  lift: SubtitleLift;
+  /** A line shown while nobody speaks, so a style change shows at once. */
+  sample?: string;
 }
 
 /**
@@ -22,7 +30,7 @@ interface SubtitleLayerProps {
  * webOS shows neither embedded nor HLS subtitles to web apps (ADR 0001), and
  * so that every source looks the same and follows the viewer's style.
  */
-export function SubtitleLayer({ video, cues, offset, look, raised }: SubtitleLayerProps) {
+export function SubtitleLayer({ video, cues, offset, look, lift, sample }: SubtitleLayerProps) {
   const index = useMemo(() => (cues ? createCueIndex(cues) : null), [cues]);
   const [read, setRead] = useState<{ index: CueIndex | null; cues: Cue[] }>({
     index: null,
@@ -41,54 +49,81 @@ export function SubtitleLayer({ video, cues, offset, look, raised }: SubtitleLay
   }, [video, index, offset]);
 
   // Cues read from an older file never show over a new one.
-  const showing = video && index && read.index === index ? read.cues : NONE;
+  const said = video && index && read.index === index ? read.cues : NONE;
+  const showing = said.length > 0 || !sample ? said : sampleCue(sample);
   if (showing.length === 0) return null;
   const bottom = showing.filter((cue) => !cue.top);
   const top = showing.filter((cue) => cue.top);
-  const lift = raised ? (look.position === 'top' ? styles.lowered : styles.raised) : undefined;
-  const placement = [styles[`at-${look.position}`], lift].filter(Boolean).join(' ');
-  const text = [styles.text, styles[`size-${look.size}`], styles[`colour-${look.colour}`]].join(
-    ' ',
-  );
-
-  const draw = (list: Cue[]) =>
-    list.map((cue, i) => (
-      <div key={`${cue.start}-${i}`} className={styles.cue}>
-        {cue.lines.map((line, j) => (
-          <div key={j} className={styles.line}>
-            <span className={`${styles.box} ${styles[`back-${look.background}`]}`}>
-              {line.map((span, k) => (
-                <span
-                  key={k}
-                  className={[
-                    span.italic && styles.italic,
-                    span.bold && styles.bold,
-                    span.underline && styles.underline,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  {span.text}
-                </span>
-              ))}
-            </span>
-          </div>
-        ))}
-      </div>
-    ));
+  // Lines placed at the top of the picture stay there under a sheet.
+  const below =
+    lift === 'sheet' ? styles.aboveSheet : lift === 'controls' ? styles.raised : undefined;
+  const lowered = lift === 'controls' ? styles.lowered : undefined;
+  const placement =
+    look.position === 'top' ? [styles['at-top'], lowered] : [styles[`at-${look.position}`], below];
 
   return (
-    <div className={text} aria-hidden="true">
+    <div className={subtitleText(look)} aria-hidden="true">
       {top.length > 0 && (
-        <div
-          className={[styles.area, styles['at-top'], raised && styles.lowered]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {draw(top)}
+        <div className={[styles.area, styles['at-top'], lowered].filter(Boolean).join(' ')}>
+          {top.map((cue, i) => (
+            <SubtitleCue key={`${cue.start}-${i}`} cue={cue} look={look} />
+          ))}
         </div>
       )}
-      {bottom.length > 0 && <div className={`${styles.area} ${placement}`}>{draw(bottom)}</div>}
+      {bottom.length > 0 && (
+        <div className={[styles.area, ...placement].filter(Boolean).join(' ')}>
+          {bottom.map((cue, i) => (
+            <SubtitleCue key={`${cue.start}-${i}`} cue={cue} look={look} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function sampleCue(text: string): Cue[] {
+  return [{ start: 0, end: 0, lines: [[{ text }]] }];
+}
+
+/** The size and colour of subtitle text, for the layer and for the style samples. */
+export function subtitleText(look: Pick<SubtitleStyle, 'size' | 'colour'>): string {
+  return [styles.text, styles[`size-${look.size}`], styles[`colour-${look.colour}`]].join(' ');
+}
+
+/** The colour of subtitle text, as `color`: a swatch fills with it. */
+export function subtitleColour(colour: SubtitleStyle['colour']): string {
+  return styles[`colour-${colour}`]!;
+}
+
+/** The box or edge behind subtitle text. */
+export function subtitleBack(background: SubtitleStyle['background']): string {
+  return `${styles.box} ${styles[`back-${background}`]}`;
+}
+
+/** One cue, line by line, each line with its own background. */
+export function SubtitleCue({ cue, look }: { cue: Cue; look: SubtitleStyle }) {
+  return (
+    <div className={styles.cue}>
+      {cue.lines.map((line, j) => (
+        <div key={j} className={styles.line}>
+          <span className={subtitleBack(look.background)}>
+            {line.map((span, k) => (
+              <span
+                key={k}
+                className={[
+                  span.italic && styles.italic,
+                  span.bold && styles.bold,
+                  span.underline && styles.underline,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                {span.text}
+              </span>
+            ))}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

@@ -29,6 +29,11 @@
   top: 250px;
 }
 
+/* Just above the audio and subtitle sheet (SHEET_HEIGHT in TracksSheet). */
+.aboveSheet {
+  bottom: 584px;
+}
+
 .cue {
   margin-top: 8px;
 }

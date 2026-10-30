@@ -159,12 +159,16 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
       video.duration === Infinity && mime !== 'video/x-matroska' && mime !== 'video/webm',
 
     audioTracks(): EngineTrack[] {
-      return listTracks(tracked.audioTracks, (track) => track.enabled === true).map((track) => ({
-        id: String(track.index),
-        lang: track.language,
-        label: track.label,
-        active: track.active,
-      }));
+      return listTracks(tracked.audioTracks, (track) => track.enabled === true).map((track) => {
+        const listed: EngineTrack = {
+          id: String(track.index),
+          lang: track.language,
+          label: track.label,
+          active: track.active,
+        };
+        if (track.kind === 'commentary') listed.commentary = true;
+        return listed;
+      });
     },
 
     selectAudio(id) {

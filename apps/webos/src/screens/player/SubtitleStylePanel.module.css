@@ -1,0 +1,157 @@
+/* Four rows of 88px: the height of the sheet's content (TracksSheet). */
+.choices {
+  position: relative;
+  height: 352px;
+}
+
+.field {
+  height: 88px;
+  white-space: nowrap;
+}
+
+.name {
+  display: inline-block;
+  width: 240px;
+  padding-left: 8px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+
+.chip {
+  display: inline-block;
+  height: 76px;
+  margin-right: 16px;
+  padding: 0 28px;
+  border-radius: 16px;
+  font: var(--bt-text-body);
+  line-height: 76px;
+  color: var(--bt-text-muted);
+  vertical-align: middle;
+  box-shadow: inset 0 0 0 2px var(--bt-surface-3);
+}
+
+.chosen {
+  color: var(--bt-text);
+  box-shadow: inset 0 0 0 4px var(--bt-accent);
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.reset {
+  margin-left: 48px;
+}
+
+.chipName {
+  vertical-align: middle;
+}
+
+/* "Aa" as a sample: at a size, or on a background. */
+.aa {
+  display: inline-block;
+  min-width: 56px;
+  margin-right: 16px;
+  font-family: var(--bt-font);
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 76px;
+  color: #ffffff;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* The four sizes, at about half the size they show on the picture. */
+.aa-small {
+  font-size: 22px;
+}
+
+.aa-medium {
+  font-size: 28px;
+}
+
+.aa-large {
+  font-size: 36px;
+}
+
+.aa-huge {
+  font-size: 46px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  margin-right: 16px;
+  border-radius: 16px;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+/* A small screen with a line where the subtitles sit. */
+.screen {
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 36px;
+  margin-right: 16px;
+  border: 2px solid var(--bt-text-subtle);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.line {
+  position: absolute;
+  left: 16px;
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bt-text);
+}
+
+.line-bottom {
+  bottom: 4px;
+}
+
+.line-raised {
+  bottom: 12px;
+}
+
+.line-top {
+  top: 4px;
+}
+
+/* Settings' sheet: its name where the player's has tabs. */
+.heading {
+  height: 104px;
+  margin-bottom: 24px;
+}
+
+.title {
+  font: var(--bt-text-heading);
+}
+
+.kept {
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+/* The sample line in Settings, just above the sheet, as the player draws it there. */
+.sample {
+  position: absolute;
+  left: 0;
+  bottom: 584px;
+  width: 1920px;
+  text-align: center;
+}
+
+/* Subtitles at the top of the picture: 64px from the top of the 1080px screen. */
+.sampleTop {
+  top: -456px;
+  bottom: auto;
+}

@@ -37,3 +37,30 @@
   padding: 56px 72px;
   border-radius: 24px;
 }
+
+/* The picture above the sheet stays bright: what changes on it shows as it changes. */
+.clear {
+  background: transparent;
+}
+
+/* SHEET_HEIGHT in the player's TracksSheet. */
+.bottom {
+  top: 520px;
+  left: 0;
+  width: 1920px;
+  height: 560px;
+  padding: 32px var(--bt-safe-x) 0;
+  border-radius: 32px 32px 0 0;
+  animation: rise var(--bt-motion) ease-out;
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(80px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
