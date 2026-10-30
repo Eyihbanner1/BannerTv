@@ -5,6 +5,7 @@ import {
   init,
   navigateByDirection,
   setKeyMap,
+  SpatialNavigation,
 } from '@noriginmedia/norigin-spatial-navigation';
 import { mark } from '../platform/marks';
 import { tuning } from '../platform/tuning';
@@ -26,6 +27,11 @@ let lastWheel = 0;
  */
 export function focusedKey(): string {
   return getCurrentFocusKey() || '';
+}
+
+/** Presses what has focus, as OK does. */
+export function pressFocused(): void {
+  SpatialNavigation.onEnterPress({ pressedKeys: { enter: 1 } });
 }
 
 /** Whether the latest focus move came from the Magic Remote wheel. */

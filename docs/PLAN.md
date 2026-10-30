@@ -394,14 +394,14 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 | Play, Pause, Stop | Mapped to transport; Stop leaves the player |
 | Fast forward, Rewind | The same 10 second skips as Left and Right; on a live broadcast they jump at once |
 | Back | Cancel a skip, hide the controls, then leave the player (progress saved); just after the controls fade by themselves, ask again first |
-| Magic Remote pointer | Moving shows the controls; a click on the picture shows or hides them; a click on the bar jumps there; the back arrow at the top left leaves |
+| Magic Remote pointer | Moving shows the controls; a click on the picture shows or hides them, or presses the focused control after the wheel moved focus (the Magic Remote's OK is a click alone while the pointer shows, as the TV check found); a click on the bar jumps there; the back arrow at the top left leaves |
 
 The controls are two tiers over the bottom of the picture, from the redesign Eyitayo picked on 29 October 2026 (built in four steps, each tried on the TV first):
 
 - Top: a back arrow for the pointer, the title, three facts (resolution, HDR, sound), the clock and "Ends at".
 - The bar: time played, then the bar, then time left ("−12:40"), or LIVE on a broadcast.
 - Transport, icons with their names under them, in fixed places: Start over, Back 10 s, Play or Pause (larger, in the middle), Forward 10 s, Next episode (anything with an episode list).
-- Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams).
+- Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams; Back from the list goes back to the film, where it was, on the same stream).
 - Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why (an icon under it when focused, a chip in place of its value): Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
 - While the Up Next card shows, the controls give way to it.
 

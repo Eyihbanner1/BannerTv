@@ -21,7 +21,7 @@ import {
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { back, type EventPlay, remembersPlace, replace } from '../../app/router';
+import { back, type EventPlay, type PlayerRoute, remembersPlace, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
@@ -33,7 +33,7 @@ import { useQuery } from '../../data/use-query';
 import { markActivity } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
 import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
-import { focusedKey } from '../../navigation/spatial';
+import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
@@ -593,8 +593,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const at = focusedKey();
     // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
     if (chrome && at !== 'player-surface') {
-      // The rest of the roll that brought them up would move on from Pause.
+      // The rest of the roll that brought them up, however long, would move on from Pause.
       if (now - lastWheel.current < WHEEL_STEP_MS) {
+        lastWheel.current = now;
         event.stopPropagation();
         return;
       }
@@ -617,7 +618,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   };
 
   // A click on the picture shows the controls, or hides them. A click on a
-  // control is that control's.
+  // control is that control's, and so is a click after the wheel moved focus
+  // to one: the Magic Remote sends its OK as a click alone while the pointer shows.
   const picturePressable = () => !problem && !waiting && !panel && !showUpNext;
   function pressPicture() {
     if (controls) hide();
@@ -626,7 +628,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const onPictureClick = (event: MouseEvent) => {
     if (clickCameWithOk()) return;
     if (event.target instanceof Element && event.target.closest(CONTROL)) return;
-    if (picturePressable()) pressPicture();
+    if (!picturePressable()) return;
+    if (chrome && wheelMovedFocus.current) pressFocused();
+    else pressPicture();
   };
 
   // The Magic Remote OK can come as a key press as well as a click. With the
@@ -858,17 +862,31 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-streams-button',
       icon: 'sources',
       label: t('player.sources'),
-      onPress: () =>
+      onPress: () => {
+        // Before a stream has opened, where the viewer asked to start.
+        const startAt = session && state.entry ? session.carryOn() : resumedAt;
+        const film: PlayerRoute = {
+          name: 'player',
+          type,
+          metaId,
+          videoId,
+          preview,
+          stream: state.entry ?? props.stream,
+          chosen: props.chosen,
+          startAt,
+          event: sportsEvent,
+        };
         replace({
           name: 'streams',
           type,
           metaId,
           videoId,
           preview,
-          // Before a stream has opened, where the viewer asked to start.
-          startAt: session && state.entry ? session.carryOn() : resumedAt,
+          startAt,
           event: sportsEvent,
-        }),
+          backTo: film,
+        });
+      },
     });
   }
 

@@ -870,20 +870,15 @@ test('the wheel never skips: a notch brings the controls up on Pause, and with t
   const play = page.locator('[data-focus-key="player-play"]');
 
   // Hidden, a notch brings them up on Pause, as Up and Down do, and the TV's own focus goes there too.
-  // The rest of the same roll stays there.
+  // The rest of the same roll stays there, however long it goes on: a quick roll on the TV takes half a second.
   await page.evaluate(async () => {
     const under = document.elementFromPoint(960, 540);
-    const notch = () =>
+    for (let notch = 0; notch < 12; notch++) {
       under?.dispatchEvent(
         new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }),
       );
-    const pause = document.querySelector('[data-focus-key="player-play"]');
-    const from = performance.now();
-    notch();
-    // The next notch of the roll comes once Pause has focus, well inside 150 ms.
-    while (document.activeElement !== pause && performance.now() - from < 100)
-      await new Promise(requestAnimationFrame);
-    notch();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
   });
   await expectFocus(page, 'player-play');
   await expect(play).toBeFocused();
@@ -920,8 +915,8 @@ test('the wheel never skips: a notch brings the controls up on Pause, and with t
   expect(await focusedKey(page)).toBe('player-surface');
   await page.mouse.wheel(0, 100);
   await expectFocus(page, 'player-play');
-  // OK is then Pause's, where the wheel put focus, even with the pointer on the picture, and its click presses nothing more.
-  await page.keyboard.press('Enter');
+  // A click is then Pause's, where the wheel put focus, even with the pointer on the picture: on the TV
+  // the Magic Remote's OK is a click alone while the pointer shows.
   await page.mouse.click(960, 420);
   await expect.poll(async () => (await video(page)).playing).toBe(false);
   await page.waitForTimeout(300);
@@ -934,7 +929,6 @@ test('the wheel never skips: a notch brings the controls up on Pause, and with t
   await expect(play).toBeHidden();
   await page.mouse.wheel(0, 100);
   await expectFocus(page, 'player-play');
-  await page.keyboard.press('Enter');
   await page.mouse.click(980, 430);
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   await page.waitForTimeout(300);
@@ -942,6 +936,32 @@ test('the wheel never skips: a notch brings the controls up on Pause, and with t
   expect(await focusedKey(page)).toBe('player-play');
   // Not one skip all along.
   expect(await seeks()).toBe(0);
+});
+
+test('Back from Sources goes back to the film where it was, on the same stream', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
+  const src = (await video(page)).src;
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  const at = (await video(page)).time;
+  await press(page, 'Enter', 'streams-item-0');
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe(src);
+  expect((await video(page)).time).toBeGreaterThan(at - 2);
+
+  // Back from the film still leaves for the title it was opened from.
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
 });
 
 test('Start over is always there, and offers for a moment to go back to where the film was', async ({

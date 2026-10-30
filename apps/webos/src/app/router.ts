@@ -86,6 +86,8 @@ export type Route =
       preview?: MetaPreview;
       startAt?: number;
       event?: EventPlay;
+      /** Sent from the player's Sources: Back goes back to the film, where it was. */
+      backTo?: PlayerRoute;
     }
   | { name: 'diagnostics' }
   | { name: 'lab' }
@@ -96,6 +98,8 @@ export type Route =
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */
   | { name: 'trakt' };
+
+export type PlayerRoute = Extract<Route, { name: 'player' }>;
 
 /**
  * Where focus goes on Back. A function is asked as the screen is shown again,
