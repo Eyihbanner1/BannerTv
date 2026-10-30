@@ -1,6 +1,7 @@
 # BannerTV's service for Trakt and TMDB. Deploy with `npx wrangler@4 deploy` from this folder.
 # Its keys are Worker secrets, set with `npx wrangler@4 secret put`: TRAKT_CLIENT_ID,
-# TRAKT_CLIENT_SECRET and TMDB_API_KEY. None of them belongs in this file.
+# TMDB_API_KEY and, only for a Trakt app that has one, TRAKT_CLIENT_SECRET.
+# None of them belongs in this file.
 name = "api"
 main = "src/worker.ts"
 compatibility_date = "2026-06-01"
