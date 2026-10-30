@@ -13,7 +13,7 @@ import {
 import { useScreenSlot } from '../app/screen-slot';
 import { whilePressing } from '../navigation/focus-memory';
 import { markActivity } from '../navigation/activity';
-import { clickCameWithOk } from '../navigation/ok-click';
+import { answeredOk, clickCameWithOk } from '../navigation/ok-click';
 import { inputMode } from '../platform/input-mode';
 
 export interface PressableProps {
@@ -46,6 +46,7 @@ export const Pressable = memo(function Pressable(props: PressableProps) {
   const onEnterPress = useCallback(() => {
     // Focus can sit on a screen for a moment after another opens on top of it.
     if (!slot.get()) return;
+    answeredOk();
     const { focusKey: key, onPress } = latest.current;
     if (onPress) whilePressing(key, onPress);
   }, [slot]);

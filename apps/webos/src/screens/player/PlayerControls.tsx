@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Pressable } from '../../components/Pressable';
 import { markActivity } from '../../navigation/activity';
+import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
 import { inputMode } from '../../platform/input-mode';
 import { formatClock, formatTime } from '../../player/media';
 import { PlayerIcon, type PlayerIconName } from './PlayerIcon';
@@ -96,6 +97,7 @@ function SeekBar({
     // the key press must not play or pause as well.
     onEnterPress: () => {
       if (inputMode.get() === 'pointer' && pointerOver.current) return;
+      answeredOk();
       onCommit();
     },
   });
@@ -147,6 +149,8 @@ function SeekBar({
         setHover(null);
       }}
       onClick={(event) => {
+        // Not the click of an OK something else answered, such as the one that brought the bar up.
+        if (clickCameWithOk()) return;
         const at = fractionAt(event);
         if (at !== null) onSeekTo(at * duration);
       }}
@@ -312,8 +316,16 @@ export function PlayerControls(props: PlayerControlsProps) {
   });
   const now = useNow(visible);
   const shown = props.scrubTo ?? position;
-  // Neither on a broadcast nor before the file gives its length.
-  const endsAt = !live && duration > 0 ? now + Math.max(0, duration - shown) * 1000 : null;
+  // Neither on a broadcast nor before the file gives its length. From the
+  // clock to the millisecond, not the last tick: playing re-renders this as
+  // the time left goes down, and against a tick up to 5 s old the end would
+  // go back and forth over a minute. It is only text, so a render that reads
+  // the clock again can only bring it up to date.
+  const endsAt =
+    !live && duration > 0
+      ? // eslint-disable-next-line react-hooks/purity
+        Math.max(now, Date.now()) + Math.max(0, duration - shown) * 1000
+      : null;
   const pause = transport.find((action) => action?.icon === 'play' || action?.icon === 'pause');
   return (
     <FocusContext.Provider value={focusKey}>

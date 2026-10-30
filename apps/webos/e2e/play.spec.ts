@@ -441,6 +441,9 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   await page.waitForTimeout(6000);
   await expectFocus(page, 'player-upnext-play');
+  // A skip behind the card says where it lands, as with the controls hidden.
+  await pressCode(page, FAST_FORWARD);
+  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(() => mock.streams).toContain('series/tt8000001:1:2');
@@ -1260,14 +1263,17 @@ test('a click on the picture hides the controls and another brings them back; th
   expect((await video(page)).playing).toBe(true);
 
   // A click on a control, well after that OK, is the control's, not the picture's.
+  const seeks = await countSeeks(page);
   await page.waitForTimeout(500);
+  const clicked = (await video(page)).time;
   await page.locator('[data-focus-key="player-back10"]').click();
-  await page.waitForTimeout(500);
+  await expect.poll(seeks).toBe(1);
+  // A few seconds in, it goes back to the start.
+  expect((await video(page)).time).toBeLessThan(Math.max(1, clicked - 5));
   await expectFocus(page, 'player-back10');
   await expect(play).toBeVisible();
 
   // With a skip under way, OK over the picture lands it, and Sources, which kept focus, stays put.
-  const seeks = await countSeeks(page);
   await page.locator('[data-focus-key="player-streams-button"]').hover();
   await expectFocus(page, 'player-streams-button');
   // Straight there, over nothing else on the way.
@@ -1275,9 +1281,37 @@ test('a click on the picture hides the controls and another brings them back; th
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
   await page.mouse.click(960, 420);
-  await expect.poll(seeks, { timeout: 400 }).toBe(1);
+  await expect.poll(seeks, { timeout: 400 }).toBe(2);
   await expectFocus(page, 'player-streams-button');
   await expect(play).toBeVisible();
+
+  // After the wheel moved focus, OK is the focused control's even with the pointer on the picture.
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+  // One row a notch, and notches closer than 150 ms count once.
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-tracks-button');
+  await page.keyboard.press('Enter');
+  await page.mouse.click(960, 420);
+  const panel = page.getByRole('dialog', { name: 'Audio & subtitles' });
+  await expect(panel).toBeVisible();
+  await pressBack(page);
+  await expect(panel).toHaveCount(0);
+  await expectFocus(page, 'player-tracks-button');
+
+  // Hidden, the bar is not under the pointer either: OK there shows the controls and jumps nowhere.
+  const bar = page.locator('[data-focus-key="player-seek"] > div');
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-seek');
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.keyboard.press('Enter');
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await expect(play).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await seeks()).toBe(2);
 
   // Hidden, the controls are not under the pointer: OK over the place of the
   // back arrow shows them, and the click that comes with it presses nothing.

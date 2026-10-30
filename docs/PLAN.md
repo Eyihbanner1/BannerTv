@@ -387,7 +387,7 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 
 | Input | Action |
 | --- | --- |
-| OK | Play or pause, and show the controls; land a skip on its way at once |
+| OK | Play or pause, and show the controls; land a skip on its way at once. With the Magic Remote pointer on the picture, show or hide the controls instead |
 | Left, Right | Skip 10 seconds a press, 30 then 60 while held; the total lands 0.8 seconds after the last press |
 | Up, Down | Show the controls, on Pause. Down from the transport reaches the tools, Up from the tools comes back to Pause, Up again reaches the bar |
 | Blue | Open or close Audio & subtitles |
@@ -402,7 +402,7 @@ The controls are two tiers over the bottom of the picture, from the redesign Eyi
 - The bar: time played, then the bar, then time left ("−12:40"), or LIVE on a broadcast.
 - Transport, icons with their names under them, in fixed places: Start over, Back 10 s, Play or Pause (larger, in the middle), Forward 10 s, Next episode (anything with an episode list).
 - Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams).
-- Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why when focused: Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
+- Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why (an icon under it when focused, a chip in place of its value): Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
 - While the Up Next card shows, the controls give way to it.
 
 **Known limits to explain in the UI**

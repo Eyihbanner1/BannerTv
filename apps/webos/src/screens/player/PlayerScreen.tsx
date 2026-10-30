@@ -32,7 +32,7 @@ import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
 import { markActivity } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
-import { clickCameWithOk } from '../../navigation/ok-click';
+import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
@@ -173,6 +173,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const pointerOnChrome = useRef(false);
   // Whether it rests on a control, whose OK is that control's; elsewhere it is the picture's.
   const pointerOnControl = useRef(false);
+  // Whether the wheel has moved focus since the pointer last moved: OK is then the focused control's.
+  const wheelMovedFocus = useRef(false);
   const lastAutoHide = useRef(0);
   const [leaveHint, setLeaveHint] = useState(false);
   const leaveTimer = useRef<number | undefined>(undefined);
@@ -408,7 +410,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const timer = window.setTimeout(commitScrub, SCRUB_COMMIT_MS);
     scrub.current = { origin, target, timer };
     setScrubTo(target);
-    if (controls && !panel) {
+    if (chrome && !panel) {
       armHide();
       return;
     }
@@ -573,8 +575,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const target = event.target instanceof Element ? event.target : null;
     pointerOnChrome.current = target?.closest('[data-player-chrome]') != null;
     pointerOnControl.current = target?.closest(CONTROL) != null;
+    if (event.movementX === 0 && event.movementY === 0) return;
+    wheelMovedFocus.current = false;
     // Behind the problem box, or while a stream opens, the controls would not show.
-    if (problem || waiting || (event.movementX === 0 && event.movementY === 0)) return;
+    if (problem || waiting) return;
     if (!controls) show();
     else armHide();
   };
@@ -582,8 +586,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // With the controls hidden the wheel skips, a notch at a time. Otherwise it
   // moves between rows, as everywhere else, and keeps the controls up.
   const onWheel = (event: WheelEvent) => {
-    if (controls || panel || problem || waiting || event.deltaY === 0) {
-      if (controls && !panel) armHide();
+    if (chrome || panel || problem || waiting || event.deltaY === 0) {
+      if (chrome && !panel && event.deltaY !== 0) {
+        wheelMovedFocus.current = true;
+        armHide();
+      }
       return;
     }
     event.stopPropagation();
@@ -615,9 +622,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
   onOkFirst.current = (event) => {
     if (event.keyCode !== KeyCode.Ok || inputMode.get() !== 'pointer') return;
     // A control the pointer rests on is the picture while the controls are hidden.
-    if ((chrome && pointerOnControl.current) || !picturePressable()) return;
+    if (chrome && (pointerOnControl.current || wheelMovedFocus.current)) return;
+    if (!picturePressable()) return;
     event.preventDefault();
     event.stopPropagation();
+    answeredOk();
     if (event.repeat) return;
     if (commitScrub()) armHide();
     else pressPicture();
@@ -645,7 +654,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const wanted = wantsControls.current;
     wantsControls.current = false;
     if (problem || panel) return;
-    if (wanted || state.status === 'paused') show('player-play');
+    // Up Next, showing from this render, has focus: the controls wait behind it.
+    if (wanted || state.status === 'paused') show(showUpNext ? undefined : 'player-play');
     // Only the change of waiting matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waiting]);
@@ -789,8 +799,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
       label: t('player.forward10'),
       onPress: () => skipButton(1),
     },
-    // Anything with an episode list has a place for it, whatever its type.
-    metaQuery && !state.live
+    // Anything with an episode list has a place for it, whatever its type,
+    // kept while the list loads.
+    metaQuery && !state.live && (!meta || episode)
       ? {
           focusKey: 'player-next',
           icon: 'next',
@@ -901,7 +912,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           {toast}
         </p>
       )}
-      {skipNote && (!controls || panel) && (
+      {skipNote && (!chrome || panel) && (
         <>
           <div className={styles.skipNote} role="status">
             <p className={styles.skipTotal}>{formatSkip(skipNote.delta)}</p>
