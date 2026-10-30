@@ -19,7 +19,7 @@ import {
   useSyncExternalStore,
   type WheelEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { back, type EventPlay, remembersPlace, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -33,6 +33,7 @@ import { useQuery } from '../../data/use-query';
 import { markActivity } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
 import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
+import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
@@ -60,7 +61,7 @@ const CONTROLS_HIDE_MS = 5000;
 const SCRUB_COMMIT_MS = 800;
 /** The note for a skip made with the controls hidden stays this long after it lands. */
 const SKIP_NOTE_MS = 1500;
-/** The wheel skips at most one notch this often, as it moves one row elsewhere. */
+/** The wheel counts at most one notch this often, as it moves one row a notch elsewhere. */
 const WHEEL_STEP_MS = 150;
 /** Start over offers to go back to where the viewer was for this long. */
 const UNDO_MS = 8000;
@@ -129,9 +130,9 @@ function formatSkip(seconds: number): string {
  * TV (or plays the one chosen in All streams), resumes where the viewer left
  * off, and moves to another stream at the same moment if one stalls.
  *
- * Remote: OK pauses and shows the controls; Left, Right, the wheel, Fast
- * forward and Rewind skip 10 s a press, with a small note while the controls
- * are hidden; Up and Down show the controls; Back hides them, then leaves.
+ * Remote: OK pauses and shows the controls; Left, Right, Fast forward and
+ * Rewind skip 10 s a press, with a small note while the controls are hidden;
+ * Up, Down and the wheel show the controls; Back hides them, then leaves.
  * Play, Pause and Stop work at any time, and Blue opens and closes audio and
  * subtitles.
  */
@@ -583,22 +584,36 @@ export function PlayerScreen(props: PlayerScreenProps) {
     else armHide();
   };
 
-  // With the controls hidden the wheel skips, a notch at a time. Otherwise it
-  // moves between rows, as everywhere else, and keeps the controls up.
+  // The wheel never skips (Eyitayo, 30 October 2026). With the controls hidden
+  // a notch shows them, on Pause, as Up and Down do. Otherwise it moves between
+  // rows, as everywhere else, and keeps the controls up.
   const onWheel = (event: WheelEvent) => {
-    if (chrome || panel || problem || waiting || event.deltaY === 0) {
-      if (chrome && !panel && event.deltaY !== 0) {
-        wheelMovedFocus.current = true;
-        armHide();
+    if (event.deltaY === 0 || panel || problem || showUpNext) return;
+    const now = Date.now();
+    const at = focusedKey();
+    // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
+    if (chrome && at !== 'player-surface') {
+      // The rest of the roll that brought them up would move on from Pause.
+      if (now - lastWheel.current < WHEEL_STEP_MS) {
+        event.stopPropagation();
+        return;
       }
+      armHide();
+      // Up stops at the bar, as the arrow does: the back arrow above it is the pointer's.
+      if (event.deltaY < 0 && at === 'player-seek') event.stopPropagation();
+      else wheelMovedFocus.current = true;
       return;
     }
+    // The notch is spent bringing them up, not on moving on from Pause as well.
     event.stopPropagation();
-    const now = Date.now();
-    if (now - lastWheel.current < WHEEL_STEP_MS) return;
+    // While a stream starts they would show without a picture.
+    if (waiting || now - lastWheel.current < WHEEL_STEP_MS) return;
     lastWheel.current = now;
     markActivity();
-    scrubBy(event.deltaY > 0 ? 1 : -1);
+    wheelMovedFocus.current = true;
+    // Shown before focus lands, or the TV's own focus (which Audio Guidance reads) stays put.
+    flushSync(() => setControls(true));
+    show('player-play');
   };
 
   // A click on the picture shows the controls, or hides them. A click on a

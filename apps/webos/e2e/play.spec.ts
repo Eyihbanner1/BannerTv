@@ -201,6 +201,11 @@ test('OK while a stream starts lets it start and then shows the controls, and co
   await press(page, 'Enter', 'player-surface');
   for (const key of ['ArrowRight', 'ArrowUp', 'ArrowDown'])
     await press(page, key, 'player-surface');
+  await page.mouse.wheel(0, 100);
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-surface');
   await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   await expectFocus(page, 'player-play');
@@ -847,22 +852,96 @@ test('every way of skipping adds 10 s a press and lands once, with a note while 
   await expect.poll(seeks).toBe(2);
   expect((await video(page)).time).toBeLessThan(before - 8);
 
-  // So does a notch of the wheel.
-  const wheeled = (await video(page)).time;
-  await page.mouse.wheel(0, 100);
-  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
-  await expect.poll(seeks).toBe(3);
-  expect((await video(page)).time).toBeGreaterThan(wheeled + 8);
-  await expectFocus(page, 'player-surface');
-
   // OK lands a skip there and then, well before it would land by itself, and leaves the film playing.
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 400 }).toBe(4);
+  await expect.poll(seeks, { timeout: 400 }).toBe(3);
   await page.waitForTimeout(1000);
-  expect(await seeks()).toBe(4);
+  expect(await seeks()).toBe(3);
   expect((await video(page)).playing).toBe(true);
   await expectControlsHidden(page);
+});
+
+test('the wheel never skips: a notch brings the controls up on Pause, and with them up it moves a row', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const seeks = await countSeeks(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+
+  // Hidden, a notch brings them up on Pause, as Up and Down do, and the TV's own focus goes there too.
+  // The rest of the same roll stays there.
+  await page.evaluate(async () => {
+    const under = document.elementFromPoint(960, 540);
+    const notch = () =>
+      under?.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }),
+      );
+    const pause = document.querySelector('[data-focus-key="player-play"]');
+    const from = performance.now();
+    notch();
+    // The next notch of the roll comes once Pause has focus, well inside 150 ms.
+    while (document.activeElement !== pause && performance.now() - from < 100)
+      await new Promise(requestAnimationFrame);
+    notch();
+  });
+  await expectFocus(page, 'player-play');
+  await expect(play).toBeFocused();
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-play');
+  // Then a notch is a row, down to the tools and up to the bar, where it stops, as Up does.
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-tracks-button');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-seek');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-seek');
+
+  // Away from the viewer too.
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await expect(play).toBeHidden();
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+
+  // Brought up by the pointer, the controls leave focus on the picture, and a notch takes it to Pause.
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.mouse.move(900, 400);
+  await page.mouse.move(960, 420, { steps: 3 });
+  await expect(page.locator('html')).toHaveClass(/pointer-mode/);
+  await expect(play).toBeVisible();
+  expect(await focusedKey(page)).toBe('player-surface');
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-play');
+  // OK is then Pause's, where the wheel put focus, even with the pointer on the picture, and its click presses nothing more.
+  await page.keyboard.press('Enter');
+  await page.mouse.click(960, 420);
+  await expect.poll(async () => (await video(page)).playing).toBe(false);
+  await page.waitForTimeout(300);
+  expect(await play.isVisible()).toBe(true);
+  expect(await focusedKey(page)).toBe('player-play');
+
+  // The same after a notch with the controls hidden and the pointer moved before it.
+  await page.mouse.move(980, 430, { steps: 2 });
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-play');
+  await page.keyboard.press('Enter');
+  await page.mouse.click(980, 430);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(300);
+  expect(await play.isVisible()).toBe(true);
+  expect(await focusedKey(page)).toBe('player-play');
+  // Not one skip all along.
+  expect(await seeks()).toBe(0);
 });
 
 test('Start over is always there, and offers for a moment to go back to where the film was', async ({
