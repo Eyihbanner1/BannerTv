@@ -3,7 +3,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { type EventPlay, replace } from '../../app/router';
+import { type EventPlay, type PlayerRoute, replace } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
@@ -11,6 +11,7 @@ import { Pressable } from '../../components/Pressable';
 import { addonClient, addonCollection } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
 import { useQuery } from '../../data/use-query';
+import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
 import { streamBadges, streamTitle, warningText } from '../../player/describe';
@@ -31,6 +32,8 @@ interface StreamsScreenProps {
   startAt?: number;
   /** A sports event: the streams of its own sources only. */
   event?: EventPlay;
+  /** Sent from the player's Sources: Back goes back to the film, where it was. */
+  backTo?: PlayerRoute;
 }
 
 function addonNames(): Map<string, string> {
@@ -43,7 +46,7 @@ function addonNames(): Map<string, string> {
  * in the list, last and dimmed, with the reason.
  */
 export function StreamsScreen(props: StreamsScreenProps) {
-  const { type, metaId, videoId, preview, startAt, event } = props;
+  const { type, metaId, videoId, preview, startAt, event, backTo } = props;
   const { t } = useTranslation();
   const finder = useMemo(() => streamFinder(type, videoId, event), [type, videoId, event]);
   const state = useSyncExternalStore(finder.subscribe, finder.get);
@@ -64,6 +67,14 @@ export function StreamsScreen(props: StreamsScreenProps) {
   const [anchor, setAnchor] = useState(0);
 
   useEffect(() => finder.start(), [finder]);
+  useBack(
+    'screen',
+    () => {
+      if (backTo) replace(backTo);
+      return true;
+    },
+    backTo !== undefined,
+  );
   const runtime = item?.runtime;
   useEffect(() => finder.setRuntime(parseRuntime(runtime)), [finder, runtime]);
   // Re-sorted when the order changes or more addons answer. The finder answers

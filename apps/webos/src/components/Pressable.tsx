@@ -13,11 +13,8 @@ import {
 import { useScreenSlot } from '../app/screen-slot';
 import { whilePressing } from '../navigation/focus-memory';
 import { markActivity } from '../navigation/activity';
+import { answeredOk, clickCameWithOk } from '../navigation/ok-click';
 import { inputMode } from '../platform/input-mode';
-
-// In pointer mode the Magic Remote OK can arrive as a key press and a click.
-let lastEnterAt = 0;
-const CLICK_AFTER_ENTER_MS = 400;
 
 export interface PressableProps {
   focusKey: string;
@@ -49,7 +46,7 @@ export const Pressable = memo(function Pressable(props: PressableProps) {
   const onEnterPress = useCallback(() => {
     // Focus can sit on a screen for a moment after another opens on top of it.
     if (!slot.get()) return;
-    lastEnterAt = Date.now();
+    answeredOk();
     const { focusKey: key, onPress } = latest.current;
     if (onPress) whilePressing(key, onPress);
   }, [slot]);
@@ -87,8 +84,9 @@ export const Pressable = memo(function Pressable(props: PressableProps) {
         markActivity();
         focusSelf();
       }}
+      // In pointer mode the Magic Remote OK can come as a key press and a click.
       onClick={() => {
-        if (Date.now() - lastEnterAt <= CLICK_AFTER_ENTER_MS) return;
+        if (clickCameWithOk()) return;
         const { onPress } = latest.current;
         if (!focused) focusSelf();
         if (onPress) whilePressing(focusKey, onPress);

@@ -113,10 +113,11 @@ test('Watch plays the best stream at once, with no list to choose from', async (
   });
   expect(layout).toEqual({ box: [0, 0, 1920, 1080], transformed: false, shown: true });
 
-  // OK pauses and brings up the controls, with what is playing.
+  // OK pauses and brings up the controls, with what is playing: at the top, and on Quality.
   await press(page, 'Enter', 'player-play');
   await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
-  await expect(page.getByText('1080p', { exact: true })).toBeVisible();
+  await expect(page.getByText('1080p', { exact: true })).toHaveCount(2);
+  await expect(page.locator('[data-focus-key="player-quality-button"]')).toContainText('1080p');
   await press(page, 'Enter', 'player-play');
   await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Pause');
 
@@ -174,7 +175,7 @@ test('Watch passes over a disc remux too big for the connection', async ({ page 
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect((await video(page)).src).toBe('/movie-2160p-web.webm');
   await press(page, 'Enter', 'player-play');
-  await expect(page.getByText('15 GB', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-quality-button"]')).toContainText('4K');
 });
 
 test('OK while a stream starts lets it start and then shows the controls, and coming back from another app has Play ready', async ({
@@ -200,6 +201,11 @@ test('OK while a stream starts lets it start and then shows the controls, and co
   await press(page, 'Enter', 'player-surface');
   for (const key of ['ArrowRight', 'ArrowUp', 'ArrowDown'])
     await press(page, key, 'player-surface');
+  await page.mouse.wheel(0, 100);
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-surface');
   await expect(page.getByRole('status', { name: 'Starting' })).toBeVisible();
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   await expectFocus(page, 'player-play');
@@ -362,7 +368,7 @@ test('subtitles come from the subtitles addon, and pressing a language again mov
   await expect.poll(() => mock.subtitles.join()).toContain('filename=movie-1080p.webm');
 
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'Enter', 'player-tracks-off');
   await press(page, 'ArrowDown', 'player-tracks-lang-en');
   await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toContainText(
@@ -400,7 +406,7 @@ test('near the end of an episode, Up Next plays the next one from the same relea
 
   // The 720p release, picked by hand: auto-play chooses 1080p.
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
   await press(page, 'ArrowRight', 'player-streams-button');
   await press(page, 'Enter', 'streams-item-0');
@@ -416,15 +422,33 @@ test('near the end of an episode, Up Next plays the next one from the same relea
   );
   await expect(page.getByText('Up next')).toBeVisible();
 
+  // The pointer heading for the card does not bring the controls up and move it.
+  const card = page.getByRole('dialog', { name: 'Up next' });
+  const where = await card.boundingBox();
+  await page.mouse.move(900, 500);
+  await page.mouse.move(1000, 600, { steps: 5 });
+  await page.waitForTimeout(300);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  expect(await card.boundingBox()).toEqual(where);
+  await expectFocus(page, 'player-upnext-play');
+  // The remote's arrows take over again: the pointer goes.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: false } })),
+  );
+
   // Pause closes it, and focus goes to the controls Pause brought up.
   await page.keyboard.press('Pause');
   await expect(page.getByText('Up next')).toHaveCount(0);
   await expectFocus(page, 'player-play');
 
-  // Playing again brings it back, and the controls do not hide and take focus from it.
+  // Playing again brings it back: the controls give way to it and do not take focus from it.
   await press(page, 'Enter', 'player-upnext-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   await page.waitForTimeout(6000);
   await expectFocus(page, 'player-upnext-play');
+  // A skip behind the card says where it lands, as with the controls hidden.
+  await pressCode(page, FAST_FORWARD);
+  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(() => mock.streams).toContain('series/tt8000001:1:2');
@@ -459,7 +483,7 @@ test('HLS with audio and subtitle choices plays through hls.js, and both show in
   expect((await video(page)).src).toMatch(/^blob:/);
 
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'Enter', 'player-tracks-off');
   await expect(page.locator('[data-focus-key="player-tracks-audio-eng|English"]')).toBeVisible();
   await press(page, 'ArrowDown', 'player-tracks-track-eng|English');
@@ -580,7 +604,7 @@ test('Quality leaves the resolution playing alone, and another starts without it
   });
 
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
   // The resolution already playing: nothing reloads, though another 1080p now ranks first.
   await press(page, 'Enter', 'player-quality-0');
@@ -672,9 +696,38 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 
-  // A broadcast has no start to go back to.
+  // A broadcast has no start to go back to: Start over keeps its place, dimmed, and says so.
+  // The controls wait for the jump to the live edge to land.
+  await expect(page.getByRole('status', { name: 'Starting' })).toHaveCount(0);
   await press(page, 'ArrowUp', 'player-play');
-  await expect(page.locator('[data-focus-key="player-restart"]')).toHaveCount(0);
+  await expect(page.getByText('LIVE', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-restart"]')).toHaveAttribute(
+    'aria-label',
+    'Start over. No start on live',
+  );
+  // Pressed, it does nothing.
+  const seeks = await countSeeks(page);
+  await press(page, 'ArrowLeft', 'player-back10');
+  await press(page, 'ArrowLeft', 'player-restart');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  expect(await seeks()).toBe(0);
+  // Back 10 s and Forward 10 s jump at once within what the broadcast keeps, as Rewind and Fast forward do.
+  await press(page, 'ArrowRight', 'player-back10');
+  const live = (await video(page)).time;
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks, { timeout: 500 }).toBe(1);
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 5);
+  await press(page, 'ArrowRight', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
+    'aria-label',
+    'Forward 10 s',
+  );
+  const behind = (await video(page)).time;
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 5);
   await pressBack(page);
   await pressBack(page);
   await expectFocus(page, 'details-watch');
@@ -704,7 +757,7 @@ test('BannerTV Demo’s subtitle checks wait to be picked, and leave the languag
   await expect(page.getByText('Hello from the stream')).toHaveCount(0);
 
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'Enter', 'player-tracks-off');
   const focused = page.locator('[data-focused="true"]');
   // Down past the stream's own tracks to the Korean check.
@@ -799,22 +852,116 @@ test('every way of skipping adds 10 s a press and lands once, with a note while 
   await expect.poll(seeks).toBe(2);
   expect((await video(page)).time).toBeLessThan(before - 8);
 
-  // So does a notch of the wheel.
-  const wheeled = (await video(page)).time;
-  await page.mouse.wheel(0, 100);
-  await expect(page.getByText('+10 s', { exact: true })).toBeVisible();
-  await expect.poll(seeks).toBe(3);
-  expect((await video(page)).time).toBeGreaterThan(wheeled + 8);
-  await expectFocus(page, 'player-surface');
-
   // OK lands a skip there and then, well before it would land by itself, and leaves the film playing.
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 400 }).toBe(4);
+  await expect.poll(seeks, { timeout: 400 }).toBe(3);
   await page.waitForTimeout(1000);
-  expect(await seeks()).toBe(4);
+  expect(await seeks()).toBe(3);
   expect((await video(page)).playing).toBe(true);
   await expectControlsHidden(page);
+});
+
+test('the wheel never skips: a notch brings the controls up on Pause, and with them up it moves a row', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const seeks = await countSeeks(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+
+  // Hidden, a notch brings them up on Pause, as Up and Down do, and the TV's own focus goes there too.
+  // The rest of the same roll stays there, however long it goes on: a quick roll on the TV takes half a second.
+  await page.evaluate(async () => {
+    const under = document.elementFromPoint(960, 540);
+    for (let notch = 0; notch < 12; notch++) {
+      under?.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  });
+  await expectFocus(page, 'player-play');
+  await expect(play).toBeFocused();
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-play');
+  // Then a notch is a row, down to the tools and up to the bar, where it stops, as Up does.
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-tracks-button');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-seek');
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(200);
+  expect(await focusedKey(page)).toBe('player-seek');
+
+  // Away from the viewer too.
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await expect(play).toBeHidden();
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+
+  // Brought up by the pointer, the controls leave focus on the picture, and a notch takes it to Pause.
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.mouse.move(900, 400);
+  await page.mouse.move(960, 420, { steps: 3 });
+  await expect(page.locator('html')).toHaveClass(/pointer-mode/);
+  await expect(play).toBeVisible();
+  expect(await focusedKey(page)).toBe('player-surface');
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-play');
+  // A click is then Pause's, where the wheel put focus, even with the pointer on the picture: on the TV
+  // the Magic Remote's OK is a click alone while the pointer shows.
+  await page.mouse.click(960, 420);
+  await expect.poll(async () => (await video(page)).playing).toBe(false);
+  await page.waitForTimeout(300);
+  expect(await play.isVisible()).toBe(true);
+  expect(await focusedKey(page)).toBe('player-play');
+
+  // The same after a notch with the controls hidden and the pointer moved before it.
+  await page.mouse.move(980, 430, { steps: 2 });
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-play');
+  await page.mouse.click(980, 430);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(300);
+  expect(await play.isVisible()).toBe(true);
+  expect(await focusedKey(page)).toBe('player-play');
+  // Not one skip all along.
+  expect(await seeks()).toBe(0);
+});
+
+test('Back from Sources goes back to the film where it was, on the same stream', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(15);
+  const src = (await video(page)).src;
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  const at = (await video(page)).time;
+  await press(page, 'Enter', 'streams-item-0');
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toBe(src);
+  expect((await video(page)).time).toBeGreaterThan(at - 2);
+
+  // Back from the film still leaves for the title it was opened from.
+  await pressBack(page);
+  await expectFocus(page, 'details-watch');
 });
 
 test('Start over is always there, and offers for a moment to go back to where the film was', async ({
@@ -828,14 +975,8 @@ test('Start over is always there, and offers for a moment to go back to where th
   await press(page, 'ArrowUp', 'player-play');
   const restart = page.locator('[data-focus-key="player-restart"]');
   await expect(restart).toHaveText('Start over');
-  for (const key of [
-    'player-tracks-button',
-    'player-quality-button',
-    'player-streams-button',
-    'player-restart',
-  ]) {
-    await press(page, 'ArrowRight', key);
-  }
+  await press(page, 'ArrowLeft', 'player-back10');
+  await press(page, 'ArrowLeft', 'player-restart');
   // A skip still to land gives way to Start over.
   await pressCode(page, FAST_FORWARD);
   await press(page, 'Enter', 'player-restart');
@@ -870,7 +1011,7 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
 }) => {
   await playMovie(page);
   const focused = page.locator('[data-focused="true"]');
-  const panel = page.getByRole('dialog', { name: 'Audio and subtitles' });
+  const panel = page.getByRole('dialog', { name: 'Audio & subtitles' });
 
   // From anywhere, with the controls hidden. Held down, it does not close again.
   await pressCode(page, BLUE);
@@ -883,7 +1024,7 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
 
   // Opened from the controls, the panel outlasts their 5 s, a skip included.
   await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
   await pressCode(page, FAST_FORWARD);
@@ -957,7 +1098,7 @@ test('Quality on a paused film opens the other stream paused, with Play ready', 
   await press(page, 'Enter', 'player-play');
   await expect(play).toHaveText('Play');
 
-  await press(page, 'ArrowRight', 'player-tracks-button');
+  await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'ArrowRight', 'player-quality-button');
   await press(page, 'Enter', 'player-quality-0');
   await press(page, 'ArrowDown', 'player-quality-1');
@@ -1044,6 +1185,251 @@ test('an arrow takes the time off the bar, and only a move over the bar brings i
 
   await page.mouse.move(box.x + box.width / 4, box.y + box.height / 2, { steps: 3 });
   await expect(bar.getByText('0:10', { exact: true })).toBeVisible();
+});
+
+test('the controls are two rows, the transport over the tools, with the time left, the clock and when it ends', async ({
+  page,
+}) => {
+  await playMovie(page);
+  await press(page, 'ArrowUp', 'player-play');
+  const transport = ['player-restart', 'player-back10', 'player-play', 'player-fwd10'];
+  const names = ['Start over', 'Back 10 s', 'Pause', 'Forward 10 s'];
+  for (const [index, key] of transport.entries()) {
+    // The name is under the icon, and is what Audio Guidance reads.
+    const button = page.locator(`[data-focus-key="${key}"]`);
+    await expect(button).toHaveAttribute('aria-label', names[index]!);
+    await expect(button.getByText(names[index]!, { exact: true })).toBeVisible();
+  }
+  // A film has no Next episode, and nothing takes its place.
+  await expect(page.locator('[data-focus-key="player-next"]')).toHaveCount(0);
+  await press(page, 'ArrowLeft', 'player-back10');
+  await press(page, 'ArrowLeft', 'player-restart');
+  await page.keyboard.press('ArrowLeft');
+  await expectFocus(page, 'player-restart');
+  await press(page, 'ArrowRight', 'player-back10');
+  await press(page, 'ArrowRight', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await page.keyboard.press('ArrowRight');
+  await expectFocus(page, 'player-fwd10');
+
+  // Down from anywhere on the transport reaches the first tool, and Up from any tool reaches Pause.
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await page.keyboard.press('ArrowLeft');
+  await expectFocus(page, 'player-tracks-button');
+  // Each chip says what is on now, and Audio Guidance reads it with the name.
+  const tracks = page.locator('[data-focus-key="player-tracks-button"]');
+  await expect(tracks).toContainText('Audio & subtitles');
+  await expect(tracks).toContainText('Subtitles off');
+  await expect(tracks).toHaveAttribute('aria-label', 'Audio & subtitles, Subtitles off');
+  await expect(page.locator('[data-focus-key="player-quality-button"]')).toHaveAttribute(
+    'aria-label',
+    'Quality, 1080p',
+  );
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await expect(page.locator('[data-focus-key="player-streams-button"]')).toHaveText('Sources');
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowUp', 'player-seek');
+  await press(page, 'ArrowDown', 'player-play');
+
+  // The time played, the bar and the time left; the clock, and when the film would end.
+  const seek = page.locator('[data-focus-key="player-seek"]');
+  await expect(seek.locator('> span').first()).toHaveText(/^0:\d\d$/);
+  await expect(seek.locator('> span').last()).toHaveText(/^−0:[1-3]\d$/);
+  // Late in a minute, so an end counted from the minute's start would show a minute early:
+  // about 35 s of the 40 s film are left.
+  await page.clock.setFixedTime(new Date(2026, 9, 30, 20, 15, 58));
+  await expect(page.getByText(/^\d\d:\d\d$/)).toHaveText('20:15');
+  await expect(page.getByText(/^Ends at /)).toHaveText('Ends at 20:16');
+});
+
+test('on a series, Next episode sits after Forward 10 s and plays the next one; on the last it says there is none', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const mock = await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'ArrowUp', 'details-season-0');
+  await press(page, 'ArrowRight', 'details-season-1');
+  await press(page, 'ArrowDown', 'details-episodes-0');
+  await press(page, 'ArrowDown', 'details-episodes-1');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await press(page, 'ArrowRight', 'player-next');
+  const next = page.locator('[data-focus-key="player-next"]');
+  await expect(next).toHaveAttribute('aria-label', 'Next episode');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => mock.streams).toContain('series/tt8000001:2:3');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // Season 2 episode 3 is the last: Next episode stays, dimmed, and does nothing.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await press(page, 'ArrowRight', 'player-next');
+  await expect(next).toHaveAttribute('aria-label', 'Next episode. Last episode');
+  await expect(next).toContainText('Last episode');
+  const asked = mock.streams.length;
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+  expect(mock.streams.length).toBe(asked);
+  await expectFocus(page, 'player-next');
+  expect((await video(page)).playing).toBe(true);
+});
+
+test('Back 10 s and Forward 10 s add up as the skip keys do, and land once', async ({ page }) => {
+  await playMovie(page);
+  const seeks = await countSeeks(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  const from = (await video(page)).time;
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  // The bar shows where the two will land, then they land as one jump.
+  await expect(page.locator('[data-focus-key="player-seek"] > span').first()).toHaveText(/^0:2\d$/);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 18);
+  expect(await seeks()).toBe(1);
+  await expectFocus(page, 'player-fwd10');
+  expect((await video(page)).playing).toBe(true);
+
+  await press(page, 'ArrowLeft', 'player-play');
+  await press(page, 'ArrowLeft', 'player-back10');
+  const before = (await video(page)).time;
+  await page.keyboard.press('Enter');
+  await expect.poll(seeks).toBe(2);
+  expect((await video(page)).time).toBeLessThan(before - 8);
+  await expectFocus(page, 'player-back10');
+});
+
+test('Quality with one stream found keeps its place, dimmed, says why, and does nothing', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, { streams: { [MOVIE]: [DEFAULT_STREAMS[0]!] } });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  const quality = page.locator('[data-focus-key="player-quality-button"]');
+  await expect(quality).toHaveAttribute('aria-label', 'Quality. Only 1080p found');
+  await expect(quality).toContainText('Only 1080p found');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expectFocus(page, 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+});
+
+test('a click on the picture hides the controls and another brings them back; the arrow at the top leaves', async ({
+  page,
+}) => {
+  await playMovie(page);
+  const play = page.locator('[data-focus-key="player-play"]');
+  await page.mouse.move(900, 400);
+  await page.mouse.move(960, 420, { steps: 3 });
+  await expect(play).toBeVisible();
+
+  // Well after the OK that started the film, whose click it would be.
+  await page.waitForTimeout(500);
+  await page.mouse.click(960, 420);
+  await expect(play).toBeHidden();
+  expect((await video(page)).playing).toBe(true);
+  await page.mouse.click(960, 420);
+  await expect(play).toBeVisible();
+  expect((await video(page)).playing).toBe(true);
+
+  // The Magic Remote OK can come as a key press and a click. Over the picture
+  // both are the picture's, once: Pause kept focus but is not pressed.
+  await expectFocus(page, 'player-play');
+  await page.keyboard.press('Enter');
+  await page.mouse.click(960, 420);
+  await expect(play).toBeHidden();
+  await page.waitForTimeout(300);
+  await expect(play).toBeHidden();
+  expect((await video(page)).playing).toBe(true);
+  await page.keyboard.press('Enter');
+  await expect(play).toBeVisible();
+  expect((await video(page)).playing).toBe(true);
+
+  // A click on a control, well after that OK, is the control's, not the picture's.
+  const seeks = await countSeeks(page);
+  await page.waitForTimeout(500);
+  const clicked = (await video(page)).time;
+  await page.locator('[data-focus-key="player-back10"]').click();
+  await expect.poll(seeks).toBe(1);
+  // A few seconds in, it goes back to the start.
+  expect((await video(page)).time).toBeLessThan(Math.max(1, clicked - 5));
+  await expectFocus(page, 'player-back10');
+  await expect(play).toBeVisible();
+
+  // With a skip under way, OK over the picture lands it, and Sources, which kept focus, stays put.
+  await page.locator('[data-focus-key="player-streams-button"]').hover();
+  await expectFocus(page, 'player-streams-button');
+  // Straight there, over nothing else on the way.
+  await page.mouse.move(960, 420);
+  await pressCode(page, FAST_FORWARD);
+  await page.keyboard.press('Enter');
+  await page.mouse.click(960, 420);
+  await expect.poll(seeks, { timeout: 400 }).toBe(2);
+  await expectFocus(page, 'player-streams-button');
+  await expect(play).toBeVisible();
+
+  // After the wheel moved focus, OK is the focused control's even with the pointer on the picture.
+  await page.mouse.wheel(0, -100);
+  await expectFocus(page, 'player-play');
+  // One row a notch, and notches closer than 150 ms count once.
+  await page.waitForTimeout(200);
+  await page.mouse.wheel(0, 100);
+  await expectFocus(page, 'player-tracks-button');
+  await page.keyboard.press('Enter');
+  await page.mouse.click(960, 420);
+  const panel = page.getByRole('dialog', { name: 'Audio & subtitles' });
+  await expect(panel).toBeVisible();
+  await pressBack(page);
+  await expect(panel).toHaveCount(0);
+  await expectFocus(page, 'player-tracks-button');
+
+  // Hidden, the bar is not under the pointer either: OK there shows the controls and jumps nowhere.
+  const bar = page.locator('[data-focus-key="player-seek"] > div');
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-seek');
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.keyboard.press('Enter');
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  await expect(play).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await seeks()).toBe(2);
+
+  // Hidden, the controls are not under the pointer: OK over the place of the
+  // back arrow shows them, and the click that comes with it presses nothing.
+  const back = page.locator('[data-focus-key="player-back"]');
+  const arrow = (await back.boundingBox())!;
+  await page.mouse.move(arrow.x + arrow.width / 2, arrow.y + arrow.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-back');
+  await pressBack(page);
+  await expect(play).toBeHidden();
+  await page.keyboard.press('Enter');
+  await page.mouse.click(arrow.x + arrow.width / 2, arrow.y + arrow.height / 2);
+  await expect(play).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
+  expect((await video(page)).playing).toBe(true);
+
+  // A click by itself on the back arrow leaves.
+  await back.click();
+  await expectFocus(page, 'details-watch');
 });
 
 test('Back while a stream starts leaves at once, even after the pointer moved', async ({

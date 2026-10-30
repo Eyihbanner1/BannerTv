@@ -139,7 +139,7 @@
 
 .toast {
   position: absolute;
-  top: 64px;
+  top: 252px;
   left: 560px;
   width: 800px;
   margin: 0;
@@ -220,20 +220,32 @@
   transition: opacity var(--bt-motion) ease-out;
 }
 
+/* The top: a back arrow for the pointer, the title and three facts, the clock. */
 .top {
   position: absolute;
   top: 0;
   left: 0;
   width: 1920px;
-  height: 320px;
-  padding: 56px var(--bt-safe-x) 0;
-  box-sizing: border-box;
+  height: 300px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.backButton {
+  position: absolute;
+  top: 72px;
+  left: 108px;
+}
+
+.heading {
+  position: absolute;
+  top: 64px;
+  left: 214px;
+  width: 1240px;
 }
 
 .title {
   margin: 0;
-  font: var(--bt-text-heading);
+  font: var(--bt-text-title);
   color: var(--bt-text);
   white-space: nowrap;
   overflow: hidden;
@@ -241,41 +253,67 @@
 }
 
 .subtitle {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   font: var(--bt-text-body);
   color: var(--bt-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .facts {
-  margin: 16px 0 0;
+  margin: 12px 0 0;
 }
 
 .fact {
   display: inline-block;
   margin-right: 12px;
-  padding: 4px 14px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  padding: 2px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.38);
   border-radius: 8px;
   font: var(--bt-text-label);
   color: var(--bt-text-muted);
 }
 
+.clock {
+  position: absolute;
+  top: 64px;
+  right: var(--bt-safe-x);
+  text-align: right;
+}
+
+.now {
+  margin: 0;
+  font: 700 40px/1.2 var(--bt-font);
+  color: var(--bt-text);
+}
+
+.endsAt {
+  margin: 4px 0 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+/* The bottom: the seek bar, the transport, then the tools. */
 .bottom {
   position: absolute;
+  top: 560px;
   left: 0;
-  bottom: 0;
   width: 1920px;
-  padding: 120px var(--bt-safe-x) 64px;
-  box-sizing: border-box;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+  height: 520px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0) 100%);
 }
 
 .seek {
+  position: absolute;
+  top: 152px;
+  left: var(--bt-safe-x);
+  width: 1728px;
   display: flex;
   align-items: center;
   height: 64px;
-  margin-bottom: 32px;
   padding: 0 16px;
+  box-sizing: border-box;
   border-radius: 16px;
 }
 
@@ -286,9 +324,32 @@
 
 .time {
   width: 140px;
-  font: var(--bt-text-label);
+  font: 600 28px/1.2 var(--bt-font);
   color: var(--bt-text);
   text-align: center;
+  white-space: nowrap;
+}
+
+.timeLeft {
+  color: var(--bt-text-muted);
+}
+
+/* On a broadcast LIVE takes the place of the times. */
+.live {
+  font: var(--bt-text-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--bt-text);
+}
+
+.liveDot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: -3px 10px 0 0;
+  border-radius: 50%;
+  background: #e5484d;
+  vertical-align: middle;
 }
 
 .bar {
@@ -334,11 +395,12 @@
 /* The time under the Magic Remote pointer, above the bar. */
 .hoverTime {
   position: absolute;
-  bottom: 28px;
-  padding: 6px 14px;
-  border-radius: 10px;
-  background: rgba(11, 8, 21, 0.9);
-  font: var(--bt-text-label);
+  bottom: 30px;
+  padding: 8px 20px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: var(--bt-surface-1);
+  font: 700 28px/1.2 var(--bt-font);
   color: var(--bt-text);
   white-space: nowrap;
   transform: translateX(-50%);
@@ -351,12 +413,223 @@
   display: block;
 }
 
-.buttons {
+/* Five places 170 px apart, centred on Play and Pause. */
+.transport {
+  position: absolute;
+  top: 228px;
+  left: 535px;
+  width: 850px;
+  height: 160px;
+}
+
+.transportButton {
+  position: absolute;
+  top: 0;
+  width: 170px;
+  height: 160px;
+}
+
+/* Resting: a white icon on a faint disc, so it reads over a bright picture. */
+.disc {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  margin: 14px auto 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--bt-text);
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.transportLarge .disc {
+  width: 108px;
+  height: 108px;
+  margin-top: 0;
+}
+
+/* Wider than the button, but only the button takes the pointer: each slot is its own. */
+.transportName,
+.transportFocused .reason {
+  position: absolute;
+  top: 128px;
+  left: -40px;
+  width: 250px;
+  overflow: hidden;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Only the focused control is ever purple, with the lavender ring and the app's zoom. */
+.transportFocused .disc,
+.backFocused .disc {
+  background: var(--bt-action-focused);
+  color: #fff;
+  transform: scale(var(--bt-focus-scale));
+}
+
+.transportFocused .disc::after,
+.backFocused .disc::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  border: 4px solid var(--bt-focus);
+  border-radius: 50%;
+}
+
+.transportFocused .transportName,
+.transportFocused .reason {
+  font-weight: 700;
+  color: #fff;
+}
+
+/* Not available now: faded, and focused it says why in place of its name. */
+.reason {
+  display: none;
+}
+
+.dim .disc {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dim .disc svg {
+  opacity: 0.38;
+}
+
+.dim .transportName {
+  color: var(--bt-text-subtle);
+  opacity: 0.7;
+}
+
+.transportFocused.dim .transportName {
+  display: none;
+}
+
+.transportFocused .reason {
+  display: block;
+}
+
+.dim.transportFocused .disc svg {
+  opacity: 0.6;
+}
+
+/* The tools, centred under the transport, each saying what is on now. */
+.tools {
+  position: absolute;
+  top: 402px;
+  left: 0;
+  width: 1920px;
+  height: 60px;
+  text-align: center;
   white-space: nowrap;
 }
 
-.buttons > div {
-  margin-right: 24px;
+.chip {
+  position: relative;
+  display: inline-block;
+  height: 60px;
+  margin: 0 9px;
+  padding: 0 22px;
+  box-sizing: border-box;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-radius: 30px;
+  background: rgba(18, 14, 32, 0.78);
+  font: var(--bt-text-label);
+  line-height: 56px;
+  color: var(--bt-text);
+  vertical-align: top;
+}
+
+.chip svg {
+  vertical-align: middle;
+  margin-top: -4px;
+}
+
+.chipLabel,
+.chipValue,
+.chip .reason {
+  margin-left: 12px;
+  vertical-align: middle;
+}
+
+.chipValue {
+  font-weight: 500;
+  color: var(--bt-text-muted);
+}
+
+/* A dimmed tool says why all the time, in place of a value, so the row never changes width. */
+.chip .reason {
+  display: inline;
+  font-weight: 500;
+  color: var(--bt-text-subtle);
+}
+
+.chip.dim {
+  background: rgba(18, 14, 32, 0.5);
+}
+
+.chip.dim svg,
+.chip.dim .chipLabel {
+  opacity: 0.4;
+}
+
+.colourKey {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: -4px 0 0 14px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.blueKey {
+  background: #2f7bf5;
+}
+
+.chipFocused {
+  border-color: var(--bt-action-focused);
+  background: var(--bt-action-focused);
+  color: #fff;
+}
+
+.chipFocused::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  right: -9px;
+  bottom: -9px;
+  border: 4px solid var(--bt-focus);
+  border-radius: 39px;
+}
+
+.chipFocused .chipLabel {
+  font-weight: 700;
+}
+
+.chipFocused .chipValue,
+.chipFocused.dim .reason {
+  color: #fff;
+}
+
+.chipFocused.dim svg,
+.chipFocused.dim .chipLabel {
+  opacity: 0.7;
+}
+
+/* On the purple, the key's colour gets a white ring so it stays visible. */
+.chipFocused .colourKey {
+  border: 2px solid #fff;
 }
 
 /* Up Next sits over the credits, bottom right, above the controls. */
@@ -373,6 +646,7 @@
   z-index: 3;
 }
 
+/* With the controls up, the card sits above them, without its picture. */
 .upNextThumb {
   display: block;
   width: 696px;

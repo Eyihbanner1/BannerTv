@@ -1,6 +1,7 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { clickCameWithOk } from '../navigation/ok-click';
 import { useBack } from '../navigation/use-back';
 import styles from './Overlay.module.css';
 
@@ -56,12 +57,20 @@ export function Overlay(props: OverlayProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Not the click of the Magic Remote OK that opened the layer, which lands outside it.
+  const onOutsideClick = () => {
+    if (!clickCameWithOk()) onClose();
+  };
+
   const root = document.getElementById('root');
   if (!root) return null;
   return createPortal(
     <FocusContext.Provider value={focusKey}>
       <div className={styles.layer}>
-        <div className={styles.backdrop} onClick={closeOnOutsideClick ? onClose : undefined} />
+        <div
+          className={styles.backdrop}
+          onClick={closeOnOutsideClick ? onOutsideClick : undefined}
+        />
         <div
           ref={ref}
           role="dialog"
