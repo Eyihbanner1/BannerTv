@@ -1,13 +1,16 @@
 import { createStore } from '@bannertv/core';
 import type { AndroidEvent, AndroidPlayerCommand, AndroidTrack } from '@tv/platform/android';
+import { requireOptionalNativeModule } from 'expo';
 import Constants from 'expo-constants';
 import {
   type AudioTrack,
   type ContentType,
   createVideoPlayer,
+  type PlayingChangeEventPayload,
   type StatusChangeEventPayload,
   type SubtitleTrack,
   type VideoPlayer,
+  type VideoPlayerStatus,
 } from 'expo-video';
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
@@ -52,6 +55,8 @@ let hasMedia = false;
 /** What the page last asked for: Media3's playWhenReady, which expo-video does not report. */
 let wantPlay = false;
 let readyOnce = false;
+/** The native player's status for the stream opened last; idle until it says otherwise. */
+let nativeStatus: VideoPlayerStatus = 'idle';
 let ended = false;
 let openedUrl: string | null = null;
 let openedStartAt = 0;
@@ -172,6 +177,7 @@ function reportError(message: string | undefined): void {
 
 function onStatus({ status, error }: StatusChangeEventPayload): void {
   if (!player || !hasMedia) return;
+  nativeStatus = status;
   if (status === 'error') {
     const message = error?.message;
     if (!typeSettled && openedUrl && mayBeHls(message)) {
@@ -198,8 +204,18 @@ function onStatus({ status, error }: StatusChangeEventPayload): void {
 }
 
 function onEnd(): void {
-  if (!hasMedia) return;
+  // The empty player that release() leaves (and a new player's first prepare) also "ends", and
+  // that news reaches JS after the next load: only a stream that opened can end.
+  if (!hasMedia || !readyOnce) return;
   ended = true;
+  emitState();
+}
+
+function onPlayingChange({ isPlaying }: PlayingChangeEventPayload): void {
+  // Android paused the player itself, its sound taken by a call, the assistant or another app.
+  // Media3's playWhenReady is false now, so say so, as the TV app reports it: the page shows
+  // Paused instead of a Pause button over a still picture.
+  if (!isPlaying && wantPlay && !ended && nativeStatus === 'readyToPlay') wantPlay = false;
   emitState();
 }
 
@@ -234,7 +250,7 @@ function ensurePlayer(): VideoPlayer {
   created.staysActiveInBackground = false;
   created.showNowPlayingNotification = false;
   created.addListener('statusChange', onStatus);
-  created.addListener('playingChange', emitState);
+  created.addListener('playingChange', onPlayingChange);
   created.addListener('playToEnd', onEnd);
   created.addListener('timeUpdate', emitTime);
   created.addListener('sourceLoad', onSourceLoad);
@@ -255,6 +271,7 @@ function open(url: string, startAt: number, type: ContentType): void {
   const current = ensurePlayer();
   openedType = type;
   readyOnce = false;
+  nativeStatus = 'idle';
   startChecked = false;
   current.replace({ uri: url, contentType: type }, true);
   if (startAt > 0 && isFinite(startAt)) current.currentTime = startAt;
@@ -286,6 +303,7 @@ function load(command: Extract<AndroidPlayerCommand, { op: 'load' }>): void {
 function release(): void {
   hasMedia = false;
   readyOnce = false;
+  nativeStatus = 'idle';
   ended = false;
   wantPlay = false;
   openedUrl = null;
@@ -396,6 +414,11 @@ const host = {
 
 let installed = false;
 
+/** modules/banner-relaunch: BannerTV opened again from the launcher while running. */
+interface RelaunchModule {
+  addListener(event: 'relaunch', listener: () => void): { remove(): void };
+}
+
 /**
  * Makes the shared code see an Android host. Call before anything asks `isAndroid()`, and
  * before `initAndroid()`, which wires the host's news to the player.
@@ -404,12 +427,18 @@ export function installPhoneHost(): void {
   if (installed) return;
   installed = true;
   window.BannerAndroid = host;
+  // Not on every return to the front, which would ask "Who's watching?" after any app switch:
+  // only a tap on the launcher icon, as on the Android TV app.
+  requireOptionalNativeModule<RelaunchModule>('BannerRelaunch')?.addListener('relaunch', () =>
+    emit({ type: 'relaunch' }),
+  );
   AppState.addEventListener('change', (next) => {
-    // Nothing plays in the background (the TV app does the same); the state news tells the page.
+    // Nothing plays in the background (the TV app does the same). The player screen pauses the
+    // session too; the state news follows its pause command, so the session knows the viewer
+    // paused. Sent from here first, it would leave a stream still opening stuck as loading.
     if (next === 'background' && hasMedia && player) {
       wantPlay = false;
       player.pause();
-      emitState();
     }
   });
 }

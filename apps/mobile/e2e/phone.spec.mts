@@ -37,7 +37,7 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
 }) => {
   const errors = watchErrors(page);
   await mockAddons(page, { firstRun: true });
-  await mockPlayback(page);
+  const playback = await mockPlayback(page);
   await openApp(page);
 
   await expect(page.getByText('Welcome to BannerTV')).toBeVisible();
@@ -67,7 +67,16 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
     .poll(() => page.evaluate(() => document.querySelector('video')?.currentTime ?? 0))
     .toBeGreaterThan(1);
 
-  await page.getByLabel('Leave the player').first().click();
+  // Quality switches to the 720p stream. The controls hide while the film plays: a tap brings them.
+  const quality = page.getByRole('button', { name: /^Quality, 1080p/ });
+  if (!(await quality.isVisible())) await page.mouse.click(206, 160);
+  await quality.click();
+  await page.getByText('720p', { exact: true }).click();
+  await expect.poll(() => playback.media).toContain('/movie-720p.webm');
+
+  const leave = page.getByLabel('Leave the player').first();
+  if (!(await leave.isVisible())) await page.mouse.click(206, 160);
+  await leave.click();
   await expect(page.getByRole('button', { name: /All streams/ })).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -1,7 +1,8 @@
-import { useScreenName } from '../../nav/use-screen';
+import { useProfileKey, useScreenName } from '../../nav/use-screen';
 import { LibraryScreen } from '../../screens/LibraryScreen';
 
 export default function Route() {
   useScreenName('library');
-  return <LibraryScreen />;
+  const profileKey = useProfileKey();
+  return <LibraryScreen key={profileKey} />;
 }

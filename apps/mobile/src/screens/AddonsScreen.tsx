@@ -1,7 +1,8 @@
-import type { InstalledAddon } from '@bannertv/core';
+import type { InstalledAddon, SportsSetting } from '@bannertv/core';
 import { addonBaseUrl } from '@bannertv/protocol';
 import { addonCollection } from '@tv/data/addons';
 import { describeInstallError, typeLabel } from '@tv/data/describe';
+import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '@tv/data/sports';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { useState, useSyncExternalStore } from 'react';
@@ -20,7 +21,7 @@ import { reportTyping } from '../runtime/whereabouts';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/icons';
 import { ScreenHeader } from '../ui/ScreenHeader';
-import { Sheet } from '../ui/Sheet';
+import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, fallbackArt, radius, space, type } from '../ui/theme';
 
 const RESOURCE_LABELS = [
@@ -30,6 +31,8 @@ const RESOURCE_LABELS = [
   ['subtitles', 'addons.resources.subtitles'],
 ] as const;
 
+const SPORTS_SETTINGS: readonly SportsSetting[] = ['auto', 'yes', 'no'];
+
 /** What the link box is for: a new addon, or new settings for one already here. */
 type Adding = { kind: 'new' } | { kind: 'settings'; addon: InstalledAddon };
 
@@ -38,11 +41,14 @@ function AddonCard({
   index,
   count,
   onSettings,
+  onSports,
 }: {
   addon: InstalledAddon;
   index: number;
   count: number;
   onSettings: (addon: InstalledAddon) => void;
+  /** "Show in Sports", for an addon that could hold sport. */
+  onSports?: (addon: InstalledAddon) => void;
 }) {
   const { t } = useTranslation();
   const { manifest } = addon;
@@ -92,6 +98,22 @@ function AddonCard({
         <Text style={styles.description} numberOfLines={4}>
           {manifest.description}
         </Text>
+      ) : null}
+      {onSports ? (
+        <Pressable
+          onPress={() => onSports(addon)}
+          accessibilityRole="button"
+          style={styles.sportsRow}
+          hitSlop={4}
+        >
+          <Text style={styles.sportsText}>
+            {t('addons.sportsLabel', {
+              name: manifest.name,
+              value: t(`addons.sportsValue.${sportsSetting(addon)}`),
+            })}
+          </Text>
+          <Icon name="chevron" size={20} color={colors.textSubtle} />
+        </Pressable>
       ) : null}
       <View style={styles.actions}>
         <Pressable
@@ -145,6 +167,9 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  const [sportsFor, setSportsFor] = useState<InstalledAddon | null>(null);
+  // Read again as addons are detected as sports ones, which changes who gets the Sports row.
+  useSyncExternalStore(sportsState.subscribe, sportsState.get);
 
   const close = () => {
     setAdding(null);
@@ -227,6 +252,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
             index={index}
             count={collection.addons.length}
             onSettings={openSettings}
+            {...(mayHoldSports(item) ? { onSports: setSportsFor } : {})}
           />
         )}
       />
@@ -286,6 +312,25 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
           ) : null}
         </View>
       </Sheet>
+      <Sheet
+        visible={sportsFor !== null}
+        title={sportsFor ? t('addons.sportsTitle', { name: sportsFor.manifest.name }) : ''}
+        onClose={() => setSportsFor(null)}
+      >
+        {sportsFor
+          ? SPORTS_SETTINGS.map((value) => (
+              <SheetOption
+                key={value}
+                label={t(`addons.sportsValue.${value}`)}
+                selected={sportsSetting(sportsFor) === value}
+                onPress={() => {
+                  setSportsSetting(sportsFor, value);
+                  setSportsFor(null);
+                }}
+              />
+            ))
+          : null}
+      </Sheet>
     </View>
   );
 }
@@ -318,6 +363,14 @@ const styles = StyleSheet.create({
   small: { ...type.small, color: colors.textMuted },
   summary: { ...type.label, color: colors.accent },
   description: { ...type.body, color: colors.textMuted },
+  sportsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.s,
+    paddingVertical: space.s,
+  },
+  sportsText: { ...type.label, color: colors.textMuted, flexShrink: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.s, paddingTop: space.s },
   iconButton: {
     width: 44,

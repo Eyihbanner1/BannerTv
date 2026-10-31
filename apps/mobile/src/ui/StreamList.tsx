@@ -14,11 +14,14 @@ export function StreamList({
   playingKey,
   onPick,
   header,
+  canOpen,
 }: {
   finder: StreamFinder;
   playingKey?: string;
   onPick: (entry: StreamEntry) => void;
   header?: React.ReactElement;
+  /** Rows this screen can act on though the player can't play them (YouTube, in All streams). */
+  canOpen?: (entry: StreamEntry) => boolean;
 }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(finder.subscribe, finder.get);
@@ -46,17 +49,18 @@ export function StreamList({
         const text = streamRowText(t, entry, { heavy: isHeavy(entry, finder.runtimeSeconds()) });
         const key = entryKey(entry);
         const playing = key === playingKey;
+        const enabled = text.playable || canOpen?.(entry) === true;
         return (
           <Pressable
             onPress={() => onPick(entry)}
-            disabled={!text.playable}
+            disabled={!enabled}
             accessibilityRole="button"
-            accessibilityState={{ selected: playing, disabled: !text.playable }}
+            accessibilityState={{ selected: playing, disabled: !enabled }}
             style={({ pressed }) => [
               styles.row,
               playing && styles.playing,
               pressed && styles.pressed,
-              !text.playable && styles.unplayable,
+              !enabled && styles.unplayable,
             ]}
           >
             <Text style={styles.addon} numberOfLines={1}>

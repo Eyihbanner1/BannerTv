@@ -5,7 +5,13 @@ import i18next from 'i18next';
  * these add what only a phone has, and reword the TV lines that speak of a remote or a TV.
  */
 const PHONE = {
-  tabs: { home: 'Home', search: 'Search', library: 'My List', settings: 'Settings' },
+  tabs: {
+    home: 'Home',
+    search: 'Search',
+    sports: 'Sports',
+    library: 'My List',
+    settings: 'Settings',
+  },
   play: 'Play',
   findingStream: 'Finding the best stream',
   opening: 'Opening {{title}}',

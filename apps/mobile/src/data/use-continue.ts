@@ -35,7 +35,10 @@ function snapshot(): ContinueItem[] {
   if (latest && latest.versions === versions && latest.hour === hour) return latest.items;
   let items = continueWatching(progress, playedVideos.get, now);
   if (isKidsProfile()) items = items.filter((item) => kidsTitleAllowed(item.preview, true));
-  if (latest && sameTitles(items, latest.items)) items = latest.items;
+  // The same list again only for the hourly tick: a card filled in meanwhile changes its tile.
+  if (latest && latest.versions === versions && sameTitles(items, latest.items)) {
+    items = latest.items;
+  }
   latest = { versions, hour, items };
   return items;
 }

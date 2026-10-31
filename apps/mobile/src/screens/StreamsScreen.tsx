@@ -21,16 +21,20 @@ const ORDERS: readonly StreamOrder[] = ['quality', 'fast', 'addon'];
  * not the one wanted. Streams this phone can't play stay in the list, last and dimmed.
  */
 export function StreamsScreen({ route }: { route: StreamsRoute }) {
-  const { type: titleType, metaId, videoId, preview, startAt } = route;
+  const { type: titleType, metaId, videoId, preview, startAt, event } = route;
   const { t } = useTranslation();
-  const finder = useMemo(() => streamFinder(titleType, videoId), [titleType, videoId]);
+  const finder = useMemo(
+    () => streamFinder(titleType, videoId, event),
+    [titleType, videoId, event],
+  );
   const order = useSyncExternalStore(
     preferences.subscribe,
     () => preferences.get().allStreamsOrder,
   );
+  // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
-    () => (titleType === 'movie' ? null : addonClient.meta(titleType, metaId)),
-    [titleType, metaId],
+    () => (titleType === 'movie' || event ? null : addonClient.meta(titleType, metaId)),
+    [titleType, metaId, event],
   );
   const meta = useQuery(metaQuery).data;
   const item = meta ?? preview;
@@ -55,6 +59,7 @@ export function StreamsScreen({ route }: { route: StreamsRoute }) {
           stream: entry,
           chosen: true,
           ...(startAt !== undefined ? { startAt } : {}),
+          ...(event ? { event } : {}),
         },
         'replace',
       );
@@ -80,6 +85,7 @@ export function StreamsScreen({ route }: { route: StreamsRoute }) {
       <StreamList
         finder={finder}
         onPick={open}
+        canOpen={(entry) => entry.assessment.action.kind === 'youtube'}
         header={
           <View style={styles.header}>
             {heading ? (

@@ -8,6 +8,8 @@ import {
   nextVideo,
   parseRuntime,
   playedCard,
+  qualityChoices,
+  type QualityReference,
   rearms,
   secondsToEnd,
   type StreamEntry,
@@ -21,6 +23,7 @@ import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
 import { audioDetail, audioSummary, pickAudio } from '@tv/player/audio';
+import { resolutionLabel } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
 import {
   createPlaybackSession,
@@ -44,7 +47,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { goBack, openPlayer, type PlayerRoute } from '../nav/routes';
+import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/routes';
 import { reportScreen } from '../runtime/whereabouts';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
@@ -66,7 +69,7 @@ const SKIP_S = 10;
 const PREFETCH_NEXT_S = 120;
 const noop = () => () => undefined;
 
-type Panel = 'tracks' | 'streams' | null;
+type Panel = 'tracks' | 'streams' | 'quality' | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -75,10 +78,15 @@ function episodeLabel(video: Video | undefined): string | undefined {
 
 export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const { type: titleType, metaId, videoId } = route;
+  // A sports event: streams from the addons that listed it only, and no Continue Watching card.
+  const sportsEvent = route.event;
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const element = useMemo(() => new PhoneVideoElement(), []);
-  const finder = useMemo(() => streamFinder(titleType, videoId), [titleType, videoId]);
+  const finder = useMemo(
+    () => streamFinder(titleType, videoId, sportsEvent),
+    [titleType, videoId, sportsEvent],
+  );
   const [session, setSession] = useState<PlaybackSession | null>(null);
   const [nothing, setNothing] = useState(false);
   const [resumedAt, setResumedAt] = useState(0);
@@ -92,10 +100,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const shown = useSyncExternalStore(pictureShown.subscribe, pictureShown.get);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
 
-  // The title's full record, for the episode list and the Continue Watching card.
+  // The title's full record, for the episode list and the Continue Watching card. A sports
+  // event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
-    () => (titleType === 'movie' ? null : addonClient.meta(titleType, metaId)),
-    [titleType, metaId],
+    () => (titleType === 'movie' || sportsEvent ? null : addonClient.meta(titleType, metaId)),
+    [titleType, metaId, sportsEvent],
   );
   const meta: MetaDetail | undefined = useQuery(metaQuery).data;
   const item: MetaPreview | undefined = meta ?? route.preview;
@@ -112,8 +121,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       videoId,
       finder,
       autoFailover: !route.chosen,
-      remember: true,
-      continueRow: true,
+      // A match saves nothing and never resumes; a replay keeps its place like any other video,
+      // but never goes on Continue Watching.
+      remember: remembersPlace(route),
+      continueRow: !sportsEvent,
     });
     // The session lives as long as this effect: made here, destroyed in its cleanup.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -154,10 +165,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [controls, setControls] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
   const [scrubbing, setScrubbing] = useState(false);
+  // Taps on the controls, which start the wait to hide them again (the clock does not).
+  const [pokes, setPokes] = useState(0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const poke = useCallback(() => {
     noteInput();
     setControls(true);
+    setPokes((count) => count + 1);
   }, []);
   useEffect(() => {
     clearTimeout(hideTimer.current);
@@ -165,8 +179,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       hideTimer.current = setTimeout(() => setControls(false), CONTROLS_HIDE_MS);
     }
     return () => clearTimeout(hideTimer.current);
-  }, [controls, state.status, panel, scrubbing, state.position]);
-  if (problem && panel !== null) setPanel(null);
+  }, [controls, state.status, panel, scrubbing, pokes]);
+  // A problem closes the other sheets; its Sources button opens the stream list over it.
+  if (problem && panel !== null && panel !== 'streams') setPanel(null);
 
   // The app going to the background pauses and saves, as hiding the TV app does.
   useEffect(() => {
@@ -193,14 +208,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     audioDecided.current = key;
     const wanted = wantedAudio(metaId);
     if (!wanted) return;
-    const match = pickAudio(state.audio, wanted, true);
+    const match = pickAudio(state.audio, wanted, !sportsEvent);
     if (match && !match.active) session.selectAudio(match.id);
-  }, [session, state.entry, state.engine, state.audio, metaId]);
+  }, [session, state.entry, state.engine, state.audio, metaId, sportsEvent]);
 
   // The Continue Watching card: name, artwork and episode (the session saves the position).
+  // Never for sports, replays included: the row would ask every addon with the id's prefix for
+  // its page, not the one that listed it.
   const recorded = useRef('');
   useEffect(() => {
-    if (state.status !== 'playing' || state.live || !item) return;
+    if (sportsEvent || state.status !== 'playing' || state.live || !item) return;
     const card = playedCard(item, videoId, meta, { metaId, type: titleType });
     const key = [videoId, meta ? 'meta' : '', card.season, card.episode, card.next?.videoId].join(
       '|',
@@ -208,7 +225,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     if (recorded.current === key) return;
     recorded.current = key;
     playedVideos.record(card);
-  }, [state.status, state.live, item, meta, videoId, metaId, titleType]);
+  }, [sportsEvent, state.status, state.live, item, meta, videoId, metaId, titleType]);
 
   // Next episode.
   const next = useMemo(
@@ -348,13 +365,67 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   };
   const surfaceWidth = useRef(1);
 
+  // Quality, as on the TV: at each resolution, the stream closest to what plays, in the
+  // language heard and at its length, never a clip.
+  const heard = state.audio.find((track) => track.active)?.lang || undefined;
+  const length = state.duration > 0 ? state.duration : undefined;
+  const reference = useMemo(
+    (): QualityReference | undefined =>
+      state.entry ? { entry: state.entry, audioLanguage: heard, lengthSeconds: length } : undefined,
+    [state.entry, heard, length],
+  );
+  const choices = useMemo(
+    () => qualityChoices(finderState.candidates, reference, finder.orderOptions()),
+    [finderState.candidates, reference, finder],
+  );
+  const currentQuality = state.entry?.facts.resolution ?? 'other';
+  // Whether Quality offers something smaller than what is playing.
+  const lowerChoice = useMemo(() => {
+    const index = choices.findIndex((c) => (c.resolution ?? 'other') === currentQuality);
+    if (index < 0) return choices.length > 1;
+    return choices.slice(index + 1).some((c) => c.resolution !== undefined);
+  }, [choices, currentQuality]);
+  const qualityValue = resolutionLabel(state.entry?.facts.resolution) ?? t('player.otherQuality');
+  // The note about a quality switch lasts while that stream opens.
+  const [switching, setSwitching] = useState<{ entry: StreamEntry; label?: string } | null>(null);
+  useEffect(() => {
+    if (!session || !switching) return;
+    return session.subscribe(() => {
+      const { entry, status } = session.get();
+      if (entry !== switching.entry || (status !== 'idle' && status !== 'loading')) {
+        setSwitching(null);
+      }
+    });
+  }, [session, switching]);
+  const pickQuality = (value: string) => {
+    setPanel(null);
+    // The resolution already playing stays as it is, whichever stream at it is playing.
+    if (value === currentQuality) return;
+    const choice = choices.find((c) => (c.resolution ?? 'other') === value);
+    if (!session || !choice) return;
+    // A paused film stays paused, and a note says what is coming.
+    session.play(choice.entry, session.carryOn(), {
+      chosen: true,
+      paused: state.status === 'paused',
+    });
+    const label = resolutionLabel(choice.resolution);
+    setSwitching(label ? { entry: choice.entry, label } : { entry: choice.entry });
+  };
+
   const clock = useCallback(() => element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
   const toast = (() => {
+    if (switching && waiting && state.entry === switching.entry) {
+      return switching.label
+        ? t('player.switchingTo', { quality: switching.label })
+        : t('player.switchingStream');
+    }
     if (state.steppedDown && waiting) return t('player.steppingDown');
     if (state.failedOver && waiting) return t('player.tryingAnother');
-    if (state.struggling && buffering) return t('player.keepsBufferingStreams');
+    if (state.struggling && buffering) {
+      return t(lowerChoice ? 'player.keepsBuffering' : 'player.keepsBufferingStreams');
+    }
     if (subtitles.failed && !waiting) return t('player.subtitlesFailed');
     return undefined;
   })();
@@ -579,6 +650,14 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               />
               <Button
                 kind="quiet"
+                icon="hd"
+                label={`${t('player.quality')} · ${qualityValue}`}
+                accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+                onPress={() => setPanel('quality')}
+                disabled={!state.entry}
+              />
+              <Button
+                kind="quiet"
                 icon="layers"
                 label={t('phone.sources')}
                 onPress={() => setPanel('streams')}
@@ -700,6 +779,40 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           );
         })}
         {subtitles.pending > 0 ? <Text style={styles.sheetNote}>{t('common.loading')}</Text> : null}
+      </Sheet>
+
+      <Sheet
+        visible={panel === 'quality'}
+        title={t('player.quality')}
+        onClose={() => setPanel(null)}
+      >
+        {choices.length <= 1 ? (
+          <Text style={styles.sheetNote}>
+            {choices.length === 1
+              ? t('player.onlyQuality', {
+                  quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
+                })
+              : t('player.noOtherQuality')}
+          </Text>
+        ) : null}
+        {choices.map((choice) => {
+          const value = choice.resolution ?? 'other';
+          return (
+            <SheetOption
+              key={value}
+              label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
+              {...(choice.otherLanguages
+                ? {
+                    detail: t('player.otherAudio', {
+                      languages: choice.otherLanguages.map(languageName).join(', '),
+                    }),
+                  }
+                : {})}
+              selected={value === currentQuality}
+              onPress={() => pickQuality(value)}
+            />
+          );
+        })}
       </Sheet>
 
       <Sheet

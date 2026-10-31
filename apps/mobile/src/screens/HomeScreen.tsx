@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useContinueItems } from '../data/use-continue';
+import { LiveSportRow } from './sports/LiveSportRow';
 import { openCatalog, openPlayer, openTitle } from '../nav/routes';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
@@ -135,8 +136,9 @@ export function HomeScreen() {
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
   const ready = collection.ready && sports.ready;
-  // No Sports screen on the phone yet: sports catalogs stay ordinary rows.
-  const board = useHomeBoard(collection.addons, ready);
+  // Sports catalogs leave the board, as on the TV: the Live sport row stands in for them. The
+  // board waits for sport to be settled, so a sports catalog is never drawn for a moment.
+  const board = useHomeBoard(collection.addons, ready, sports.homeLeaveOut);
   const continueItems = useContinueItems();
   const [empty, setEmpty] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const [firsts, setFirsts] = useState<Readonly<Record<string, MetaPreview>>>({});
@@ -179,9 +181,14 @@ export function HomeScreen() {
   );
 
   const profile = activeProfile();
+  const kids = isKidsProfile();
   const noRows = ready && board !== null && rows.length === 0 && continueRow.length === 0;
   const allHidden =
-    board !== null && board.length === 0 && buildBoard(collection.addons).length > 0;
+    board !== null &&
+    board.length === 0 &&
+    buildBoard(collection.addons, sports.homeLeaveOut).length > 0;
+  // The addons only list sport, which has its own tab.
+  const sportsOnly = !kids && !allHidden && sports.shown;
 
   const header = (
     <View>
@@ -227,17 +234,23 @@ export function HomeScreen() {
           }}
         />
       ) : null}
+      <LiveSportRow />
       {noRows ? (
         <Message
-          title={t('home.noAddons')}
+          title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
           lead={t(
-            isKidsProfile()
+            kids
               ? 'home.noKidsRowsLead'
               : allHidden
                 ? 'home.allHiddenLead'
-                : 'home.noAddonsLead',
+                : sportsOnly
+                  ? 'home.sportsOnlyLead'
+                  : 'home.noAddonsLead',
           )}
-          action={{ label: t('phone.addons'), onPress: () => router.push('/addons') }}
+          // Addons are for the grown-ups: a kids profile gets the words only, as on the TV.
+          {...(kids
+            ? {}
+            : { action: { label: t('phone.addons'), onPress: () => router.push('/addons') } })}
         />
       ) : null}
     </View>

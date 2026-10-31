@@ -81,7 +81,9 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
-    reactCompiler: true,
+    // Off: the shared screens' hooks read their stores during render (the TV runs no compiler),
+    // and the compiler would keep the first answer, a stale profile or My List button.
+    reactCompiler: false,
   },
 };
 

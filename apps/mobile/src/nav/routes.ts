@@ -1,6 +1,9 @@
-import type { BingeHint, StreamEntry } from '@bannertv/core';
+import type { BingeHint, SportEvent, StreamEntry } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
+import type { EventPlay } from '@tv/app/router';
 import { router } from 'expo-router';
+
+export type { EventPlay };
 
 /**
  * The phone's routes. Objects a screen hands the next one (the tile's preview, a chosen stream)
@@ -19,6 +22,8 @@ export interface PlayerRoute {
   binge?: BingeHint;
   /** Seconds; undefined resumes where the viewer left off, 0 starts over. */
   startAt?: number;
+  /** A sports event: streams from the addons that listed it only, and no Continue Watching card. */
+  event?: EventPlay;
 }
 
 export interface StreamsRoute {
@@ -29,6 +34,7 @@ export interface StreamsRoute {
   startAt?: number;
   /** Opened from the player: picking a stream replaces the player instead of stacking another. */
   fromPlayer?: boolean;
+  event?: EventPlay;
 }
 
 export interface CatalogRoute {
@@ -57,6 +63,23 @@ export function handed<T>(key: string | string[] | undefined): T | undefined {
 
 export function openTitle(item: MetaPreview): void {
   router.push({ pathname: '/title', params: { type: item.type, id: item.id, key: keep(item) } });
+}
+
+/** How the match page hands an event to the player and All streams (as the TV's router). */
+export function eventPlay(event: Pick<SportEvent, 'key' | 'sources' | 'kind'>): EventPlay {
+  return { key: event.key, sources: event.sources, replay: event.kind === 'replay' };
+}
+
+/**
+ * Whether playback keeps its place to resume. Not for a sports match, whose broadcast has no
+ * place to come back to; a replay does, like any other video (as the TV's remembersPlace).
+ */
+export function remembersPlace(route: { event?: EventPlay }): boolean {
+  return !route.event || route.event.replay;
+}
+
+export function openEvent(event: SportEvent): void {
+  router.push({ pathname: '/event', params: { key: keep(event) } });
 }
 
 export function openPlayer(route: PlayerRoute, how: 'push' | 'replace' = 'push'): void {

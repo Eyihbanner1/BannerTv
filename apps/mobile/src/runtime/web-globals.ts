@@ -2,6 +2,7 @@ import { reloadAppAsync } from 'expo';
 import * as ExpoCrypto from 'expo-crypto';
 import { SQLiteStorage } from 'expo-sqlite/kv-store';
 import { AppState, type AppStateStatus } from 'react-native';
+import { SPORTS_DATA_SCRIPT } from '@tv/data/sports-data-script';
 
 /**
  * Stand-ins for the browser globals the shared web modules (apps/webos/src) read, handed to
@@ -266,9 +267,22 @@ const quietTarget = {
   removeChild: <T>(child: T): T => child,
 };
 
+/** Hands the sports module its team and league list, which the TV loads as a script. */
+function loadSportsData(script: { onload: ((event: Event) => void) | null }): void {
+  import('../../../../packages/core/src/sports/data/sports-data.json').then(
+    (data) => {
+      (window as unknown as Record<string, unknown>)[SPORTS_DATA_SCRIPT.global] =
+        'default' in data ? data.default : data;
+      script.onload?.(new Event('load'));
+    },
+    () => undefined,
+  );
+}
+
 /**
- * An element that is never drawn. A script one fails to load, as one would offline: the sports
- * module then groups matches by what the addons say, without its bundled team list.
+ * An element that is never drawn. A script one fails to load, as one would offline, except the
+ * sports team list, which the phone bundles. A media one does nothing: the TV's link test then
+ * ends as "slow" instead of throwing, and nothing waits on it.
  */
 function createElement(tag: string) {
   const element = {
@@ -280,10 +294,18 @@ function createElement(tag: string) {
     onerror: null as ((event: Event) => void) | null,
     setAttribute: () => undefined,
     getAttribute: (): null => null,
+    removeAttribute: () => undefined,
     remove: () => undefined,
+    load: () => undefined,
+    play: () => Promise.resolve(),
+    pause: () => undefined,
+    canPlayType: () => '',
   };
   if (element.tagName === 'SCRIPT') {
-    setTimeout(() => element.onerror?.(new Event('error')), 0);
+    setTimeout(() => {
+      if (element.src.endsWith(SPORTS_DATA_SCRIPT.file)) loadSportsData(element);
+      else element.onerror?.(new Event('error'));
+    }, 0);
   }
   return element;
 }

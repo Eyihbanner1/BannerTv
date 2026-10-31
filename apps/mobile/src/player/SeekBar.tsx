@@ -53,10 +53,13 @@ export function SeekBar({
         accessibilityRole="adjustable"
         accessibilityValue={{ min: 0, max: Math.round(duration), now: Math.round(shown) }}
       >
-        <View style={styles.track}>
+        {/* Drawn parts take no touches, so every touch is measured from the bar itself. */}
+        <View style={styles.track} pointerEvents="none">
           <View style={[styles.fill, { width: `${fraction * 100}%` }]} />
         </View>
-        {known ? <View style={[styles.thumb, { left: `${fraction * 100}%` }]} /> : null}
+        {known ? (
+          <View pointerEvents="none" style={[styles.thumb, { left: `${fraction * 100}%` }]} />
+        ) : null}
       </View>
       <Text style={styles.time}>{known ? formatTime(duration) : '--:--'}</Text>
     </View>

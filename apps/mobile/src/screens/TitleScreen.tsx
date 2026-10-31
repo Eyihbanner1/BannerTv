@@ -1,4 +1,10 @@
-import { kidsTitleAllowed, nextVideo, ratingAllowed, tmdbImageUrl } from '@bannertv/core';
+import {
+  kidsTitleAllowed,
+  MIN_RESUME_SECONDS,
+  nextVideo,
+  ratingAllowed,
+  tmdbImageUrl,
+} from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
 import { describeAddonError, formatDate, metaFacts } from '@tv/data/describe';
@@ -172,10 +178,25 @@ export function TitleScreen({
   const latest = !canWatch && kidsAllowed ? progress.forMeta(id)[0] : undefined;
   const latestVideo = latest && meta?.videos.find((video) => video.id === latest.videoId);
   const latestResume = latest && progress.resumeAt(latest.videoId);
+  // An episode stopped in its first seconds starts again from the beginning, as Continue
+  // Watching has it, rather than being skipped for the next one.
+  const latestAgain =
+    !!latest &&
+    latestResume === undefined &&
+    !latest.watched &&
+    latest.position < MIN_RESUME_SECONDS &&
+    !!latestVideo;
   // After a finished episode, the next one that has aired.
   const upNext =
-    latest && latestResume === undefined && meta ? nextVideo(meta, latest.videoId, now) : undefined;
-  const firstEpisode = hasEpisodes && !latest ? groupSeasons(meta.videos)[0]?.videos[0] : undefined;
+    latest && latestResume === undefined && !latestAgain && meta
+      ? nextVideo(meta, latest.videoId, now)
+      : undefined;
+  // The first episode that has aired: an announced series has nothing to play yet.
+  const firstListed = hasEpisodes && !latest ? groupSeasons(meta.videos)[0]?.videos[0] : undefined;
+  const firstEpisode =
+    firstListed && episodeState(firstListed, undefined, false, now).kind !== 'upcoming'
+      ? firstListed
+      : undefined;
 
   const primaryVideoId = watchVideoId ?? latestVideo?.id ?? upNext?.id ?? firstEpisode?.id ?? null;
   usePrefetch(titleType, kidsAllowed ? primaryVideoId : null, item?.runtime);
@@ -296,6 +317,22 @@ export function TitleScreen({
                   : t('details.resumeFrom', { time: formatTime(resumeAt) })
               }
               onPress={() => play(watchVideoId)}
+              style={styles.wide}
+            />
+          ) : null}
+          {latestVideo && latestAgain ? (
+            <Button
+              kind="primary"
+              icon="play"
+              label={
+                latestVideo.season !== undefined && latestVideo.episode !== undefined
+                  ? `${t('phone.play')} ${t('home.episodeNote', {
+                      season: latestVideo.season,
+                      episode: latestVideo.episode,
+                    })}`
+                  : t('phone.play')
+              }
+              onPress={() => play(latestVideo.id, 0)}
               style={styles.wide}
             />
           ) : null}

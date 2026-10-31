@@ -4,8 +4,8 @@ import { preferences, setPreference, type Preferences } from '@tv/data/preferenc
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection } from '@tv/data/sync';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,10 +15,11 @@ import { ListRow } from '../ui/Button';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, radius, space, type } from '../ui/theme';
 
-type Choice = 'streamChoice' | 'probing';
+// No "Test links before playing": the phone has no player of its own to test a link with, as
+// the TV app on Android, where Automatic means off.
+type Choice = 'streamChoice';
 const CHOICES: { [K in Choice]: readonly Preferences[K][] } = {
   streamChoice: ['quality', 'fast'],
-  probing: ['auto', 'on', 'off'],
 };
 
 function Section({ title, children }: { title?: string; children: ReactNode }) {
@@ -75,18 +76,18 @@ export function SettingsScreen() {
   const profile = activeProfile();
 
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (isMain) checkAccountSection();
-  }, [isMain]);
+  // Each visit, as the TV's Settings mounts on each: a failed check offline tries again later.
+  useFocusEffect(
+    useCallback(() => {
+      if (isMain) checkAccountSection();
+    }, [isMain]),
+  );
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
 
-  const valueOf = (choice: Choice, value: string) =>
-    choice === 'streamChoice'
-      ? t(`settings.streamChoiceValue.${value}`)
-      : t(`settings.probingValue.${value}`);
+  const valueOf = (_choice: Choice, value: string) => t(`settings.streamChoiceValue.${value}`);
   const accountDetail =
     account.engine !== 'running'
       ? undefined
@@ -147,11 +148,6 @@ export function SettingsScreen() {
               detail={valueOf('streamChoice', prefs.streamChoice)}
               onPress={() => setChoosing('streamChoice')}
             />
-            <ListRow
-              title={t('settings.probingTitle')}
-              detail={valueOf('probing', prefs.probing)}
-              onPress={() => setChoosing('probing')}
-            />
             <Toggle
               title={t('phone.stillWatchingSetting')}
               value={prefs.stillWatching}
@@ -176,13 +172,7 @@ export function SettingsScreen() {
 
       <Sheet
         visible={choosing !== null}
-        title={
-          choosing === 'streamChoice'
-            ? t('settings.streamChoiceTitle')
-            : choosing === 'probing'
-              ? t('settings.probingTitle')
-              : ''
-        }
+        title={choosing === 'streamChoice' ? t('settings.streamChoiceTitle') : ''}
         onClose={() => setChoosing(null)}
       >
         {choosing
@@ -192,11 +182,7 @@ export function SettingsScreen() {
                 label={valueOf(choosing, value)}
                 selected={prefs[choosing] === value}
                 onPress={() => {
-                  if (choosing === 'streamChoice') {
-                    setPreference('streamChoice', value as Preferences['streamChoice']);
-                  } else {
-                    setPreference('probing', value as Preferences['probing']);
-                  }
+                  setPreference('streamChoice', value);
                   setChoosing(null);
                 }}
               />

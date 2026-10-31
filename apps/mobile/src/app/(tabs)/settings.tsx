@@ -1,7 +1,8 @@
-import { useScreenName } from '../../nav/use-screen';
+import { useProfileKey, useScreenName } from '../../nav/use-screen';
 import { SettingsScreen } from '../../screens/SettingsScreen';
 
 export default function Route() {
   useScreenName('settings');
-  return <SettingsScreen />;
+  const profileKey = useProfileKey();
+  return <SettingsScreen key={profileKey} />;
 }
