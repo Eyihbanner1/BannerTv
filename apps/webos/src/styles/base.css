@@ -56,7 +56,14 @@ input:focus {
   outline: none;
 }
 
-/* Low-power mode (webOS 5.x): no focus scaling or slides. */
+/* Android draws the picture under the page while its player is in use
+   (player/engines/android.ts): nothing behind the player may cover it. */
+html.android-video,
+html.android-video body {
+  background: transparent !important;
+}
+
+/* Low-power mode (webOS 5.x, and low-memory Android devices): no focus scaling or slides. */
 .low-power * {
   transition: none !important;
 }

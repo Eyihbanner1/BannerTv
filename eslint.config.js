@@ -16,6 +16,8 @@ export default defineConfig(
       // Built by the demo addon's media script: HLS segments end in .ts.
       'services/demo/public/**',
       'services/demo/.work/**',
+      // Kotlin, and its Gradle build folder holds a copy of the web build.
+      'apps/androidtv/**',
     ],
   },
   js.configs.recommended,

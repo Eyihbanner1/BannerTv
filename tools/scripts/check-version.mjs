@@ -10,6 +10,12 @@ const problems = [];
 
 if (!/^\d+\.\d+\.\d+$/.test(appinfo.version)) {
   problems.push(`appinfo.json version "${appinfo.version}" must be major.minor.patch`);
+} else {
+  // Android's versionCode is major*1000000 + minor*1000 + patch, so a part of 1000 would collide.
+  const [, minor, patch] = appinfo.version.split('.').map(Number);
+  if (minor >= 1000 || patch >= 1000) {
+    problems.push(`appinfo.json version ${appinfo.version} needs minor and patch below 1000`);
+  }
 }
 if (pkg.version !== appinfo.version) {
   problems.push(`apps/webos/package.json is ${pkg.version} but appinfo.json is ${appinfo.version}`);

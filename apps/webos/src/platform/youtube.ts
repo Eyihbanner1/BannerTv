@@ -1,3 +1,4 @@
+import { isAndroid, openExternal } from './android';
 import { isWebOS, lunaCall } from './webos';
 
 /** LG's YouTube app. Every LG TV since webOS 3 ships it. */
@@ -13,6 +14,11 @@ export const TRAILER_EVENT = 'bannertv:trailer';
  * LG's own launcher uses, sent too in case the app version prefers it.
  */
 export function playTrailer(youtubeId: string): Promise<void> {
+  // Android hands the link to the YouTube app, or a browser where there is none.
+  if (isAndroid()) {
+    openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(youtubeId)}`);
+    return Promise.resolve();
+  }
   if (!isWebOS()) {
     window.dispatchEvent(new CustomEvent(TRAILER_EVENT, { detail: youtubeId }));
     return Promise.resolve();

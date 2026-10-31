@@ -1,4 +1,6 @@
+import { isAndroid } from '../../platform/android';
 import { guessMimeType } from '../media';
+import { createAndroidEngine } from './android';
 import { createHlsEngine } from './hls';
 import { createNativeEngine } from './native';
 import { createShakaEngine } from './shaka';
@@ -74,6 +76,8 @@ async function fetchPlaylist(url: string): Promise<string | null> {
  * even the playlist cannot be read that way, the TV's player gets the link.
  */
 export async function chooseEngine(url: string): Promise<EngineName> {
+  // Android's player opens files, HLS and DASH alike, and lists their tracks itself.
+  if (isAndroid()) return 'android';
   const mime = guessMimeType(url);
   if (mime === 'application/dash+xml') return canUseMse() ? 'shaka' : 'native';
   if (mime !== 'application/vnd.apple.mpegurl' || !canUseMse()) return 'native';
@@ -91,6 +95,8 @@ export function fallbackEngine(
   url: string,
   tried: ReadonlySet<EngineName>,
 ): EngineName | undefined {
+  // The WebView's player would only fail on what Android's could not open: the next stream is the better try.
+  if (failed === 'android') return undefined;
   if (guessMimeType(url) !== 'application/vnd.apple.mpegurl') return undefined;
   const other: EngineName = failed === 'native' ? 'hls.js' : 'native';
   if (tried.has(other) || (other === 'hls.js' && !canUseMse())) return undefined;
@@ -111,6 +117,8 @@ export function createEngine(
       return createHlsEngine(video, listener);
     case 'shaka':
       return createShakaEngine(video, listener);
+    case 'android':
+      return createAndroidEngine(video, listener);
     default:
       return createNativeEngine(video, listener);
   }
