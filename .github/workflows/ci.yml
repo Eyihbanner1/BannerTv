@@ -182,3 +182,64 @@ jobs:
           name: android-reports
           path: apps/androidtv/app/build/reports/
           if-no-files-found: ignore
+
+  # The phone app (apps/mobile, ADR 0007): React Native through Expo. Its native Android project is
+  # generated from app.config.ts on every run (`expo prebuild`) rather than kept in the repository.
+  mobile:
+    name: Phone APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate the Android project
+        working-directory: apps/mobile
+        env:
+          CI: '1'
+        run: pnpm exec expo prebuild --platform android --no-install
+
+      # A release build, so the JavaScript is inside the APK and it runs without a computer
+      # attached. Signed with the debug key the Expo template ships, which is the same on every
+      # run, so each test APK installs over the last. Not for the store.
+      - name: Build
+        working-directory: apps/mobile/android
+        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Collect the APK
+        run: |
+          version=$(node -p "require('./apps/webos/webos-meta/appinfo.json').version")
+          mkdir -p apps/mobile/out
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
+            "apps/mobile/out/bannertv-phone-$version-test.apk"
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-phone-apk
+          path: apps/mobile/out/*.apk
+          if-no-files-found: error
+
+      - name: Upload Gradle reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-android-reports
+          path: apps/mobile/android/app/build/reports/
+          if-no-files-found: ignore
