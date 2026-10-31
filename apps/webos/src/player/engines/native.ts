@@ -16,6 +16,11 @@ const START_SLACK_S = 10;
 /** How long after `playing` the webOS clock may still read 0 before it shows the real position. */
 const LATE_CLOCK_MS = 1500;
 const UHD = { width: 3840, height: 2160 };
+/**
+ * On a broadcast, live is taken this far back from the newest moment the
+ * TV's player can seek to, and this much behind it still counts as live.
+ */
+const NATIVE_LIVE_GAP_S = 10;
 
 function describe(code: number): PlaybackError {
   switch (code) {
@@ -50,6 +55,8 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
   const tracked = video as TrackedVideo;
   let cleanup: Array<() => void> = [];
   let mime = '';
+  const isLive = () =>
+    video.duration === Infinity && mime !== 'video/x-matroska' && mime !== 'video/webm';
 
   const on = <K extends keyof HTMLMediaElementEventMap>(
     type: K,
@@ -155,8 +162,20 @@ export const createNativeEngine: EngineFactory = (video, listener) => {
 
     // The TV's player gives a live stream no length. So it does a Matroska or
     // WebM file whose header leaves the length out, which is still a film.
-    isLive: () =>
-      video.duration === Infinity && mime !== 'video/x-matroska' && mime !== 'video/webm',
+    isLive,
+
+    // What the TV's player can seek to. It plays a broadcast some way short of
+    // the newest moment it has, and how far is not measured yet: live is taken
+    // a little back from it, with as much again counting as live.
+    liveWindow() {
+      if (!isLive()) return null;
+      const kept = video.seekable;
+      if (!kept || kept.length === 0) return null;
+      const start = kept.start(0);
+      const newest = kept.end(kept.length - 1);
+      if (!isFinite(start) || !isFinite(newest) || newest - start <= NATIVE_LIVE_GAP_S) return null;
+      return { start, live: newest - NATIVE_LIVE_GAP_S, slack: NATIVE_LIVE_GAP_S };
+    },
 
     audioTracks(): EngineTrack[] {
       return listTracks(tracked.audioTracks, (track) => track.enabled === true).map((track) => {

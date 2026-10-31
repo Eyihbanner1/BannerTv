@@ -1,6 +1,8 @@
 import type { MetaDetail, Stream, StreamSource, Video } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
-import { findBingeStream, nextVideo } from './next';
+import { assessStream } from '../streams/assess';
+import type { StreamAction, StreamEntry } from '../streams/types';
+import { bingeEntry, bingeHint, findBingeStream, nextVideo } from './next';
 
 const NOW = Date.parse('2026-06-01T00:00:00Z');
 
@@ -162,5 +164,177 @@ describe('findBingeStream', () => {
     const streams = [stream(url('a'), { bingeGroup: 'x' })];
     expect(findBingeStream(streams, 'y')).toBeUndefined();
     expect(findBingeStream([], 'y')).toBeUndefined();
+  });
+});
+
+const link = (name: string): StreamSource => ({ kind: 'url', url: `https://cdn.example/${name}` });
+
+function entry(
+  addonId: string,
+  name: string,
+  hints: Partial<Stream['behaviorHints']> = {},
+  action: StreamAction = { kind: 'play' },
+): StreamEntry {
+  return {
+    stream: stream(link(name), hints),
+    addonId,
+    addonRank: 0,
+    rank: 0,
+    facts: { hdr: [], audio: [], languages: [] },
+    assessment: { action, warnings: [] },
+  };
+}
+
+describe('bingeHint', () => {
+  it('names the addon and the release of the stream playing', () => {
+    const playing = entry('torrentio', 'e1', { bingeGroup: 'torrentio|720p' });
+    expect(bingeHint(playing)).toEqual({ addonId: 'torrentio', bingeGroup: 'torrentio|720p' });
+  });
+
+  it('never carries the link', () => {
+    const playing = entry('torrentio', 'secret-key/e1', { bingeGroup: 'torrentio|720p' });
+    const hint = bingeHint(playing)!;
+    expect(Object.keys(hint).sort()).toEqual(['addonId', 'bingeGroup']);
+    expect(JSON.stringify(hint)).not.toContain('secret-key');
+  });
+
+  it('gives nothing without a stream, or for a stream that names no release', () => {
+    expect(bingeHint(null)).toBeUndefined();
+    expect(bingeHint(undefined)).toBeUndefined();
+    expect(bingeHint(entry('torrentio', 'e1'))).toBeUndefined();
+    expect(bingeHint(entry('torrentio', 'e1', { bingeGroup: '' }))).toBeUndefined();
+  });
+});
+
+describe('bingeEntry', () => {
+  const hint = { addonId: 'torrentio', bingeGroup: 'torrentio|720p' };
+
+  it("picks the same addon's stream of the same release, not another addon's", () => {
+    const wanted = entry('torrentio', 'e2-720p', { bingeGroup: 'torrentio|720p' });
+    const entries = [
+      entry('other', 'e2-other', { bingeGroup: 'torrentio|720p' }),
+      entry('torrentio', 'e2-1080p', { bingeGroup: 'torrentio|1080p' }),
+      entry('torrentio', 'e2-plain'),
+      wanted,
+      entry('torrentio', 'e2-720p-later', { bingeGroup: 'torrentio|720p' }),
+    ];
+    expect(bingeEntry(entries, hint)).toBe(wanted);
+  });
+
+  it("passes over a stream of the release that can't play here for the next one that can", () => {
+    const wanted = entry('torrentio', 'e2-b', { bingeGroup: 'torrentio|720p' });
+    const entries = [
+      entry(
+        'torrentio',
+        'e2-a',
+        {
+          bingeGroup: 'torrentio|720p',
+          proxyHeaders: { request: { Referer: 'https://x.example' }, response: {} },
+        },
+        { kind: 'unavailable', reason: 'proxy-headers' },
+      ),
+      entry('torrentio', 'e2-c', { bingeGroup: 'torrentio|720p' }, { kind: 'external' }),
+      wanted,
+    ];
+    expect(bingeEntry(entries, hint)).toBe(wanted);
+  });
+
+  it('leaves out a torrent of the release, which needs a streaming server', () => {
+    const torrent: StreamEntry = {
+      ...entry('torrentio', 'e2', { bingeGroup: 'torrentio|720p' }),
+      stream: stream(
+        { kind: 'torrent', infoHash: 'abc', trackers: [] },
+        { bingeGroup: 'torrentio|720p' },
+      ),
+      assessment: { action: { kind: 'unavailable', reason: 'torrent' }, warnings: [] },
+    };
+    expect(bingeEntry([torrent], hint)).toBeUndefined();
+  });
+
+  it('takes the first in the order given, from either install of the addon', () => {
+    const first = { ...entry('torrentio', 'e2-a', { bingeGroup: 'torrentio|720p' }), addonRank: 2 };
+    const second = {
+      ...entry('torrentio', 'e2-b', { bingeGroup: 'torrentio|720p' }),
+      addonRank: 0,
+    };
+    expect(bingeEntry([first, second], hint)).toBe(first);
+    expect(bingeEntry([second, first], hint)).toBe(second);
+  });
+
+  it('gives nothing when the release is not there, so the usual choice applies', () => {
+    const entries = [
+      entry('other', 'e2-other', { bingeGroup: 'torrentio|720p' }),
+      entry('torrentio', 'e2-1080p', { bingeGroup: 'torrentio|1080p' }),
+      entry('torrentio', 'e2-case', { bingeGroup: 'Torrentio|720p' }),
+      entry('torrentio', 'e2-plain'),
+    ];
+    expect(bingeEntry(entries, hint)).toBeUndefined();
+    expect(bingeEntry([], hint)).toBeUndefined();
+  });
+
+  it('gives nothing for a hint with no release named', () => {
+    const entries = [entry('torrentio', 'e2'), entry('torrentio', 'e2-g', { bingeGroup: 'g' })];
+    expect(bingeEntry(entries, { addonId: 'torrentio' })).toBeUndefined();
+    expect(bingeEntry(entries, { addonId: 'torrentio', bingeGroup: '' })).toBeUndefined();
+  });
+
+  it('picks what the player picked for the next episode before, for streams as they are assessed', () => {
+    // The pick PlayerScreen made before bingeEntry: the addon's first stream of the group, if it plays.
+    const before = (entries: StreamEntry[], playing: StreamEntry) => {
+      const same = entries.filter((e) => e.addonId === playing.addonId);
+      const found = findBingeStream(
+        same.map((e) => e.stream),
+        playing.stream.behaviorHints.bingeGroup,
+      );
+      return same.find((e) => e.stream === found && e.assessment.action.kind === 'play');
+    };
+    const tv = {
+      webOS: 22,
+      uhd: true,
+      hdr10: true,
+      dolbyVision: false,
+      hevc: true,
+      av1: false,
+      dts: false,
+      truehd: false,
+    };
+    const assessed = (addonId: string, source: StreamSource, hints = {}): StreamEntry => {
+      const facts = { hdr: [], audio: [], languages: [] };
+      const s = stream(source, { bingeGroup: 'g', ...hints });
+      return { ...entry(addonId, ''), stream: s, facts, assessment: assessStream(s, facts, tv) };
+    };
+    const headers = (request: Record<string, string>) => ({
+      proxyHeaders: { request, response: { 'Content-Type': 'video/mp4' } },
+    });
+    const all = [
+      assessed('other', link('other')),
+      assessed('torrentio', { kind: 'torrent', infoHash: 'abc', trackers: [] }),
+      assessed('torrentio', { kind: 'youtube', ytId: 'x' }),
+      assessed('torrentio', { kind: 'external', url: 'https://x.example' }),
+      assessed('torrentio', link('needs-headers'), headers({ Referer: 'https://x.example' })),
+      assessed('torrentio', link('response-headers'), headers({})),
+      assessed('torrentio', link('other-group'), { bingeGroup: 'h' }),
+      assessed('torrentio', link('wanted')),
+      assessed('torrentio', link('later')),
+    ];
+    const playing = assessed('torrentio', link('e1'));
+    let found = 0;
+    for (let from = 0; from < all.length; from++) {
+      for (const entries of [all.slice(from), all.slice(from).reverse()]) {
+        const picked = bingeEntry(entries, bingeHint(playing)!);
+        expect(picked).toBe(before(entries, playing));
+        if (picked) found++;
+      }
+    }
+    expect(found).toBeGreaterThan(0);
+  });
+
+  it("carries the playing episode's release on to the next episode's streams", () => {
+    const playing = entry('torrentio', 'e1-720p', { bingeGroup: 'torrentio|720p' });
+    const next = [
+      entry('torrentio', 'e2-1080p', { bingeGroup: 'torrentio|1080p' }),
+      entry('torrentio', 'e2-720p', { bingeGroup: 'torrentio|720p' }),
+    ];
+    expect(bingeEntry(next, bingeHint(playing)!)).toBe(next[1]);
   });
 });

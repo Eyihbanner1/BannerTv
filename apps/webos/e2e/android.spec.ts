@@ -89,6 +89,18 @@ test("the Android app plays in Android's player under the page, and its remote d
   await press(page, 'Enter', 'player-play');
   await expect.poll(async () => (await playerOps(page)).at(-1)).toBe('pause');
   await playerState(page, { playing: false, playWhenReady: false, position: 2 });
+  // Info says whose player it is.
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'ArrowRight', 'player-info-button');
+  await press(page, 'Enter', 'player-info-about');
+  await expect(page.locator('[data-focus-key="player-info-about"]')).toHaveAttribute(
+    'aria-label',
+    /Played by, Android's player\./,
+  );
+  await androidSays(page, { type: 'key', key: 'Back' });
+  await expectFocus(page, 'player-info-button');
   await androidSays(page, { type: 'key', key: 'MediaPlayPause' });
   await expect.poll(async () => (await playerOps(page)).at(-1)).toBe('play');
   await playerState(page, { playing: true, position: 2 });

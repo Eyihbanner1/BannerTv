@@ -1,3 +1,4 @@
+import type { ProgressEntry } from '@bannertv/core';
 import type { Video } from '@bannertv/protocol';
 
 export interface Season {
@@ -35,4 +36,39 @@ export function groupSeasons(videos: readonly Video[]): Season[] {
 export function defaultSeason(seasons: readonly Season[]): number {
   const first = seasons.findIndex((season) => season.number !== null && season.number >= 1);
   return first === -1 ? 0 : first;
+}
+
+/** The season holding the video, or the default one when it is not listed. */
+export function seasonOf(seasons: readonly Season[], videoId: string): number {
+  const found = seasons.findIndex((season) => season.videos.some((video) => video.id === videoId));
+  return found === -1 ? defaultSeason(seasons) : found;
+}
+
+export type EpisodeState =
+  | { kind: 'upcoming' }
+  | { kind: 'watched' }
+  | { kind: 'started'; fraction: number; secondsLeft: number }
+  | { kind: 'new' };
+
+/**
+ * Where the viewer is with an episode, as the episode lists show it: not out
+ * yet (an undated or unreadable date counts as out), watched here or on
+ * Trakt, part watched, or not started.
+ */
+export function episodeState(
+  video: Video,
+  seen: ProgressEntry | undefined,
+  watched: boolean,
+  now: number,
+): EpisodeState {
+  if (video.released !== undefined && Date.parse(video.released) > now) return { kind: 'upcoming' };
+  if (seen?.watched === true || watched) return { kind: 'watched' };
+  if (seen && seen.duration > 0 && seen.position > 0) {
+    return {
+      kind: 'started',
+      fraction: Math.min(1, seen.position / seen.duration),
+      secondsLeft: Math.max(0, seen.duration - seen.position),
+    };
+  }
+  return { kind: 'new' };
 }

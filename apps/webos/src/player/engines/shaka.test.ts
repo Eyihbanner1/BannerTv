@@ -29,6 +29,7 @@ class FakePlayer {
   addEventListener() {}
   getTextTracks = () => [];
   isDynamic = () => FakePlayer.dynamic;
+  seekRange = () => ({ start: 50, end: 290 });
   load = () => Promise.resolve();
   destroy = () => Promise.resolve();
 }
@@ -85,5 +86,15 @@ describe('the Shaka engine', () => {
     expect(engine.isLive()).toBe(false);
     FakePlayer.dynamic = true;
     expect(engine.isLive()).toBe(true);
+  });
+
+  it('plays live at the end of the seek range, which has its delay taken off already', async () => {
+    script.finish();
+    FakePlayer.dynamic = false;
+    const engine = createShakaEngine(video, listener);
+    await engine.load('https://media.example.com/manifest.mpd', 0);
+    expect(engine.liveWindow()).toBeNull();
+    FakePlayer.dynamic = true;
+    expect(engine.liveWindow()).toEqual({ start: 50, live: 290, slack: 6 });
   });
 });

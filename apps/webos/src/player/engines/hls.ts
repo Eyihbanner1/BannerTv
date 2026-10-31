@@ -178,6 +178,16 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     // hls.js gives a live playlist a length that grows, so ask it.
     isLive: () => hls?.latestLevelDetails?.live === true,
 
+    // Live is where hls.js syncs to, a few segments back from the newest; the
+    // oldest segment listed is as far back as it goes, and a segment is the slack.
+    liveWindow() {
+      const details = hls?.latestLevelDetails;
+      const live = hls?.liveSyncPosition;
+      if (!details?.live || typeof live !== 'number' || !isFinite(live)) return null;
+      const first = details.fragments[0];
+      return { start: first ? first.start : 0, live, slack: details.targetduration };
+    },
+
     audioTracks() {
       if (!hls) return [];
       const current = hls.audioTracks[hls.audioTrack];

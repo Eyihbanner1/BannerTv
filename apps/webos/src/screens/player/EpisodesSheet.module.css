@@ -1,0 +1,66 @@
+/*
+ * The same measurements as the audio and subtitle sheet: 32px, a 104px
+ * header, 24px, then four rows of 88px, which leaves the safe area below.
+ */
+.header {
+  position: relative;
+  height: 104px;
+  margin-bottom: 24px;
+}
+
+.series {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  width: 520px;
+  padding: 0 28px;
+  white-space: nowrap;
+}
+
+.kicker {
+  display: block;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.name {
+  display: block;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The focused episode's story, over its column: two lines at most. */
+.summary {
+  position: absolute;
+  top: 14px;
+  left: 552px;
+  width: 1176px;
+  padding: 0 28px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.content {
+  position: relative;
+  height: 352px;
+}
+
+.seasons {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 520px;
+}
+
+.episodes {
+  position: absolute;
+  top: 0;
+  left: 552px;
+  width: 1176px;
+}

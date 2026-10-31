@@ -31,6 +31,8 @@ export interface Preferences {
   subtitleStyle: SubtitleStyle;
   /** Details adds TMDB's logos, cast photos, episode stills and UK ratings. */
   tmdb: boolean;
+  /** The third episode in a row to start by itself asks "Still watching?" first. */
+  stillWatching: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -41,6 +43,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subtitleLanguage: null,
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
   tmdb: true,
+  stillWatching: true,
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
@@ -103,6 +106,8 @@ export function readPreferences(raw: string | null): Preferences {
       ),
     },
     tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
+    stillWatching:
+      typeof stored.stillWatching === 'boolean' ? stored.stillWatching : d.stillWatching,
   };
 }
 

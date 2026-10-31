@@ -1,9 +1,10 @@
-import type { Resolution, StreamEntry } from '@bannertv/core';
+import type { LiveWindow, Resolution, StreamEntry } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
   SMOOTH_AFTER_S,
@@ -19,6 +20,8 @@ interface FakeEngine extends Engine {
   startAt?: number;
   /** Whether the engine says the stream is live. */
   live?: boolean;
+  /** What the broadcast keeps, as the engine reads it. */
+  window?: LiveWindow;
   /** How often the session told it the viewer moved the clock. */
   seeks: number;
 }
@@ -71,6 +74,7 @@ vi.mock('./engines/choose', () => ({
         return Promise.resolve();
       },
       isLive: () => engine.live === true,
+      liveWindow: () => (engine.live ? (engine.window ?? null) : null),
       audioTracks: () => engine.audio,
       selectAudio: (id) => {
         engine.audio = engine.audio.map((track) => ({ ...track, active: track.id === id }));
@@ -90,6 +94,7 @@ vi.mock('./engines/choose', () => ({
 class FakeVideo extends EventTarget {
   paused = true;
   currentTime = 0;
+  playbackRate = 1;
   // A two-hour film, so the bitrates below follow from the sizes.
   duration = 7200;
 
@@ -134,6 +139,11 @@ interface SetupOptions {
   autoFailover?: boolean;
   remember?: boolean;
   continueRow?: boolean;
+  /** The running time the title's page gives, in seconds. None by default. */
+  runtime?: number;
+  /** A film, tt1, by default. */
+  type?: string;
+  videoId?: string;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -148,13 +158,14 @@ function setup(options: SetupOptions = {}) {
       [first, second].find((entry) => !tried.has(entryKey(entry))),
     markFailed,
     lighter,
-    runtimeSeconds: () => 7200,
+    runtimeSeconds: () => options.runtime ?? 7200,
+    knownRuntimeSeconds: () => options.runtime,
   } as unknown as StreamFinder;
   const session = createPlaybackSession({
     video: video as unknown as HTMLVideoElement,
-    type: 'movie',
+    type: options.type ?? 'movie',
     metaId: 'tt1',
-    videoId: 'tt1',
+    videoId: options.videoId ?? 'tt1',
     finder,
     autoFailover: options.autoFailover ?? true,
     remember: options.remember,
@@ -182,7 +193,7 @@ async function start(
   video: FakeVideo,
   entry: StreamEntry,
   at = 0,
-  options?: { chosen?: boolean },
+  options?: { chosen?: boolean; handPicked?: boolean },
 ) {
   session.play(entry, at, options);
   await settle();
@@ -451,7 +462,12 @@ describe('a stream that keeps buffering', () => {
     wait(video, 999);
     expect(session.get().entry).toBe(remux);
     vi.advanceTimersByTime(1);
-    expect(lighter).toHaveBeenCalledWith(remux, expect.anything());
+    // With what plays, so the step down keeps to its language and length.
+    expect(lighter).toHaveBeenCalledWith(
+      remux,
+      expect.anything(),
+      expect.objectContaining({ entry: remux }),
+    );
     expect(session.get()).toMatchObject({ entry: bluray, position: 340, steppedDown: true });
     expect(kept.bandwidth.struggled).toHaveBeenCalledWith(80e6, undefined);
     await settle();
@@ -699,6 +715,200 @@ describe('a stream that plays smoothly', () => {
   });
 });
 
+describe('a stream far shorter than the title', () => {
+  /** Opens `entry` at `at` seconds as a file `seconds` long, which the engine has just read. */
+  async function open(
+    session: Session,
+    video: FakeVideo,
+    entry: StreamEntry,
+    seconds: number,
+    at = 0,
+    options?: { chosen?: boolean; handPicked?: boolean },
+  ) {
+    session.play(entry, at, options);
+    await settle();
+    video.duration = seconds;
+    video.fire('durationchange');
+  }
+
+  it('is moved on from at the same place, as a stream that failed, and keeps nothing', async () => {
+    const { video, session, markFailed } = setup({ runtime: 2700 });
+    await open(session, video, first, 30, 600);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get().entry).toBe(second);
+    expect(session.get().failedOver).toBe(true);
+    await settle();
+    expect(lastEngine().startAt).toBe(600);
+    expect(kept.progress).not.toHaveBeenCalled();
+    expect(kept.sourceMemory).toHaveBeenCalledWith(first.addonId, false);
+
+    // The next one, the episode's length, plays and keeps its place.
+    video.duration = 2640;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    video.currentTime = 600;
+    video.fire('timeupdate');
+    playFor(video, 30);
+    session.saveProgress();
+    expect(session.get().entry).toBe(second);
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 630, duration: 2640 }),
+    );
+  });
+
+  it('is found at its first picture when its length came before the engine could tell', async () => {
+    const { video, session, markFailed } = setup({ runtime: 2700 });
+    session.play(first, 600);
+    await settle();
+    video.duration = 30;
+    void video.play();
+    video.fire('playing');
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get().entry).toBe(second);
+    await settle();
+    expect(lastEngine().startAt).toBe(600);
+    expect(session.get().status).toBe('loading');
+  });
+
+  it('says so once no other stream is left', async () => {
+    const { video, session } = setup({ runtime: 2700 });
+    await open(session, video, first, 30);
+    await settle();
+    expect(session.get().entry).toBe(second);
+    video.duration = 45;
+    video.fire('durationchange');
+    expect(session.get().status).toBe('failed');
+    expect(session.get().error?.kind).toBe('clip');
+    void video.play();
+    video.fire('playing');
+    expect(session.get().status).toBe('failed');
+    expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('plays when the viewer picked it, never keeps its place, and says it was only a clip at its end', async () => {
+    for (const options of [{ handPicked: true }, undefined]) {
+      kept.progress.mockClear();
+      const { video, session, markFailed } = setup({
+        runtime: 2700,
+        autoFailover: options !== undefined,
+      });
+      await open(session, video, first, 30, 0, options);
+      void video.play();
+      video.fire('playing');
+      playFor(video, 20);
+      session.saveProgress();
+      expect(session.get().status).toBe('playing');
+      expect(session.get().clip).toBe(true);
+      expect(markFailed).not.toHaveBeenCalled();
+      // Its end is not the video's: no end, no next stream, nothing kept.
+      video.fire('ended');
+      expect(session.get().entry).toBe(first);
+      expect(session.get().status).toBe('failed');
+      expect(session.get().error?.kind).toBe('clip');
+      expect(markFailed).toHaveBeenCalledWith(first);
+      await settle();
+      expect(session.get().entry).toBe(first);
+      session.destroy();
+      expect(kept.progress).not.toHaveBeenCalled();
+    }
+  });
+
+  it("leaves the next stream at the place the clip was opened at, not at the clip's clock", async () => {
+    const { video, session } = setup({ runtime: 2700 });
+    await open(session, video, first, 30, 600, { handPicked: true });
+    void video.play();
+    video.fire('playing');
+    session.seek(0);
+    video.fire('seeked');
+    playFor(video, 5);
+    expect(session.get().clip).toBe(true);
+    expect(session.carryOn()).toBe(600);
+    session.destroy();
+  });
+
+  it('takes nothing from the clip it let go of, when its engine tells all in one go', async () => {
+    // Android's bridge sends the length, the end and the picture in one state message.
+    const { video, session } = setup({ runtime: 2700 });
+    session.play(first, 600);
+    await settle();
+    video.duration = 30;
+    video.fire('durationchange');
+    video.fire('ended');
+    video.fire('playing');
+    expect(session.get().entry).toBe(second);
+    expect(session.get().status).toBe('loading');
+    expect(session.get().failedOver).toBe(true);
+    expect(session.get().clip).toBe(false);
+    expect(kept.progress).not.toHaveBeenCalled();
+    // The next stream's start clock still runs: it fails if nothing plays.
+    await settle();
+    vi.advanceTimersByTime(START_TIMEOUT_MS);
+    expect(session.get().status).toBe('failed');
+    expect(session.get().error?.kind).toBe('network');
+  });
+
+  it("is never judged for a special, which the series' running time says nothing about", async () => {
+    const { video, session, markFailed } = setup({
+      runtime: 1320,
+      type: 'series',
+      videoId: 'tt1:0:3',
+    });
+    await open(session, video, first, 180);
+    void video.play();
+    video.fire('playing');
+    playFor(video, 10);
+    session.saveProgress();
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get().entry).toBe(first);
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 10, duration: 180 }),
+    );
+    // An episode of season 1 that short is a clip.
+    const regular = setup({ runtime: 1320, type: 'series', videoId: 'tt1:1:3' });
+    await open(regular.session, regular.video, first, 180);
+    expect(regular.markFailed).toHaveBeenCalledWith(first);
+  });
+
+  it('is not judged without the running time from the title page, under 20 minutes, nor for five minutes or more', async () => {
+    for (const [runtime, seconds] of [
+      [undefined, 30],
+      [2700, 360],
+      [900, 30],
+      [240, 30],
+    ] as const) {
+      kept.progress.mockClear();
+      const { video, session, markFailed } = setup({ runtime });
+      await open(session, video, first, seconds);
+      void video.play();
+      video.fire('playing');
+      playFor(video, 10);
+      session.saveProgress();
+      expect(markFailed).not.toHaveBeenCalled();
+      expect(session.get().entry).toBe(first);
+      expect(kept.progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ position: 10, duration: seconds }),
+      );
+    }
+  });
+
+  it('is judged again for each stream: a clip passed over leaves the next one kept', async () => {
+    const { video, session } = setup({ runtime: 2700 });
+    await open(session, video, first, 30);
+    await settle();
+    expect(session.get().entry).toBe(second);
+    video.duration = 2640;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    playFor(video, 5);
+    video.fire('ended');
+    expect(kept.progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ position: 2640, duration: 2640 }),
+    );
+  });
+});
+
 describe('a stream that is not remembered', () => {
   it('keeps no record of how it played, buffering or smooth', async () => {
     const { video, session } = setup({ lighter: [bluray], remember: false });
@@ -761,6 +971,102 @@ describe('a live stream', () => {
     video.fire('playing');
     video.fire('timeupdate');
   }
+
+  it('says how far behind live it is, keeps jumps within what it keeps, and goes back to live', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ behind: 0, liveWindow: { start: 7000, live: 7200 } });
+    session.seek(7100);
+    expect(session.get().behind).toBe(100);
+    // Never past live, nor before what it keeps.
+    session.seek(7400);
+    expect(video.currentTime).toBe(7200);
+    expect(session.get().behind).toBe(0);
+    session.seek(6000);
+    expect(video.currentTime).toBe(7000);
+    expect(session.get().behind).toBe(200);
+    session.goToLive();
+    expect(video.currentTime).toBe(7200);
+    expect(session.get().behind).toBe(0);
+    session.destroy();
+  });
+
+  it('falls behind live while paused, with no clock moving to say so', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.fire('timeupdate');
+    session.pause();
+    video.fire('pause');
+    // Live moves on; the paused clock does not.
+    lastEngine().window = { start: 7030, live: 7230, slack: 6 };
+    vi.advanceTimersByTime(LIVE_TICK_MS);
+    expect(session.get()).toMatchObject({ status: 'paused', behind: 30 });
+    session.goToLive();
+    expect(session.get().behind).toBe(0);
+    session.destroy();
+  });
+
+  it('never jumps back on a skip forward, and takes no judgement from a reading of 0', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    session.seek(7100);
+    expect(session.get().behind).toBe(100);
+    // The clock ran on past where live was last read: forward stays put.
+    video.currentTime = 7203;
+    session.seek(7213);
+    expect(video.currentTime).toBe(7203);
+    // So does Go to live: live is here, not back where it was read.
+    session.goToLive();
+    expect(video.currentTime).toBe(7203);
+    // An engine recovering the media reads 0 for a moment: not judged, and not a place.
+    session.seek(7100);
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ behind: 100, position: 7100 });
+    session.destroy();
+  });
+
+  it('goes back from past a live point read a moment late', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.currentTime = 7210;
+    video.fire('timeupdate');
+    // Back 10 s lands on live, where it was read.
+    session.seek(7200);
+    expect(video.currentTime).toBe(7200);
+    session.seek(7190);
+    expect(video.currentTime).toBe(7190);
+    session.destroy();
+  });
+
+  it('judges the start of a broadcast that keeps everything from 0', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 0, live: 2400, slack: 6 };
+    video.currentTime = 2400;
+    video.fire('timeupdate');
+    expect(session.get().behind).toBe(0);
+    session.seek(0);
+    expect(session.get().behind).toBe(2400);
+    vi.advanceTimersByTime(LIVE_TICK_MS);
+    expect(session.get().behind).toBe(2400);
+    session.destroy();
+  });
+
+  it('reads as live, and leaves jumps alone, when the engine cannot tell where live is', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    session.seek(7100);
+    expect(session.get()).toMatchObject({ behind: 0, liveWindow: null });
+    session.goToLive();
+    expect(video.currentTime).toBe(7100);
+    session.destroy();
+  });
 
   it('saves nothing to resume, whenever it stops or ends', async () => {
     const { video, session } = setup();
@@ -867,7 +1173,75 @@ describe('a live stream', () => {
   });
 });
 
+describe('a stream picked from the list', () => {
+  it('stops at the problem box when it fails, rather than move to another', async () => {
+    const { video, session, markFailed } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get()).toMatchObject({ status: 'failed', entry: second, failedOver: false });
+    expect(markFailed).toHaveBeenCalledWith(second);
+  });
+
+  it('lets a stream opened afterwards by the session fail over again', async () => {
+    const { video, session } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    session.play(second, 600);
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get()).toMatchObject({ entry: first, failedOver: true });
+  });
+});
+
 describe('a stream with an end', () => {
+  it('is paused, not ended, once the viewer goes back from the end, and plays on from there', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 7190);
+    video.currentTime = 7200;
+    video.fire('ended');
+    expect(session.get().status).toBe('ended');
+    session.seek(7100);
+    expect(session.get()).toMatchObject({ status: 'paused', position: 7100 });
+    session.resume();
+    expect(video.currentTime).toBe(7100);
+  });
+
+  it('stays ended when a seek lands on the end itself', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 7190);
+    video.fire('ended');
+    session.seek(7300);
+    expect(session.get().status).toBe('ended');
+  });
+
+  it('starts at normal speed', async () => {
+    const { video, session } = setup();
+    expect(session.get().rate).toBe(1);
+    await start(session, video, first, 600);
+    expect(session.get().rate).toBe(1);
+  });
+
+  it('plays at the speed chosen, says so when the TV puts it back, and opens another stream at normal speed', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.setRate(1.25);
+    expect(video.playbackRate).toBe(1.25);
+    expect(session.get().rate).toBe(1.25);
+    // Not a speed: Shaka's 0 while it buffers.
+    video.playbackRate = 0;
+    video.fire('ratechange');
+    expect(session.get().rate).toBe(1.25);
+    video.playbackRate = 1;
+    video.fire('ratechange');
+    expect(session.get().rate).toBe(1);
+    session.setRate(1.5);
+    session.play(second, 0);
+    expect(video.playbackRate).toBe(1);
+    expect(session.get().rate).toBe(1);
+    session.destroy();
+  });
+
   it('carries on from where it is', async () => {
     const { video, session } = setup();
     await start(session, video, first, 600);

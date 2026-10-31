@@ -34,6 +34,11 @@ export const addonClient = createAddonClient({
   kidsOnly: isKidsProfile,
 });
 
+/** Each installed addon's name, by its manifest id. */
+export function addonNames(): Map<string, string> {
+  return new Map(addonCollection.get().addons.map((a) => [a.manifest.id, a.manifest.name]));
+}
+
 /**
  * Reads the addon collection, then refreshes day-old manifests once Home has
  * had a few seconds to load, so the refresh never competes with the first rows.

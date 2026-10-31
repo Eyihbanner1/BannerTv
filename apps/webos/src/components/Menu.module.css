@@ -29,6 +29,14 @@
   text-overflow: ellipsis;
 }
 
+.label {
+  margin-right: 16px;
+}
+
+.detail {
+  color: var(--bt-text-subtle);
+}
+
 .selected {
   color: var(--bt-text);
 }

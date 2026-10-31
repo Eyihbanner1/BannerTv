@@ -1,11 +1,14 @@
+import { languageKey } from '../subtitles/languages';
 import { SEVERE_WARNINGS } from './assess';
-import { estimateBitrate } from './bitrate';
+import { estimateBitrate, isTooSmall } from './bitrate';
 import type {
   OrderOptions,
   QualityChoice,
+  QualityReference,
   ReleaseSource,
   Resolution,
   StreamEntry,
+  StreamFacts,
   StreamOrder,
   TvCapabilities,
 } from './types';
@@ -45,7 +48,7 @@ function fastResolutionRank(resolution: Resolution | undefined): number {
   return resolution === '1080p' ? 0 : resolution === '720p' ? 1 : resolution === '2160p' ? 2 : 3;
 }
 
-function isSevere(entry: StreamEntry): boolean {
+function isSevere(entry: Pick<StreamEntry, 'assessment'>): boolean {
   for (const warning of entry.assessment.warnings) {
     if (SEVERE_WARNINGS.has(warning)) return true;
   }
@@ -65,11 +68,12 @@ function playGroup(entry: StreamEntry): number {
 }
 
 /**
- * Every order starts here: streams BannerTV plays, those with a severe
- * warning below them, then YouTube and web links, then streams that cannot
- * play here at all.
+ * Every order starts here: 0 for streams BannerTV plays, 1 for those with a
+ * severe warning, 2 for YouTube and web links, 3 for streams that cannot play
+ * here at all. A list that keeps its rows in place as more addons answer
+ * keeps them within their tier.
  */
-function tier(entry: StreamEntry): number {
+export function streamTier(entry: Pick<StreamEntry, 'assessment'>): number {
   switch (entry.assessment.action.kind) {
     case 'play':
       return isSevere(entry) ? 1 : 0;
@@ -151,7 +155,7 @@ function keyFor(
   score: (addonId: string) => number,
   options: OrderOptions,
 ): Key {
-  const head = tier(entry);
+  const head = streamTier(entry);
   if (order === 'addon') return [head, entry.addonRank, entry.rank];
   if (order === 'fast') {
     const size = entry.facts.sizeBytes;
@@ -241,6 +245,142 @@ export function playableCandidates(
   return groups[0]!.concat(groups[1]!, groups[2]!, groups[3]!);
 }
 
+// How well a stream's audio fits the language heard now, lower is better.
+/** It names a language heard now, or neither it nor what plays names one. */
+const SAME_LANGUAGE = 0;
+/**
+ * It names several languages, says nothing while English plays, or names
+ * English while what plays says nothing.
+ */
+const LIKELY_SAME = 1;
+/** It says nothing while a language other than English plays. */
+const UNSTATED = 2;
+/** It names only other languages: a dub. */
+const OTHER_LANGUAGES = 3;
+
+/** An ISO 639-1 code, as stream facts name languages. */
+const LANGUAGE_CODE = /^[a-z]{2}$/;
+
+/** The audio languages a stream names, without "multi". */
+function spoken(facts: StreamFacts): string[] {
+  return facts.languages.filter((code) => code !== 'multi');
+}
+
+/** The languages heard now: the playing track's, else those the playing stream names. */
+function heardLanguages(reference: QualityReference | undefined): string[] {
+  if (!reference) return [];
+  const track = reference.audioLanguage ? languageKey(reference.audioLanguage).split('-')[0]! : '';
+  return LANGUAGE_CODE.test(track) ? [track] : spoken(reference.entry.facts);
+}
+
+/**
+ * From SAME_LANGUAGE to OTHER_LANGUAGES. English is often not stated
+ * (Torrentio flags only other languages), so a stream that says nothing
+ * probably has the film's own language.
+ */
+function languageFit(facts: StreamFacts, heard: readonly string[]): number {
+  const named = spoken(facts);
+  const multi = facts.languages.indexOf('multi') >= 0;
+  if (heard.length === 0) {
+    if (named.length === 0) return SAME_LANGUAGE;
+    return multi || named.indexOf('en') >= 0 ? LIKELY_SAME : OTHER_LANGUAGES;
+  }
+  for (const code of heard) {
+    if (named.indexOf(code) >= 0) return SAME_LANGUAGE;
+  }
+  if (multi) return LIKELY_SAME;
+  if (named.length === 0) return heard.indexOf('en') >= 0 ? LIKELY_SAME : UNSTATED;
+  return OTHER_LANGUAGES;
+}
+
+/**
+ * The audio languages a stream names when it names only others than the one
+ * heard now, for a note such as "Spanish audio". Without what plays now, the
+ * languages it names when none is English and it is not MULTi or Dual.
+ * Undefined otherwise.
+ */
+export function otherLanguages(
+  facts: StreamFacts,
+  reference?: QualityReference,
+): string[] | undefined {
+  return languageFit(facts, heardLanguages(reference)) === OTHER_LANGUAGES
+    ? spoken(facts)
+    : undefined;
+}
+
+/** Releases from one family share their timing, so the subtitles set for one fit the other. */
+const SOURCE_FAMILY: Readonly<Record<ReleaseSource, string>> = {
+  REMUX: 'disc',
+  BluRay: 'disc',
+  'WEB-DL': 'web',
+  WEBRip: 'web',
+  HDTV: 'tv',
+  DVD: 'dvd',
+  SCR: 'cinema',
+  TC: 'cinema',
+  TS: 'cinema',
+  CAM: 'cinema',
+};
+
+/** Most addons put the resolution in the binge group ("torrentio|1080p|FLUX"), so it is left out. */
+const BINGE_RESOLUTION = /(?:^|[^a-z0-9])(?:\d{3,4}[pi]|4k|uhd|fhd|hd|sd)(?![a-z0-9])/g;
+const HAS_WORD = /[a-z0-9]/;
+
+function bingeFamily(entry: StreamEntry): string | undefined {
+  const group = entry.stream.behaviorHints.bingeGroup;
+  if (!group) return undefined;
+  const family = group.toLowerCase().replace(BINGE_RESOLUTION, '|');
+  return HAS_WORD.test(family) ? family : undefined;
+}
+
+/** What makes two streams the same release, or releases of one kind. */
+interface Release {
+  binge?: string;
+  group?: string;
+  family?: string;
+}
+
+function releaseOf(entry: StreamEntry): Release {
+  const source = entry.facts.releaseSource;
+  return {
+    binge: bingeFamily(entry),
+    group: entry.facts.releaseGroup,
+    family: source === undefined ? undefined : SOURCE_FAMILY[source],
+  };
+}
+
+function same(a: string | undefined, b: string | undefined): boolean {
+  return a !== undefined && a === b;
+}
+
+/** A sample, trailer or file far too small for the length playing. What plays now never is one. */
+function isClip(entry: StreamEntry, reference: QualityReference | undefined): boolean {
+  if (reference && entry.stream === reference.entry.stream) return false;
+  return entry.facts.sample === true || isTooSmall(entry.facts, reference?.lengthSeconds);
+}
+
+/**
+ * How close a stream is to what plays now, after how likely it is to play:
+ * the language heard, never heavier or less cached for it, then the same
+ * release, then the same family of source.
+ */
+function closeness(
+  entry: StreamEntry,
+  playing: Release,
+  heard: readonly string[],
+  options: OrderOptions,
+): Key {
+  const release = releaseOf(entry);
+  const sameRelease = same(release.binge, playing.binge) || same(release.group, playing.group);
+  return [
+    languageFit(entry.facts, heard),
+    heavy(entry, options),
+    -cacheRank(entry),
+    sameRelease ? 0 : 1,
+    same(release.family, playing.family) ? 0 : 1,
+  ];
+}
+
 /**
  * The player's Quality menu: for each resolution among the candidates, the
  * first candidate at it, highest resolution first; unknown resolutions last.
@@ -254,21 +394,73 @@ export function playableCandidates(
  * another has a proper release, as the menu shows nothing but the resolution
  * and "4K" should not lead to a camcorder copy. When every stream has such a
  * warning, the resolutions of the likeliest to play stay.
+ *
+ * Given what plays now, each resolution offers the stream closest to it
+ * instead of the first: the language heard, then light enough and cached,
+ * then the same release and the same family of source. Samples, trailers and
+ * files far too small for the length playing are left out, and a choice
+ * that names only other languages says which. `options` are those the
+ * candidates were ranked with. Without what plays now, samples are still
+ * left out and nothing else changes.
  */
-export function qualityChoices(candidates: readonly StreamEntry[]): QualityChoice[] {
-  const best = new Map<Resolution | undefined, { entry: StreamEntry; group: number }>();
+export function qualityChoices(
+  candidates: readonly StreamEntry[],
+  reference?: QualityReference,
+  options: OrderOptions = {},
+): QualityChoice[] {
+  const heard = heardLanguages(reference);
+  const playing = reference ? releaseOf(reference.entry) : undefined;
+  const best = new Map<Resolution | undefined, { entry: StreamEntry; key: Key }>();
   let floor = Infinity;
-  for (const entry of candidates) {
-    const resolution = entry.facts.resolution;
+  candidates.forEach((entry, index) => {
+    if (isClip(entry, reference)) return;
     const group = playGroup(entry);
-    const known = best.get(resolution);
-    if (!known || group < known.group) best.set(resolution, { entry, group });
+    // One pass, the index last: no sort, so nothing leans on Chromium 68's unstable one.
+    const key = playing
+      ? [group, ...closeness(entry, playing, heard, options), index]
+      : [group, index];
+    const known = best.get(entry.facts.resolution);
+    if (!known || compareKeys(key, known.key) < 0) best.set(entry.facts.resolution, { entry, key });
     floor = Math.min(floor, group);
-  }
+  });
   const choices: QualityChoice[] = [];
   for (const resolution of [...RESOLUTIONS, undefined]) {
     const found = best.get(resolution);
-    if (found && found.group === floor) choices.push({ resolution, entry: found.entry });
+    if (!found || found.key[0] !== floor) continue;
+    const choice: QualityChoice = { resolution, entry: found.entry };
+    if (playing && found.key[1] === OTHER_LANGUAGES) {
+      choice.otherLanguages = spoken(found.entry.facts);
+    }
+    choices.push(choice);
   }
   return choices;
+}
+
+/**
+ * The stream an automatic switch, such as the step-down after buffering,
+ * should take from `ordered`, which is best first. Never a clip, nor a
+ * stream that names only other languages than the one heard now: a switch
+ * the viewer did not ask for must not change what they hear. Among the rest
+ * the likeliest to play well, then one in the language heard or probably
+ * so, then the order given. Undefined when none is left.
+ */
+export function closestCandidate(
+  ordered: readonly StreamEntry[],
+  reference: QualityReference,
+): StreamEntry | undefined {
+  const heard = heardLanguages(reference);
+  let best: StreamEntry | undefined;
+  let bestKey: Key = [];
+  for (let index = 0; index < ordered.length; index++) {
+    const entry = ordered[index]!;
+    if (isClip(entry, reference)) continue;
+    const fit = languageFit(entry.facts, heard);
+    if (fit === OTHER_LANGUAGES) continue;
+    const key = [playGroup(entry), fit === UNSTATED ? 1 : 0, index];
+    if (best === undefined || compareKeys(key, bestKey) < 0) {
+      best = entry;
+      bestKey = key;
+    }
+  }
+  return best;
 }

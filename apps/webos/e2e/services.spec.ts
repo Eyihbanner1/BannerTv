@@ -72,7 +72,7 @@ test('Trakt signs in with a code shown on the TV, then brings in My List and whe
   // Trakt's watchlist is in My List.
   await pressBack(page);
   await expectFocus(page, 'settings-trakt');
-  await press(page, 'ArrowLeft', 'settings-diagnostics');
+  await press(page, 'ArrowLeft', 'settings-still-watching');
   await press(page, 'ArrowLeft', 'rail-settings');
   await press(page, 'ArrowUp', 'rail-addons');
   await press(page, 'ArrowUp', 'rail-library');
@@ -187,7 +187,7 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
   await expectFocusLabel(page, 'Extra details from TMDB: Off');
   await expect(page.getByText(/not endorsed or certified by TMDB/)).toHaveCount(0);
 
-  await press(page, 'ArrowLeft', 'settings-diagnostics');
+  await press(page, 'ArrowLeft', 'settings-still-watching');
   await press(page, 'ArrowLeft', 'rail-settings');
   for (const item of ['addons', 'library', 'discover', 'search', 'home']) {
     await press(page, 'ArrowUp', `rail-${item}`);

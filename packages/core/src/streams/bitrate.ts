@@ -28,17 +28,79 @@ export function parseRuntime(text: string | undefined): number | undefined {
 /**
  * A stream's average bitrate in bits per second, from its file size and the
  * video's running time. Undefined when either is unknown, as for adaptive
- * HLS and DASH streams.
+ * HLS and DASH streams, or a live stream's endless length.
  */
 export function estimateBitrate(
   facts: Pick<StreamFacts, 'sizeBytes'>,
   runtimeSeconds: number | undefined,
 ): number | undefined {
   const size = facts.sizeBytes;
-  if (size === undefined || !(size > 0) || runtimeSeconds === undefined || !(runtimeSeconds > 0)) {
+  if (
+    size === undefined ||
+    !(size > 0) ||
+    runtimeSeconds === undefined ||
+    !(runtimeSeconds > 0) ||
+    !isFinite(runtimeSeconds)
+  ) {
     return undefined;
   }
   return (size * 8) / runtimeSeconds;
+}
+
+/**
+ * The lowest average bitrate a whole video can have at each resolution, in
+ * bits per second: half or less of the smallest real encodes. A 24-minute
+ * 720p x265 episode of 70 MB is about 400 kbit/s, a 45-minute 1080p one of
+ * 250 MB about 780 kbit/s, a 2-hour 4K film of 4 GB about 4.8 Mbit/s.
+ */
+const MIN_BITRATE: Readonly<Record<Resolution, number>> = {
+  '2160p': 1e6,
+  '1440p': 0.6e6,
+  '1080p': 0.3e6,
+  '720p': 0.2e6,
+  '576p': 0.1e6,
+  '480p': 0.1e6,
+  '360p': 0.1e6,
+};
+const MIN_BITRATE_UNKNOWN = 0.1e6;
+
+/**
+ * Whether a file is far too small to last `lengthSeconds`, the measured
+ * length of the video playing: a sample or trailer, not the video. False
+ * when the size or the length is unknown. Never pass an assumed running
+ * time, which is long on purpose and would make small encodes look like clips.
+ */
+export function isTooSmall(
+  facts: Pick<StreamFacts, 'sizeBytes' | 'resolution'>,
+  lengthSeconds: number | undefined,
+): boolean {
+  const bitrate = estimateBitrate(facts, lengthSeconds);
+  if (bitrate === undefined) return false;
+  return bitrate < (facts.resolution ? MIN_BITRATE[facts.resolution] : MIN_BITRATE_UNKNOWN);
+}
+
+/**
+ * Only a video this long is told from a clip by its length: a short's or a
+ * short series' running time can be far off for one episode (an anthology's
+ * run from 6 to 17 minutes under one figure).
+ */
+const MIN_LENGTH_FOR_CLIP_S = 20 * 60;
+/** A stream under this long is a clip of a video of 20 minutes or more. */
+const MAX_CLIP_S = 5 * 60;
+
+/**
+ * Whether a stream, `seconds` long, is a clip of the video it should be,
+ * `lengthSeconds` long: under five minutes, for a video of 20 minutes or more.
+ * A sample, a trailer, or a debrid service's "not ready yet" clip, whatever
+ * its name and size say.
+ */
+export function isMuchShorter(seconds: number, lengthSeconds: number): boolean {
+  return (
+    isFinite(lengthSeconds) &&
+    lengthSeconds >= MIN_LENGTH_FOR_CLIP_S &&
+    seconds > 0 &&
+    seconds < MAX_CLIP_S
+  );
 }
 
 const RESOLUTION_ORDER: readonly Resolution[] = [

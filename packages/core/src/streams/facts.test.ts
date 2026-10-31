@@ -473,3 +473,154 @@ describe('describeStream, tricky tokens', () => {
     expect(read({ url: 'https://cdn.example.org/play/abcdef' }).container).toBeUndefined();
   });
 });
+
+describe('describeStream, samples and release groups', () => {
+  /** The facts of one fixture stream, by its id. */
+  function fixtureFacts(id: string): StreamFacts {
+    const raw = STREAMS.find((stream) => stream._fixture.id === id);
+    const stream = raw && parseFixture(raw);
+    if (!stream) throw new Error(`no fixture stream ${id}`);
+    return describeStream(stream);
+  }
+
+  it('marks samples, trailers, teasers and featurettes', () => {
+    expect(
+      read({ behaviorHints: { filename: 'Film.2020.1080p.WEB-DL.x264-GRP.sample.mkv' } }).sample,
+    ).toBe(true);
+    expect(read({ description: 'Film 2020 Official Trailer 1080p' }).sample).toBe(true);
+    expect(read({ description: 'Film.2020.Teaser.1080p.WEB' }).sample).toBe(true);
+    expect(read({ description: 'Film 2020 Featurette 720p' }).sample).toBe(true);
+    expect(read({ url: 'https://cdn.example.org/Sample/film-sample.mkv' }).sample).toBe(true);
+    expect(read({ name: 'Trailer' }).sample).toBe(true);
+  });
+
+  it('does not mark a title with the word in it, nor a longer word', () => {
+    expect(read({ description: 'Trailer.Park.Boys.S01E01.1080p.WEB.h264-GRP' }).sample).toBe(
+      undefined,
+    );
+    expect(read({ description: 'The Teaser (2019) 1080p' }).sample).toBeUndefined();
+    // A line that is only the title, as some addons write it, is not a clip.
+    expect(read({ name: 'Trailer Park Boys', description: 'S01E01 1080p' }).sample).toBeUndefined();
+    expect(read({ description: 'Trailer Park Boys\n1080p WEB 1.2 GB' }).sample).toBeUndefined();
+    expect(read({ name: 'Official Trailer' }).sample).toBe(true);
+    expect(read({ description: 'Film.2020.1080p.WEB-DL.x264-GRP' }).sample).toBeUndefined();
+    expect(read({ description: 'Film.2020.1080p.Samples.Included' }).sample).toBeUndefined();
+  });
+
+  it("does not mark an episode whose own title has the word, but still marks the episode's sample", () => {
+    expect(read({ description: 'Show.S03E05.The.Trailer.1080p.WEB-DL.x264-GRP' }).sample).toBe(
+      undefined,
+    );
+    expect(read({ description: 'Show.S01E04.Free.Sample.1080p.WEB' }).sample).toBeUndefined();
+    expect(read({ description: 'Show S02E01 Teaser Trailer 720p HDTV' }).sample).toBeUndefined();
+    expect(
+      read({ behaviorHints: { filename: 'Show.S01E01.1080p.WEB.x264-GRP.sample.mkv' } }).sample,
+    ).toBe(true);
+    expect(read({ description: 'Show.S01E01.1080p.WEB.Trailer' }).sample).toBe(true);
+    // Any source or codec ends the title, and so does the end of a file's own name.
+    for (const tags of [
+      'PDTV.XviD-LOL',
+      'SDTV.AAC',
+      'DSR.XviD-GRP',
+      'HDRip.XviD-GRP',
+      'DVDR-GRP',
+    ]) {
+      expect(read({ description: `Show.S03E05.The.Trailer.${tags}` }).sample, tags).toBeUndefined();
+    }
+    expect(read({ description: 'Show.S01E01E02.Free.Sample.1080p.WEB-DL' }).sample).toBeUndefined();
+    expect(
+      read({
+        description: 'Show.S03.1080p.BluRay.x264-GRP',
+        behaviorHints: { filename: 'Show (1989) - S03E05 - The Trailer.mkv' },
+      }).sample,
+    ).toBeUndefined();
+    expect(
+      read({ description: 'Show.S03.1080p.WEB\nShow - S03E05 - The Trailer.mkv' }).sample,
+    ).toBe(undefined);
+    // In brackets it is a tag; in a release name with nothing after it, nothing says it is a title.
+    expect(read({ description: 'Show.S01E01.[Sample].1080p.WEB' }).sample).toBe(true);
+    expect(read({ description: 'Show.S01E01.Sample' }).sample).toBe(true);
+    // A file named for the episode's sample, with no tag to end a title, is a sample.
+    expect(read({ behaviorHints: { filename: 'Show.S03E05.Sample.mkv' } }).sample).toBe(true);
+    expect(read({ behaviorHints: { filename: 'show.s03e05-sample.mkv' } }).sample).toBe(true);
+    expect(read({ url: 'https://cdn.example.org/show.s03e05-sample.mkv' }).sample).toBe(true);
+    expect(read({ description: '📂 Show.S03E05.Sample.mkv\n💾 40 MB' }).sample).toBe(true);
+    // Beside other words, with no tag, it is the episode's own title.
+    expect(
+      read({ behaviorHints: { filename: 'Show (2010) - s01e04 - Free Sample.mkv' } }).sample,
+    ).toBeUndefined();
+    expect(
+      read({ description: 'Show.S01.1080p.WEB.h264-GRP\nShow.S01/Show - S01E04 - Free Sample.mkv' })
+        .sample,
+    ).toBeUndefined();
+  });
+
+  it('reads the release group from the file name first', () => {
+    expect(
+      read({
+        behaviorHints: {
+          filename:
+            'Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv',
+        },
+      }).releaseGroup,
+    ).toBe('framestor');
+    expect(
+      read({
+        description: 'Show.S01.1080p.WEB-DL.x264-PACK',
+        behaviorHints: { filename: 'Show.S01E02.1080p.WEB-DL.x264-EPGRP.mkv' },
+      }).releaseGroup,
+    ).toBe('epgrp');
+  });
+
+  it('else from the first line of the description that names a release', () => {
+    expect(
+      read({ description: 'Film.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX\n💾 5.2 GB' }),
+    ).toMatchObject({ releaseGroup: 'flux' });
+    expect(
+      read({
+        description: 'Quality: WEB-DL\nName: Show.S02E10.2160p.WEB-DL.H.265-NTb.mkv\nSize: 8.4 GB',
+      }).releaseGroup,
+    ).toBe('ntb');
+    // The file name has none, so the description's goes.
+    expect(
+      read({
+        description: 'Film.2020.1080p.BluRay.x264-AMIABLE',
+        behaviorHints: { filename: 'film.mkv' },
+      }).releaseGroup,
+    ).toBe('amiable');
+  });
+
+  it('reads no group from words that only look like one', () => {
+    expect(read({ description: 'Film.2020.1080p.WEB-DL' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Film.2020.720p.BluRay.x264-ITA' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Spider-Man' }).releaseGroup).toBeUndefined();
+    expect(read({ description: 'Film.2020.1080p.x264-GRP-sample' }).releaseGroup).toBeUndefined();
+    // A line naming no year, episode or resolution is not a release name.
+    expect(read({ description: 'Open Movie - Directors-Cut' }).releaseGroup).toBeUndefined();
+  });
+
+  it('never reads the group from the link, which can carry account keys', () => {
+    expect(
+      read({ url: 'https://cdn.example.org/play/Film.2020.1080p.WEB-DL.x264-SECRETKEY' })
+        .releaseGroup,
+    ).toBeUndefined();
+  });
+
+  it('reads the fixture streams', () => {
+    expect(fixtureFacts('torrentio-p2p-4k-dv-remux').releaseGroup).toBe('framestor');
+    expect(fixtureFacts('torrentio-tb-cached-1080p-web-atmos').releaseGroup).toBe('flux');
+    expect(fixtureFacts('torrentio-p2p-4k-hdr10plus-web').releaseGroup).toBe('ntb');
+    expect(fixtureFacts('aiostreams-torrentio-style-p2p-mib').releaseGroup).toBe('ethel');
+    expect(fixtureFacts('stremthru-torz-rd-cached-2160p').releaseGroup).toBe('framestor');
+    expect(fixtureFacts('comet-v1-p2p-1080p').releaseGroup).toBe('3li');
+    expect(fixtureFacts('torrentio-p2p-cam').releaseGroup).toBeUndefined();
+    expect(fixtureFacts('torrentio-p2p-1080p-pack-multisubs').releaseGroup).toBeUndefined();
+    expect(fixtureFacts('youtube-trailer').sample).toBe(true);
+    for (const raw of STREAMS) {
+      const stream = parseFixture(raw);
+      if (stream && raw._fixture.id !== 'youtube-trailer') {
+        expect(describeStream(stream).sample, raw._fixture.id).toBeUndefined();
+      }
+    }
+  });
+});
