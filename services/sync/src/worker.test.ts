@@ -290,9 +290,11 @@ describe('setup key', () => {
       create: true,
       key: true,
     });
-    for (const unset of [undefined, '', '  ']) {
-      const answer = await call('GET', '/v1/status', undefined, { ...env, CREATE_KEY: unset });
-      expect(answer.body, String(unset)).toMatchObject({ key: false });
+    expect((await call('GET', '/v1/status', undefined, env)).body).toMatchObject({ key: false });
+    // Set to something that is no key, it is needed all the same, and nobody has it.
+    for (const unusable of ['', '  ', true, {}, 7.5]) {
+      const answer = await call('GET', '/v1/status', undefined, { ...env, CREATE_KEY: unusable });
+      expect(answer.body, String(unusable)).toMatchObject({ key: true });
     }
   });
 
@@ -329,6 +331,26 @@ describe('setup key', () => {
 
   it('is not asked for when CREATE_KEY is not set', async () => {
     expect((await create({ ...keys(), key: 'anything' })).status).toBe(201);
+  });
+
+  it('refuses every create while CREATE_KEY is set to something that is no key', async () => {
+    for (const unusable of ['', '  ', true, false, null, {}, { key: KEY }, [KEY], 7.5]) {
+      const using = { ...env, CREATE_KEY: unusable };
+      for (const key of [undefined, '', '  ', 'true', '[object Object]', KEY, '7.5', 0]) {
+        const answer = await create({ ...keys(), key }, using);
+        expect(answer.status, `${JSON.stringify(unusable)} ${JSON.stringify(key)}`).toBe(403);
+        expect(answer.body).toEqual({ error: 'key', now: START });
+      }
+    }
+    expect(d1.calls).toEqual([]);
+  });
+
+  it('takes a whole number, as TOML gives one without quotes, as its text', async () => {
+    const using = { ...env, CREATE_KEY: 123456789012 };
+    expect((await call('GET', '/v1/status', undefined, using)).body).toMatchObject({ key: true });
+    expect((await create(keys(), using)).body).toEqual({ error: 'key', now: START });
+    expect((await create({ ...keys(), key: 123456789012 }, using)).status).toBe(403);
+    expect((await create({ ...keys(), key: '123456789012' }, using)).status).toBe(201);
   });
 });
 

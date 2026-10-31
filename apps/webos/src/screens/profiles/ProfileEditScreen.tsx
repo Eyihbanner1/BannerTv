@@ -5,6 +5,7 @@ import {
   MAIN_PROFILE_ID,
   MAX_NAME_LENGTH,
   PROFILE_COLOURS,
+  type StoredPin,
 } from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useRef, useState, useSyncExternalStore } from 'react';
@@ -33,6 +34,9 @@ import styles from './ProfileEditScreen.module.css';
 const KIDS_OFF = 'off';
 const COLOURS = Array.from({ length: PROFILE_COLOURS }, (_, index) => index);
 
+/** The same saved PIN: one set again, here or on another screen, is not. */
+const samePin = (a: StoredPin, b: StoredPin) => a.salt === b.salt && a.hash === b.hash;
+
 /**
  * Changing a PIN: the one it has, unless it is known on this page, then the
  * new one typed once and again to be sure. Removing one takes only the first.
@@ -52,7 +56,8 @@ type PinStep =
  * Changing or removing a PIN asks for the one it has first, Main's and your
  * own included, since Main's PIN guards the BannerTV account (ADR 0006).
  * It is not asked again once known on this page: entered to open it
- * (`unlocked`), entered here, or just chosen.
+ * (`unlocked`), entered here, or just chosen. A PIN changed since on
+ * another screen is not that one, and is asked for.
  */
 export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unlocked?: boolean }) {
   const { t } = useTranslation();
@@ -65,7 +70,8 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [pin, setPin] = useState<PinStep | null>(null);
   const [pinMessage, setPinMessage] = useState<string | undefined>(undefined);
-  const [pinKnown, setPinKnown] = useState(unlocked);
+  const [knownPin, setKnownPin] = useState(unlocked ? existing?.pin : undefined);
+  const pinKnown = !!existing?.pin && !!knownPin && samePin(existing.pin, knownPin);
   // Where the PIN pad sends focus as it closes: the button that opened it, while it is there.
   const pinFrom = useRef('profile-pin');
   const [deleting, setDeleting] = useState(false);
@@ -235,7 +241,7 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
                 setPinMessage(result === 'locked' ? lockedMessage(existing.id) : t('pin.wrong'));
                 return;
               }
-              setPinKnown(true);
+              setKnownPin(existing.pin);
               setPinMessage(undefined);
               if (pin.then === 'change') {
                 setPin({ step: 'first' });
@@ -245,12 +251,16 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
                 setProfilePin(existing.id, null);
                 setPin(null);
               }
+            } else if (existing.pin && !pinKnown) {
+              // Another screen changed the PIN while this pad was open: the new one is asked for first.
+              setPinMessage(t('pin.changedElsewhere'));
+              setPin({ step: 'current', then: 'change' });
             } else if (pin.step === 'first') {
               setPinMessage(undefined);
               setPin({ step: 'again', first: digits });
             } else if (digits === pin.first) {
               setProfilePin(existing.id, digits);
-              setPinKnown(true);
+              setKnownPin(profiles.get().profiles.find((p) => p.id === existing.id)?.pin);
               setPin(null);
             } else {
               setPinMessage(t('pin.mismatch'));

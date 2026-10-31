@@ -49,8 +49,9 @@ import styles from './AccountScreen.module.css';
 type Step =
   | { name: 'menu' }
   /**
-   * `held`: Back waits for it to finish. A create, a confirm or a join left
-   * half way would be offered again while it still runs.
+   * `held`: Back waits for it to finish. A create, a confirm, a join, a
+   * leave or a delete left half way would be offered again while it still
+   * runs.
    */
   | { name: 'busy'; text: string; held: boolean }
   /** The service's setup key, typed before a new account is made. */
@@ -190,7 +191,8 @@ function viewOf(step: Step, state: AccountState): string {
  * Main's PIN, when it has one, comes before the code is shown and before
  * the account is created or deleted, and a service that needs its setup key
  * asks for it before a new account is made. Back goes back a step, then to
- * Settings, but waits while a create, a confirm or a join runs.
+ * Settings, but waits while a create, a confirm, a join, a leave or a
+ * delete runs.
  */
 export function AccountScreen() {
   const { t } = useTranslation();
@@ -652,6 +654,7 @@ export function AccountScreen() {
                   leaveAccount,
                   () => toMenu(t('account.left')),
                   () => toMenu(t('account.failed')),
+                  true,
                 )
               }
             />
@@ -682,6 +685,7 @@ export function AccountScreen() {
                     deleteAccount,
                     () => toMenu(),
                     () => toMenu(t('account.deleteOffline')),
+                    true,
                   )
                 }
               />
@@ -812,6 +816,7 @@ export function AccountScreen() {
               leaveAccount,
               () => toMenu(t('account.left')),
               () => toMenu(t('account.failed')),
+              true,
             );
           }}
           onCancel={() => setDialog(null)}
@@ -832,6 +837,7 @@ export function AccountScreen() {
               deleteAccount,
               () => toMenu(t('account.deleted')),
               () => toMenu(t('account.deleteOffline')),
+              true,
             );
           }}
           onCancel={() => setDialog(null)}

@@ -1184,7 +1184,7 @@ describe('a push the service or the size refuses', () => {
     expect((await accountItems(w, code, 'addons'))!['a/big']).toMatchObject({ x: 1 });
   });
 
-  it('keeps pulling past a document the full account refuses, and sends it once it changes', async () => {
+  it('keeps pulling past a document the full account refuses, and tries it again only when room may have been made', async () => {
     const w = world();
     const { a, code } = await created(w, async (s) => {
       await s.stores.library.add(preview('a1'));
@@ -1219,13 +1219,25 @@ describe('a push the service or the size refuses', () => {
           (request.body as { put: Array<{ name: string }> }).put.some((put) => put.name === watch),
       ).length;
     const before = sent();
-    b.profiles.set('main/name', 'Ann');
-    await b.engine.flush();
     await a.stores.library.add(preview('a3'));
-    await a.engine.syncNow();
-    expect(a.profiles.get('main/name')?.v).toBe('Ann');
+    await a.engine.flush();
+    await w.time.advance(30 * 60 * 1000);
+    await settled(a.engine);
     expect(await accountTitles(w, code)).toEqual(['a1', 'a2', 'a3']);
     expect(sent()).toBe(before);
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
+
+    // Another screen's change may have made room: the pull that brings it tries once more.
+    b.profiles.set('main/name', 'Ann');
+    await b.engine.flush();
+    await w.time.advance(30 * 60 * 1000);
+    await settled(a.engine);
+    expect(a.profiles.get('main/name')?.v).toBe('Ann');
+    expect(sent()).toBe(before + 1);
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
+    // So does Sync now, once.
+    await a.engine.syncNow();
+    expect(sent()).toBe(before + 2);
     expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
 
     // Room again, and the progress changes: it goes.
@@ -1234,6 +1246,81 @@ describe('a push the service or the size refuses', () => {
     record(120);
     await a.engine.flush();
     expect(w.service.documents(keys.accountId).has(watch)).toBe(true);
+    expect(a.engine.status().state).toBe('idle');
+  });
+
+  it('sends a document the full account refused on Sync now, or as a hold ends, once there is room', async () => {
+    const w = world();
+    const { a, code } = await created(w, async (s) => {
+      await s.stores.library.add(preview('a1'));
+    });
+    const keys = await deriveAccountKeys(crypto, code);
+    const on = (document: string) =>
+      wireName(crypto, keys, document).then((name) =>
+        w.service.documents(keys.accountId).has(name),
+      );
+    w.service.limitDocuments(w.service.documents(keys.accountId).size);
+    await w.time.advance(1000);
+    await a.stores.homeLayout.update(() => ({ order: [], hidden: ['r1'] }));
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
+
+    // Another screen makes room. Nothing here has changed, and Sync now sends it.
+    w.service.limitDocuments(Infinity);
+    await a.engine.syncNow();
+    expect(await on('p/main/settings')).toBe(true);
+    expect(a.engine.status().state).toBe('idle');
+
+    // Full again, then the service's daily limit holds pushes while room is made.
+    w.service.limitDocuments(w.service.documents(keys.accountId).size);
+    a.stores.progress.record({
+      metaId: 'tt1',
+      type: 'movie',
+      videoId: 'tt1',
+      position: 60,
+      duration: 6000,
+    });
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
+    w.service.failNext({
+      path: '/v1/push',
+      status: 429,
+      body: { error: 'limit', retryAfter: 600 },
+    });
+    await a.stores.library.add(preview('a2'));
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'limit' });
+    w.service.limitDocuments(Infinity);
+    await w.time.advance(600 * 1000);
+    await settled(a.engine);
+    expect(await on('p/main/watch')).toBe(true);
+    expect(await accountTitles(w, code)).toEqual(['a1', 'a2']);
+    expect(a.engine.status().state).toBe('idle');
+  });
+
+  it('sends a document the full account refused when hiding the app ends a hold on pushes', async () => {
+    const w = world();
+    const { a, code } = await created(w, async (s) => {
+      await s.stores.library.add(preview('a1'));
+    });
+    w.service.limitDocuments(
+      w.service.documents((await deriveAccountKeys(crypto, code)).accountId).size,
+    );
+    await w.time.advance(1000);
+    await a.stores.homeLayout.update(() => ({ order: [], hidden: ['r1'] }));
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'full' });
+
+    // A request refused for its size holds pushes while another screen makes room.
+    w.service.failNext({ path: '/v1/push', status: 413, body: { error: 'too-big' } });
+    await a.stores.library.add(preview('a2'));
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'too-big' });
+    w.service.limitDocuments(Infinity);
+    a.engine.hide();
+    await settled(a.engine);
+    expect((await accountItems(w, code, 'p/main/settings')) ?? {}).not.toEqual({});
+    expect(await accountTitles(w, code)).toEqual(['a1', 'a2']);
     expect(a.engine.status().state).toBe('idle');
   });
 
@@ -1338,7 +1425,7 @@ describe('what the engine kept, unreadable', () => {
     expect(b.engine.status().state).toBe('idle');
   });
 
-  it("fails the start when a document's waiting edits cannot be read, and keeps them", async () => {
+  it("fails the start when a document's waiting edits cannot be read, says nothing of the account, and keeps them", async () => {
     const w = world();
     const { a, code, storage } = await signedIn(w);
     const b = screen(w, { storage });
@@ -1355,6 +1442,13 @@ describe('what the engine kept, unreadable', () => {
     });
     expect(await whileTimePasses(w, broken.start())).toBeInstanceOf(Error);
     expect(titles(broken)).toEqual(['a1']);
+    // As when the state itself cannot be read: not In sync while nothing is watched.
+    expect(broken.engine.status().state).toBe('off');
+    expect(broken.engine.code()).toBeUndefined();
+    const requests = w.service.requests.length;
+    await broken.engine.syncNow();
+    await w.time.advance(60 * 1000);
+    expect(w.service.requests.length).toBe(requests);
 
     const again = screen(w, { storage });
     await again.start();
@@ -1479,7 +1573,7 @@ describe('setting up', () => {
     expect(again.engine.status().state).toBe('idle');
   });
 
-  it('gives a create or confirm asked again while it runs the same answer', async () => {
+  it('gives a create, confirm, leave or delete asked again while it runs the same answer', async () => {
     const w = world();
     const a = screen(w);
     await a.start();
@@ -1490,5 +1584,49 @@ describe('setting up', () => {
     expect(a.engine.confirmCreate()).toBe(confirm);
     await confirm;
     expect(w.service.count('/v1/account/create')).toBe(1);
+
+    const remove = a.engine.deleteAccount();
+    expect(a.engine.deleteAccount()).toBe(remove);
+    // A leave asked meanwhile waits for it, and finds nothing left to do.
+    const leave = a.engine.leave();
+    expect(a.engine.leave()).toBe(leave);
+    await remove;
+    await leave;
+    expect(w.service.count('/v1/account/delete')).toBe(1);
+    expect(a.engine.status().state).toBe('off');
+  });
+
+  it('runs one setup call at a time: a join asked while a create runs waits, then finds the screen signed in', async () => {
+    const w = world(5);
+    const { code } = await created(w);
+    // Working out the new account's keys takes a while: a join is asked meanwhile.
+    let gate: Promise<void> | undefined;
+    let open: () => void = () => undefined;
+    const slow: SyncCrypto = {
+      ...crypto,
+      async hkdf(ikm, salt, info, length) {
+        if (gate) await gate;
+        return crypto.hkdf(ikm, salt, info, length);
+      },
+    };
+    const b = screen(w, { crypto: slow });
+    await b.start();
+    gate = new Promise<void>((resolve) => (open = resolve));
+    const create = b.engine.create();
+    await w.time.settle();
+    const join = b.engine.join(code, 'use').catch((error: SyncSetupError) => error.problem);
+    gate = undefined;
+    open();
+    const made = await create;
+    expect(await join).toBe('signed-in');
+    expect(made).not.toBe(code);
+    expect(b.engine.code()).toBe(made);
+    const keys = await deriveAccountKeys(crypto, made);
+    expect(await b.storage.get('sync/state')).toMatchObject({
+      phase: 'creating',
+      accountId: keys.accountId,
+    });
+    await b.engine.confirmCreate();
+    expect(b.engine.status().state).toBe('idle');
   });
 });

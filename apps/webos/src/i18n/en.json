@@ -473,7 +473,8 @@
     "remove": "Remove PIN",
     "choose": "Choose a four-digit PIN",
     "again": "Enter the PIN again",
-    "mismatch": "Those PINs didn't match. Choose one again."
+    "mismatch": "Those PINs didn't match. Choose one again.",
+    "changedElsewhere": "This PIN was just changed on another screen. Enter the new one first."
   },
   "homeRows": {
     "title": "Home rows",

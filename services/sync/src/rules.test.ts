@@ -236,12 +236,16 @@ describe('settings', () => {
     expect(readPullMinutes(100000)).toBe(24 * 60);
   });
 
-  it('reads CREATE_KEY, none when missing or blank', () => {
+  it('reads CREATE_KEY: none when missing, a whole number as its text, and no key as one nobody holds', () => {
     expect(readCreateKey('k3yOnTheTV42')).toBe('k3yOnTheTV42');
     // A secret pasted into the dashboard can bring a space or a line break with it.
     expect(readCreateKey(' k3yOnTheTV42\n')).toBe('k3yOnTheTV42');
-    for (const value of [undefined, null, '', '   ', 42]) {
-      expect(readCreateKey(value), String(value)).toBe('');
+    expect(readCreateKey(undefined)).toBeUndefined();
+    // TOML gives a whole number without quotes as a number.
+    expect(readCreateKey(123456789012)).toBe('123456789012');
+    expect(readCreateKey(0)).toBe('0');
+    for (const value of [null, '', '   ', true, false, {}, [], { key: 'k3y' }, -5, 7.5, NaN]) {
+      expect(readCreateKey(value), String(value)).toBeNull();
     }
   });
 });

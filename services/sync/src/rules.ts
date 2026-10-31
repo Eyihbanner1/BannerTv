@@ -67,12 +67,20 @@ export function readPullMinutes(value: unknown): number {
 }
 
 /**
- * The setup key a create must carry, from the CREATE_KEY secret, or '' when
- * none is set and anyone may create while there is a place. Spaces at either
- * end are dropped, as a pasted secret can bring them.
+ * The setup key a create must carry, from the CREATE_KEY secret: undefined
+ * when it is not set, and anyone may create while there is a place. Spaces
+ * at either end are dropped, as a pasted secret can bring them, and a whole
+ * number, as TOML gives one without quotes, is its text. Set to anything
+ * else (blank text, an object, true), it is null, and every create is
+ * refused: the safe way to be wrong.
  */
-export function readCreateKey(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+export function readCreateKey(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+  }
+  const key = typeof value === 'string' ? value.trim() : '';
+  return key === '' ? null : key;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

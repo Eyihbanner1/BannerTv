@@ -18,7 +18,7 @@ The address is `https://sync.bannertv.workers.dev`. Screens send simple requests
 | `POST /v1/push` | `{account, auth, epoch, put: [{name, base, body}]}` | `{now, epoch, done: [{name, ver, at}], conflicts: [name], full: [name]}` |
 | `POST /v1/account/delete` | `{account, auth}` | `{now}`: the account and its documents are gone |
 
-A push names the version each document started from as `base`, 0 for a new one, and a document is written only while that is still the stored version (compare and swap) and while it fits the account's limits. Each document commits on its own, or comes back in `conflicts` or `full` with its version unchanged. A conflict means the document has moved on, so the screen pulls, merges and pushes again. `full` means it did not fit: a new document while the account holds 120, or a change that would take the account's bodies past 10,000,000 characters. A change that keeps a document's size or makes it smaller always fits, so an account over a limit can come back under it.
+A push names the version each document started from as `base`, 0 for a new one, and a document is written only while that is still the stored version (compare and swap) and while it fits the account's limits. Each document commits on its own, or comes back in `conflicts` or `full` with its version unchanged. A conflict means the document has moved on, so the screen pulls, merges and pushes again. `full` means it did not fit: a new document while the account holds 120, or a change that would take the account's bodies past 10,000,000 characters. A change that keeps a document's size or makes it smaller always fits, so an account over a limit can come back under it. The screen keeps a document that did not fit and sends it again once it changes, and also once on Sync now, once when a hold on its pushes ends, and once after a pull that brought other screens' changes, which may have made room: never in a loop, so a full account costs only a few of the day's writes.
 
 A push's documents, the account's daily write count and the day it was last used are written in one D1 batch, so they change together or not at all. The limits are checked by the same statements that write, so pushes sent at once cannot pass them together.
 
@@ -29,7 +29,7 @@ The errors are `{error, now}`:
 | 400 | `bad-request` | a field out of its form, or a body that is not JSON |
 | 401 | `denied` | an unknown account or a wrong auth key: the two answers are the same. Also a push that crossed the account's delete |
 | 403 | `closed` | a create while `MAX_ACCOUNTS` accounts exist |
-| 403 | `key` | a create without the setup key, or with another, while `CREATE_KEY` is set. It comes before `closed`, so it says nothing about the place |
+| 403 | `key` | a create without the setup key, or with another, while `CREATE_KEY` is set, and every create while it is set to something that is no key (see the setup key below). It comes before `closed`, so it says nothing about the place |
 | 404 | `not-found` | any other route |
 | 409 | `exists` | a create for an account that exists with another auth key |
 | 409 | `epoch` | a pull or push naming an epoch the account no longer has: it was deleted and made again. Also a push that crossed that |
@@ -80,6 +80,8 @@ Then, before anyone makes the account, add the setup key, so that only someone w
 1. Make up a key of at least 12 letters and numbers, and nothing else, used nowhere else. Capitals count. Keep it with the account code.
 2. In the Cloudflare dashboard, open the `sync` Worker, then Settings, then Variables and Secrets, and choose Add.
 3. Choose the type Secret, name it `CREATE_KEY`, type the key as its value, and deploy.
+
+A `CREATE_KEY` that is blank, or set to anything but text or a whole number, is no key: every create is then refused, and the status still says `"key":true`, so a mistake there never opens the place to anyone.
 
 Never put the key on a command line, in `wrangler.toml` or in a file in this folder. `wrangler secret put` takes the secret's name on the command line, not its value: an earlier try with the value there stored it as the name. Later deploys keep the secret as it is.
 

@@ -406,6 +406,7 @@ async function settleLaunch(): Promise<boolean> {
     restore: restoreSaved,
     signIn: () => setSyncOn(true),
     reload: () => window.location.reload(),
+    timers: browserTimers,
   });
   if (!settled) return false;
   if (kidsHeldAtLaunch() && confirmHeldKids(await savedAccountProfiles())) {

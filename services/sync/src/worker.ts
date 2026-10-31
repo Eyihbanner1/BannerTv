@@ -66,8 +66,11 @@ export interface Env {
   MAX_ACCOUNTS?: string | number;
   /** How often screens pull, in minutes. */
   PULL_MINUTES?: string | number;
-  /** The setup key a create must carry, a secret. Missing, MAX_ACCOUNTS alone decides. */
-  CREATE_KEY?: string;
+  /**
+   * The setup key a create must carry, a secret. Missing, MAX_ACCOUNTS alone
+   * decides; set to something that is no key, it refuses every create.
+   */
+  CREATE_KEY?: unknown;
 }
 
 /** An account's row, without its id. */
@@ -305,7 +308,7 @@ async function status(env: Env, now: number): Promise<Response> {
     v: PROTOCOL,
     now,
     create: count < max,
-    key: readCreateKey(env.CREATE_KEY) !== '',
+    key: readCreateKey(env.CREATE_KEY) !== undefined,
     pullMinutes: readPullMinutes(env.PULL_MINUTES),
   });
 }
@@ -331,8 +334,12 @@ async function create(body: unknown, env: Env, now: number): Promise<Response> {
   if (!signed) return fail('bad-request', now);
   // With a setup key set, only whoever holds it can take a place, and a create
   // resumed after a lost answer carries it again. D1 is not asked without it.
+  // Set to something that is no key, nobody holds it.
   const key = readCreateKey(env.CREATE_KEY);
-  if (key !== '' && !(await carriesKey((body as { key?: unknown }).key, key))) {
+  if (
+    key !== undefined &&
+    (key === null || !(await carriesKey((body as { key?: unknown }).key, key)))
+  ) {
     return fail('key', now);
   }
   const db = await database(env);

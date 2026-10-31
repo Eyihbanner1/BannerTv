@@ -73,6 +73,19 @@ async function joinWithUse(kv: KeyValueStore): Promise<void> {
   await markJoined(kv, app.savedProfiles);
 }
 
+/** IndexedDB whose reads of the join's copy fail `times` times. */
+function failingReads(kv: KeyValueStore, times: number): KeyValueStore {
+  let left = times;
+  return {
+    ...kv,
+    get(key) {
+      if (key !== JOINED_KEY || left === 0) return kv.get(key);
+      left -= 1;
+      return Promise.reject(new Error('IDB transaction aborted'));
+    },
+  };
+}
+
 /** The reload read localStorage as it was before the join's last writes arrived. */
 function loseWrites(old: Map<string, string>): void {
   local.map.clear();
@@ -151,6 +164,43 @@ describe('a join’s reload', () => {
     const next = await settle(kv);
     expect(next.ids()).toEqual(['main', 'ada001']);
     expect(next.app.heldDeletions()).toEqual([]);
+  });
+
+  it('tries a read that failed again, and still puts back what the reload lost', async () => {
+    const kv = failingReads(memoryKeyValueStore(), 1);
+    const old = before();
+    await joinWithUse(kv);
+    loseWrites(old);
+
+    expect((await settle(kv)).reloads).toBe(1);
+    const next = await settle(kv);
+    expect(next.ids()).toEqual(['main', 'ada001']);
+    expect(await kv.get(JOINED_KEY)).toBeUndefined();
+  });
+
+  it('drops the copy unread at a later launch when the one after the join could not read it', async () => {
+    const disk = memoryKeyValueStore();
+    const kv = failingReads(disk, 4);
+    before();
+    await joinWithUse(kv);
+    const first = await settle(kv);
+    expect(first.go).toBe(true);
+    expect(first.reloads).toBe(0);
+    expect(await disk.get(JOINED_KEY)).toBeDefined();
+    // Meanwhile Guest is added again; the app then starts again, or is opened another day.
+    first.app.profiles.set((s) => ({ ...s, profiles: [...s.profiles, GUEST] }));
+
+    const later = await settle(kv);
+    expect(later.go).toBe(true);
+    expect(later.reloads).toBe(0);
+    expect(later.signedIn).toBe(false);
+    expect(later.ids()).toEqual(['main', 'ada001', 'guest4']);
+    expect(await kv.get(JOINED_KEY)).toBeUndefined();
+    expect((await launch()).profiles.get().profiles.map((p) => p.id)).toEqual([
+      'main',
+      'ada001',
+      'guest4',
+    ]);
   });
 
   it('leaves a launch with no join alone', async () => {

@@ -549,11 +549,13 @@ test("a join's reload that misses what the join wrote to localStorage puts it ba
   const errors = watchErrors(other);
   await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
   // As on a TV whose reload reads localStorage before the join's last writes have arrived.
-  // window.name carries what to lose, since a reload here may not see sessionStorage yet.
+  // The address carries what to lose, since a reload here may not see sessionStorage yet,
+  // and window.name is the join's own.
   await other.addInitScript(() => {
-    if (window.name.indexOf('lost-join:') !== 0) return;
-    const lost = window.name.slice('lost-join:'.length);
-    window.name = '';
+    const prefix = '#lost-join=';
+    if (location.hash.indexOf(prefix) !== 0) return;
+    const lost = decodeURIComponent(location.hash.slice(prefix.length));
+    history.replaceState(null, '', location.pathname + location.search);
     localStorage.setItem('bannertv.profiles', lost);
     localStorage.removeItem('bannertv.syncOn');
   });
@@ -566,7 +568,8 @@ test("a join's reload that misses what the join wrote to localStorage puts it ba
   await press(other, 'Enter', 'account-use-dialog-cancel');
   await press(other, 'ArrowLeft', 'account-use-dialog-confirm');
   await other.evaluate(() => {
-    window.name = `lost-join:${localStorage.getItem('bannertv.profiles')!}`;
+    const lost = encodeURIComponent(localStorage.getItem('bannertv.profiles')!);
+    history.replaceState(null, '', `${location.pathname}${location.search}#lost-join=${lost}`);
   });
   let loads = 0;
   other.on('load', () => (loads += 1));
@@ -974,12 +977,22 @@ test("Show account code and Delete ask for Main's PIN, which cannot be taken off
   const dialog = page.getByRole('dialog', { name: 'Delete the account for every screen?' });
   await expect(dialog).toContainText('Cloudflare keeps backups of the service for up to 7 days');
   await press(page, 'ArrowLeft', 'account-delete-dialog-confirm');
+  // A slow connection: Back does nothing while the delete runs, so it cannot be asked twice.
+  sync.delay = 1500;
   await page.keyboard.press('Enter');
+  const deleting = page.getByText('Deleting the account');
+  await expect(deleting).toBeVisible();
+  await pressBack(page);
+  await pressBack(page);
+  await page.waitForTimeout(300);
+  await expect(deleting).toBeVisible();
+  await expect(page.locator('[data-focus-key="account-delete"]')).toHaveCount(0);
   await expect(
     page.getByText('The account is deleted. This screen keeps everything it has.'),
   ).toBeVisible();
+  sync.delay = 0;
   await expectFocus(page, 'account-create');
-  expect(sync.requests).toContain('POST /v1/account/delete');
+  expect(sync.requests.filter((request) => request === 'POST /v1/account/delete')).toHaveLength(1);
   expect(errors).toEqual([]);
 
   // The other screen finds out at its next sync, and keeps what it has.
@@ -993,6 +1006,207 @@ test("Show account code and Delete ask for Main's PIN, which cannot be taken off
   await other.keyboard.press('Enter');
   await expectFocus(other, 'account-create');
   expect(otherErrors.filter((error) => !ANSWERED.test(error))).toEqual([]);
+});
+
+test("a profile's page opened with its PIN asks for it again once another screen has changed it", async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  // This screen's next regular pull is half an hour away: the journey moves its clock on.
+  await page.clock.install();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await seedProfiles(page, {
+    profiles: [main(), { ...GUEST, ...lockedWith('1357') }],
+    lastId: 'main',
+    askAtLaunch: false,
+  });
+  const guestPin = (screen: Page) =>
+    screen.evaluate((id) => {
+      const saved = JSON.parse(localStorage.getItem('bannertv.profiles')!) as {
+        profiles: { id: string; pin?: { hash: string } }[];
+      };
+      return saved.profiles.find((profile) => profile.id === id)?.pin?.hash ?? null;
+    }, GUEST_ID);
+  /** From Settings, Guest's page opened with its PIN, down to `to`. */
+  const openGuest = async (screen: Page, to: string) => {
+    await press(screen, 'Enter', 'profiles-main');
+    await press(screen, 'ArrowDown', `profiles-${GUEST_ID}`);
+    await press(screen, 'Enter', 'profiles-pin-1');
+    await typeDigits(screen, '1357');
+    await expectFocus(screen, 'profile-name');
+    await screen.keyboard.press('ArrowDown');
+    await expect(screen.locator('[data-focused="true"]')).toHaveAttribute(
+      'data-focus-key',
+      /^profile-colour-/,
+    );
+    await screen.waitForTimeout(150);
+    for (const key of ['profile-kids', 'profile-save', 'profile-pin', 'profile-pin-remove']) {
+      await press(screen, 'ArrowDown', key);
+      if (key === to) return;
+    }
+  };
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  // The other screen has nothing of its own: it becomes the account's, Guest's PIN included.
+  const other = await secondScreen(browser, sync);
+  const otherErrors = watchErrors(other);
+  await seedProfiles(other, { profiles: [main()], lastId: 'main', askAtLaunch: false });
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await reloadsAfter(other, () => typeCode(other, code));
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+
+  // Guest's page opens here with its PIN.
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await press(page, 'ArrowUp', 'settings-home-rows');
+  await press(page, 'ArrowUp', 'settings-profiles');
+  await openGuest(page, 'profile-pin-remove');
+
+  // There, Guest's PIN changes.
+  await openSettings(other);
+  await press(other, 'ArrowRight', 'settings-profiles');
+  await openGuest(other, 'profile-pin');
+  const pushes = () => sync.requests.filter((request) => request === 'POST /v1/push').length;
+  const pushed = pushes();
+  await other.keyboard.press('Enter');
+  await expect(other.getByRole('dialog', { name: 'Choose a four-digit PIN' })).toBeVisible();
+  await typeDigits(other, '2468');
+  await expect(other.getByRole('dialog', { name: 'Enter the PIN again' })).toBeVisible();
+  await typeDigits(other, '2468');
+  await expectFocus(other, 'profile-pin');
+  const changed = await guestPin(other);
+  await expect.poll(pushes, { timeout: 10000 }).toBeGreaterThan(pushed);
+
+  // Here the regular pull brings it, and Remove PIN asks for the new one.
+  await page.clock.fastForward('31:00');
+  await expect.poll(() => guestPin(page), { timeout: 10000 }).toBe(changed);
+  await page.keyboard.press('Enter');
+  const pad = page.getByRole('dialog', { name: 'Enter the PIN for Guest' });
+  await expect(pad).toBeVisible();
+  await typeDigits(page, '1357');
+  await expect(pad.getByText('That PIN is not right.')).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, 'profile-pin-remove');
+  expect(await guestPin(page)).toBe(changed);
+  await page.keyboard.press('Enter');
+  await expect(pad).toBeVisible();
+  await typeDigits(page, '2468');
+  await expectFocus(page, 'profile-pin');
+  expect(await guestPin(page)).toBeNull();
+  expect(errors).toEqual([]);
+  expect(otherErrors).toEqual([]);
+});
+
+test('a new PIN being chosen when another screen changes it asks for the changed one first', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  await page.clock.install();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await seedProfiles(page, {
+    profiles: [main(), { ...GUEST, ...lockedWith('1357') }],
+    lastId: 'main',
+    askAtLaunch: false,
+  });
+  const guestPin = (screen: Page) =>
+    screen.evaluate((id) => {
+      const saved = JSON.parse(localStorage.getItem('bannertv.profiles')!) as {
+        profiles: { id: string; pin?: { hash: string } }[];
+      };
+      return saved.profiles.find((profile) => profile.id === id)?.pin?.hash ?? null;
+    }, GUEST_ID);
+  /** From Settings, Guest's page opened with its PIN, down to Change PIN. */
+  const openGuest = async (screen: Page) => {
+    await press(screen, 'Enter', 'profiles-main');
+    await press(screen, 'ArrowDown', `profiles-${GUEST_ID}`);
+    await press(screen, 'Enter', 'profiles-pin-1');
+    await typeDigits(screen, '1357');
+    await expectFocus(screen, 'profile-name');
+    await screen.keyboard.press('ArrowDown');
+    await expect(screen.locator('[data-focused="true"]')).toHaveAttribute(
+      'data-focus-key',
+      /^profile-colour-/,
+    );
+    await screen.waitForTimeout(150);
+    for (const key of ['profile-kids', 'profile-save', 'profile-pin']) {
+      await press(screen, 'ArrowDown', key);
+    }
+  };
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  const otherErrors = watchErrors(other);
+  await seedProfiles(other, { profiles: [main()], lastId: 'main', askAtLaunch: false });
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await reloadsAfter(other, () => typeCode(other, code));
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+
+  // Here, Change PIN on Guest's page opened with its PIN goes straight to the new one.
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await press(page, 'ArrowUp', 'settings-home-rows');
+  await press(page, 'ArrowUp', 'settings-profiles');
+  await openGuest(page);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Choose a four-digit PIN' })).toBeVisible();
+
+  // There, Guest's PIN changes, and the regular pull brings it here while the pad is open.
+  await openSettings(other);
+  await press(other, 'ArrowRight', 'settings-profiles');
+  await openGuest(other);
+  const pushes = () => sync.requests.filter((request) => request === 'POST /v1/push').length;
+  const pushed = pushes();
+  await other.keyboard.press('Enter');
+  await typeDigits(other, '2468');
+  await expect(other.getByRole('dialog', { name: 'Enter the PIN again' })).toBeVisible();
+  await typeDigits(other, '2468');
+  await expectFocus(other, 'profile-pin');
+  const changed = await guestPin(other);
+  await expect.poll(pushes, { timeout: 10000 }).toBeGreaterThan(pushed);
+  await page.clock.fastForward('31:00');
+  await expect.poll(() => guestPin(page), { timeout: 10000 }).toBe(changed);
+
+  // The new PIN typed here is not kept until the changed one is entered.
+  await typeDigits(page, '9999');
+  const pad = page.getByRole('dialog', { name: 'Enter the PIN for Guest' });
+  await expect(pad).toBeVisible();
+  await expect(
+    pad.getByText('This PIN was just changed on another screen.', { exact: false }),
+  ).toBeVisible();
+  expect(await guestPin(page)).toBe(changed);
+  await typeDigits(page, '2468');
+  await expect(page.getByRole('dialog', { name: 'Choose a four-digit PIN' })).toBeVisible();
+  await typeDigits(page, '9999');
+  await expect(page.getByRole('dialog', { name: 'Enter the PIN again' })).toBeVisible();
+  await typeDigits(page, '9999');
+  await expectFocus(page, 'profile-pin');
+  const chosen = await guestPin(page);
+  expect(chosen).not.toBe(changed);
+  expect(chosen).not.toBeNull();
+  expect(errors).toEqual([]);
+  expect(otherErrors).toEqual([]);
 });
 
 test('Diagnostics says whether this is a secure context and Web Crypto gives the known answers', async ({

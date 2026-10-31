@@ -332,6 +332,7 @@ describe('joining', () => {
     expect(JSON.parse(disk.values.get('sync-joined')!)).toEqual({
       profiles: local.getItem('bannertv.profiles'),
       held: local.getItem('bannertv.syncHeld'),
+      token: expect.any(String),
     });
 
     // The next launch reads what the join wrote, and drops the copy.
