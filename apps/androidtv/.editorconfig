@@ -1,0 +1,8 @@
+# Settings for ktlint and Android XML here; the repo root sets 4-space Kotlin and CRLF .bat files.
+[*.{kt,kts}]
+max_line_length = 120
+ktlint_code_style = intellij_idea
+ktlint_standard_blank-line-between-when-conditions = disabled
+
+[*.xml]
+indent_size = 4

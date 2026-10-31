@@ -448,7 +448,8 @@ The code lives in one pnpm monorepo at [Eyihbanner1/BannerTv](https://github.com
 ```text
 bannertv/
 ├── apps/
-│   └── webos/                 TV app: React UI and webOS glue
+│   ├── webos/                 TV app: React UI and webOS glue
+│   └── androidtv/             Android TV app: Kotlin shell showing the same build, with ExoPlayer (Phase 5)
 │       ├── webos-meta/        appinfo.json, icons, splash
 │       ├── src/
 │       │   ├── app/           shell, router, back stack, providers
@@ -521,6 +522,13 @@ On 28 October 2026 Phase 3 started before PR #4 and PR #6 merged, built on the p
 - [ ] Try Trakt and TMDB on the TV once the Worker is up
 
 Still to come, as ADR 0004 lists: settings backup to a phone, the addon catalog browser, per-title reuse of the last link, and the sports organisation that the sports thread plans in PR #7.
+
+On 30 October 2026 Phase 5 started, with Phase 4 (the LG Content Store) on hold, because BannerTV is for every screen, not only LG. It runs in this order:
+
+- [x] Android TV app: the same build in a Kotlin WebView shell, with video in Android's ExoPlayer under the page (design in [ADR 0005](adr/0005-android-tv-app.md), setup in [ANDROID_TV_SETUP.md](ANDROID_TV_SETUP.md)). Built by CI as an APK
+- [ ] Try it on Eyitayo's Android phone, then on an Android TV or Fire TV device
+- [ ] A BannerTV account, so profiles, addons, My List, Continue Watching and settings follow a person between the LG and Android: sign-in with an account code and no email, data encrypted on the device before it is sent, and a small `sync` Cloudflare Worker that Eyitayo deploys
+- [ ] Phone apps (Android, then iOS), sharing `packages/core`
 
 **Phase 0 tasks to start with**
 

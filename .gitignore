@@ -19,3 +19,17 @@ apps/webos/lab-sources.local.json
 services/demo/public/
 services/demo/.work/
 services/demo/review/
+
+# Android TV host: Gradle and IDE state, build outputs and signing keys. Never a bare build/,
+# because apps/webos/build/ holds source.
+apps/androidtv/.gradle/
+apps/androidtv/.kotlin/
+apps/androidtv/build/
+apps/androidtv/**/build/
+apps/androidtv/out/
+apps/androidtv/local.properties
+.idea/
+*.apk
+*.aab
+*.jks
+*.keystore

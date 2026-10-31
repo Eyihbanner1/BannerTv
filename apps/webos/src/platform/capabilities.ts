@@ -1,4 +1,5 @@
 import type { TvCapabilities } from '@bannertv/core';
+import { androidCapabilities } from './android';
 import { parseChromiumMajor, webOSReleaseForChromium, webOSReleaseForSdkVersion } from './engine';
 import { isWebOS, lunaCall } from './webos';
 
@@ -48,6 +49,9 @@ function dtsByRelease(webOS: number | null): boolean | null {
 }
 
 async function detect(): Promise<TvCapabilities> {
+  // Android tells what its decoders, screen and HDMI audio take (apps/androidtv DeviceFacts).
+  const android = androidCapabilities();
+  if (android) return { ...android, webOS: null };
   // Off the TV (a laptop, Playwright) nothing is known, so no stream gets a TV warning.
   if (!isWebOS()) return UNKNOWN;
   const [system, configs] = await Promise.all([

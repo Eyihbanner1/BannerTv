@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BannerTV</string>
+    <string name="webview_too_old">BannerTV needs Android System WebView 68 or newer. Update it from the Play Store or your device\'s app store, then open BannerTV again.</string>
+    <string name="webview_unavailable">BannerTV could not start Android System WebView. Check that it is installed and turned on in your device\'s settings, then open BannerTV again.</string>
+</resources>

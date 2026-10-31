@@ -16,7 +16,7 @@ import { Pressable } from '../../components/Pressable';
 import { addonNames } from '../../data/addons';
 import { formatDate, metaFacts } from '../../data/describe';
 import { formatSize, resolutionLabel, streamRowText, streamTitle } from '../../player/describe';
-import type { EngineTrack } from '../../player/engines/types';
+import type { Engine, EngineTrack } from '../../player/engines/types';
 import { formatTime } from '../../player/media';
 import { focusedKey } from '../../navigation/spatial';
 import { SheetTabs } from './SheetTabs';
@@ -83,7 +83,7 @@ export function InfoSheet({
   /** Seconds; 0 while unknown. */
   duration: number;
   live: boolean;
-  engine: 'native' | 'hls.js' | 'shaka' | null;
+  engine: Engine['name'] | null;
   heavy: boolean;
   reference?: QualityReference;
   sleep: SleepTimer;
@@ -144,7 +144,12 @@ export function InfoSheet({
     }
   }
   add('length', live ? t('player.liveBroadcast') : duration > 0 ? formatTime(duration) : undefined);
-  if (engine) add('playedBy', t(`player.playedBy.${engine === 'native' ? 'native' : 'app'}`));
+  if (engine) {
+    add(
+      'playedBy',
+      t(`player.playedBy.${engine === 'native' || engine === 'android' ? engine : 'app'}`),
+    );
+  }
   const notes = entry
     ? streamRowText(t, entry, {
         heavy,

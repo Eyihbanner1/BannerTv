@@ -309,7 +309,8 @@
     },
     "playedBy": {
       "native": "The TV's own player",
-      "app": "BannerTV's player"
+      "app": "BannerTV's player",
+      "android": "Android's player"
     },
     "liveBroadcast": "Live broadcast",
     "severalLanguages": "Several",

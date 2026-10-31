@@ -13,6 +13,7 @@ import { startSports } from './data/sports';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
+import { initAndroid } from './platform/android';
 import { bootInfo } from './platform/boot';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { initInputMode } from './platform/input-mode';
@@ -43,6 +44,7 @@ function start() {
   initNavigation();
   initInputMode();
   initLifecycle(askAgainOnRelaunch);
+  initAndroid({ onRelaunch: askAgainOnRelaunch });
   startAddons();
   startPlaybackData();
   startLibraryData();
