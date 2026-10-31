@@ -317,12 +317,14 @@ describe('preferencesPart', () => {
       probing: 'off',
       audioLanguage: 'fre',
       tmdb: false,
+      stillWatching: false,
       subtitleStyle: { ...DEFAULT_PREFERENCES.subtitleStyle, colour: 'yellow' },
     });
     expect(part.document).toBe('p/abc123/settings');
     expect(plain(part.snapshot())).toEqual({
       'pref/audioLanguage': { v: 'fre' },
       'pref/tmdb': { v: false },
+      'pref/stillWatching': { v: false },
       'style/colour': { v: 'yellow' },
     });
     expect(plain(prefsSetup().part.snapshot())).toEqual({});
@@ -334,6 +336,7 @@ describe('preferencesPart', () => {
       change(
         [
           ['pref/subtitleLanguage', { t: 1, v: 'spa' }],
+          ['pref/stillWatching', { t: 1, v: false }],
           ['style/size', { t: 1, v: 'large' }],
           ['pref/probing', { t: 1, v: 'off' }],
         ],
@@ -345,6 +348,7 @@ describe('preferencesPart', () => {
       probing: 'on',
       tmdb: false,
       subtitleLanguage: 'spa',
+      stillWatching: false,
       subtitleStyle: { ...DEFAULT_PREFERENCES.subtitleStyle, size: 'large' },
     });
   });

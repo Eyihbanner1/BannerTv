@@ -266,6 +266,7 @@ type PreferenceKey =
   | 'pref/audioLanguage'
   | 'pref/subtitleLanguage'
   | 'pref/tmdb'
+  | 'pref/stillWatching'
   | 'style/size'
   | 'style/colour'
   | 'style/background'
@@ -295,6 +296,7 @@ const PREFERENCE_KEYS: ReadonlyArray<
     (p, v) => ({ ...p, subtitleLanguage: v as never }),
   ],
   ['pref/tmdb', (p) => p.tmdb, (p, v) => ({ ...p, tmdb: v as never })],
+  ['pref/stillWatching', (p) => p.stillWatching, (p, v) => ({ ...p, stillWatching: v as never })],
   [
     'style/size',
     (p) => p.subtitleStyle.size,
