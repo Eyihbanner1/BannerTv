@@ -77,7 +77,8 @@ describe('age ratings', () => {
     expect(ukRating('G', 'US')).toBe('U');
     expect(ukRating('PG-13', 'US')).toBe('12');
     expect(ukRating('R', 'US')).toBe('15');
-    expect(ukRating('TV-Y7', 'US')).toBe('U');
+    expect(ukRating('TV-Y7', 'US')).toBe('PG');
+    expect(ukRating('TV-Y7-FV', 'US')).toBe('PG');
     expect(ukRating('TV-PG', 'US')).toBe('PG');
     expect(ukRating('TV-14', 'US')).toBe('15');
     expect(ukRating('TV-MA', 'US')).toBe('18');

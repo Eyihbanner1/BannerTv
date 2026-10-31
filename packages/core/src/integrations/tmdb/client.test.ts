@@ -22,7 +22,7 @@ const FILM = `${BASE}/movie/155?append_to_response=images,credits,release_dates&
 const FIND_SERIES = `${BASE}/find/tt7678620?external_source=imdb_id`;
 const SERIES = `${BASE}/tv/82728?append_to_response=images,aggregate_credits,content_ratings&include_image_language=en,null&language=en-GB`;
 const SEASON = `${BASE}/tv/82728/season/1?language=en-GB`;
-const FILM_KEY = 'tmdb:1:details:movie:tt0468569';
+const FILM_KEY = 'tmdb:2:details:movie:tt0468569';
 
 const DAY = 24 * 60 * 60 * 1000;
 const TIMEOUT = { timeoutMs: 10000 };
@@ -220,8 +220,8 @@ describe('createTmdbClient', () => {
     expect(first.get()).toEqual({ status: 'success', data: readSeason(season), stale: false });
     expect(ninth.get()).toEqual({ status: 'success', data: {}, stale: false });
     expect(writes.map((write) => write.key)).toEqual([
-      'tmdb:1:season:82728:1',
-      'tmdb:1:season:82728:9',
+      'tmdb:2:season:82728:1',
+      'tmdb:2:season:82728:9',
     ]);
   });
 

@@ -286,3 +286,76 @@ test("a kids profile can't play a film TMDB rates above the profile's age rating
   await expectFocus(page, 'details-my-list');
   expect(errors).toEqual([]);
 });
+
+test('a kids profile goes by the strictest UK rating, while Details shows the cinema one', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page, {
+    catalogs: {
+      'movie/top/genre=Family': (route) =>
+        json(route, {
+          metas: [{ id: 'tt1254207', type: 'movie', name: 'Big Buck Bunny', genres: ['Family'] }],
+        }),
+    },
+  });
+  await page.route('https://v3-cinemeta.strem.io/meta/movie/tt1254207.json', (route) =>
+    json(route, {
+      meta: { id: 'tt1254207', type: 'movie', name: 'Big Buck Bunny', genres: ['Family'] },
+    }),
+  );
+  // PG at the cinema, 15 on disc (an extended cut).
+  await mockServices(page, { tmdb: true, certificate: 'PG', homeCertificate: '15' });
+  await seedProfiles(page, {
+    profiles: [main(), { id: KIDS_ID, name: 'Robin', colour: 3, kids: 'PG' }],
+    lastId: KIDS_ID,
+    askAtLaunch: false,
+  });
+  await page.goto(APP_URL);
+
+  await expectFocus(page, 'home-0-movie-top-genre-family-tile-0');
+  await page.keyboard.press('Enter');
+  const details = page.locator('section[aria-label="Big Buck Bunny"]');
+  await expect(details.getByText("This title isn't available in a kids profile.")).toBeVisible();
+  await expect(details.getByText('PG · Blender Studio', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a kids profile plays a film its Family row offers when TMDB rates it within the profile, without a Family tag', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page, {
+    catalogs: {
+      'movie/top/genre=Family': (route) =>
+        json(route, {
+          metas: [{ id: 'tt1254207', type: 'movie', name: 'Big Buck Bunny', genres: [] }],
+        }),
+    },
+  });
+  // As Cinemeta lists Moana: in its Family catalog, but its details say only Animation.
+  await page.route('https://v3-cinemeta.strem.io/meta/movie/tt1254207.json', (route) =>
+    json(route, {
+      meta: {
+        id: 'tt1254207',
+        type: 'movie',
+        name: 'Big Buck Bunny',
+        genres: ['Animation', 'Adventure'],
+      },
+    }),
+  );
+  await mockServices(page, { tmdb: true, certificate: 'PG' });
+  await seedProfiles(page, {
+    profiles: [main(), { id: KIDS_ID, name: 'Robin', colour: 3, kids: 'PG' }],
+    lastId: KIDS_ID,
+    askAtLaunch: false,
+  });
+  await page.goto(APP_URL);
+
+  const kidsRow = 'home-0-movie-top-genre-family';
+  await expectFocus(page, `${kidsRow}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await expect(page.getByText("This title isn't available in a kids profile.")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

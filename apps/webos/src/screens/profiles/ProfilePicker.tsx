@@ -21,7 +21,11 @@ export const RAIL_PROFILE_FOCUS_KEY = 'rail-profile';
 export function useProfileLabel(): (profile: Profile) => string {
   const { t } = useTranslation();
   return (profile) =>
-    [profile.name, profile.kids ? t('profiles.kids') : '', profile.pin ? t('profiles.locked') : '']
+    [
+      profile.name,
+      profile.kids ? t('profiles.kidsUpTo', { rating: profile.kids }) : '',
+      profile.pin ? t('profiles.locked') : '',
+    ]
       .filter(Boolean)
       .join(', ');
 }

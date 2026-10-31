@@ -160,18 +160,25 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   const failed = state.status === 'error';
   const tmdb = useTmdbDetails(type, id);
   const extra = tmdb.details;
-  // A kids profile plays a title only once its full details show it is for
-  // children, and TMDB's UK rating, where it has one, is within the profile's.
+  // A kids profile plays a title only once its full details are in. With a
+  // UK rating from TMDB, the rating decides, within the profile's (the
+  // strictest of that country's ratings, so a 15 on disc outranks a PG at the
+  // cinema); without one, the details must list it as Family. Either way no genre that is not
+  // for children (Cinemeta's Family rows hold PG films its details tag only
+  // Animation or Adventure).
   const kids = isKidsProfile();
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
+  const kidsRating = extra?.strictestCertificate ?? extra?.certificate;
   const kidsAllowed =
     !kids ||
     (kidsDecided &&
       meta !== undefined &&
-      kidsTitleAllowed(meta) &&
-      (extra?.certificate === undefined ||
-        (kidsMax !== undefined && ratingAllowed(extra.certificate, kidsMax))));
+      (kidsRating === undefined
+        ? kidsTitleAllowed(meta)
+        : kidsMax !== undefined &&
+          ratingAllowed(kidsRating, kidsMax) &&
+          kidsTitleAllowed(meta, true)));
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
   // Titles without episodes get Watch, which plays the addon's default video.
   const canWatch = kidsAllowed && (isMovie || (meta !== undefined && !hasEpisodes));

@@ -221,7 +221,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     state,
   );
 
-  useScrobble(session, state, { type, metaId, videoId, lab: props.lab }, finder.runtimeSeconds);
+  useScrobble(
+    session,
+    state,
+    { type, metaId, videoId, lab: props.lab },
+    finder.runtimeSeconds,
+    () => parseRuntime(item?.runtime),
+  );
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
   // episode: again when the series' episode list arrives or changes, never for

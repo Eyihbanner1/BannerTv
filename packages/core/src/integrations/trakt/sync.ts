@@ -20,6 +20,23 @@ const KEY = 'traktSync';
 export const TRAKT_RECENT_SHOW_MS = 30 * 24 * 60 * 60 * 1000;
 /** Trakt takes one change a second; a Retry-After longer than this waits for the next sync. */
 const MAX_RETRY_AFTER_S = 10;
+/**
+ * Trakt's watched lists come a page at a time since July 2026 (100 items
+ * unless asked for more), and its shows carry their seasons only with
+ * extended=progress, which keeps them to 100 a page.
+ */
+const MOVIES_PER_PAGE = 250;
+const SHOWS_PER_PAGE = 100;
+const WATCHLIST_PER_PAGE = 250;
+/** Enough pages for 25,000 films; a list longer than that stops here. */
+const MAX_PAGES = 100;
+/**
+ * Raised when a pull starts reading more than before, so the first run after
+ * an update brings it in again instead of waiting for Trakt's next change.
+ * Format 2 reads every page of the watched lists and the watchlist, and the
+ * shows' seasons, which runs before it never got.
+ */
+const FORMAT = 2;
 
 export type TraktSyncResult = 'done' | 'skipped' | 'failed';
 
@@ -63,7 +80,7 @@ const ALL_FIELDS = FIELDS.paused.concat(FIELDS.watched, FIELDS.watchlist);
 type Times = Record<string, string>;
 
 /** The activity times of the last run, or null before the first. */
-type SyncState = { times: Times } | null;
+type SyncState = { format?: number; times: Times } | null;
 
 /** The times in a sync/last_activities answer. */
 function readActivities(data: Record<string, unknown>): Times {
@@ -76,15 +93,27 @@ function readActivities(data: Record<string, unknown>): Times {
   return times;
 }
 
+/** Fields whose pull reads more since format 2, so their old times are dropped. */
+const REREAD_FIELDS = FIELDS.watched.concat(FIELDS.watchlist);
+
 function readState(saved: unknown): SyncState {
   const raw = record(record(saved)?.times);
   if (!raw) return null;
+  const current = record(saved)?.format === FORMAT;
   const times: Times = {};
   for (const field of ALL_FIELDS) {
+    if (!current && REREAD_FIELDS.indexOf(field) !== -1) continue;
     const at = text(raw[field]);
     if (at) times[field] = at;
   }
-  return { times };
+  return current ? { format: FORMAT, times } : { times };
+}
+
+/** Which title a list item is about, to notice a page Trakt sends twice. */
+function itemKey(value: unknown): string {
+  const item = record(value);
+  const title = record(item?.movie) ?? record(item?.show);
+  return JSON.stringify(title?.ids ?? value) ?? '';
 }
 
 /** The profile's progress, as far as choosing a title's id needs it. */
@@ -324,6 +353,41 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   }
 
   /**
+   * Every page of a list, and how many pages held some of it. The Worker
+   * passes on no paging headers, so it reads until a page is empty, or brings
+   * nothing new, as when Trakt keeps no pages and sends the whole list each time.
+   */
+  async function getAllPages(
+    path: string,
+    perPage: number,
+  ): Promise<{ items: readonly unknown[]; pages: number }> {
+    const items: unknown[] = [];
+    const seen = new Set<string>();
+    const join = path.indexOf('?') === -1 ? '?' : '&';
+    let pages = 0;
+    while (pages < MAX_PAGES) {
+      const fresh = (await getList(`${path}${join}page=${pages + 1}&limit=${perPage}`)).filter(
+        (item) => {
+          const key = itemKey(item);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        },
+      );
+      if (fresh.length === 0) break;
+      pages += 1;
+      for (const item of fresh) items.push(item);
+    }
+    return { items, pages };
+  }
+
+  async function activityTimes(): Promise<Times> {
+    const activities = record(await get('/sync/last_activities'));
+    if (!activities) throw new TraktError('other', 'Trakt sent activity BannerTV cannot read');
+    return readActivities(activities);
+  }
+
+  /**
    * Runs `task` once every push and pull asked for before it has finished.
    * Never called from inside one, which would wait for itself.
    */
@@ -381,8 +445,28 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   }
 
   async function syncWatched(mine: number) {
-    const movies = await getList('/sync/watched/movies');
-    const shows = await getList('/sync/watched/shows?extended=full');
+    const movies = (await getAllPages('/sync/watched/movies', MOVIES_PER_PAGE)).items;
+    // full brings each show's running time, for Continue Watching; progress its seasons,
+    // for the ticks. Should Trakt stop sending seasons with both, they are asked for
+    // alone, and the running times already in are put back on the shows.
+    let shows = (await getAllPages('/sync/watched/shows?extended=full,progress', SHOWS_PER_PAGE))
+      .items;
+    if (shows.length > 0 && !shows.some((item) => Array.isArray(record(item)?.seasons))) {
+      const runtimes = new Map<string, unknown>();
+      for (const item of shows) {
+        const show = record(record(item)?.show);
+        if (show?.runtime !== undefined) runtimes.set(itemKey(item), show.runtime);
+      }
+      shows = (
+        await getAllPages('/sync/watched/shows?extended=progress', SHOWS_PER_PAGE)
+      ).items.map((item) => {
+        const show = record(record(item)?.show);
+        const runtime = runtimes.get(itemKey(item));
+        return show && show.runtime === undefined && runtime !== undefined
+          ? { ...record(item), show: { ...show, runtime } }
+          : item;
+      });
+    }
     await progress.load().catch(() => undefined);
     const kept = keptNow();
     // Each film under the id it goes by here, and again under its others, since
@@ -403,21 +487,40 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     if (episodes.finished.length > 0) await progress.merge(episodes.finished);
   }
 
-  /** Brings in the watchlist. Call it in turn with pushes (inTurn), so none lands during it. */
-  async function pullWatchlist(mine: number) {
-    const movies = await getList('/sync/watchlist/movies');
-    const shows = await getList('/sync/watchlist/shows');
-    const remote: RemoteLibraryItem[] = [];
-    for (const item of movies) {
-      const entry = watchlistItem(item, 'movie');
-      if (entry) remote.push(entry);
+  /**
+   * Brings in the watchlist. Call it in turn with pushes (inTurn), so none
+   * lands during it. `since` holds the watchlist's activity times as last read.
+   */
+  async function pullWatchlist(mine: number, since: Times) {
+    let before = since;
+    for (let tries = 1; ; tries++) {
+      // A title missing from the pull reads as taken off on Trakt, so every page counts.
+      const movies = await getAllPages('/sync/watchlist/movies', WATCHLIST_PER_PAGE);
+      const shows = await getAllPages('/sync/watchlist/shows', WATCHLIST_PER_PAGE);
+      if (movies.pages > 1 || shows.pages > 1) {
+        // Pages are read by offset: a title taken off elsewhere between two of them
+        // moves the rest up, and the one skipped would read as taken off here. A list
+        // that moved meanwhile (this TV's own push included) is read once more.
+        const after = await activityTimes();
+        if (FIELDS.watchlist.some((field) => after[field] !== before[field])) {
+          if (tries === 2) throw new TraktError('other', 'The watchlist changed while it was read');
+          before = after;
+          continue;
+        }
+      }
+      const remote: RemoteLibraryItem[] = [];
+      for (const item of movies.items) {
+        const entry = watchlistItem(item, 'movie');
+        if (entry) remote.push(entry);
+      }
+      for (const item of shows.items) {
+        const entry = watchlistItem(item, 'show');
+        if (entry) remote.push(entry);
+      }
+      check(mine);
+      await library.mergeRemote(remote);
+      return;
     }
-    for (const item of shows) {
-      const entry = watchlistItem(item, 'show');
-      if (entry) remote.push(entry);
-    }
-    check(mine);
-    await library.mergeRemote(remote);
   }
 
   /** Sends the outbox once. Resolves false when a request failed, so its changes wait for the next push. */
@@ -495,12 +598,13 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
   async function syncWatchlist(
     changed: boolean,
     mine: number,
+    times: Times,
   ): Promise<{ pulled: boolean; pushed: boolean }> {
     // What the TV changed goes first, so the pull does not undo it.
     let pushed = await pushOrFail();
     if (!changed) return { pulled: true, pushed };
     try {
-      await inTurn(() => pullWatchlist(mine));
+      await inTurn(() => pullWatchlist(mine, times));
     } catch (error) {
       if (isSignedOutError(error)) throw error;
       return { pulled: false, pushed };
@@ -524,9 +628,7 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     if (account.get().status !== 'signedIn') return 'skipped';
     await saved.load();
     const mine = generation;
-    const activities = record(await get('/sync/last_activities'));
-    if (!activities) throw new TraktError('other', 'Trakt sent activity BannerTV cannot read');
-    const times = readActivities(activities);
+    const times = await activityTimes();
     const last = saved.get();
     const kept: Times = last ? { ...last.times } : {};
     let failed = false;
@@ -535,7 +637,7 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
       let fetched = true;
       try {
         if (group === 'watchlist') {
-          const result = await syncWatchlist(changed, mine);
+          const result = await syncWatchlist(changed, mine, times);
           fetched = result.pulled;
           if (!result.pushed) failed = true;
         } else if (changed) {
@@ -558,9 +660,10 @@ export function createTraktSync(options: TraktSyncOptions): TraktSync {
     check(mine);
     const same =
       last !== null &&
+      last.format === FORMAT &&
       Object.keys(kept).length === Object.keys(last.times).length &&
       Object.keys(kept).every((field) => kept[field] === last.times[field]);
-    if (!same) await saved.update(() => ({ times: kept }));
+    if (!same) await saved.update(() => ({ format: FORMAT, times: kept }));
     return failed ? 'failed' : 'done';
   }
 

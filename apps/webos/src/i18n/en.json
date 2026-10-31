@@ -449,7 +449,7 @@
     "full": "This TV already has six profiles.",
     "colour": "Colour {{number}}",
     "kidsProfile": "Kids profile",
-    "kidsExplained": "Only family films and series, no Addons, and limited Settings. Ratings come from TMDB when it is on, and titles without one are left out.",
+    "kidsExplained": "No Addons, and limited Settings. Home, Discover and Search show family films and series. A title plays when TMDB rates it within this limit, or, with no rating, when it is listed as Family. Horror, thriller, crime, war and adult titles never play.",
     "mainNotKids": "Main set BannerTV up, so it is never a kids profile.",
     "youNotKids": "Switch to another profile to make this one a kids profile.",
     "save": "Save",
