@@ -247,5 +247,8 @@ export function initAndroid(hooks: AndroidHooks = {}): void {
   };
   // Back on the root screen asks to leave the app (platformBack off webOS).
   window.addEventListener(EXIT_EVENT, () => bridge.exit());
+  // A page that reloads (a profile asked for again on relaunch) runs no cleanup, so Android's
+  // player may still hold the last page's stream. Nothing plays at start.
+  sendPlayerCommand({ op: 'release' });
   if (androidHostInfo()?.lowRam) document.documentElement.classList.add('low-power');
 }

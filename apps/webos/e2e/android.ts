@@ -117,6 +117,8 @@ export function playerState(
     position?: number;
     duration?: number | null;
     ended?: boolean;
+    ready?: boolean;
+    live?: boolean;
   },
 ): Promise<void> {
   return androidSays(page, {
@@ -125,10 +127,29 @@ export function playerState(
     playWhenReady: state.playWhenReady ?? true,
     playing: state.playing,
     buffering: state.buffering ?? false,
-    ready: !state.buffering,
+    ready: state.ready ?? !state.buffering,
     ended: state.ended ?? false,
     position: state.position ?? 0,
     duration: state.duration === undefined ? 900 : state.duration,
-    live: false,
+    live: state.live ?? false,
   });
+}
+
+/**
+ * What Android's player sends as it opens a stream at `startAt`, in its order: the jump to the
+ * start, then buffering on a placeholder with no length (before and after it is told to play),
+ * then the picture moving once it has read the file.
+ */
+export async function androidOpens(page: Page, startAt = 0, duration = 900): Promise<void> {
+  if (startAt > 0) await androidSays(page, { type: 'player', event: 'seeked', position: startAt });
+  const opening = {
+    playing: false,
+    buffering: true,
+    ready: false,
+    position: startAt,
+    duration: null,
+  };
+  await playerState(page, { ...opening, playWhenReady: false });
+  await playerState(page, opening);
+  await playerState(page, { playing: true, position: startAt, duration });
 }

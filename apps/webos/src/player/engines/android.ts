@@ -113,7 +113,6 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
   function setDuration(value: number | null) {
     if (value === duration) return;
     duration = value;
-    if (value === -1) live = true;
     fire('durationchange');
   }
 
@@ -146,7 +145,10 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
     },
     duration: {
       configurable: true,
-      get: () => (duration === null ? NaN : duration < 0 ? Infinity : duration),
+      // A file whose length Android cannot read is Infinity once it plays, as the TV's own
+      // player reports it, so the session keeps progress against the film's running time.
+      get: () =>
+        duration === null ? (ready && !live ? Infinity : NaN) : duration < 0 ? Infinity : duration,
     },
     paused: { configurable: true, get: () => paused },
     ended: { configurable: true, get: () => ended },
@@ -168,6 +170,9 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
           intent = { paused: false, at: now() };
           if (ended) seekTo(0);
           setPaused(false, true);
+          // As a real element does when it resumes without enough data: the session shows
+          // that it is buffering and watches for a stall.
+          if (buffering) queue('waiting');
           sendPlayerCommand({ op: 'play' });
         }
         return Promise.resolve();
@@ -207,7 +212,9 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
     const wasPlaying = playing;
     const wasBuffering = buffering;
     ready = ready || event.ready;
-    live = live || event.live;
+    // Only once Android has read the stream: the session clears a film's resume point for a
+    // broadcast, so a wrong "live" while it opens would cost the viewer their place.
+    if (event.ready && event.live) live = true;
     if (!seeking) place(event.position);
     setDuration(event.duration);
     // Android's word on play or pause, unless the viewer has just asked for the other.

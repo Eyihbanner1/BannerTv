@@ -247,6 +247,13 @@ describe('initAndroid', () => {
     expect(calls.exit).toBe(1);
   });
 
+  it("lets go of anything Android's player still holds from before a reload", async () => {
+    onAndroid();
+    const android = await load();
+    android.initAndroid();
+    expect(calls.player.map((command) => JSON.parse(command))).toEqual([{ op: 'release' }]);
+  });
+
   it('turns on low-power mode on a low-memory device', async () => {
     onAndroid({ hostInfo: () => JSON.stringify({ lowRam: true }) });
     const android = await load();

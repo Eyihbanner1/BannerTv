@@ -76,15 +76,12 @@ class DeviceFacts(context: Context) {
 
     private fun isUhd(display: Display): Boolean = display.supportedModes.any { it.physicalWidth >= UHD_WIDTH }
 
-    @Suppress("DEPRECATION") // HdrCapabilities.getSupportedHdrTypes, still the only source before API 34
-    private fun supportedHdrTypes(display: Display): Set<Int> {
-        val types = HashSet<Int>()
-        display.hdrCapabilities?.supportedHdrTypes?.forEach { types.add(it) }
-        if (Build.VERSION.SDK_INT >= 34) {
-            display.mode.supportedHdrTypes.forEach { types.add(it) }
-        }
-        return types
-    }
+    // Deprecated in API 34, but still the one answer that leaves out the HDR formats the viewer
+    // turned off in settings, and gives none when the system forces SDR. Mode.getSupportedHdrTypes
+    // lists what the panel could do regardless.
+    @Suppress("DEPRECATION")
+    private fun supportedHdrTypes(display: Display): Set<Int> =
+        display.hdrCapabilities?.supportedHdrTypes?.toSet() ?: emptySet()
 
     private fun hasDecoder(mime: String, hardwareOnly: Boolean = false): Boolean = decoders.any { info ->
         info.supportedTypes.any { it.equals(mime, ignoreCase = true) } && (!hardwareOnly || isHardware(info))

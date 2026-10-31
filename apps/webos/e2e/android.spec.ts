@@ -3,12 +3,13 @@ import { FIRST_ROW, mockAddons } from './addons';
 import {
   ANDROID_URL,
   androidCalls,
+  androidOpens,
   androidSays,
   openAsAndroid,
   playerOps,
   playerState,
 } from './android';
-import { mockPlayback, seedStreamAddon } from './play';
+import { mockPlayback, readKv, seedStreamAddon } from './play';
 import { expectFocus, press, watchErrors } from './tv';
 
 /** The page's own colours, which must let Android's picture through while it plays. */
@@ -25,6 +26,8 @@ function backgrounds(page: Page) {
 }
 
 const CLEAR = 'rgba(0, 0, 0, 0)';
+/** Elephants Dream, the first title on Home. */
+const MOVIE = 'tt0807840';
 
 /** Elements shown over the middle of the screen with a background that would hide the video. */
 function coversPicture(page: Page) {
@@ -60,7 +63,7 @@ test("the Android app plays in Android's player under the page, and its remote d
   await press(page, 'Enter', 'player-surface');
   // Android opens the link itself; the page's video element stays empty.
   await expect
-    .poll(async () => (await androidCalls(page)).player[0])
+    .poll(async () => (await androidCalls(page)).player.find((command) => command.op === 'load'))
     .toEqual({
       op: 'load',
       id: expect.any(Number),
@@ -76,7 +79,7 @@ test("the Android app plays in Android's player under the page, and its remote d
   });
   expect(await page.locator('video:not([aria-hidden])').getAttribute('src')).toBeNull();
 
-  await playerState(page, { playing: false, buffering: true, duration: null });
+  await androidOpens(page);
   await playerState(page, { playing: true, position: 1 });
   await expect(page.getByRole('status', { name: 'Starting' })).toHaveCount(0);
   // Nothing the page shows over the middle of the screen hides Android's picture.
@@ -106,6 +109,41 @@ test("the Android app plays in Android's player under the page, and its remote d
   await androidSays(page, { type: 'key', key: 'Back' });
   await expect.poll(async () => (await androidCalls(page)).exits).toBe(1);
   expect(errors).toEqual([]);
+});
+
+test('a film resumes on Android where it was left, and keeps its place', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 120 }],
+  });
+  await mockPlayback(page);
+  await openAsAndroid(page);
+  await page.goto(ANDROID_URL);
+  await expectFocus(page, 'home-continue-tile-0');
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await expect(page.locator('[data-focus-key="details-watch"]')).toHaveText('Resume from 0:35');
+
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(async () => (await androidCalls(page)).player.find((command) => command.op === 'load'))
+    .toMatchObject({ op: 'load', startAt: 35 });
+  await androidOpens(page, 35, 120);
+  for (const position of [36, 38, 40, 42, 44]) {
+    await androidSays(page, { type: 'player', event: 'time', position, duration: 120 });
+    await page.waitForTimeout(250);
+  }
+  // Opened once, at its place: not started again from the beginning as a broadcast would be.
+  expect((await playerOps(page)).filter((op) => op === 'load')).toHaveLength(1);
+  await expect
+    .poll(async () => {
+      const saved = (await readKv(page, 'progress')) as Array<{
+        videoId: string;
+        position: number;
+      }>;
+      return saved.find((entry) => entry.videoId === MOVIE)?.position ?? 0;
+    })
+    .toBeGreaterThanOrEqual(35);
 });
 
 test('a stream Android cannot play moves on to the next, as on the TV', async ({ page }) => {

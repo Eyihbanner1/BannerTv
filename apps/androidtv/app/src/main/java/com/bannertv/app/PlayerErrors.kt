@@ -13,7 +13,13 @@ object PlayerErrors {
     /** ERROR_CODE_BEHIND_LIVE_WINDOW: recovered natively, never reported. */
     const val BEHIND_LIVE_WINDOW: Int = 1002
 
+    /** ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED: no extractor knew the file. */
+    const val CONTAINER_UNSUPPORTED: Int = 3003
+
     fun recoversNatively(code: Int): Boolean = code == BEHIND_LIVE_WINDOW
+
+    /** A link of no known kind can be an HLS playlist whose address does not end in .m3u8. */
+    fun mayBeHls(code: Int): Boolean = code == CONTAINER_UNSUPPORTED
 
     fun kind(code: Int): String = when (code) {
         in 2000..2999 -> NETWORK
@@ -32,6 +38,9 @@ object PlayerErrors {
 
     /** The protocol's detail string, for example "ERROR_CODE_IO_BAD_HTTP_STATUS (2004)". */
     fun detail(codeName: String, code: Int): String = "$codeName ($code)"
+
+    /** The detail for a video track no decoder on the device can show, which ExoPlayer does not count as an error. */
+    fun videoUnsupported(mime: String?): String = "VIDEO_UNSUPPORTED (${mime ?: "unknown"})"
 
     /** A short message for the viewer. Built here rather than taken from the exception, which can carry the URL. */
     fun message(kind: String, httpStatus: Int?): String = when (kind) {

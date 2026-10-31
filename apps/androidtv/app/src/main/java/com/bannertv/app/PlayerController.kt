@@ -52,8 +52,21 @@ class PlayerController(
     /** STATE_READY has been reached at least once since the last load. */
     private var readyOnce = false
 
+    /** The stream's video has been checked against the device's decoders since the last load. */
+    private var videoChecked = false
+
     /** The id of the last load command, sent with every event so the page can drop stale ones. */
     private var loadId = 0
+
+    /** The last load's link and start, for opening it again as HLS. */
+    private var openedUrl: String? = null
+    private var openedStartAt = 0.0
+
+    /** The page named the stream type, or it was already retried as HLS. */
+    private var typeSettled = false
+
+    /** The error from the first try, reported if the retry as HLS fails too. */
+    private var firstError: PlaybackException? = null
     private var destroyed = false
 
     private val ticker: Runnable =
@@ -155,17 +168,16 @@ class PlayerController(
         val url = stringOrNull(command, "url")
         if (url.isNullOrEmpty()) return
         val startAt = command.optDouble("startAt", 0.0)
-        val item = MediaItem.Builder().setUri(url)
-        when (Protocol.streamType(stringOrNull(command, "mime"))) {
-            Protocol.STREAM_HLS -> item.setMimeType(MimeTypes.APPLICATION_M3U8)
-            Protocol.STREAM_DASH -> item.setMimeType(MimeTypes.APPLICATION_MPD)
-        }
+        val type = Protocol.streamType(stringOrNull(command, "mime"))
 
         hasMedia = true
-        readyOnce = false
         // Events stop() causes are still about the stream before, so they keep its id.
         player.stop()
         loadId = command.optInt("id", 0)
+        openedUrl = url
+        openedStartAt = startAt
+        typeSettled = type != null
+        firstError = null
         // Each title starts with ExoPlayer's own audio choice and no subtitles; the page re-selects.
         player.trackSelectionParameters =
             player.trackSelectionParameters
@@ -173,11 +185,22 @@ class PlayerController(
                 .clearOverrides()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
+        open(url, startAt, type)
+        view.visibility = View.VISIBLE
+    }
+
+    private fun open(url: String, startAt: Double, type: String?, playWhenReady: Boolean = true) {
+        val item = MediaItem.Builder().setUri(url)
+        when (type) {
+            Protocol.STREAM_HLS -> item.setMimeType(MimeTypes.APPLICATION_M3U8)
+            Protocol.STREAM_DASH -> item.setMimeType(MimeTypes.APPLICATION_MPD)
+        }
+        readyOnce = false
+        videoChecked = false
         player.setMediaItem(item.build())
         if (startAt > 0 && !startAt.isInfinite()) player.seekTo((startAt * 1000).toLong())
         player.prepare()
-        player.playWhenReady = true
-        view.visibility = View.VISIBLE
+        player.playWhenReady = playWhenReady
     }
 
     private fun play() {
@@ -250,6 +273,21 @@ class PlayerController(
     }
 
     override fun onTracksChanged(tracks: Tracks) {
+        if (!videoChecked && tracks.containsType(C.TRACK_TYPE_VIDEO)) {
+            videoChecked = true
+            if (!tracks.isTypeSupported(C.TRACK_TYPE_VIDEO, true)) {
+                // With no decoder here for the picture ExoPlayer plays the sound alone and calls it
+                // playing. Stop, and report a format the device cannot play, so the page moves on.
+                player.playWhenReady = false
+                emit(
+                    playerEvent("error")
+                        .put("kind", PlayerErrors.FORMAT)
+                        .put("message", PlayerErrors.message(PlayerErrors.FORMAT, null))
+                        .put("detail", PlayerErrors.videoUnsupported(videoMime(tracks))),
+                )
+                return
+            }
+        }
         val audio = JSONArray()
         val text = JSONArray()
         tracks.groups.forEachIndexed { groupIndex, group ->
@@ -288,14 +326,29 @@ class PlayerController(
             player.prepare()
             return
         }
-        val kind = PlayerErrors.kind(code)
+        val url = openedUrl
+        if (PlayerErrors.mayBeHls(code) && !typeSettled && url != null) {
+            // ExoPlayer knows HLS by ".m3u8" in the link, and IPTV and proxy links often have
+            // none, so an HLS playlist reads as a file of no known kind. Try it as HLS once.
+            typeSettled = true
+            firstError = error
+            // Paused if the page paused it while the first try opened.
+            open(url, openedStartAt, Protocol.STREAM_HLS, player.playWhenReady)
+            return
+        }
+        // If it was not HLS either, the first answer is the one that describes the link.
+        val reported = firstError ?: error
+        val kind = PlayerErrors.kind(reported.errorCode)
         emit(
             playerEvent("error")
                 .put("kind", kind)
-                .put("message", PlayerErrors.message(kind, httpStatus(error)))
-                .put("detail", PlayerErrors.detail(error.errorCodeName, code)),
+                .put("message", PlayerErrors.message(kind, httpStatus(reported)))
+                .put("detail", PlayerErrors.detail(reported.errorCodeName, reported.errorCode)),
         )
     }
+
+    private fun videoMime(tracks: Tracks): String? =
+        tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO }?.getTrackFormat(0)?.sampleMimeType
 
     private fun emitState() {
         val state = player.playbackState
@@ -321,8 +374,9 @@ class PlayerController(
 
     private fun positionSeconds(): Double = player.currentPosition.coerceAtLeast(0L) / 1000.0
 
-    private fun isLive(): Boolean =
-        player.isCurrentMediaItemLive || (player.isCurrentMediaItemDynamic && player.duration == C.TIME_UNSET)
+    // Only a real timeline says live. Each load starts on a placeholder timeline that is dynamic
+    // and has no duration, which would make every film look like a broadcast.
+    private fun isLive(): Boolean = player.isCurrentMediaItemLive
 
     /** Seconds, -1 for a live stream with no end, or JSON null while unknown. */
     private fun durationValue(): Any {

@@ -7,6 +7,14 @@ import org.junit.Test
 
 class PlayerErrorsTest {
     @Test
+    fun onlyAnUnknownContainerIsWorthTryingAsHls() {
+        assertTrue(PlayerErrors.mayBeHls(3003))
+        for (code in listOf(1002, 2004, 3001, 3002, 3004, 4005)) {
+            assertFalse("code $code", PlayerErrors.mayBeHls(code))
+        }
+    }
+
+    @Test
     fun ioErrorsAreNetwork() {
         for (code in listOf(2000, 2001, 2002, 2004, 2005, 2008, 2999)) {
             assertEquals("code $code", PlayerErrors.NETWORK, PlayerErrors.kind(code))
@@ -58,6 +66,8 @@ class PlayerErrorsTest {
             "ERROR_CODE_IO_BAD_HTTP_STATUS (2004)",
             PlayerErrors.detail("ERROR_CODE_IO_BAD_HTTP_STATUS", 2004),
         )
+        assertEquals("VIDEO_UNSUPPORTED (video/wvc1)", PlayerErrors.videoUnsupported("video/wvc1"))
+        assertEquals("VIDEO_UNSUPPORTED (unknown)", PlayerErrors.videoUnsupported(null))
     }
 
     @Test

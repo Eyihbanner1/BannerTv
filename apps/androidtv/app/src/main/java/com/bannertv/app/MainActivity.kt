@@ -189,19 +189,22 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    // The page is told it is hidden only when the app leaves the screen, as on the TV. onPause
+    // also comes for a system panel over the app (sound settings, the Assistant), and a hidden
+    // page pauses the film.
+    override fun onStart() {
+        super.onStart()
+        webView?.onResume()
+    }
+
     override fun onResume() {
         super.onResume()
         hideSystemBars()
-        webView?.onResume()
         webView?.requestFocus()
     }
 
-    override fun onPause() {
-        webView?.onPause()
-        super.onPause()
-    }
-
     override fun onStop() {
+        webView?.onPause()
         super.onStop()
         player?.pauseForBackground()
     }

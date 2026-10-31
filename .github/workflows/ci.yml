@@ -145,6 +145,14 @@ jobs:
         run: |
           tasks=(assembleDebug)
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
+            # Gradle falls back to the debug key without all four, which would pass off a
+            # debug-signed APK as the release.
+            for secret in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+              if [ -z "${!secret}" ]; then
+                echo "::error::The release key is set but the secret $secret is not."
+                exit 1
+              fi
+            done
             tasks+=(assembleRelease)
           fi
           ./gradlew --no-daemon "${tasks[@]}"

@@ -9,7 +9,7 @@ Every CI run builds it; nothing needs installing on a computer.
 1. On GitHub, open the repository's **Actions** tab, then the latest **CI** run for the branch (or for `main`).
 2. Under **Artifacts**, download **bannertv-apk**. It is a zip; inside is `bannertv-<version>-debug.apk`, and `bannertv-<version>-release.apk` once the release key is set up.
 
-The debug build installs as **BannerTV test** (`com.bannertv.app.debug`), beside any release build, with its own data. A newer debug build installs over it and keeps its addons and profiles. CI keeps the debug key in its cache, which GitHub empties after a week without a run; if Android then refuses the update ("App not installed" or "package conflicts"), uninstall the old build first, which clears its data.
+The debug build installs as **BannerTV test** (`com.bannertv.app.debug`), beside any release build, with its own data. A newer debug build installs over it and keeps its addons and profiles. CI keeps the debug key in its cache, which GitHub empties after a week without a run. A branch's builds share one key, and every branch can read `main`'s, but `main` cannot read a branch's, so the first build from `main` after a merge has a key of its own. If Android refuses an update ("App not installed" or "package conflicts"), uninstall the old build first, which clears its data.
 
 ## On an Android phone
 

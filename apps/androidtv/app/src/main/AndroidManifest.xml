@@ -29,14 +29,19 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
 
-        <!-- Every config change is handled in place, so the WebView and the player survive it. -->
+        <!--
+            Every config change is handled in place, so the WebView and the player survive it.
+            adjustResize resizes nothing here (the app draws edge to edge), but before Android 11
+            it is how the keyboard's height reaches the window insets, which tell the page when
+            the keyboard opens and closes.
+        -->
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|density|fontScale|layoutDirection"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape"
-            android:windowSoftInputMode="adjustNothing">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

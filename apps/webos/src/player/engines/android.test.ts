@@ -223,6 +223,37 @@ describe("Android's engine", () => {
     expect(engine.isLive()).toBe(true);
   });
 
+  it('takes no stream for a broadcast until Android has read it', () => {
+    const { element, engine } = open();
+    // Android's placeholder while a film opens: no length, and nothing known yet.
+    state({ playing: false, buffering: true, ready: false, duration: -1, live: true });
+    expect(engine.isLive()).toBe(false);
+    state({ position: 1, duration: 5400 });
+    expect(engine.isLive()).toBe(false);
+    expect(element.duration).toBe(5400);
+  });
+
+  it('reads a file with no length in it as Infinity once Android plays it, as the TV does', () => {
+    const { element, engine } = open();
+    expect(element.duration).toBeNaN();
+    state({ duration: null });
+    expect(element.duration).toBe(Infinity);
+    expect(engine.isLive()).toBe(false);
+  });
+
+  it('says it is waiting when the viewer plays on before Android has enough to show', () => {
+    const { element, events } = open();
+    state();
+    state({ playing: false, buffering: true, position: 40 });
+    element.pause();
+    vi.advanceTimersByTime(0);
+    state({ playWhenReady: false, playing: false, buffering: true, position: 40 });
+    events.length = 0;
+    void element.play();
+    vi.advanceTimersByTime(0);
+    expect(events).toEqual(['play', 'waiting']);
+  });
+
   it('ends as a browser does: pause, then ended', () => {
     const { events } = open();
     state();

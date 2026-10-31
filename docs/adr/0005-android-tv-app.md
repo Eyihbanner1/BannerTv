@@ -71,7 +71,9 @@ Player commands:
 
 Every player event also carries `"load"`, the id of the load command it is about. Android's player can send news about a stream just as the page moves on to another (an error, the end, its track list), so the page drops news whose id is not the latest.
 
-Android's error codes map to the kinds the session already acts on: network errors (2xxx) to `network`; malformed files and decoder failures (3001, 3002, 4001 to 4003) to `decode`; unsupported containers, formats beyond the device, audio output failures and DRM (3003, 3004, 4004, 4005, 5xxx, 6xxx) to `format`; anything else to `other`. Falling behind a live window (1002) is recovered by Android without telling the page.
+Android's error codes map to the kinds the session already acts on: network errors (2xxx) to `network`; malformed files and decoder failures (3001, 3002, 4001 to 4003) to `decode`; unsupported containers, formats beyond the device, audio output failures and DRM (3003, 3004, 4004, 4005, 5xxx, 6xxx) to `format`; anything else to `other`. Falling behind a live window (1002) is recovered by Android without telling the page. A link of no known kind (3003) is tried once more as HLS, since IPTV and proxy links often leave out `.m3u8`; if that fails too, the first error is reported. A video track no decoder on the device can show, which ExoPlayer would play as sound alone, is reported as `format` with the detail `VIDEO_UNSUPPORTED (<mime>)`.
+
+`live` is true only on a real live timeline. While a stream opens ExoPlayer stands in a placeholder timeline that has no length and could pass for a broadcast, and the session clears a film's resume point for a broadcast, so the page also takes `live` only from a state that is `ready`. A file whose length Android cannot read reads as `Infinity` once it plays, as on the TV, so its progress is kept against the film's running time.
 
 ## Consequences
 
