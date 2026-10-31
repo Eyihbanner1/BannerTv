@@ -1,58 +1,263 @@
 import { describe, expect, it } from 'vitest';
-import { isClip, isSpecial, percent } from './scrobble-progress';
+import type { SessionState, SessionStatus } from '../../player/session';
+import { createScrobblePlace, isClip, isSpecial, percent } from './scrobble-progress';
 
 const EPISODE_S = 47 * 60;
 const EPISODE = 'tt0944947:1:3';
 
+type Entry = SessionState['entry'];
+const REAL = { name: 'The episode' } as unknown as Entry;
+const OTHER = { name: 'Another release' } as unknown as Entry;
+const CLIP = { name: 'A 30 second clip' } as unknown as Entry;
+
+function played(
+  position: number,
+  duration: number,
+  status: SessionStatus = 'playing',
+  clip = false,
+  entry: Entry = clip ? CLIP : REAL,
+) {
+  return { status, entry, position, duration, clip };
+}
+
 describe('isClip', () => {
-  it('takes a 30 second file of a 47 minute episode for a clip', () => {
-    expect(isClip({ position: 30, duration: 30 }, EPISODE_S, EPISODE)).toBe(true);
+  it('takes a 30 second file of a 47 minute episode for a clip, before the player judges it', () => {
+    expect(isClip(played(30, 30), EPISODE_S, EPISODE)).toBe(true);
   });
 
-  it('takes a short episode for the episode', () => {
-    expect(isClip({ position: 0, duration: 21 * 60 }, EPISODE_S, EPISODE)).toBe(false);
+  it('takes a file the player judged a clip for one, whatever is known of its length', () => {
+    expect(isClip(played(10, 0, 'playing', true), undefined, EPISODE)).toBe(true);
   });
 
-  it('takes a short file of a short title for the title', () => {
-    expect(isClip({ position: 0, duration: 4 * 60 }, 15 * 60, EPISODE)).toBe(false);
-    expect(isClip({ position: 0, duration: 4 * 60 }, 4 * 60, 'tt0000001')).toBe(false);
+  it('takes a short episode, or a short file of a short title, for the title', () => {
+    expect(isClip(played(0, 21 * 60), EPISODE_S, EPISODE)).toBe(false);
+    expect(isClip(played(0, 4 * 60), 15 * 60, EPISODE)).toBe(false);
   });
 
-  it('never guesses: without a running time from the title, nothing is a clip', () => {
-    expect(isClip({ position: 30, duration: 30 }, undefined, EPISODE)).toBe(false);
+  it('never guesses: without a running time from the title, its length makes nothing a clip', () => {
+    expect(isClip(played(30, 30), undefined, EPISODE)).toBe(false);
   });
 
-  it('never takes a special for a clip, however long the series runs', () => {
+  it('never takes a special for a clip by its length, however long the series runs', () => {
     expect(isSpecial('tt0944947:0:12')).toBe(true);
     expect(isSpecial('tmdb:1399:0:1')).toBe(true);
     expect(isSpecial('tt0944947:10:1')).toBe(false);
     expect(isSpecial('tt0944947')).toBe(false);
-    expect(isClip({ position: 0, duration: 3 * 60 }, EPISODE_S, 'tt0944947:0:12')).toBe(false);
+    expect(isClip(played(0, 3 * 60), EPISODE_S, 'tt0944947:0:12')).toBe(false);
   });
 
   it('needs a length from the file', () => {
-    expect(isClip({ position: 30, duration: 0 }, EPISODE_S, EPISODE)).toBe(false);
+    expect(isClip(played(30, 0), EPISODE_S, EPISODE)).toBe(false);
   });
 });
 
 describe('percent', () => {
   it('measures a file against its own length', () => {
-    expect(percent({ position: 30 * 60, duration: 60 * 60 }, EPISODE_S, false)).toBe(50);
+    expect(percent(played(30 * 60, 60 * 60), EPISODE_S)).toBe(50);
   });
 
   it('measures a file that gives no length against the running time, or the guess at it', () => {
-    expect(percent({ position: EPISODE_S / 4, duration: 0 }, EPISODE_S, false)).toBe(25);
-  });
-
-  it('measures a clip against the episode, so its end is not a watched episode', () => {
-    expect(percent({ position: 30, duration: 30 }, EPISODE_S, true)).toBeLessThan(2);
-  });
-
-  it('takes the end of a whole short episode for 100%', () => {
-    expect(percent({ position: 21 * 60, duration: 21 * 60 }, 3600, false)).toBe(100);
+    expect(percent(played(EPISODE_S / 4, 0), EPISODE_S)).toBe(25);
   });
 
   it('is 0 with no length at all', () => {
-    expect(percent({ position: 10, duration: 0 }, 0, false)).toBe(0);
+    expect(percent(played(10, 0), 0)).toBe(0);
+  });
+});
+
+describe('createScrobblePlace', () => {
+  const known = { runtimeSeconds: EPISODE_S, knownRuntimeSeconds: EPISODE_S };
+  const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
+  const episode = () => createScrobblePlace(EPISODE);
+
+  it('tells Trakt how far a real file has got', () => {
+    const scrobble = episode();
+    const now = played(20 * 60, 40 * 60);
+    scrobble.see(now, known);
+    expect(scrobble.clip(now, known)).toBe(false);
+    expect(scrobble.now(now, known)).toBe(50);
+  });
+
+  it('keeps the real place while a clip picked after it opens, plays, is paused or ends', () => {
+    const scrobble = episode();
+    scrobble.see(played(20 * 60, 45 * 60), known);
+    // Sources: the clip opens where the episode was, with the episode's length still showing.
+    scrobble.see(played(20 * 60, 45 * 60, 'loading', false, CLIP), known);
+    for (const clip of [
+      played(5, 30, 'playing', false, CLIP),
+      played(12, 30, 'playing', true),
+      played(12, 30, 'paused', true),
+      played(30, 30, 'failed', true),
+    ]) {
+      scrobble.see(clip, known);
+      expect(scrobble.clip(clip, known)).toBe(true);
+      expect(scrobble.now(clip, known)).toBeCloseTo((20 / 45) * 100);
+    }
+  });
+
+  it('keeps the real place when the clip opens paused, before its length is known', () => {
+    const scrobble = episode();
+    scrobble.see(played(31.5, 600), known);
+    scrobble.see(played(31.5, 600, 'paused'), known);
+    // Picked while paused: it opens paused, at the episode's place, with no length yet.
+    scrobble.see(played(31.5, 0, 'loading', false, CLIP), known);
+    const opening = played(31.5, 0, 'paused', false, CLIP);
+    scrobble.see(opening, known);
+    const judged = played(31.5, 40, 'paused', true);
+    scrobble.see(judged, known);
+    expect(scrobble.now(judged, known)).toBeCloseTo(5.25);
+  });
+
+  it('forgets what a clip reached when its running time comes after it started', () => {
+    const scrobble = episode();
+    scrobble.see(played(20 * 60, 45 * 60), known);
+    scrobble.see(played(0, 0, 'loading', false, CLIP), guessed);
+    // No running time yet: the 30 second file passes for the episode.
+    scrobble.see(played(25, 30, 'playing', false, CLIP), guessed);
+    expect(scrobble.now(played(25, 30, 'playing', false, CLIP), guessed)).toBeCloseTo(83.3, 1);
+    // The title's page says 47 minutes: it was a clip all along.
+    const ended = played(30, 30, 'ended', false, CLIP);
+    scrobble.see(ended, known);
+    expect(scrobble.clip(ended, known)).toBe(true);
+    expect(scrobble.now(ended, known)).toBeCloseTo((20 / 45) * 100);
+    // Nor once another clip is picked after it.
+    const next = played(5, 30, 'paused', true, OTHER);
+    scrobble.see(next, known);
+    expect(scrobble.now(next, known)).toBeCloseTo((20 / 45) * 100);
+  });
+
+  it('keeps the place of the real file auto-play moves on to from a clip', () => {
+    const scrobble = episode();
+    // A 40 s "not ready yet" clip, then the episode in its place: each file
+    // opens with no length until it gives its own.
+    scrobble.see(played(1200, 0, 'loading', false, CLIP), known);
+    scrobble.see(played(1200, 40, 'loading', false, CLIP), known);
+    scrobble.see(played(1200, 0, 'loading', false, OTHER), known);
+    // A file of unknown length plays as the title.
+    const unknown = played(1300, 0, 'playing', false, OTHER);
+    scrobble.see(unknown, known);
+    expect(scrobble.clip(unknown, known)).toBe(false);
+    scrobble.see(played(1692, 2820, 'playing', false, OTHER), known);
+    // Then a clip picked in Sources: paused in it, Trakt keeps 60%.
+    scrobble.see(played(1692, 0, 'loading', false, REAL), known);
+    const picked = { ...played(1692, 40, 'paused', true), entry: REAL };
+    scrobble.see(picked, known);
+    expect(scrobble.now(picked, known)).toBeCloseTo(60);
+  });
+
+  it('drops a place a clip reached before the running time was known, once it is', () => {
+    const scrobble = episode();
+    const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
+    scrobble.see(played(0, 0, 'loading', false, CLIP), guessed);
+    scrobble.see(played(25, 30, 'playing', false, CLIP), guessed);
+    // Another clip picked before the page's running time comes.
+    scrobble.see(played(25, 30, 'loading', false, OTHER), guessed);
+    const judged = { ...played(10, 30, 'paused', true), entry: OTHER };
+    scrobble.see(judged, known);
+    expect(scrobble.now(judged, known)).toBeUndefined();
+  });
+
+  it('measures a pause or close while the next file opens by the file that was playing', () => {
+    const scrobble = episode();
+    // A 70 minute file of a title whose page says 45: 40 minutes in is 57%.
+    scrobble.see(played(2400, 4200), known);
+    // Another release opens there, with no length until it gives its own.
+    const opening = played(2400, 0, 'loading', false, OTHER);
+    scrobble.see(opening, known);
+    expect(scrobble.now(opening, known)).toBeCloseTo(57.14);
+    expect(scrobble.now(played(2400, 0, 'paused', false, OTHER), known)).toBeCloseTo(57.14);
+    // Once it gives its length, its own place.
+    const own = played(2400, 4000, 'playing', false, OTHER);
+    scrobble.see(own, known);
+    expect(scrobble.now(own, known)).toBe(60);
+  });
+
+  it('measures the first file, opening at a saved place, against the running time', () => {
+    const scrobble = episode();
+    const opening = played(EPISODE_S / 2, 0, 'loading');
+    scrobble.see(opening, known);
+    expect(scrobble.now(opening, known)).toBe(50);
+  });
+
+  it('measures a file of unknown length that plays against the running time', () => {
+    const scrobble = episode();
+    scrobble.see(played(2400, 4200), known);
+    scrobble.see(played(2400, 0, 'loading', false, OTHER), known);
+    const unknown = played(EPISODE_S / 2, 0, 'playing', false, OTHER);
+    scrobble.see(unknown, known);
+    expect(scrobble.now(unknown, known)).toBe(50);
+  });
+
+  it('tells Trakt nothing for a clip when no real file played', () => {
+    const scrobble = episode();
+    const clip = played(30, 30, 'paused', true);
+    scrobble.see(clip, known);
+    expect(scrobble.now(clip, known)).toBeUndefined();
+  });
+
+  it('follows a real file picked after a clip, and keeps it through the next clip', () => {
+    const scrobble = episode();
+    scrobble.see(played(10, 30, 'playing', true), known);
+    const real = played(9 * 60, 45 * 60, 'playing', false, OTHER);
+    scrobble.see(real, known);
+    expect(scrobble.now(real, known)).toBe(20);
+    expect(scrobble.now(played(5, 30, 'paused', true), known)).toBe(20);
+    scrobble.see(played(5, 30, 'paused', true), known);
+    expect(scrobble.now(played(5, 30, 'paused', true), known)).toBe(20);
+  });
+
+  it('learns nothing from a file opening, until it plays or gives its own length', () => {
+    const scrobble = episode();
+    const clip = played(3, 30, 'paused', true);
+    // Opened paused at the last file's place, with no length yet.
+    scrobble.see(played(10 * 60, 0, 'loading'), known);
+    scrobble.see(played(10 * 60, 0, 'paused'), known);
+    expect(scrobble.now(clip, known)).toBeUndefined();
+    // Its own length in: paused at 20 of 40 minutes (moved there, say).
+    scrobble.see(played(20 * 60, 40 * 60, 'paused'), known);
+    expect(scrobble.now(clip, known)).toBe(50);
+  });
+
+  it('keeps the real place when two clips come before the running time does', () => {
+    const scrobble = episode();
+    const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
+    scrobble.see(played(1410, 2820, 'playing', false, REAL), guessed);
+    // A 4 minute sample passes for the title while the page's running time is not in.
+    scrobble.see(played(1410, 0, 'loading', false, CLIP), guessed);
+    scrobble.see(played(1440, 240, 'playing', false, CLIP), guessed);
+    scrobble.see(played(1440, 0, 'loading', false, OTHER), guessed);
+    // The running time comes, and the next sample is judged a clip.
+    const judged = { ...played(1450, 240, 'paused', true), entry: OTHER };
+    scrobble.see(judged, known);
+    expect(scrobble.now(judged, known)).toBeCloseTo(50);
+  });
+
+  it('ends at 100, but a clip found out by its end only at the last real place, or nothing', () => {
+    const scrobble = episode();
+    const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
+    expect(scrobble.end(played(45 * 60, 45 * 60, 'ended'), known)).toBe(100);
+    scrobble.see(played(0, 0, 'loading', false, CLIP), guessed);
+    scrobble.see(played(29, 30, 'playing', false, CLIP), guessed);
+    expect(scrobble.end(played(30, 30, 'ended', false, CLIP), known)).toBeUndefined();
+    const after = createScrobblePlace(EPISODE);
+    after.see(played(9 * 60, 45 * 60), known);
+    after.see(played(9 * 60, 0, 'loading', false, CLIP), guessed);
+    after.see(played(29, 30, 'playing', false, CLIP), guessed);
+    expect(after.end(played(30, 30, 'ended', false, CLIP), known)).toBe(20);
+  });
+
+  it('takes a short file for the title when the page gives no running time', () => {
+    const scrobble = episode();
+    const short = played(30, 30, 'ended');
+    expect(scrobble.clip(short, guessed)).toBe(false);
+    expect(scrobble.now(short, guessed)).toBe(100);
+  });
+
+  it('takes a short special for the special, unless the player judged it a clip', () => {
+    const scrobble = createScrobblePlace('tt0944947:0:4');
+    const special = played(3 * 60, 3 * 60, 'ended');
+    expect(scrobble.clip(special, known)).toBe(false);
+    expect(scrobble.now(special, known)).toBe(100);
+    expect(scrobble.clip(played(10, 30, 'playing', true), known)).toBe(true);
   });
 });

@@ -735,6 +735,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         entry,
         engine: null,
         position: startAt,
+        // Unknown until this file says: never the last file's, which could be
+        // a clip's 40 s beside the video's own start.
+        duration: 0,
         live: false,
         liveWindow: null,
         behind: 0,
