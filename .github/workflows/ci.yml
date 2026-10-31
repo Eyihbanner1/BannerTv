@@ -188,7 +188,7 @@ jobs:
   mobile:
     name: Phone APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -201,6 +201,23 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      # Touch journeys on the web build with the TV journeys' fake addons, before the long
+      # Android build: every screen opens and a film plays.
+      - name: Phone journeys
+        working-directory: apps/mobile
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm export:web
+          pnpm e2e
+
+      - name: Upload the journeys' traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-journeys
+          path: apps/mobile/test-results/
+          if-no-files-found: ignore
 
       - uses: actions/setup-java@v4
         with:

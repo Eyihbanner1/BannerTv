@@ -19,9 +19,10 @@ const REPLACED = {
 
 /**
  * Packages the shared web modules import that must be the phone's own copy: the LG app pins
- * React 18 and a second React in one bundle breaks every hook.
+ * React 18, a second React in one bundle breaks every hook, and react-i18next (and so i18next,
+ * whose instance it holds) must be the copy built against the phone's React.
  */
-const OWN_COPY = /^(react|react\/.*)$/;
+const OWN_COPY = /^(react|react\/.*|react-dom|react-dom\/.*|react-i18next|i18next)$/;
 
 const upstream = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

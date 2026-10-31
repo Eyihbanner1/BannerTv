@@ -8,6 +8,11 @@ const real = globalThis as unknown as {
   localStorage: Storage;
   sessionStorage: Storage;
   history: History;
+  Event: typeof globalThis.Event;
+  CustomEvent: typeof globalThis.CustomEvent;
+  KeyboardEvent: typeof globalThis.KeyboardEvent;
+  HTMLMediaElement: typeof globalThis.HTMLMediaElement;
+  TextDecoder: typeof globalThis.TextDecoder;
 };
 
 export const window = real.window;
@@ -15,3 +20,8 @@ export const document = real.document;
 export const localStorage = real.localStorage;
 export const sessionStorage = real.sessionStorage;
 export const history = real.history;
+export const Event = real.Event;
+export const CustomEvent = real.CustomEvent;
+export const KeyboardEvent = real.KeyboardEvent;
+export const HTMLMediaElement = real.HTMLMediaElement;
+export const TextDecoder = real.TextDecoder;

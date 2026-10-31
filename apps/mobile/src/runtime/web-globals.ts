@@ -15,7 +15,7 @@ import { AppState, type AppStateStatus } from 'react-native';
  * - document.hidden follows the app going to the background and back.
  */
 
-type Listener = (event: { type: string }) => void;
+type Listener = (event: { type: string; detail?: unknown }) => void;
 
 class Listeners {
   private readonly byType = new Map<string, Set<Listener>>();
@@ -33,10 +33,10 @@ class Listeners {
     this.byType.get(type)?.delete(listener);
   }
 
-  dispatch(type: string): void {
+  dispatch(type: string, event: { type: string; detail?: unknown } = { type }): void {
     for (const listener of Array.from(this.byType.get(type) ?? [])) {
       try {
-        listener({ type });
+        listener(event);
       } catch (error) {
         console.warn('[BannerTV] listener failed:', String(error));
       }
@@ -183,7 +183,118 @@ AppState.addEventListener('change', (next) => {
   documentListeners.dispatch('visibilitychange');
 });
 
+/** The DOM Event, as far as the shared modules make and send them. */
+export class Event {
+  readonly type: string;
+  readonly bubbles: boolean;
+  readonly cancelable: boolean;
+  defaultPrevented = false;
+  target: unknown = null;
+
+  constructor(type: string, init: { bubbles?: boolean; cancelable?: boolean } = {}) {
+    this.type = type;
+    this.bubbles = init.bubbles === true;
+    this.cancelable = init.cancelable === true;
+  }
+
+  preventDefault(): void {
+    if (this.cancelable) this.defaultPrevented = true;
+  }
+
+  stopPropagation(): void {}
+}
+
+export class CustomEvent<T = unknown> extends Event {
+  readonly detail: T | null;
+
+  constructor(type: string, init: { detail?: T; bubbles?: boolean; cancelable?: boolean } = {}) {
+    super(type, init);
+    this.detail = init.detail ?? null;
+  }
+}
+
+export class KeyboardEvent extends Event {
+  readonly key: string;
+  readonly repeat: boolean;
+
+  constructor(type: string, init: { key?: string; repeat?: boolean; bubbles?: boolean } = {}) {
+    super(type, init);
+    this.key = init.key ?? '';
+    this.repeat = init.repeat === true;
+  }
+}
+
+/** The readyState numbers the Android engine reports with. */
+export const HTMLMediaElement = {
+  HAVE_NOTHING: 0,
+  HAVE_METADATA: 1,
+  HAVE_CURRENT_DATA: 2,
+  HAVE_FUTURE_DATA: 3,
+  HAVE_ENOUGH_DATA: 4,
+} as const;
+
+/** The page's class list, which the shared modules use as flags (android-video, low-power). */
+class ClassList {
+  private readonly names = new Set<string>();
+
+  add(...names: string[]): void {
+    names.forEach((name) => this.names.add(name));
+  }
+
+  remove(...names: string[]): void {
+    names.forEach((name) => this.names.delete(name));
+  }
+
+  contains(name: string): boolean {
+    return this.names.has(name);
+  }
+
+  toggle(name: string, force?: boolean): boolean {
+    const on = force ?? !this.names.has(name);
+    if (on) this.names.add(name);
+    else this.names.delete(name);
+    return on;
+  }
+}
+
+/** Takes events and keeps them: nothing on a phone listens to the page's body. */
+const quietTarget = {
+  dispatchEvent: () => true,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  appendChild: <T>(child: T): T => child,
+  removeChild: <T>(child: T): T => child,
+};
+
+/**
+ * An element that is never drawn. A script one fails to load, as one would offline: the sports
+ * module then groups matches by what the addons say, without its bundled team list.
+ */
+function createElement(tag: string) {
+  const element = {
+    ...quietTarget,
+    tagName: tag.toUpperCase(),
+    style: {} as Record<string, string>,
+    src: '',
+    onload: null as ((event: Event) => void) | null,
+    onerror: null as ((event: Event) => void) | null,
+    setAttribute: () => undefined,
+    getAttribute: (): null => null,
+    remove: () => undefined,
+  };
+  if (element.tagName === 'SCRIPT') {
+    setTimeout(() => element.onerror?.(new Event('error')), 0);
+  }
+  return element;
+}
+
 export const document = {
+  documentElement: { classList: new ClassList(), style: {} as Record<string, string> },
+  body: quietTarget,
+  head: quietTarget,
+  /** No elements: the phone draws with React Native. */
+  querySelector: (): null => null,
+  createElement,
   get hidden(): boolean {
     return hidden();
   },
@@ -227,7 +338,12 @@ export const window = {
     windowListeners.remove(type, listener);
   },
   dispatchEvent(event: { type: string }): boolean {
-    windowListeners.dispatch(event.type);
+    windowListeners.dispatch(event.type, event);
     return true;
   },
+  /** The Android host (src/player/phone-host.ts) sets these, as the TV's Android app does. */
+  BannerAndroid: undefined as unknown,
+  __bannerAndroid: undefined as unknown,
 };
+
+export { TextDecoder } from './text-decoder';

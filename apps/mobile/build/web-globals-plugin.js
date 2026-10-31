@@ -6,7 +6,18 @@
  * `typeof document`). So each shared module that reads one gets an import of the phone's stand-ins
  * instead, and nothing global changes. See src/runtime/web-globals.ts and ADR 0007.
  */
-const SHIMMED = ['window', 'document', 'localStorage', 'sessionStorage', 'history'];
+const SHIMMED = [
+  'window',
+  'document',
+  'localStorage',
+  'sessionStorage',
+  'history',
+  'Event',
+  'CustomEvent',
+  'KeyboardEvent',
+  'HTMLMediaElement',
+  'TextDecoder',
+];
 
 module.exports = function webGlobals({ types: t }, options) {
   const source = options.source;
