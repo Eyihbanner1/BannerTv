@@ -74,6 +74,9 @@ export interface ScrobblePlace {
 interface Reached {
   position: number;
   duration: number;
+  entry: SessionState['entry'];
+  /** Only moved to, before the file played or gave a length. */
+  moved: boolean;
 }
 
 /** Earlier files' places kept, newest last. */
@@ -95,6 +98,10 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   /** Whether this opening of the file has played, or got past opening at all. */
   let played = false;
   let begun = false;
+  /** Where this opening started, to tell when the viewer moves it. */
+  let openedAt: number | undefined;
+  /** A place the last opening was only moved to: kept if the next opens there. */
+  let movedTo: Reached | undefined;
   let wasClip = false;
   /**
    * This link has been a clip, or a broadcast, and has shown no other length
@@ -109,7 +116,10 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   // As percent() measures it, by the title's running time as it is now when
   // the file gave no length.
   const measure = (place: Reached, runtimes: Runtimes) =>
-    percent({ ...NO_PLAY, ...place }, runtimes.runtimeSeconds);
+    percent(
+      { ...NO_PLAY, position: place.position, duration: place.duration },
+      runtimes.runtimeSeconds,
+    );
   // A place kept from before the title's running time was known is judged
   // again by it: the newest one that was not a clip counts.
   const lastReal = (runtimes: Runtimes) => {
@@ -124,13 +134,23 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     }
     return undefined;
   };
-  // What the file reached is kept, if it was the title, and it starts over.
-  const startOver = () => {
-    if (reached && !wasClip) earlier.push(reached);
+  const keep = (place: Reached) => {
+    earlier.push(place);
     if (earlier.length > KEPT) earlier.shift();
+  };
+  // What the file reached is kept, if it was the title, and it starts over.
+  // A place only moved to counts once the next opening starts there, as the
+  // session opens it where a move it took leads.
+  const startOver = () => {
+    movedTo = undefined;
+    if (reached && !wasClip) {
+      if (reached.moved) movedTo = reached;
+      else keep(reached);
+    }
     reached = undefined;
     played = false;
     begun = false;
+    openedAt = undefined;
     wasClip = false;
   };
   const linkIsClip = (runtimes: Runtimes) =>
@@ -152,6 +172,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         if (wasClip) linkWasClip = true;
         startOver();
       }
+      if (openedAt === undefined) {
+        openedAt = state.position;
+        if (movedTo && Math.abs(movedTo.position - state.position) <= SAME_PLACE_S) keep(movedTo);
+        movedTo = undefined;
+      }
       if (!opening) begun = true;
       if (state.status === 'playing') played = true;
       if (state.live) {
@@ -168,18 +193,36 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       }
       if (clip(state, runtimes)) {
         // Found out late (its running time came after it started): nothing it
-        // reached counts.
+        // reached counts, nor any place it was only moved to.
         wasClip = true;
         reached = undefined;
+        for (let index = earlier.length - 1; index >= 0; index--) {
+          if (earlier[index]!.moved && earlier[index]!.entry === state.entry) {
+            earlier.splice(index, 1);
+          }
+        }
         return;
       }
-      // Once this file has played, or shows its own length: one opening shows
-      // none, beside the place it opened at.
+      // Once this file has played, or shows its own length, a place inside
+      // it; or, with no length, once the viewer moved it from where it opened.
       const underWay =
         state.status === 'playing' || state.status === 'paused' || state.status === 'buffering';
-      if (underWay && !wasClip && (played || state.duration > 0)) {
-        reached = { position: state.position, duration: state.duration };
-      }
+      if (!underWay || wasClip) return;
+      const inside = state.duration === 0 || state.position <= state.duration + SAME_PLACE_S;
+      const moved =
+        state.duration === 0 &&
+        !played &&
+        !linkWasLive &&
+        !linkIsClip(runtimes) &&
+        Math.abs(state.position - (openedAt ?? state.position)) > SAME_PLACE_S;
+      if (inside && (played || state.duration > 0 || moved)) {
+        reached = {
+          position: state.position,
+          duration: state.duration,
+          entry: state.entry,
+          moved: !played && state.duration === 0,
+        };
+      } else if (reached?.moved) reached = undefined;
     },
     clip,
     now(state, runtimes) {
