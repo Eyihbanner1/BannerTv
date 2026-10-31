@@ -1,5 +1,6 @@
 import { createPersisted } from '../persisted';
 import type { KeyValueStore } from '../storage';
+import type { Listener } from '../store';
 
 const KEY = 'trackChoices';
 export const MAX_TRACK_TITLES = 300;
@@ -25,6 +26,22 @@ export interface TrackMemory {
   get(metaId: string): TrackChoice | undefined;
   rememberAudio(metaId: string, language: string): Promise<void>;
   rememberSubtitle(metaId: string, language: string | null): Promise<void>;
+  /** Every title's choice, the least recently changed first. */
+  choices(): readonly TrackChoice[];
+  /**
+   * Makes the choices match a change from the BannerTV account: choices in
+   * `set` are kept as given, as the most recently changed in the order given,
+   * and titles in `remove` forget theirs.
+   */
+  adopt(change: TrackAdoption): Promise<void>;
+  /** Told of every change, and once when the saved choices have been read. */
+  subscribe(listener: Listener): () => void;
+}
+
+/** What the BannerTV account changes in the choices. */
+export interface TrackAdoption {
+  set?: readonly TrackChoice[];
+  remove?: readonly string[];
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
@@ -74,5 +91,20 @@ export function createTrackMemory(options: { storage: KeyValueStore }): TrackMem
     get: (metaId) => state.get().find((choice) => choice.metaId === metaId),
     rememberAudio: (metaId, language) => change(metaId, { audio: language }),
     rememberSubtitle: (metaId, language) => change(metaId, { subtitle: language }),
+    choices: () => state.get(),
+    adopt: (adoption) =>
+      state.update((current) => {
+        const set = readChoices(adoption.set ?? []);
+        const removing = new Set(adoption.remove ?? []);
+        set.forEach((choice) => removing.add(choice.metaId));
+        if (set.length === 0 && !current.some((choice) => removing.has(choice.metaId))) {
+          return current;
+        }
+        return current
+          .filter((choice) => !removing.has(choice.metaId))
+          .concat(set)
+          .slice(-MAX_TRACK_TITLES);
+      }),
+    subscribe: state.subscribe,
   };
 }

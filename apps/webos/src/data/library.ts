@@ -5,10 +5,11 @@ import {
   createTrackMemory,
   createWatchedSet,
 } from '@bannertv/core';
+import { storeNow } from './sync-clock';
 import { profileKv } from './storage';
 
-/** The profile's "My List" (ADR 0004, item 6). */
-export const library = createLibrary({ storage: profileKv });
+/** The profile's "My List" (ADR 0004, item 6), stamped with the account's clock when there is one. */
+export const library = createLibrary({ storage: profileKv, now: storeNow });
 
 /** What Trakt says the profile has watched, for watched ticks (ADR 0004, item 12). */
 export const watchedSet = createWatchedSet({ storage: profileKv });

@@ -22,7 +22,7 @@ export interface InstalledAddon {
 }
 
 /** A short tag for an address, so what is saved about an install never holds the address, which can hold keys. */
-function addressTag(url: string): string {
+export function addressTag(url: string): string {
   // FNV-1a: the same on every launch.
   let hash = 0x811c9dc5;
   for (let index = 0; index < url.length; index++) {
@@ -94,6 +94,24 @@ export interface AddonCollection extends Pick<Store<CollectionState>, 'get' | 's
   move(transportUrl: string, offset: number): void;
   /** Fetches manifests older than `maxAgeMs` again. Failures keep the old manifest. */
   refreshManifests(maxAgeMs: number): Promise<void>;
+  /** The collection as it is saved, with every install's name (installIdOf) filled in. */
+  toStored(): StoredAddon[];
+  /**
+   * Makes the collection match a change from the BannerTV account, with no
+   * request to any addon. Each addon in `set` names its install: it replaces
+   * that install, or one at the same address, or else joins the end. One
+   * already here at the same address keeps its own manifest. Installs named in
+   * `remove` leave, and `order` (install names) puts the rest in order, any
+   * it does not name after it as they were.
+   */
+  adopt(change: CollectionAdoption): Promise<void>;
+}
+
+/** What the BannerTV account changes in the collection. */
+export interface CollectionAdoption {
+  set?: readonly StoredAddon[];
+  remove?: readonly string[];
+  order?: readonly string[];
 }
 
 /** The scheme and host of an address normalizeManifestUrl has accepted. */
@@ -146,6 +164,16 @@ export function createAddonCollection(options: {
       }
     }
     return addons;
+  }
+
+  function stored(addons: readonly InstalledAddon[]): StoredAddon[] {
+    return addons.map((addon) => ({
+      transportUrl: addon.transportUrl,
+      manifest: raw.get(addon.transportUrl),
+      official: addon.official,
+      fetchedAt: addon.fetchedAt,
+      installId: installIdOf(addon),
+    }));
   }
 
   function save(addons: readonly InstalledAddon[]) {
@@ -296,6 +324,65 @@ export function createAddonCollection(options: {
           return manifest ? { ...addon, manifest, fetchedAt } : addon;
         }),
       );
+    },
+
+    toStored: () => stored(state.get().addons),
+
+    async adopt(change) {
+      // Before the saved collection is read, this would save over it.
+      if (!state.get().ready) return;
+      let list = stored(state.get().addons);
+      const before = JSON.stringify(list.map((item) => [item.installId, item.transportUrl]));
+      const removing = new Set(change.remove ?? []);
+      list = list.filter((item) => !removing.has(item.installId!));
+      for (const incoming of change.set ?? []) {
+        if (!incoming || typeof incoming.transportUrl !== 'string' || !incoming.installId) continue;
+        const at = list.findIndex(
+          (item) =>
+            item.installId === incoming.installId || item.transportUrl === incoming.transportUrl,
+        );
+        const old = at === -1 ? undefined : list[at]!;
+        // The same address: what this screen fetched is as good, and maybe fresher.
+        const item: StoredAddon =
+          old && old.transportUrl === incoming.transportUrl
+            ? { ...old, official: incoming.official === true, installId: incoming.installId }
+            : {
+                transportUrl: incoming.transportUrl,
+                manifest: incoming.manifest,
+                official: incoming.official === true,
+                fetchedAt: 0,
+                installId: incoming.installId,
+              };
+        // Another install of this screen's at the same address leaves, as one install per address is kept.
+        list = list.filter(
+          (other, index) => index === at || other.transportUrl !== incoming.transportUrl,
+        );
+        const place = old ? list.indexOf(old) : -1;
+        if (place === -1) list.push(item);
+        else list[place] = item;
+      }
+      if (change.order) {
+        const rank = new Map(change.order.map((id, index) => [id, index]));
+        list = list
+          .map((item, index) => ({ item, index, rank: rank.get(item.installId!) }))
+          .sort((a, b) => {
+            if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank;
+            if (a.rank !== undefined) return -1;
+            if (b.rank !== undefined) return 1;
+            return a.index - b.index;
+          })
+          .map(({ item }) => item);
+      }
+      const after = JSON.stringify(list.map((item) => [item.installId, item.transportUrl]));
+      const official = (items: StoredAddon[]) => items.map((item) => item.official).join();
+      if (after === before && official(list) === official(stored(state.get().addons))) return;
+      const addons = readAll(list);
+      // Addresses that left take their manifests with them.
+      const kept = new Set(addons.map((addon) => addon.transportUrl));
+      Array.from(raw.keys()).forEach((url) => {
+        if (!kept.has(url)) raw.delete(url);
+      });
+      update(addons);
     },
   };
 }

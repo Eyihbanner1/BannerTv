@@ -10,6 +10,7 @@ import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
 import { startSports } from './data/sports';
+import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
@@ -51,6 +52,7 @@ function start() {
   checkServiceStatus();
   startTrakt();
   void startSports();
+  startSync();
 
   createRoot(root).render(
     <StrictMode>

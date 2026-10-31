@@ -17,6 +17,7 @@ import { ProfileEditScreen } from '../screens/profiles/ProfileEditScreen';
 import { ProfilePicker } from '../screens/profiles/ProfilePicker';
 import { ProfilesScreen } from '../screens/profiles/ProfilesScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
+import { AccountScreen } from '../screens/settings/AccountScreen';
 import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
 import { TraktScreen } from '../screens/settings/TraktScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -78,6 +79,8 @@ function Screen({ route }: { route: Route }) {
       return <HomeRowsScreen />;
     case 'trakt':
       return <TraktScreen />;
+    case 'account':
+      return <AccountScreen />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;

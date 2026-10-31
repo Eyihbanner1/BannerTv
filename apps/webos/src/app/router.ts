@@ -97,7 +97,9 @@ export type Route =
   /** Settings > Home rows: their order, and which are hidden. */
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */
-  | { name: 'trakt' };
+  | { name: 'trakt' }
+  /** Settings > BannerTV account: create, join, sync now, leave, delete (ADR 0006). */
+  | { name: 'account' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 

@@ -396,3 +396,55 @@ describe('a match opened from its catalog in Discover', () => {
     expect(event?.home).toBe('Chelsea');
   });
 });
+
+describe('Show in Sports in the BannerTV account', () => {
+  const addon = install('org.x.sports', 'https://x.example.com/manifest.json', [FOOTBALL, LIVE]);
+  const moved = install('org.x.sports.99887766aabb', 'https://x.example.com/9988/manifest.json', [
+    FOOTBALL,
+    LIVE,
+  ]);
+
+  it('takes what the person sets, and automatic as no choice', async () => {
+    const { sports } = await start([addon]);
+    const first = sports.sportsChoices.get();
+    expect(first.size).toBe(0);
+    let calls = 0;
+    sports.sportsChoices.subscribe(() => (calls += 1));
+    sports.setSportsSetting(addon, 'no');
+    expect(sports.sportsChoices.get()).not.toBe(first);
+    expect(Array.from(sports.sportsChoices.get())).toEqual([['org.x.sports', 'no']]);
+    sports.setSportsSetting(addon, 'auto');
+    expect(sports.sportsChoices.get().size).toBe(0);
+    expect(calls).toBe(2);
+  });
+
+  it('leaves the account alone when an addon moves or goes', async () => {
+    const { sports, collection } = await start([addon]);
+    sports.setSportsSetting(addon, 'yes');
+    const before = sports.sportsChoices.get();
+    collection.set({ ready: true, addons: [moved] });
+    collection.set({ ready: true, addons: [] });
+    expect(sports.sportsChoices.get()).toBe(before);
+  });
+
+  it('applies the account’s choices to the setting, and reads them back after a launch', async () => {
+    const { sports } = await start([addon]);
+    sports.sportsChoices.adopt([['org.x.sports', 'no']], []);
+    expect(sports.sportsSetting(addon)).toBe('no');
+    expect(sports.sportsState.get().shown).toBe(false);
+    expect(saved.get('sports.settings')).toEqual({ 'org.x.sports': 'no' });
+
+    const again = await start([addon]);
+    expect(Array.from(again.sports.sportsChoices.get())).toEqual([['org.x.sports', 'no']]);
+    again.sports.sportsChoices.adopt([], ['org.x.sports']);
+    expect(again.sports.sportsSetting(addon)).toBe('auto');
+  });
+
+  it('keeps an addon id like __proto__ as an ordinary setting', async () => {
+    const odd = install('__proto__', 'https://odd.example.com/manifest.json', [FOOTBALL]);
+    const { sports } = await start([odd]);
+    sports.sportsChoices.adopt([['__proto__', 'yes']], []);
+    expect(sports.sportsSetting(odd)).toBe('yes');
+    expect(sports.sportsSetting(addon)).toBe('auto');
+  });
+});

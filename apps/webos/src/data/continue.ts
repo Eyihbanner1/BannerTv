@@ -75,8 +75,10 @@ function walk(): void {
       // Recorded meanwhile by the player, which knows better.
       const latest = playedVideos.get(entry.videoId);
       if (latest && latest !== card) return;
+      // Filled in here, not played: the account never takes it as an edit (ADR 0006, decision 4).
       playedVideos.record(
         playedCard(meta, entry.videoId, meta, { metaId: entry.metaId, type: entry.type }),
+        { filled: true },
       );
     };
     const done = () => {

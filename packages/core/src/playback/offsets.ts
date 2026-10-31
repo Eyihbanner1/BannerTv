@@ -7,7 +7,7 @@ export const MAX_SUBTITLE_OFFSETS = 300;
 /** Further than this is another film's subtitles, not a timing to fix. */
 const LIMIT_S = 600;
 
-interface SavedOffset {
+export interface SavedOffset {
   /** Who the file is, as made by subtitleFileKey: never a link. */
   key: string;
   /** Seconds; positive shows the subtitles later. */
@@ -24,7 +24,21 @@ export interface SubtitleOffsets {
   /** The timing kept for the file, if any. */
   get(key: string): number | undefined;
   remember(key: string, offset: number): Promise<void>;
+  /** Every file's timing, the least recently changed first. */
+  offsets(): readonly SavedOffset[];
+  /**
+   * Makes the timings match a change from the BannerTV account: timings in
+   * `set` are kept as the most recently changed, in the order given, and
+   * files in `remove` forget theirs. A timing of 0 is a removal.
+   */
+  adopt(change: OffsetAdoption): Promise<void>;
   subscribe(listener: Listener): () => void;
+}
+
+/** What the BannerTV account changes in the timings. */
+export interface OffsetAdoption {
+  set?: readonly SavedOffset[];
+  remove?: readonly string[];
 }
 
 /** Tenths of a second, as the player moves them. */
@@ -72,6 +86,22 @@ export function createSubtitleOffsets(options: { storage: KeyValueStore }): Subt
         return (value === 0 ? rest : rest.concat({ key, offset: value })).slice(
           -MAX_SUBTITLE_OFFSETS,
         );
+      }),
+    offsets: () => state.get(),
+    adopt: (adoption) =>
+      state.update((current) => {
+        const set = readOffsets(adoption.set ?? []);
+        const removing = new Set(adoption.remove ?? []);
+        for (const saved of adoption.set ?? []) {
+          if (saved && typeof saved.key === 'string') removing.add(saved.key);
+        }
+        if (set.length === 0 && !current.some((saved) => removing.has(saved.key))) {
+          return current;
+        }
+        return current
+          .filter((saved) => !removing.has(saved.key))
+          .concat(set)
+          .slice(-MAX_SUBTITLE_OFFSETS);
       }),
     subscribe: state.subscribe,
   };

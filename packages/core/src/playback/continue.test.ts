@@ -870,3 +870,51 @@ describe('continueWatching', () => {
     expect(tv.items(2).map((item) => item.preview.id)).toEqual(['tt25', 'tt24']);
   });
 });
+
+describe('filled cards and the BannerTV account', () => {
+  const card: Card = { videoId: 'tt1', metaId: 'tt1', type: 'movie', name: 'One' };
+
+  it('marks a card the screen filled in, keeps the mark when read back, and drops it when played', async () => {
+    const storage = memoryKeyValueStore();
+    const played = createPlayedVideos({ storage, now: () => 10 });
+    await played.load();
+    played.record(card, { filled: true });
+    expect(played.get('tt1')?.filled).toBe(true);
+    await flush();
+    const again = createPlayedVideos({ storage, now: () => 20 });
+    await again.load();
+    expect(again.get('tt1')?.filled).toBe(true);
+    again.record({ ...card, name: 'One, played' });
+    expect(again.get('tt1')).toEqual({ ...card, name: 'One, played', updatedAt: 20 });
+  });
+
+  it('adopts cards with their own times, least recently played first, and forgets others', async () => {
+    const storage = memoryKeyValueStore();
+    const played = createPlayedVideos({ storage, now: () => 50, maxCards: 3 });
+    await played.load();
+    played.record(card);
+    played.record({ ...card, videoId: 'tt2', metaId: 'tt2' });
+    const listener = vi.fn();
+    played.subscribe(listener);
+    await played.adopt({
+      set: [
+        { ...card, videoId: 'tt3', metaId: 'tt3', updatedAt: 90 },
+        { ...card, videoId: 'tt4', metaId: 'tt4', updatedAt: 10 },
+        { ...card, videoId: 'tt5', metaId: 'tt5', updatedAt: 70 },
+      ],
+      remove: ['tt2'],
+    });
+    // The limit of three drops the least recently played, an adopted one here.
+    expect(played.get('tt4')).toBeUndefined();
+    expect(played.get('tt2')).toBeUndefined();
+    expect(played.get('tt3')?.updatedAt).toBe(90);
+    expect(played.get('tt1')?.updatedAt).toBe(50);
+    expect(listener).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(((await storage.get('played')) as PlayedVideo[]).map((c) => c.videoId)).toEqual([
+      'tt1',
+      'tt5',
+      'tt3',
+    ]);
+  });
+});

@@ -517,7 +517,7 @@ On 30 October 2026 Phase 5 started, with Phase 4 (the LG Content Store) on hold,
 
 - [x] Android TV app: the same build in a Kotlin WebView shell, with video in Android's ExoPlayer under the page (design in [ADR 0005](adr/0005-android-tv-app.md), setup in [ANDROID_TV_SETUP.md](ANDROID_TV_SETUP.md)). Built by CI as an APK
 - [ ] Try it on Eyitayo's Android phone, then on an Android TV or Fire TV device
-- [ ] A BannerTV account, so profiles, addons, My List, Continue Watching and settings follow a person between the LG and Android: sign-in with an account code and no email, data encrypted on the device before it is sent, and a small `sync` Cloudflare Worker that Eyitayo deploys
+- [ ] A BannerTV account, so profiles, addons, My List, Continue Watching and settings follow a person between the LG and Android: sign-in with an account code and no email, data encrypted on the device before it is sent, and a small `sync` Cloudflare Worker that Eyitayo deploys (design in [ADR 0006](adr/0006-account-and-sync.md), deploy steps in [services/sync/README.md](../services/sync/README.md))
 - [ ] Phone apps (Android, then iOS), sharing `packages/core`
 
 **Phase 0 tasks to start with**

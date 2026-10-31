@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../http';
 import { memoryKeyValueStore } from '../storage';
-import { createAddonCollection, InstallError, installIdOf, type StoredAddon } from './collection';
+import {
+  addressTag,
+  createAddonCollection,
+  InstallError,
+  installIdOf,
+  type StoredAddon,
+} from './collection';
 import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
 
 /** Cinemeta and OpenSubtitles v3 as shipped: two official addons, without BannerTV Demo. */
@@ -230,5 +236,81 @@ describe('createAddonCollection', () => {
     await collection.refreshManifests(1000);
     // Only the one that failed is old enough to try again.
     expect(fetchJson.mock.calls.map(([url]) => url)).toEqual([STREMIO_DEFAULTS[1]!.transportUrl]);
+  });
+});
+
+describe('the collection and the BannerTV account', () => {
+  const OTHER_URL = 'https://other.example/manifest.json';
+  const OTHER_MANIFEST = { ...EXTRA_MANIFEST, id: 'org.other', name: 'Other' };
+
+  it('lists itself as saved, with every install named', async () => {
+    const { collection } = setup();
+    await collection.load();
+    const stored = collection.toStored();
+    expect(stored.map((item) => item.transportUrl)).toEqual(urls(collection));
+    expect(stored.map((item) => item.installId)).toEqual(
+      collection.get().addons.map((addon) => installIdOf(addon)),
+    );
+    expect(stored[0]!.manifest).toEqual(STREMIO_DEFAULTS[0]!.manifest);
+  });
+
+  it('adopts addons, removals and the order without asking any addon', async () => {
+    const { collection, fetchJson, storage } = setup();
+    await collection.load();
+    const [cinemeta, subtitles] = collection.toStored();
+    await collection.adopt({
+      set: [
+        {
+          transportUrl: OTHER_URL,
+          manifest: OTHER_MANIFEST,
+          official: false,
+          fetchedAt: 99,
+          installId: 'other1',
+        },
+      ],
+      remove: [subtitles!.installId!],
+      order: ['other1', 'nothing-here'],
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+    expect(urls(collection)).toEqual([OTHER_URL, CINEMETA_URL]);
+    const other = collection.get().addons[0]!;
+    expect(installIdOf(other)).toBe('other1');
+    // Fetched again at the next refresh, which is not an edit.
+    expect(other.fetchedAt).toBe(0);
+    expect(other.manifest.name).toBe('Other');
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.transportUrl)).toEqual([OTHER_URL, CINEMETA_URL]);
+    expect(saved[0]!.installId).toBe('other1');
+    expect(cinemeta!.installId).toBe(installIdOf(collection.get().addons[1]!));
+  });
+
+  it('keeps its own manifest for an address it has, and one install per address', async () => {
+    const { collection } = setup();
+    await collection.load();
+    const [cinemeta] = collection.toStored();
+    await collection.adopt({
+      set: [
+        {
+          transportUrl: CINEMETA_URL,
+          manifest: { ...(cinemeta!.manifest as object), name: 'Old copy' },
+          official: false,
+          fetchedAt: 0,
+          installId: 'elsewhere',
+        },
+      ],
+    });
+    const addons = collection.get().addons;
+    expect(addons.filter((addon) => addon.transportUrl === CINEMETA_URL)).toHaveLength(1);
+    expect(addons[0]!.manifest.name).toBe('Cinemeta');
+    expect(addons[0]!.official).toBe(false);
+    expect(installIdOf(addons[0]!)).toBe('elsewhere');
+  });
+
+  it('changes nothing before the saved collection is read', async () => {
+    const { collection, storage } = setup();
+    await storage.set('addons', STREMIO_DEFAULTS);
+    await collection.adopt({ remove: [addressTag(CINEMETA_URL)] });
+    expect(await storage.get('addons')).toEqual(STREMIO_DEFAULTS);
+    expect(collection.get().ready).toBe(false);
   });
 });

@@ -1,0 +1,85 @@
+/* A line of what is going on: busy, loading, or what the account needs next. */
+.line {
+  max-width: 1100px;
+  margin-bottom: 32px;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+}
+
+.status {
+  margin-bottom: 32px;
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+}
+
+.help {
+  max-width: 1100px;
+  margin-bottom: 32px;
+  font: 500 24px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+}
+
+.heading {
+  margin-bottom: 16px;
+  font: var(--bt-text-heading);
+  color: var(--bt-text);
+}
+
+/* The account code, large enough to copy from across the room, in its five groups. */
+.codePanel {
+  display: inline-block;
+  margin-bottom: 40px;
+  padding: 32px 40px;
+  border-radius: 24px;
+  background: var(--bt-surface-1);
+}
+
+.code {
+  margin: 8px 0 24px;
+  font: 700 72px/1.1 var(--bt-font);
+  letter-spacing: 8px;
+  color: var(--bt-text);
+  white-space: nowrap;
+}
+
+.group {
+  display: inline-block;
+  margin-right: 40px;
+}
+
+.group:last-child {
+  margin-right: 0;
+}
+
+/* Typing the code, or its last four characters, with the buttons under the field. */
+.wide {
+  width: 1100px;
+}
+
+.actions {
+  width: 640px;
+  margin-top: 32px;
+}
+
+/* Bring and Use side by side, each with what it would do to every profile. */
+.option {
+  display: inline-block;
+  vertical-align: top;
+  width: 720px;
+  margin: 0 64px 32px 0;
+}
+
+.plan {
+  margin-top: 8px;
+  padding-left: 32px;
+  font: 500 24px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+  list-style: disc;
+}
+
+.note {
+  max-width: 1100px;
+  margin-top: 24px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
