@@ -1,0 +1,125 @@
+/*
+ * The same measurements as the other sheets: 32px, a 104px header, 24px,
+ * then three rows of 116px, which leaves the safe area below.
+ */
+.header {
+  position: relative;
+  height: 104px;
+  margin-bottom: 24px;
+}
+
+.heading {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  padding: 0 28px;
+  white-space: nowrap;
+}
+
+.kicker {
+  display: block;
+  font: var(--bt-text-label);
+  color: var(--bt-text-subtle);
+}
+
+.status {
+  display: block;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+}
+
+.buttons {
+  position: absolute;
+  top: 14px;
+  right: 8px;
+  white-space: nowrap;
+}
+
+/* As the timing steps in Audio & subtitles. */
+.button {
+  display: inline-block;
+  height: 76px;
+  margin-left: 16px;
+  padding: 0 28px;
+  border-radius: 16px;
+  font: var(--bt-text-body);
+  line-height: 76px;
+  color: var(--bt-text-muted);
+  box-shadow: inset 0 0 0 2px var(--bt-surface-3);
+}
+
+.buttonFocused {
+  background: var(--bt-surface-3);
+  color: var(--bt-text);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.empty {
+  position: absolute;
+  padding: 24px 36px 0;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+}
+
+/* Each row: the addon in a column of its own, then the release over its facts. */
+.addon {
+  position: absolute;
+  top: 18px;
+  left: 28px;
+  width: 216px;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text {
+  display: block;
+  margin-left: 240px;
+}
+
+.title {
+  display: block;
+  font: var(--bt-text-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.facts {
+  display: block;
+  margin-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge,
+.works {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 2px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.works {
+  background: rgba(124, 252, 138, 0.16);
+  color: #9cf5a8;
+}
+
+.warning,
+.reason {
+  font: var(--bt-text-label);
+}
+
+.warning {
+  color: #ffcf66;
+}
+
+.reason {
+  color: var(--bt-text-subtle);
+}

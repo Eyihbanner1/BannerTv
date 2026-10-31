@@ -90,6 +90,25 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
   expect(slides).toBe(0);
 });
 
+test('a press made before an opened screen draws its first frame stays where it went', async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(2026, 9, 31, 12, 0, 0).getTime() });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // A busy TV can draw a screen's first frame after the next press: frames wait here.
+  await page.clock.pauseAt(new Date(2026, 9, 31, 12, 1, 0).getTime());
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'details-watch');
+  await page.keyboard.press('ArrowLeft');
+  await expectFocus(page, 'rail-home');
+  await page.clock.resume();
+  // The screen settles two frames after it opens, after it would have taken focus.
+  await expect(page.locator('.screen-settling')).toHaveCount(0);
+  await expectFocus(page, 'rail-home');
+  await press(page, 'ArrowRight', 'details-watch');
+});
+
 test('Back closes screens, goes Home, returns to the first row, then exits', async ({ page }) => {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
@@ -105,6 +124,7 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
   await press(page, 'Enter', 'settings-stream-choice');
   await press(page, 'ArrowDown', 'settings-probing');
   await press(page, 'ArrowDown', 'settings-subtitle-style');
+  await press(page, 'ArrowDown', 'settings-still-watching');
   await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'Enter', 'diagnostics-refresh');
   await expect(page.getByText('classic script')).toBeVisible();

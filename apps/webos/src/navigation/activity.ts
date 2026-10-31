@@ -9,6 +9,8 @@ export const IDLE_AFTER_MS = 3000;
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 let lastAt = 0;
+// Any use of the remote at all, the pointer's moves and clicks included.
+let inputAt = 0;
 let gap = Infinity;
 const listeners = new Set<() => void>();
 
@@ -25,6 +27,7 @@ export function markActivity(): void {
   const now = Date.now();
   gap = now - lastAt;
   lastAt = now;
+  inputAt = now;
   listeners.forEach((listener) => listener());
   const root = document.documentElement;
   if (!root.classList.contains(CLASS)) root.classList.add(CLASS);
@@ -40,4 +43,17 @@ export function activityGap(): number {
 /** How long ago the latest key press (or pointer move) came. */
 export function sinceActivity(): number {
   return Date.now() - lastAt;
+}
+
+/**
+ * The pointer moved or clicked. Unlike a key press it leaves the page's
+ * motion alone: it only says someone is there.
+ */
+export function noteInput(): void {
+  inputAt = Date.now();
+}
+
+/** How long ago anyone used the remote: a key, the wheel, or the pointer moving or clicking. */
+export function sinceInput(): number {
+  return Date.now() - inputAt;
 }

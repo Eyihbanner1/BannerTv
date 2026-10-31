@@ -67,6 +67,10 @@ export interface StreamFacts {
   languages: string[];
   /** From the file name or URL path. */
   container?: Container;
+  /** The group that made the release ("framestor", "flux"), lower case, from a release name. */
+  releaseGroup?: string;
+  /** Named a sample, trailer, teaser or featurette: a short clip, not the video. */
+  sample?: boolean;
 }
 
 /** What the TV can play, as far as BannerTV can tell. null means unknown. */
@@ -159,4 +163,18 @@ export interface QualityChoice {
   /** Undefined for streams whose resolution the addon did not say. */
   resolution: Resolution | undefined;
   entry: StreamEntry;
+  /** ISO 639-1 codes, when the stream names only audio languages other than the one heard now. */
+  otherLanguages?: string[];
+}
+
+/** What plays now: the Quality menu and a step-down look for the stream closest to it. */
+export interface QualityReference {
+  entry: StreamEntry;
+  /** The playing audio track's language as the engine names it ("eng", "es-MX"), when known. */
+  audioLanguage?: string;
+  /**
+   * The measured length of what plays now, in seconds, to tell clips by their
+   * size. Undefined while live or unknown; never the title's running time.
+   */
+  lengthSeconds?: number;
 }

@@ -33,6 +33,12 @@ const SETTLING_CLASS = 'screen-settling';
 /** Global, so screens can pause their animations while hidden. */
 const COVERED_CLASS = 'screen-covered';
 
+/** Whether focus is anywhere but in `screen` or on the rail (the page's only nav). */
+function focusLeftBehind(screen: HTMLElement): boolean {
+  const focused = document.activeElement;
+  return !screen.contains(focused) && !focused?.closest('nav');
+}
+
 // A route object lives as long as its stack entry, so its identity names one visit.
 const routeIds = new WeakMap<Route, number>();
 let nextRouteId = 0;
@@ -143,11 +149,13 @@ const ScreenSlot = memo(function ScreenSlot({
 
   // A pushed screen that places no focus of its own yet (it is still loading)
   // takes it here, so the remote cannot move around the hidden screen below.
+  // This frame no longer pulls back focus the viewer moved to the rail before
+  // it came, which a busy TV can draw after the press.
   useEffect(() => {
     if (!pushed) return;
     const frame = requestAnimationFrame(() => {
       const element = ref.current;
-      if (element && !element.contains(document.activeElement)) void setFocus(focusKey);
+      if (element && focusLeftBehind(element)) void setFocus(focusKey);
     });
     return () => cancelAnimationFrame(frame);
   }, [pushed, focusKey, ref]);

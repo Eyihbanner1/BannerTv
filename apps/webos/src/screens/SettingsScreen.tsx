@@ -94,6 +94,14 @@ function FullSettings() {
         />
         <Button
           block
+          focusKey="settings-still-watching"
+          label={t('settings.stillWatching', {
+            value: t(prefs.stillWatching ? 'common.on' : 'common.off'),
+          })}
+          onPress={() => setPreference('stillWatching', !prefs.stillWatching)}
+        />
+        <Button
+          block
           focusKey="settings-diagnostics"
           label={t('settings.diagnostics')}
           onPress={() => push({ name: 'diagnostics' })}

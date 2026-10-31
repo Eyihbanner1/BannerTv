@@ -48,8 +48,39 @@
   transform: rotate(45deg);
 }
 
+/* A row with a body of its own: two lines, say, with room for a bar. */
+.tall {
+  padding-top: 14px;
+  line-height: normal;
+  white-space: normal;
+}
+
+.tall.selected::after {
+  top: calc(50% - 14px);
+}
+
 .dim {
   opacity: 0.6;
+}
+
+/* How far into it the viewer got. */
+.progress {
+  position: absolute;
+  left: 28px;
+  right: 64px;
+  bottom: 10px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.progressFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bt-accent);
 }
 
 .focused {

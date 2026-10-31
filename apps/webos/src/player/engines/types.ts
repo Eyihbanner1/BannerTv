@@ -1,4 +1,4 @@
-import type { Cue } from '@bannertv/core';
+import type { Cue, LiveWindow } from '@bannertv/core';
 
 /** An audio or subtitle track the stream itself carries. */
 export interface EngineTrack {
@@ -18,8 +18,9 @@ export interface EngineTrack {
 /**
  * format: the TV cannot play this container or codec. network: the link
  * failed or expired. decode: the file is broken or the decoder gave up.
+ * clip: it plays, but is a short clip far shorter than the video.
  */
-export type PlaybackErrorKind = 'format' | 'network' | 'decode' | 'other';
+export type PlaybackErrorKind = 'format' | 'network' | 'decode' | 'clip' | 'other';
 
 export class PlaybackError extends Error {
   readonly kind: PlaybackErrorKind;
@@ -54,6 +55,11 @@ export interface Engine {
   load(url: string, startAt: number): Promise<void>;
   /** A live broadcast, which has no end: nothing to resume, and another stream starts at the live edge. */
   isLive(): boolean;
+  /**
+   * What a broadcast still keeps and where this engine plays it live, on
+   * the video's clock. Null when it is not live or the engine can't tell.
+   */
+  liveWindow(): LiveWindow | null;
   audioTracks(): EngineTrack[];
   selectAudio(id: string): void;
   /** Subtitles carried by the stream (HLS or DASH renditions). Cues arrive through the listener. */

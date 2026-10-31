@@ -16,6 +16,7 @@ import {
   rememberScroll,
 } from '../../navigation/focus-memory';
 import { canSlide } from '../../platform/input-mode';
+import { episodeState } from './seasons';
 import styles from './EpisodeList.module.css';
 
 const ITEM_HEIGHT = 168;
@@ -74,10 +75,10 @@ export function EpisodeList({
       : t('details.untitledEpisode', { number });
     const thumbnail = video.thumbnail ?? tmdbImageUrl(extra?.stillPath, 'w300');
     const overview = video.overview || extra?.overview;
-    const upcoming = video.released !== undefined && Date.parse(video.released) > now;
-    const seen = progress.get(video.id);
-    const watched = seen?.watched === true || watchedSet.has(video.id);
-    const fraction = seen && seen.duration > 0 ? Math.min(1, seen.position / seen.duration) : 0;
+    const state = episodeState(video, progress.get(video.id), watchedSet.has(video.id), now);
+    const upcoming = state.kind === 'upcoming';
+    const watched = state.kind === 'watched';
+    const fraction = state.kind === 'started' ? state.fraction : 0;
     const date = video.released
       ? upcoming
         ? t('details.airs', { date: formatDate(video.released) })

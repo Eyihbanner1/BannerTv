@@ -217,7 +217,7 @@ Exact method names and permissions get confirmed in the Phase 0 spike. A webOS J
 - HLS plays natively (v7 on webOS 5+). DASH is not listed for the native player, so DASH streams go through MSE with Shaka Player. MSE and EME follow the W3C recommendations from webOS 5.0. HTTP/2 needs webOS 5.0. Source: [Streaming protocol and DRM](https://webostv.developer.lge.com/develop/specifications/streaming-protocol-drm).
 - Native subtitle support is WebVTT only, so BannerTV renders SRT and VTT itself in an overlay.
 - The `mediaOption` parameter on the `<source>` type passes a resume position and adaptive-streaming limits to the native player ([mediaOption parameters](https://webostv.developer.lge.com/develop/guides/mediaoption-parameter)).
-- Native HLS does not support playback speeds other than 1.0.
+- Native HLS does not support playback speeds other than 1.0. BannerTV offers a speed only where Settings > Lab measured this TV keeping it, with sound, for that kind of stream.
 
 ## Architecture
 
@@ -381,7 +381,9 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 - Save the position every 10 seconds, on pause and when the app is hidden. Mark as watched at 90% (configurable).
 - Resume with "Resume from 42:10" or "Start over" once 30 seconds have played, but not in the last minute. A rewatch resumes too, unless it stopped past 90%. A series offers its latest episode as "Resume S1:E3". The resume position is passed to the native player with `mediaOption` so the TV starts at the right spot instead of seeking after load. On webOS 22 this works for HLS and MP4. With `mediaOption`, `currentTime` reads 0 at the first `playing` event and the real position about 55 ms later, so progress is only saved once the clock has moved past the resume point, never from that first 0.
 - Playback health: `getVideoPlaybackQuality()` reports no frames at all on webOS 22, so dropped frames cannot be counted. Stall detection and the "try the next stream" offer use `waiting` and `stalled` events and a timer.
-- Up Next card in the last 30 seconds or at 95%, with a 10 second countdown. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the automatic choice.
+- Up Next card in the last 30 seconds, counting down to the real end of the episode so nothing is cut. It shows only over the picture alone and never takes focus from the controls, a sheet or a skip; with the controls up, the Next episode button counts instead. Rewinding into the last 30 seconds brings it back. An end held by a sheet counts 10 seconds once the sheet goes. The next video ID comes from the series meta, and the stream is the one with the same `bingeGroup` from the same addon, falling back to the automatic choice.
+- "Still watching?" in place of the third episode in a row to start by itself with nothing pressed, or after 90 minutes without a key (Settings can turn it off).
+- Sleep timer, in the Info sheet: 15, 30, 45, 60 or 90 minutes, or the end of the episode or film. A minute before, a card in the corner offers 15 minutes more or turning it off; then the video pauses under a dark screen.
 - Trakt scrobble start, pause and stop events (Phase 3).
 
 **Player controls**
@@ -400,11 +402,11 @@ Phase 0 results on webOS 22 (details in [ADR 0001](adr/0001-react-norigin-classi
 The controls are two tiers over the bottom of the picture, from the redesign Eyitayo picked on 29 October 2026 (built in four steps, each tried on the TV first):
 
 - Top: a back arrow for the pointer, the title, three facts (resolution, HDR, sound), the clock and "Ends at".
-- The bar: time played, then the bar, then time left ("−12:40"), or LIVE on a broadcast.
-- Transport, icons with their names under them, in fixed places: Start over, Back 10 s, Play or Pause (larger, in the middle), Forward 10 s, Next episode (anything with an episode list).
-- Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources (All streams; Back from the list goes back to the film, where it was, on the same stream).
-- Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why (an icon under it when focused, a chip in place of its value): Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found.
-- While the Up Next card shows, the controls give way to it.
+- The bar: time played, then the bar, then time left ("−12:40"). On a broadcast LIVE takes the place of the time played, with a red dot while it plays live; behind live the dot goes grey, the time on the right says how far behind ("−0:42"), and the bar is what the broadcast keeps.
+- Transport, icons with their names under them, in fixed places: Start over, Back 10 s, Play or Pause (larger, in the middle), Forward 10 s, then Next episode (anything with an episode list) or, on a broadcast, Go to live.
+- Tools, as chips saying what is on now: Audio & subtitles (the subtitle language, with the Blue key's dot), Quality (the resolution playing), Sources, Episodes (anything with an episode list) and Info (the sleep timer, when one is set).
+- Nothing comes or goes while the video plays. A control that can't be used now stays in its place, dimmed, and says why (an icon under it when focused, a chip in place of its value): Start over on a broadcast, Next episode with no next one (last, not out yet, or no episode list), Quality with one quality found, Episodes with no list, and Forward 10 s and Go to live while a broadcast plays live.
+- The controls win over Up Next: its card shows only over the picture alone, and the Next episode button counts down while the controls are up.
 
 The audio and subtitle sheet (step 3) rises from the bottom over the lower half of the picture. The picture above stays bright, the controls make way for it, and the subtitle line sits just above it, so a style or timing change shows as it is made.
 
@@ -415,11 +417,19 @@ The audio and subtitle sheet (step 3) rises from the bottom over the lower half 
 - Style: each choice shown as it looks (Aa at each size, colour swatches, Aa on each background, a picture of each position) and Reset to default. A sample line shows above the sheet while nobody speaks. Settings opens the same choices in the same sheet.
 - Back goes from a tab's choices to the tabs, then closes the sheet onto the controls; Blue or a click above it closes it where it was opened. The controls can't fade behind it, and rows keep their places while more addons answer.
 
+Step 4 made the other tools sheets of the same kind, over the picture, which keeps playing:
+
+- Sources: every stream the addons offered, in the same order as All streams, with the one playing ticked. Back goes back to the film, where it was, on the same stream.
+- Episodes: seasons on the left, the season in focus's episodes on the right.
+- Info: what plays (the addon, the release, its size, picture, sound and how it is played) and what it is, then tabs for Speed and the sleep timer. The plan's "More" chip became these tabs, so the tools row keeps five chips.
+- Speed: Normal and the speeds Settings > Lab passed on this TV for the kind of stream playing (the TV's player on a file or on HLS, hls.js, Shaka), each measured against the clock and checked for sound by the tester. The tab shows only once any speed has passed, and in the Lab, where it runs the test. Diagnostics lists what each kind passed.
+- Quality keeps to streams in the audio language playing and of about the same length, so a switch never lands on a dub, a trailer or a sample.
+
 **Known limits to explain in the UI**
 
 - Audio passthrough (Atmos, TrueHD) is decided by the TV's sound output settings and eARC, not by the app.
 - Dolby Vision profile 7 (Blu-ray remux) often plays as the HDR10 base layer only.
-- Native HLS has no playback speed control.
+- Native HLS has no playback speed control, so Speed shows only where the Lab passed it.
 - Media errors are mapped to plain messages, for example "This TV can't decode TrueHD audio. Try a stream with DD+ audio.", with a "Try next stream" button.
 
 **Resource hygiene**

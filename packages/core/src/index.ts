@@ -113,7 +113,65 @@ export {
   type PlayedVideo,
   type PlayedVideos,
 } from './playback/continue';
-export { findBingeStream, nextVideo } from './playback/next';
+export { bingeEntry, type BingeHint, bingeHint, findBingeStream, nextVideo } from './playback/next';
+export {
+  clampToWindow,
+  judgeLive,
+  type LiveJudgement,
+  liveFraction,
+  type LiveWindow,
+} from './playback/live';
+export {
+  addSleepTime,
+  nextSleepCheck,
+  SLEEP_ADD_MS,
+  SLEEP_CHOICES,
+  SLEEP_SKIPS_NEXT_MS,
+  SLEEP_WARN_MS,
+  type SleepChoice,
+  type SleepMedia,
+  sleepPhase,
+  type SleepPhase,
+  type SleepTimer,
+  startSleep,
+  stopsBeforeNext,
+} from './playback/sleep';
+export {
+  CLOCK_MIN_SAMPLES,
+  clockRate,
+  type ClockSample,
+  createSpeedMemory,
+  judgeClock,
+  judgeSpeed,
+  SPEED_KINDS,
+  SPEED_TEST_RATES,
+  SPEED_TOLERANCE,
+  type SpeedFailure,
+  type SpeedKind,
+  speedKindOf,
+  type SpeedMeasurement,
+  type SpeedMemory,
+  type SpeedResult,
+  type SpeedResults,
+  type SpeedVerdict,
+  steadyBaseline,
+} from './playback/speed';
+export {
+  askStillWatching,
+  STILL_WATCHING_EPISODES,
+  STILL_WATCHING_QUIET_MS,
+} from './playback/still-watching';
+export {
+  type EndAction,
+  endAction,
+  type EndState,
+  inLastStretch,
+  rearms,
+  secondsToEnd,
+  UP_NEXT_AFTER_END_S,
+  UP_NEXT_BEFORE_END_S,
+  UP_NEXT_REARM_S,
+} from './playback/up-next';
 export {
   createProgressStore,
   MIN_RESUME_SECONDS,
@@ -190,9 +248,23 @@ export * from './sports';
 export { createStore } from './store';
 export * from './sync';
 export { assessStream, SEVERE_WARNINGS } from './streams/assess';
-export { DEFAULT_MAX_BITRATE, estimateBitrate, isLighter, parseRuntime } from './streams/bitrate';
+export {
+  DEFAULT_MAX_BITRATE,
+  estimateBitrate,
+  isLighter,
+  isMuchShorter,
+  isTooSmall,
+  parseRuntime,
+} from './streams/bitrate';
 export { describeStream } from './streams/facts';
-export { orderStreams, playableCandidates, qualityChoices } from './streams/order';
+export {
+  closestCandidate,
+  orderStreams,
+  otherLanguages,
+  playableCandidates,
+  qualityChoices,
+  streamTier,
+} from './streams/order';
 export type {
   AudioFormat,
   Channels,
@@ -200,6 +272,7 @@ export type {
   HdrFormat,
   OrderOptions,
   QualityChoice,
+  QualityReference,
   ReleaseSource,
   Resolution,
   StreamAction,
