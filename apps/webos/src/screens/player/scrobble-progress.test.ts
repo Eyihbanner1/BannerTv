@@ -509,10 +509,72 @@ describe('onStatus and onClose', () => {
         [played(5, 40, 'paused', true), known],
       ]),
     ).toEqual(['start(0)', 'pause(40)', 'stop(40)']);
-    // Another real release picked after it, paused and closed while it opens.
+    // Another real release picked after it opens at the start, as the player
+    // opens one after a broadcast: that is where it is.
     expect(
       trakt([...before, [played(0, 0, 'loading'), known], [played(0, 0, 'paused'), known]]),
+    ).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
+    // Found live while it still opens, and opened again at its live edge:
+    // a Pause before the picture keeps the episode's place.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(1128, 2820, 'playing'), known],
+        [played(1128, 0, 'loading', false, OTHER), known],
+        [live(0, 'loading'), known],
+        [played(0, 0, 'loading', false, OTHER), known],
+        [played(0, 0, 'paused', false, OTHER), known],
+      ]),
     ).toEqual(['start(0)', 'pause(40)', 'stop(40)']);
+  });
+
+  it('measures a file opening where the viewer moved one of unknown length, as the player opens it', () => {
+    const moved = [
+      [played(0, 2820, 'playing'), known],
+      [played(1410, 2820, 'playing'), known],
+      [played(1410, 2820, 'paused'), known],
+      // Another quality, of unknown length, opened paused and moved to 85%.
+      [played(1410, 0, 'loading', false, OTHER), known],
+      [played(1410, 0, 'paused', false, OTHER), known],
+      [played(2400, 0, 'paused', false, OTHER), known],
+    ] satisfies [Played, typeof known][];
+    // Play: the same file goes on from there; Back before its picture.
+    expect(trakt([...moved, [played(2400, 0, 'loading', false, OTHER), known]])).toEqual([
+      'start(0)',
+      'pause(50)',
+      'stop(85)',
+    ]);
+    // Another quality, opened at the moved place.
+    expect(
+      trakt([
+        ...moved,
+        [played(2400, 0, 'loading', false, CLIP), known],
+        [played(2400, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(50)', 'stop(85)']);
+    // A move the player did not take (no length to move by yet): the next
+    // file opens where the first was, and is there by its measure.
+    expect(
+      trakt([
+        ...moved,
+        [played(1410, 0, 'loading', false, CLIP), known],
+        [played(1410, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(50)', 'stop(50)']);
+  });
+
+  it('measures a kept place of unknown length by the running time once it comes', () => {
+    const guess = { runtimeSeconds: 6000, knownRuntimeSeconds: undefined };
+    const page = { runtimeSeconds: 7200, knownRuntimeSeconds: 7200 };
+    expect(
+      trakt([
+        [played(4800, 0, 'playing'), guess],
+        [played(4900, 0, 'playing'), guess],
+        [played(4900, 0, 'paused'), guess],
+        [played(4900, 0, 'loading', false, OTHER), guess],
+        [played(4900, 0, 'paused', false, OTHER), page],
+      ]),
+    ).toEqual(['start(80)', 'pause(82)', 'stop(68)']);
   });
 
   it('never stops a clip that ends at 100%', () => {
