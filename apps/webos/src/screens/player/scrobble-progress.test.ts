@@ -400,6 +400,59 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(0)']);
   });
 
+  it('keeps a clip found out late one through every Try again, and when its running time comes late', () => {
+    const clip = [
+      [played(0, 0, 'loading', false, CLIP), guessed],
+      [played(0, 240, 'playing', false, CLIP), guessed],
+      [played(200, 240, 'playing', false, CLIP), guessed],
+    ] satisfies [Played, typeof known | typeof guessed][];
+    // The running time comes; Try again fails before the link shows a length; Try again.
+    expect(
+      trakt([
+        ...clip,
+        [played(200, 240, 'failed', false, CLIP), known],
+        [played(200, 0, 'loading', false, CLIP), known],
+        [played(200, 0, 'failed', false, CLIP), known],
+        [played(200, 0, 'loading', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+    // Try again first; the running time comes while it opens, and Pause is pressed.
+    expect(
+      trakt([
+        ...clip,
+        [played(200, 240, 'failed', false, CLIP), guessed],
+        [played(200, 0, 'loading', false, CLIP), guessed],
+        [played(200, 0, 'loading', false, CLIP), known],
+        [played(200, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+  });
+
+  it('follows the viewer moving a file of unknown length before its first picture', () => {
+    // Try again, paused before the picture, rewound to 10%.
+    expect(
+      trakt([
+        [played(0, 0, 'playing'), known],
+        [played(2540, 0, 'playing'), known],
+        [played(2540, 0, 'failed'), known],
+        [played(2540, 0, 'loading'), known],
+        [played(2540, 0, 'paused'), known],
+        [played(282, 0, 'paused'), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(90)', 'stop(10)']);
+    // Another quality, opened paused and moved on to 85%.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(900, 2820, 'playing'), known],
+        [played(900, 2820, 'paused'), known],
+        [played(900, 0, 'loading', false, OTHER), known],
+        [played(900, 0, 'paused', false, OTHER), known],
+        [played(2400, 0, 'paused', false, OTHER), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(32)', 'stop(85)']);
+  });
+
   it('never takes a broadcast’s clock for the episode’s place', () => {
     const before = [
       [played(0, 2820, 'playing'), known],
