@@ -269,8 +269,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   // Up Next, in the last 30 seconds of an episode: a card while nothing else
   // is on screen, else the count on Next episode. It counts to the real end,
-  // in watching seconds, so the ending is never cut. Never on a broadcast.
-  const offersNext = !!next && !state.live;
+  // in watching seconds, so the ending is never cut. Never on a broadcast,
+  // nor over a clip the viewer picked: its end is not the episode's.
+  const hasNext = !!next && !state.live;
+  const offersNext = hasNext && !state.clip;
   const ended = state.status === 'ended';
   const running = state.status === 'playing' || state.status === 'buffering';
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
@@ -1121,7 +1123,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
             icon: 'next',
             // Up Next's count, while the controls hide its card.
             label: showsCount ? t('player.nextIn', { seconds: count }) : t('player.nextEpisode'),
-            unavailable: offersNext ? undefined : noNextReason(),
+            // Over a clip too: only the count and the end leave it alone.
+            unavailable: hasNext ? undefined : noNextReason(),
             onPress: playNextEpisode,
           }
         : null,

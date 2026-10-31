@@ -275,6 +275,65 @@ test('a film whose every stream is a short clip says so, and keeps nothing', asy
   expect(saved.map((entry) => entry.videoId)).not.toContain(MOVIE);
 });
 
+test('a clip picked by hand plays with no Up Next over it, and at its end says it was only a clip', async ({
+  page,
+}) => {
+  // The series' page says its episodes run 45 minutes; the 720p release is a 40 s clip.
+  await mockAddons(page, { seriesRuntime: '45 min' });
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      'tt8000001:1:1': [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL x264\n💾 1.4 GB ⚡ Cached',
+          path: '/long-episode-1080p.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL x264\n💾 700 MB ⚡ Cached',
+          path: '/episode-720p.webm',
+        },
+      ],
+    },
+  });
+  await playFirstEpisode(page);
+  expect((await video(page)).src).toBe('/long-episode-1080p.webm');
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowDown', source(1));
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/episode-720p.webm');
+
+  // Its last 30 seconds are not the episode's: no Up Next counts over them.
+  await expect.poll(async () => (await video(page)).time, { timeout: 20000 }).toBeGreaterThan(14);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
+  await expectFocus(page, 'player-surface');
+  // Next episode is still there to press.
+  await press(page, 'ArrowUp', 'player-play');
+  await expect(page.locator('[data-focus-key="player-next"]')).toHaveAttribute(
+    'aria-label',
+    'Next episode',
+  );
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+
+  // Its end is not the episode's either: no next episode, and no leaving.
+  await press(page, 'ArrowRight', 'player-surface');
+  await press(page, 'ArrowRight', 'player-surface');
+  await expect(
+    page.getByText(
+      'This stream is only a short clip, not the video. Its source may not have it ready yet.',
+    ),
+  ).toBeVisible({ timeout: 20000 });
+  // The episode's own release was already tried here, so All streams is the way on.
+  await expectFocus(page, 'player-problem-streams');
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
+});
+
 test('OK while a stream starts lets it start and then shows the controls, and coming back from another app has Play ready', async ({
   page,
 }) => {

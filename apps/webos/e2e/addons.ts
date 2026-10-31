@@ -104,7 +104,7 @@ function preview(type: string, [id, name, year]: readonly [string, string, strin
   };
 }
 
-function seriesMeta(id: string, upcoming: readonly string[] = []) {
+function seriesMeta(id: string, upcoming: readonly string[] = [], runtime?: string) {
   const entry = SERIES.find(([seriesId]) => seriesId === id);
   if (!entry) return null;
   const videos = [];
@@ -129,6 +129,7 @@ function seriesMeta(id: string, upcoming: readonly string[] = []) {
   }
   return {
     ...preview('series', entry),
+    ...(runtime && { runtime }),
     cast: ['Ton Roosendaal'],
     links: [{ name: 'Nikolai Mamashev', category: 'Directors' }],
     videos,
@@ -209,6 +210,8 @@ export interface MockOptions {
   catalogs?: Record<string, (route: Route) => Promise<void> | undefined>;
   /** Episodes, by video id, that the series lists as not out yet. */
   upcoming?: readonly string[];
+  /** The series' running time, as its page gives it ("45 min"). It gives none otherwise. */
+  seriesRuntime?: string;
 }
 
 /** The pairing relay, played by the test: it plays the phone too. */
@@ -381,7 +384,10 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
     if (meta) {
       const id = decodeURIComponent(meta[2]!);
       return json(route, {
-        meta: meta[1] === 'series' ? seriesMeta(id, options.upcoming) : movieMeta(id),
+        meta:
+          meta[1] === 'series'
+            ? seriesMeta(id, options.upcoming, options.seriesRuntime)
+            : movieMeta(id),
       });
     }
     return json(route, { error: 'not found' }, 404);

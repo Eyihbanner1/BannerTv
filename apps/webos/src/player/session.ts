@@ -335,6 +335,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
    */
   function carryOn(): number {
     if (live) return 0;
+    // A clip's clock says nothing about the video: the next stream starts where this one was opened.
+    if (clip) return lastStartAt;
     return startedPlaying || seekedToPlace ? (tracker?.position() ?? lastStartAt) : lastStartAt;
   }
 
@@ -385,11 +387,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
   let lastStartAt = 0;
 
+  const clipError = () => new PlaybackError('clip', 'The stream is a short clip, not the video');
+
   /**
    * Once its length is known: a stream far shorter than the title's running
    * time is a clip. Auto-play moves on from it as from a stream that failed,
-   * at the same place; one the viewer picked plays on, kept nowhere. Not a
-   * special (season 0), which the series' running time says nothing about.
+   * at the same place; one the viewer picked plays on, kept nowhere, and fails
+   * as a clip at its end. Not a special (season 0), which the series' running
+   * time says nothing about.
    */
   function judgeLength(current: number) {
     if (clip || live || current !== attempt || destroyed || !engine || special) return;
@@ -397,7 +402,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (runtime === undefined || !isMuchShorter(durationNow(), runtime)) return;
     clip = true;
     if (options.autoFailover && !handPicked) {
-      fail(new PlaybackError('clip', 'The stream is a short clip, not the video'), current);
+      fail(clipError(), current);
     } else patch({ clip: true });
   }
 
@@ -645,6 +650,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         clearTimers();
         if (live) {
           patch({ status: 'ended' });
+          return;
+        }
+        // A clip the viewer picked: its end is not the video's. It says it was
+        // only a clip, with the ways out, instead of ending the video.
+        if (clip) {
+          fail(clipError(), attempt);
           return;
         }
         const duration = savedLength();

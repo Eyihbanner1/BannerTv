@@ -786,7 +786,7 @@ describe('a stream far shorter than the title', () => {
     expect(kept.progress).not.toHaveBeenCalled();
   });
 
-  it('plays when the viewer picked it, but never keeps its place or marks the video watched', async () => {
+  it('plays when the viewer picked it, never keeps its place, and says it was only a clip at its end', async () => {
     for (const options of [{ handPicked: true }, undefined]) {
       kept.progress.mockClear();
       const { video, session, markFailed } = setup({
@@ -798,14 +798,33 @@ describe('a stream far shorter than the title', () => {
       video.fire('playing');
       playFor(video, 20);
       session.saveProgress();
-      video.fire('ended');
-      session.destroy();
-      expect(session.get().entry).toBe(first);
-      expect(session.get().status).toBe('ended');
+      expect(session.get().status).toBe('playing');
       expect(session.get().clip).toBe(true);
       expect(markFailed).not.toHaveBeenCalled();
+      // Its end is not the video's: no end, no next stream, nothing kept.
+      video.fire('ended');
+      expect(session.get().entry).toBe(first);
+      expect(session.get().status).toBe('failed');
+      expect(session.get().error?.kind).toBe('clip');
+      expect(markFailed).toHaveBeenCalledWith(first);
+      await settle();
+      expect(session.get().entry).toBe(first);
+      session.destroy();
       expect(kept.progress).not.toHaveBeenCalled();
     }
+  });
+
+  it("leaves the next stream at the place the clip was opened at, not at the clip's clock", async () => {
+    const { video, session } = setup({ runtime: 2700 });
+    await open(session, video, first, 30, 600, { handPicked: true });
+    void video.play();
+    video.fire('playing');
+    session.seek(0);
+    video.fire('seeked');
+    playFor(video, 5);
+    expect(session.get().clip).toBe(true);
+    expect(session.carryOn()).toBe(600);
+    session.destroy();
   });
 
   it('takes nothing from the clip it let go of, when its engine tells all in one go', async () => {
