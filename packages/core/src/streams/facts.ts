@@ -73,8 +73,12 @@ interface Rule {
    * may be nothing but the word's line ("Trailer Park Boys").
    */
   afterTitle?: boolean;
-  /** A clip's word: not in an episode's own title ("Show.S03E05.The.Trailer.1080p"). */
-  clip?: boolean;
+  /**
+   * A clip's word: not in an episode's own title ("Show.S03E05.The.Trailer.1080p").
+   * 'tagged' only where a tag ends that title: a file named "Show.S03E05.Sample.mkv"
+   * is a sample.
+   */
+  clip?: 'title' | 'tagged';
 }
 
 function hdr(format: HdrFormat): Apply {
@@ -248,7 +252,7 @@ const RULES: readonly Rule[] = [
       draft.sample = true;
     },
     titleWord: true,
-    clip: true,
+    clip: 'tagged',
   },
   {
     pattern: 'trailer|teaser|featurette',
@@ -256,7 +260,7 @@ const RULES: readonly Rule[] = [
       draft.sample = true;
     },
     afterTitle: true,
-    clip: true,
+    clip: 'title',
   },
   // Language names and the three-letter tags release names use. Tags that are
   // also common words ("por", "fin", "dan", "vie") are left out.
@@ -343,12 +347,22 @@ interface TitleLine {
    */
   episodeStart: number;
   episodeEnd: number;
+  /** Whether a tag ends the episode's title, rather than the end of a file's name. */
+  episodeTagged: boolean;
   /** Where the file name and the link's file name end, and the description starts. */
   filesEnd: number;
 }
 
 function titleLine(filesEnd = 0): TitleLine {
-  return { start: 0, end: -1, titleEnd: -1, episodeStart: -1, episodeEnd: -1, filesEnd };
+  return {
+    start: 0,
+    end: -1,
+    titleEnd: -1,
+    episodeStart: -1,
+    episodeEnd: -1,
+    episodeTagged: false,
+    filesEnd,
+  };
 }
 
 /** Finds the line around `start` to `end`, and where its titles are, unless it is the line already read. */
@@ -361,6 +375,7 @@ function readLine(text: string, start: number, end: number, line: TitleLine): vo
   const anchor = TITLE_END.exec(words);
   line.titleEnd = anchor ? line.start + anchor.index : -1;
   line.episodeStart = line.episodeEnd = -1;
+  line.episodeTagged = false;
   const episode = EPISODE.exec(words);
   if (!episode) return;
   const from = episode.index + episode[0].length;
@@ -372,6 +387,7 @@ function readLine(text: string, start: number, end: number, line: TitleLine): vo
   if (!tag && !fileName) return;
   line.episodeStart = line.start + from;
   line.episodeEnd = tag ? line.start + from + tag.index : line.end;
+  line.episodeTagged = tag !== null;
 }
 
 /**
@@ -386,12 +402,26 @@ function inTitle(text: string, start: number, end: number, line: TitleLine): boo
   return line.titleEnd >= end;
 }
 
-/** True for a word in an episode's own title, as "Trailer" in "Show.S03E05.The.Trailer.1080p". Not in brackets. */
-function inEpisodeTitle(text: string, start: number, end: number, line: TitleLine): boolean {
+/**
+ * True for a word in an episode's own title, as "Trailer" in
+ * "Show.S03E05.The.Trailer.1080p". Not in brackets. With `tagged`, in a title
+ * no tag ends only alongside other words: "S01E04 - Free Sample.mkv" is an
+ * episode, "S03E05.Sample.mkv" its sample.
+ */
+function inEpisodeTitle(
+  text: string,
+  start: number,
+  end: number,
+  line: TitleLine,
+  tagged: boolean,
+): boolean {
   const before = text.charAt(start - 1);
   if (before === '[' || before === '(') return false;
   readLine(text, start, end, line);
-  return start >= line.episodeStart && end <= line.episodeEnd;
+  if (start < line.episodeStart || end > line.episodeEnd) return false;
+  if (!tagged || line.episodeTagged) return true;
+  const after = text.slice(end, line.episodeEnd).trim().replace(VIDEO_EXTENSION, '');
+  return /[a-z0-9]/.test(text.slice(line.episodeStart, start) + after);
 }
 
 /** The line a clip's name alone makes: "Trailer", "Official Teaser". */
@@ -898,7 +928,7 @@ export function describeStream(stream: Stream): StreamFacts {
         const rule = RULES[group - 1]!;
         const start = end - token.length;
         const counts =
-          !(rule.clip && inEpisodeTitle(text, start, end, line)) &&
+          !(rule.clip && inEpisodeTitle(text, start, end, line, rule.clip === 'tagged')) &&
           (rule.afterTitle
             ? afterTitle(text, start, end, line)
             : !rule.titleWord || !inTitle(text, start, end, line));

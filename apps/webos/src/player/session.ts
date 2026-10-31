@@ -282,6 +282,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   const durationNow = () => (live || !isFinite(video.duration) ? 0 : video.duration);
   const liveWindow = () => (live ? (engine?.liveWindow() ?? null) : null);
 
+  /**
+   * Whether `position` is no place in the broadcast: an engine recovering
+   * the media reads 0 for a moment. A broadcast that keeps everything from
+   * its start has a real 0.
+   */
+  function noPlace(kept: LiveWindow, position: number): boolean {
+    return !(position >= 0) || video.readyState < 1 || (position === 0 && kept.start > 0);
+  }
+
   /** How far behind live a broadcast is, at `position`. */
   function judge(position: number): Pick<SessionState, 'liveWindow' | 'behind'> {
     const kept = liveWindow();
@@ -289,10 +298,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       wasBehind = false;
       return { liveWindow: null, behind: 0 };
     }
-    // No place to judge: an engine recovering the media reads 0 for a moment.
-    // A broadcast that keeps everything from its start has a real 0.
-    const noPlace = !(position >= 0) || video.readyState < 1 || (position === 0 && kept.start > 0);
-    if (noPlace) return { liveWindow: kept, behind: state.get().behind };
+    if (noPlace(kept, position)) return { liveWindow: kept, behind: state.get().behind };
     const { behind, atLive } = judgeLive(kept, position, wasBehind);
     wasBehind = !atLive;
     return { liveWindow: kept, behind };
@@ -551,6 +557,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         if (!engine) return;
         checkLive();
         const position = video.currentTime;
+        // Nor is a broadcast's 0 while the engine recovers: the bar stays where it was.
+        const kept = liveWindow();
+        if (kept && noPlace(kept, position)) return;
         const duration = durationNow();
         if (tracker?.update(position, Date.now())) save();
         const trusted = tracker?.position();
@@ -799,15 +808,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
       const wanted = kept ? clampToWindow(kept, position) : position;
-      // A jump forward, or to live, never lands behind where it started, as
-      // one to a live point read a moment late would.
-      if (
-        kept &&
-        wanted < video.currentTime &&
-        (position > video.currentTime || position >= kept.live)
-      ) {
-        return;
-      }
+      // A jump forward never lands behind where it started, as one past a
+      // live point read a moment late would.
+      if (kept && wanted < video.currentTime && position > video.currentTime) return;
       const target = Math.max(0, Math.min(wanted, duration - 1));
       endBuffering();
       clearTimeout(judgeTimer);
@@ -835,6 +838,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       if (!kept) return;
       // Live again at once, whatever the boundary the last reading was judged by.
       wasBehind = false;
+      // Already past a live point read a moment late: live is here, not back there.
+      if (kept.live <= video.currentTime) {
+        patch(judge(video.currentTime));
+        return;
+      }
       session.seek(kept.live);
     },
 

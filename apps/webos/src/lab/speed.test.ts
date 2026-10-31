@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runSpeedTest, SPEED_SETTLE_MS, SPEED_WINDOW_MS, type SpeedTestStep } from './speed';
+import {
+  runSpeedTest,
+  SPEED_HOLD_MS,
+  SPEED_SETTLE_MS,
+  SPEED_WINDOW_MS,
+  type SpeedTestStep,
+} from './speed';
 
 /**
  * A video whose clock runs with the wall clock: at the speed set, or at what
@@ -39,9 +45,9 @@ function setup(heard: (rate: number) => boolean = () => true) {
   return { video, steps, asked, test };
 }
 
-/** Long enough for every window. */
+/** Long enough for every window, and a wait for one to play on. */
 async function finish() {
-  await vi.advanceTimersByTimeAsync((SPEED_SETTLE_MS + SPEED_WINDOW_MS) * 6);
+  await vi.advanceTimersByTimeAsync((SPEED_SETTLE_MS + SPEED_WINDOW_MS) * 6 + SPEED_HOLD_MS);
 }
 
 beforeEach(() => {
@@ -109,6 +115,18 @@ describe('the Lab speed test', () => {
     await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + 100);
     video.dispatchEvent(new Event('waiting'));
     await vi.advanceTimersByTimeAsync(150);
+    video.dispatchEvent(new Event('playing'));
+    await finish();
+    const verdicts = await test.done;
+    expect(verdicts).toContainEqual(expect.objectContaining({ rate: 0.75, ok: true }));
+    expect(asked).toEqual([0.75, 1.25, 1.5]);
+  });
+
+  it('waits for a video a new speed stopped to play on, for longer than its moment to take hold', async () => {
+    const { video, asked, test } = setup();
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + 100);
+    video.dispatchEvent(new Event('waiting'));
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS * 3);
     video.dispatchEvent(new Event('playing'));
     await finish();
     const verdicts = await test.done;

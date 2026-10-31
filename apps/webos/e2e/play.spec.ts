@@ -1330,6 +1330,15 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await page.mouse.click(box.x + 4, box.y + box.height / 2);
   await expect.poll(seeks, { timeout: 500 }).toBe(3);
   await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
+  // The right end is live: a click there goes to live, and playing live does nothing.
+  await page.mouse.click(box.x + box.width, box.y + box.height / 2);
+  await expect.poll(seeks, { timeout: 500 }).toBe(4);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
+  await page.waitForTimeout(1000);
+  await page.mouse.click(box.x + box.width, box.y + box.height / 2);
+  await page.waitForTimeout(500);
+  expect(await seeks()).toBe(4);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
 });
 
 test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({
@@ -1787,6 +1796,10 @@ for (const [list, streams] of [
     const box = (await p2p.boundingBox())!;
     await page.mouse.move(box.x + 300, box.y + 40, { steps: 5 });
     await expectFocus(page, source(streams.length - 1));
+    // Off the side of the list and back, passing no other row: it holds the row again.
+    await page.mouse.move(box.x + box.width + 40, box.y + 40, { steps: 5 });
+    await page.mouse.move(box.x + 300, box.y + 40, { steps: 5 });
+    await expectFocus(page, source(streams.length - 1));
 
     // The remux goes above it, among those that play, and the view moves with it.
     answer();
@@ -1799,6 +1812,16 @@ for (const [list, streams] of [
     await page.waitForTimeout(500);
     expect(mock.media).not.toContain('/movie-1080p-remux.webm');
     expect((await video(page)).src).toBe(playing);
+
+    // Away from the list, it no longer holds a row in place: one that fits
+    // the sheet shows every row again, the stream playing first.
+    const list = (await p2p.locator('xpath=../..').boundingBox())!;
+    await page.mouse.move(box.x + 300, 60, { steps: 5 });
+    await expect(sheet).toBeVisible();
+    const first = page.locator(`[data-focus-key="${source(0)}"]`);
+    if (streams.length + 1 <= 3) {
+      await expect.poll(async () => (await first.boundingBox())!.y).toBe(list.y);
+    }
   });
 }
 

@@ -1,6 +1,7 @@
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { type ReactNode, useState } from 'react';
 import { Pressable } from '../../components/Pressable';
+import { focusedKey } from '../../navigation/spatial';
 import { canSlide } from '../../platform/input-mode';
 import styles from './SheetList.module.css';
 
@@ -55,17 +56,25 @@ export function SheetList({
   rowHeight?: number;
   className?: string;
 }) {
-  const { ref, focusKey: key } = useFocusable<object, HTMLDivElement>({
+  const {
+    ref,
+    focusKey: key,
+    hasFocusedChild,
+  } = useFocusable<object, HTMLDivElement>({
     focusKey,
     saveLastFocusedChild: remember,
     preferredChildFocusKey: preferred,
+    trackChildren: true,
   });
   const lastAnchor = Math.max(0, rows.length - visible);
   const anchorFor = (index: number) => Math.max(0, Math.min(lastAnchor, index - LEAD));
   const [place, setPlace] = useState<{
     anchor: number;
     focused?: string;
-    /** Under a resting pointer: where the focused row was when the pointer took it. */
+    /**
+     * Under a resting pointer: where the focused row was when the pointer
+     * took it. Let go once the pointer or focus leaves the list.
+     */
     pointedAt?: number;
   }>(() => ({
     anchor: anchorFor(rows.findIndex((row) => row.focusKey === preferred)),
@@ -84,6 +93,8 @@ export function SheetList({
   // Pinned, it may leave space under the last row rather than slide.
   const pinned = place.pointedAt !== undefined && focusedIndex >= 0;
   const top = Math.max(0, pinned ? anchor : Math.min(anchor, lastAnchor));
+  const letGo = () => setPlace({ anchor: Math.min(top, lastAnchor), focused: place.focused });
+  if (place.pointedAt !== undefined && !hasFocusedChild) letGo();
 
   const first = Math.max(0, top - OVERSCAN);
   const last = Math.min(rows.length, top + visible + OVERSCAN);
@@ -119,9 +130,12 @@ export function SheetList({
             : { top: index * rowHeight, height: rowHeight - ROW_GAP }
         }
         onPress={row.onPress}
-        onFocus={() => {
+        onFocus={(layout) => {
           if (canSlide()) setPlace({ anchor: anchorFor(index), focused: row.focusKey });
-          else setPlace({ anchor: top, focused: row.focusKey, pointedAt: index });
+          // Only the row the pointer is on: focus put on a row elsewhere moves nothing.
+          else if (layout.node.matches(':hover')) {
+            setPlace({ anchor: top, focused: row.focusKey, pointedAt: index });
+          }
           row.onFocus?.();
         }}
       >
@@ -149,6 +163,18 @@ export function SheetList({
         ref={ref}
         className={className ? `${styles.list} ${className}` : styles.list}
         style={{ height: visible * rowHeight }}
+        onMouseLeave={() => {
+          if (place.pointedAt !== undefined) letGo();
+        }}
+        // Back over the row that kept focus, which takes no focus to say so: held again.
+        onMouseMove={(event) => {
+          if (place.pointedAt !== undefined || canSlide()) return;
+          const over = (event.target as Element).closest('[data-focus-key]');
+          const focused = focusedKey();
+          if (!over || over.getAttribute('data-focus-key') !== focused) return;
+          const index = rows.findIndex((row) => row.focusKey === focused);
+          if (index >= 0) setPlace({ anchor: top, focused, pointedAt: index });
+        }}
       >
         <div
           className={styles.track}

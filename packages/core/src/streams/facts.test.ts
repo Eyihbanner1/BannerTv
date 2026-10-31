@@ -540,6 +540,19 @@ describe('describeStream, samples and release groups', () => {
     // In brackets it is a tag; in a release name with nothing after it, nothing says it is a title.
     expect(read({ description: 'Show.S01E01.[Sample].1080p.WEB' }).sample).toBe(true);
     expect(read({ description: 'Show.S01E01.Sample' }).sample).toBe(true);
+    // A file named for the episode's sample, with no tag to end a title, is a sample.
+    expect(read({ behaviorHints: { filename: 'Show.S03E05.Sample.mkv' } }).sample).toBe(true);
+    expect(read({ behaviorHints: { filename: 'show.s03e05-sample.mkv' } }).sample).toBe(true);
+    expect(read({ url: 'https://cdn.example.org/show.s03e05-sample.mkv' }).sample).toBe(true);
+    expect(read({ description: '📂 Show.S03E05.Sample.mkv\n💾 40 MB' }).sample).toBe(true);
+    // Beside other words, with no tag, it is the episode's own title.
+    expect(
+      read({ behaviorHints: { filename: 'Show (2010) - s01e04 - Free Sample.mkv' } }).sample,
+    ).toBeUndefined();
+    expect(
+      read({ description: 'Show.S01.1080p.WEB.h264-GRP\nShow.S01/Show - S01E04 - Free Sample.mkv' })
+        .sample,
+    ).toBeUndefined();
   });
 
   it('reads the release group from the file name first', () => {

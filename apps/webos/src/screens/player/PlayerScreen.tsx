@@ -571,7 +571,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
   /** A click on the bar: straight there, whatever skip was in progress. */
   function seekTo(seconds: number) {
     cancelScrub();
-    session?.seek(seconds);
+    // A broadcast's right end is live, which has moved on since the bar was
+    // drawn: there it is Go to live, which reads where live is now.
+    const kept = state.live ? state.liveWindow : null;
+    if (session && kept && seconds >= kept.live - Math.max(0, kept.slack)) {
+      if (!atLive) session.goToLive();
+    } else session?.seek(seconds);
     armHide();
   }
 

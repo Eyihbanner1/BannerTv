@@ -819,14 +819,28 @@ describe('a live stream', () => {
     video.currentTime = 7203;
     session.seek(7213);
     expect(video.currentTime).toBe(7203);
-    // At live, the right end of the bar (live, read a moment late) stays put too.
-    session.seek(7200);
+    // So does Go to live: live is here, not back where it was read.
+    session.goToLive();
     expect(video.currentTime).toBe(7203);
-    // An engine recovering the media reads 0 for a moment.
+    // An engine recovering the media reads 0 for a moment: not judged, and not a place.
     session.seek(7100);
     video.currentTime = 0;
     video.fire('timeupdate');
-    expect(session.get().behind).toBe(100);
+    expect(session.get()).toMatchObject({ behind: 100, position: 7100 });
+    session.destroy();
+  });
+
+  it('goes back from past a live point read a moment late', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.currentTime = 7210;
+    video.fire('timeupdate');
+    // Back 10 s lands on live, where it was read.
+    session.seek(7200);
+    expect(video.currentTime).toBe(7200);
+    session.seek(7190);
+    expect(video.currentTime).toBe(7190);
     session.destroy();
   });
 

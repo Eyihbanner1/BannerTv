@@ -15,6 +15,8 @@ export const SPEED_SAMPLE_MS = 200;
 export const SPEED_WINDOW_MS = 2400;
 /** How long a new speed is left to take hold before its readings start. */
 export const SPEED_SETTLE_MS = 600;
+/** How long a video a new speed stopped is waited for to play on. */
+export const SPEED_HOLD_MS = 4000;
 
 /** What the test is doing, for the screen. */
 export type SpeedTestStep =
@@ -91,8 +93,8 @@ export function runSpeedTest(
   /**
    * Sets `rate`, gives it a moment to take hold, then reads a window. A wait
    * while it takes hold breaks the window as much as one during it, unless
-   * the video has played on since: a TV that hitches at each new speed gets
-   * the moment again from there, once.
+   * the video plays on within a few seconds: a TV that hitches at each new
+   * speed gets the moment again from there, once.
    */
   async function at(rate: number): Promise<Omit<SpeedMeasurement, 'asked' | 'baseline'>> {
     let interrupted = false;
@@ -109,6 +111,9 @@ export function runSpeedTest(
     try {
       video.playbackRate = rate;
       await wait(SPEED_SETTLE_MS);
+      for (let waited = 0; held && waited < SPEED_HOLD_MS; waited += SPEED_SAMPLE_MS) {
+        await wait(SPEED_SAMPLE_MS);
+      }
       if (interrupted && !held && !video.paused) {
         interrupted = false;
         await wait(SPEED_SETTLE_MS);
