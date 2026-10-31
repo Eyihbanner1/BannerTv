@@ -212,10 +212,17 @@ function onEnd(): void {
 }
 
 function onPlayingChange({ isPlaying }: PlayingChangeEventPayload): void {
-  // Android paused the player itself, its sound taken by a call, the assistant or another app.
-  // Media3's playWhenReady is false now, so say so, as the TV app reports it: the page shows
-  // Paused instead of a Pause button over a still picture.
-  if (!isPlaying && wantPlay && !ended && nativeStatus === 'readyToPlay') wantPlay = false;
+  if (!hasMedia) return;
+  if (isPlaying) {
+    // A media button (Bluetooth headphones, a headset, the car) or the notification resumed the
+    // player: Media3's playWhenReady is true again, so the page shows Pause, not Play.
+    wantPlay = true;
+  } else if (wantPlay && !ended && nativeStatus === 'readyToPlay') {
+    // Android paused the player itself, its sound taken by a call, the assistant or another app.
+    // Media3's playWhenReady is false now, so say so, as the TV app reports it: the page shows
+    // Paused instead of a Pause button over a still picture.
+    wantPlay = false;
+  }
   emitState();
 }
 
