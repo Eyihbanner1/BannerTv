@@ -80,7 +80,8 @@ val copyWebBuild = tasks.register<CopyWebBuild>("copyWebBuild") {
 
 android {
     namespace = "com.bannertv.app"
-    compileSdk = 36
+    // AndroidX core 1.19 needs API 37 to compile against; the app still targets 36.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.bannertv.app"

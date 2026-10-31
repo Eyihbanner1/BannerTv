@@ -10,7 +10,7 @@ This is a plain Gradle build with no `package.json`, so `pnpm -r` skips it and t
 
 ## Build it
 
-You need JDK 17 or newer and the Android SDK (API 36). Android Studio brings both; on the command line, point `ANDROID_HOME` at the SDK or put `sdk.dir` in `local.properties`.
+You need JDK 17 or newer and the Android SDK (API 37). Android Studio brings both; on the command line, point `ANDROID_HOME` at the SDK or put `sdk.dir` in `local.properties`.
 
 1. Build the web app first, from the repo root: `pnpm install && pnpm build`. The Android build copies `apps/webos/dist` into the APK and stops with a clear message if it is missing.
 2. Build the APK, from `apps/androidtv`: `./gradlew assembleDebug` (or open `apps/androidtv` in Android Studio).
