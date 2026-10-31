@@ -45,10 +45,11 @@ export interface EngineListener {
 
 /**
  * One way of getting a stream into the video element: the TV's own player,
- * hls.js or Shaka. The player keeps one video element and swaps engines.
+ * hls.js or Shaka, or on Android the device's player under the page. The
+ * player keeps one video element and swaps engines.
  */
 export interface Engine {
-  readonly name: 'native' | 'hls.js' | 'shaka';
+  readonly name: 'native' | 'hls.js' | 'shaka' | 'android';
   /** Starts loading at `startAt` seconds (0 for the beginning). Rejects when it cannot start at all. */
   load(url: string, startAt: number): Promise<void>;
   /** A live broadcast, which has no end: nothing to resume, and another stream starts at the live edge. */

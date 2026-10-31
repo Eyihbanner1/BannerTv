@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- From the brand kit: background, launcher tile and text. -->
+    <color name="background">#0B0815</color>
+    <color name="ic_launcher_background">#1B1430</color>
+    <color name="text">#F1EDFF</color>
+</resources>

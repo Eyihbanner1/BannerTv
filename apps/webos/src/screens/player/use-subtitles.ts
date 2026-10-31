@@ -283,8 +283,11 @@ export function useSubtitles(
           ? choice?.kind === 'file' && choice.key === version.key
           : choice?.kind === 'track' && choice.id === version.id;
       if (version.kind === 'track') {
-        // Until the stream hands over its first line.
-        return showing && state.streamCues[version.id] === undefined ? 'loading' : undefined;
+        // Until the stream hands over its first line. Android draws its own and hands over none.
+        const drawnByPlayer = state.engine === 'android';
+        return showing && !drawnByPlayer && state.streamCues[version.id] === undefined
+          ? 'loading'
+          : undefined;
       }
       const option = options.find((o) => o.key === version.key);
       if (!option) return undefined;

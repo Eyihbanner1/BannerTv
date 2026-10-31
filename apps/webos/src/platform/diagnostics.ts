@@ -1,5 +1,6 @@
 import appinfo from '../../webos-meta/appinfo.json';
 import { recentBackTimes } from '../navigation/back-timing';
+import { androidCapabilities, androidHostInfo, isAndroid } from './android';
 import { bootInfo } from './boot';
 import {
   isSupportedEngine,
@@ -103,7 +104,27 @@ function mediaRows(): DiagnosticRow[] {
   return rows;
 }
 
+/** The Android app's own description of the device, and what it says the device can play. */
+function androidRows(): DiagnosticRow[] {
+  const host = androidHostInfo();
+  const caps = androidCapabilities();
+  const rows: DiagnosticRow[] = [];
+  if (host) {
+    rows.push(['Device', `${host.manufacturer} ${host.model}`]);
+    rows.push(['Android', `${host.release} (API ${host.sdk})`]);
+    rows.push(['Kind', host.fireTv ? 'Fire TV' : host.tv ? 'Android TV' : 'phone or tablet']);
+    rows.push(['Android app', `${host.appVersion} (${host.versionCode})`]);
+    rows.push(['WebView', text(host.webView)]);
+    rows.push(['Low memory', yesNo(host.lowRam)]);
+  }
+  if (caps) {
+    for (const [label, value] of Object.entries(caps)) rows.push([label, text(value)]);
+  }
+  return rows;
+}
+
 async function tvRows(): Promise<DiagnosticRow[]> {
+  if (isAndroid()) return androidRows();
   if (!isWebOS()) return [['Running on webOS', 'no (laptop or test browser)']];
   const device = readDeviceInfo() ?? {};
   const rows: DiagnosticRow[] = [
@@ -192,14 +213,16 @@ export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
         ['Chromium', chromium === null ? '—' : String(chromium)],
         [
           'webOS release',
-          chromium === null ? '—' : (webOSReleaseForChromium(chromium) ?? 'older than 3'),
+          chromium === null || isAndroid()
+            ? '—'
+            : (webOSReleaseForChromium(chromium) ?? 'older than 3'),
         ],
         ['Supported', yesNo(isSupportedEngine(ua))],
         ['Window', `${window.innerWidth} x ${window.innerHeight} @ ${window.devicePixelRatio}x`],
         ['User agent', ua],
       ],
     },
-    { title: 'TV', rows: tv },
+    { title: isAndroid() ? 'Android' : 'TV', rows: tv },
     { title: 'Media: native / MSE', rows: mediaRows() },
   ];
 }

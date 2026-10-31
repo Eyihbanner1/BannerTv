@@ -12,12 +12,16 @@ Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, pac
 - [TV setup](docs/TV_SETUP.md): Developer Mode, installing on the TV, and running the spikes.
 - [ADR 0001](docs/adr/0001-react-norigin-classic-bundle.md): why React, Norigin and one classic ES2017 script, and the spike results.
 - [ADR 0002](docs/adr/0002-addon-client-and-browse.md): how BannerTV reads addons, caches them, and builds Home and Details.
+- [ADR 0003](docs/adr/0003-playback.md): playback, automatic stream choice and subtitles.
+- [ADR 0004](docs/adr/0004-library-profiles-trakt.md): library, household profiles, Trakt and TMDB.
+- [ADR 0005](docs/adr/0005-android-tv-app.md): the Android TV app, its player and the bridge between the two.
+- [Android setup](docs/ANDROID_TV_SETUP.md): installing the Android app on a phone, an Android TV, a Fire TV or the emulator.
 
 ## At a glance
 
 | | |
 | --- | --- |
-| Platform | LG webOS TV, packaged web app (.ipk), webOS 5.0 (2020) and newer |
+| Platform | LG webOS TV, packaged web app (.ipk), webOS 5.0 (2020) and newer. Android TV, Google TV and Fire TV (.apk), Android 7.1 and newer, from Phase 5 |
 | Stack | TypeScript, React, Vite, Norigin Spatial Navigation |
 | App ID | `com.bannertv.app` |
 | Launch | United Kingdom, English, LG Content Store |
@@ -36,6 +40,8 @@ pnpm e2e          # remote journeys against the production build, loaded from fi
 pnpm package      # out/com.bannertv.app_<version>_all.ipk
 pnpm tv:install   # build, check, package, install and open on the TV
 ```
+
+The Android app (`apps/androidtv`) is built by CI from the same `apps/webos/dist`; its APK is the run's `bannertv-apk` artifact. Building it locally needs Android Studio or the Android SDK and JDK 17 or newer: `pnpm build`, then `./gradlew assembleDebug` in `apps/androidtv`.
 
 `pnpm lint`, `pnpm typecheck`, `pnpm format:check` and `pnpm check:bundle` run in CI with the rest. `check:bundle` fails when the bundle uses syntax or built-ins newer than webOS 5.0's Chromium 68, or grows past its budget.
 

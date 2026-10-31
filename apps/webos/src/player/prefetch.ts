@@ -2,6 +2,7 @@ import { parseRuntime } from '@bannertv/core';
 import { useEffect } from 'react';
 import type { EventPlay } from '../app/router';
 import { preferences } from '../data/preferences';
+import { isAndroid } from '../platform/android';
 import { knownCapabilities } from '../platform/capabilities';
 import { stopProbing, streamFinder } from './finder';
 
@@ -10,11 +11,14 @@ export const PREFETCH_REST_MS = 1500;
 
 /**
  * Whether links may be tested before Play. Off on webOS 5 TVs under "auto"
- * until probing has been measured on one (docs/PLAN.md, auto-play).
+ * until probing has been measured on one (docs/PLAN.md, auto-play). Off on
+ * Android too: the test runs in the WebView's player, which fails files
+ * Android's own player plays, so it would set good links aside.
  */
 export function probingAllowed(): boolean {
   const setting = preferences.get().probing;
   if (setting !== 'auto') return setting === 'on';
+  if (isAndroid()) return false;
   return knownCapabilities().webOS !== 5;
 }
 

@@ -1,0 +1,6 @@
+# The Gradle wrapper scripts must keep their own line endings whatever the checkout settings,
+# or gradlew fails on the Linux runner.
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
