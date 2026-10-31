@@ -6,7 +6,7 @@ Oct 26, 2026 · @Eyitayo
 
 ## Summary
 
-BannerTV is a webOS-native media center that plays content from Stremio-compatible addons, with Nuvio-style extras (Trakt sync, profiles, a customizable home screen) built for the LG remote from day one. It hosts no content itself: users install addon URLs, and BannerTV browses, resolves and plays what those addons return.
+BannerTV is a webOS-native media center that plays content from Stremio-compatible addons, with Nuvio-style extras (Trakt sync, profiles, a customizable home screen) built for the LG remote from day one. It hosts no content of its own, apart from the BannerTV Demo addon's three Creative Commons films: users install addon URLs, and BannerTV browses, resolves and plays what those addons return.
 
 **Goals**
 
@@ -49,7 +49,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | --- | --- | --- | --- | --- |
 | Addons | Install addon by manifest URL | Yes | Yes, same addons and config | Phase 1. Typed on screen, or sent from a phone via QR pairing |
 | Addons | Configurable addons (settings page per addon) | Yes, opens a web page | Yes | Phase 1. Show the addon's configure URL as a QR code, phone returns the configured manifest URL |
-| Addons | Preinstalled defaults | Cinemeta, OpenSubtitles, more | Its own defaults | Phase 1. Cinemeta and OpenSubtitles v3, both removable |
+| Addons | Preinstalled defaults | Cinemeta, OpenSubtitles, more | Its own defaults | Phase 1. Cinemeta and OpenSubtitles v3; PR #8 adds BannerTV Demo first. All removable |
 | Addons | Addon catalogs (browse community addons) | Yes | Plugin repos by URL or QR | Phase 3 |
 | Addons | Scraper plugins outside the addon protocol | No | Yes | Not planned. Addon protocol only, which keeps the store review simple |
 | Browse | Home board, one row per catalog | Yes | Yes, plus Modern, Grid and Classic layouts | Phase 1 rows with a hero banner. Phase 3 reorder and hide rows |
@@ -59,7 +59,7 @@ BannerTV reaches Stremio parity on browsing, addons and playback by the end of P
 | Streams | Stream list grouped by addon | Yes | Yes, plus regex and first-source modes | Phase 2, as the "All streams" escape hatch, with parsed quality, size and codec badges |
 | Streams | Reuse last link, auto-pick | Partial | Yes | Phase 2: Watch picks a working stream itself and plays it (see Choosing a stream). Per-title "reuse last link" in Phase 3 |
 | Streams | Torrent streams (infoHash) | Local streaming server | P2P toggle | Phase 5, only through a streaming server the user runs on a PC or NAS |
-| Streams | Debrid (Real-Debrid, TorBox, Premiumize) | Through addons | TorBox and Premiumize built in | Through addons in v1. Built-in debrid is a Phase 5 option |
+| Streams | Debrid (Real-Debrid, TorBox, Premiumize) | Through addons | TorBox and Premiumize built in | Through addons in v1. Phase 4: link a debrid account by code from the TV, with an optional referral link (see Debrid accounts and referral links). Built-in debrid is a Phase 5 option |
 | Player | Internal player | Yes | ExoPlayer or libmpv | Phase 2, HTML5 video on the webOS media pipeline |
 | Player | Subtitles from addons, styling | Yes | Yes, plus libass for ASS | Phase 2 SRT and VTT with styling. ASS in Phase 5 |
 | Player | Embedded audio and subtitle tracks | Yes | Yes, per-title memory | Phase 2. Audio through `audioTracks`; embedded subtitles are not exposed on webOS 22 and need a spike (see Player) |
@@ -439,7 +439,7 @@ Step 4 made the other tools sheets of the same kind, over the picture, which kee
 
 **Debrid**
 
-In v1, debrid works through addons: the user configures an addon with their Real-Debrid, AllDebrid, TorBox or Premiumize key, and the addon returns plain HTTPS links that play natively. Built-in debrid accounts are a Phase 5 option.
+In v1, debrid works through addons: the user configures an addon with their Real-Debrid, AllDebrid, TorBox or Premiumize key, and the addon returns plain HTTPS links that play natively. Phase 4 adds linking a debrid account from the TV and an optional referral link (see Debrid accounts and referral links). BannerTV itself resolving streams through a linked account is a Phase 5 option.
 
 ## Repository structure
 
@@ -504,6 +504,8 @@ The phone pairing feature needs the small `pair` relay because a webOS web app c
 A private beta that browses and plays is ready at the end of week 10, and the store launch follows around week 18 if one developer works on it full time. Each phase ends at a gate that must pass before the next starts.
 
 ![BannerTV roadmap: 6 phases, 5 gates](images/roadmap.png)
+
+Phase 4 also includes the optional debrid account step (see Debrid accounts and referral links), which isn't on the roadmap image.
 
 Phases 0 to 2 are the minimum product; if time runs short, Phase 3's profiles and TMDB enrichment slip, never the Phase 2 playback gate.
 
@@ -620,13 +622,14 @@ BannerTV ships through two channels: the LG Content Store for everyone, and GitH
 
 **Making the app reviewable**
 
-BannerTV has no content of its own, so a tester who opens it needs something legal to play. The store build preinstalls Cinemeta for metadata and a small first-party "BannerTV Demo" addon that streams public-domain and Creative Commons films (for example the Blender open movies). The UX scenario document walks the tester through browsing, playing, subtitles and adding an addon by URL.
+BannerTV has no content of its own, so a tester who opens it needs something legal to play. The store build preinstalls a small first-party "BannerTV Demo" addon, first in the list, with three Creative Commons films from the Blender Foundation, then Cinemeta for metadata and OpenSubtitles v3 for subtitles. The Demo is described in `docs/DEMO_ADDON.md` (PR #8). The UX scenario document walks the tester through browsing, playing, subtitles and adding an addon by URL.
 
 **Store build rules**
 
 - No third-party stream addons preinstalled or promoted. Users add addons by URL themselves, the same model Stremio uses in the LG store.
-- A first-run notice that BannerTV hosts no content and that users are responsible for the addons they install.
+- A first-run notice that, apart from BannerTV Demo, BannerTV hosts no content and that users are responsible for the addons they install.
 - The adult-content filter is on by default.
+- No debrid screens in the first store submission: it is built with `debrid=off`. Link only can follow in an update after LG has answered question 11. The referral screen comes only after LG has answered in writing, the provider has agreed in writing and the legal review is done (see Debrid accounts and referral links).
 
 **UK launch, donations and domain**
 
@@ -645,6 +648,160 @@ BannerTV has no content of its own, so a tester who opens it needs something leg
 - Monthly store releases after launch, with beta builds weekly.
 - `version` in appinfo.json and the git tag move together; patch versions for fixes, minor versions for features.
 
+## Debrid accounts and referral links (Phase 4)
+
+Eyitayo added this to Phase 4 on 27 October 2026. BannerTV gets an optional step for linking a debrid account. A user without an account sees a provider's details and a QR code to Eyitayo's referral link, opens it on their phone and buys their own account there. They then link that account to the TV with a code. Anyone can link an account they already have, and nothing in BannerTV ever depends on having one.
+
+Bundling a debrid account behind a BannerTV subscription was considered and ruled out. All four providers below limit an account to personal use by its holder. Real-Debrid, Premiumize and TorBox forbid reselling or giving others access without their written permission, and AllDebrid only allows its accredited voucher resellers. TorBox and Premiumize do license resellers. Even so, bundling would turn BannerTV from a neutral player into a seller of access to streams, which is the step the legal notes below warn against.
+
+**What the research found** (27 October 2026; details and sources below)
+
+- **The reward is free premium days, not money.**
+  - TorBox pays in premium days, and so does Real-Debrid according to a 2024 copy of its FAQ.
+  - AllDebrid's referral scheme was reported closed in 2026; even while it ran, a referral was worth about one or two days.
+  - Premiumize's terms stopped mentioning referrals in April 2026. It now agrees deals with established sites case by case, which might include money.
+  - So the referral mostly pays for Eyitayo's own subscription.
+- **Linking from the TV works for all four.** Each has a code flow: the TV shows a short code and the user enters or approves it on their phone.
+  - For AllDebrid, Premiumize and TorBox, a QR code can fill the code in. Real-Debrid's QR code can only open the page.
+  - AllDebrid may first email the user to approve a new location.
+  - For Real-Debrid, BannerTV would have to be open source to use the shared client ID. Any other route means shipping a secret inside the app, and Real-Debrid says it must stay secret.
+- **Two providers need written permission first.**
+  - TorBox's API terms require written authorisation for any public app and for using its name. Its partner pages treat integrations as partner-programme territory. That programme is application-only, takes no projects with zero users and screens out "sketchy, illegal" ones.
+  - Premiumize's terms forbid commercial use, earning money from the service and using its marks without written permission.
+  - Real-Debrid's and AllDebrid's referral rules are behind a login, so Eyitayo needs to read them while signed in and ask in writing.
+- **The biggest risk is the store, not the code.**
+  - No rule on this was found in LG's public pages. The full self-checklist ZIP couldn't be downloaded, and the app policy LG's content test applies isn't published. That test rejects content that aims to commit a crime or helps someone do so. Changes after approval need another review.
+  - Stremio's store listings never mention debrid.
+  - Google suspended Stremio for 19 days over the 2025–26 new year without giving a reason. In 2026 it reportedly suspended Nuvio, another client for Stremio addons, after a DMCA complaint from the Motion Picture Association. Nuvio had reportedly already removed its built-in TorBox integration in May 2026, citing the risk.
+  - Apple and Amazon removed Stremio in January 2026.
+  - A referral screen also earns the developer a reward for each sign-up to a stream-access service. That weakens the neutral-client position the store build relies on.
+
+**Decision** (Eyitayo, 27 October 2026). Build the step in Phase 4 behind a build switch. The first store submission is built with the step off. Each part reaches a public build only once its conditions are met. Beta builds on GitHub Releases are public too.
+
+- **Linking.** A provider's link screen appears in beta builds once that provider has agreed in writing. Linking joins the store build in an update once LG has also clearly approved it in writing (STORE.md, question 11).
+- **Referral screen.** It needs the provider's written agreement and a short legal review before it appears in any build. It needs LG's clear written approval as well before it reaches the store build.
+- **What counts as approval.** An LG reply that doesn't clearly approve the screen, such as "it will be checked in QA", counts as no.
+
+This protects the first approval, which is the Phase 4 gate. LG locks an app out for three months after a fifth function-test rejection in a row, or a third round rejected for the same issue as the first two (STORE.md). A lock-out also stops bug-fix updates. If LG rejects an update over the referral screen, resubmit with link only or with the step off, never with the same screen.
+
+**Providers compared**
+
+| | Real-Debrid | AllDebrid | Premiumize | TorBox |
+| --- | --- | --- | --- | --- |
+| Run by | XT Network SAS, France | Vulnerator SARL, France | Meta Connect Ltd, Labuan, Malaysia (Malaysian law); servers and data in the EU | TorBox, a UAE company since July 2026 |
+| Referral reward | 5 premium days and 50 points when a new user follows the link before paying. The 15-day plan, reseller vouchers and reseller payments don't count, and the bonus can't be added after payment. Users reported points vanishing in mid-2026 (all reported; from a July 2024 copy of the FAQ, as the official page returned 403) | About 5 points per referral (10 for a plan of 90 days or more), first purchase only; 150 points = 30 days, so roughly 1 to 2 days a referral. Programme reported discontinued in 2026 (reported; the rate page dates from 2020) | Terms no longer mention a referral programme since April 2026 (probably ended; unconfirmed, as the account area needs a login). The webmaster programme offers free days, trial vouchers or "even money" to established sites by arrangement | 7 days per month bought, for both people, on the first purchase only. The referrer must have a paid plan, or the new user gets nothing either. The link only counts if the user is signed in on the phone and accepts TorBox's popup before paying; support won't add a missed code. No cash |
+| Link from the TV | Device code typed at real-debrid.com/device (a QR code can only open the page). Shared client ID for open-source apps only | 4-character PIN, with a QR link that fills it in. No app registration. A new location may need the user to approve an email | Device code with a QR link that fills it in. BannerTV must register its own client on a page that needs a login | 6-digit code with a QR link. No registration; the app passes its name. The token appears to be the account's main API key, so unlinking one TV may mean resetting it for every app |
+| Permission | No API or referral rules published (the referral page needs a login). The terms forbid reproducing site content, so no logos without permission | Same as Real-Debrid | Written permission for commercial use and for the name or logo | Written authorisation for a public app and for the name or logo; it can audit or disable an integration without notice |
+| Price, as listed | €3 for 15 days, €4 for 30, €9 for 90, €16 for 180, one-off in EUR (reported by three third-party sources, latest September 2026; the official page returned 403) | €2.99 per 30 days as a card-only subscription that renews, or one-off from €3.99 for 30 days to €24.99 for 300; some payment methods cost more | €9.99 a month or €69.99 a year; "VAT may apply depending on your region" | Free plan (1 download a day, 10 a month: enough to test linking, not to watch); Essential $3, Standard $5, Pro $10 a month |
+| Watch out for | Since November 2024, filters after a notice from French film distributors, the cache check removed and a stated aim (reported) to block "counterfeit Kodi / Stremio applications". Since May 2026, files removed by keyword, so cached files can disappear. One IP at a time (reported) | In November 2024 it reportedly refunded new subscribers and dropped a feature used through third-party apps. It refuses link unlocking from server IPs, so addons that resolve links on a server fail. Old API versions get switched off. One IP at a time (reported) | Rebranded as "personal cloud storage" in April 2026, but its API still offers torrent cache and direct links, including Rapidgator, 1fichier and Streamtape, which are on the USTR 2025 Notorious Markets List. Household use allowed; unapproved third-party apps are at the user's risk | API terms ban using its tools for any catalogue or workflow for infringing content |
+
+**Which providers.** Approach TorBox and Premiumize first. Both have code flows built for TVs and a channel for asking. A provider that doesn't agree in writing gets no screens at all. Real-Debrid and AllDebrid stay as they are today, with their keys entered in addons, unless their written terms allow more. Real-Debrid linking also needs BannerTV's source to be published.
+
+**How it works on the TV**
+
+1. **Where it appears.** Settings, then Integrations, then **Linked services**, next to Trakt, with each provider listed by name. Store builds add nothing to the welcome screen. Beta builds may offer an optional **Link an account** button there, and skipping it never brings it back as a prompt. The screens never appear in a kids profile, and sit behind the profile PIN where one is set.
+2. **Have an account?** Choose the provider, then **Link this TV**.
+   - BannerTV starts the provider's code flow. It shows the code, the plain address to type it at, and a QR code that fills the code in where the provider supports it.
+   - It checks back at the interval the provider gives. When the code runs out, **New code** gets another.
+   - A linked account shows the plan, the expiry date and **Unlink**.
+   - The screen says what linking does: "Linking shows your plan and expiry date in BannerTV. BannerTV doesn't use the account for anything else yet. Addons that support TorBox take your key in their own settings."
+3. **Need an account?** This opens a list labelled **Ad**, which says: "These services give BannerTV's developer a reward when you sign up through BannerTV." Providers are listed alphabetically, focus starts on Back, and there's no "recommended" badge. Each provider then gets its own screen:
+   - An **Ad** label at the top, before the QR code, in a colour that contrasts with the background.
+   - The provider's name as text (logos only with permission), who sells it, and a factual line on what it is, for example: "TorBox is a paid cloud download and storage service, sold by TorBox. Some addons can use a TorBox account. BannerTV works without one."
+   - The disclosure, which must match the provider's actual deal. For TorBox: "If you buy TorBox through this QR code, BannerTV's developer gets extra days on the developer's own TorBox plan. On your first purchase, TorBox also gives you 7 extra days for each month you buy. You pay the same price either way. TorBox sells and runs this service, not BannerTV."
+   - The price, only under the rules below; otherwise "See the current price on TorBox's site".
+   - A QR code to the referral link, with the address printed underneath.
+   - **Link this TV** for after they've signed up, and Back to leave.
+4. **Saying no is easy.** There's no countdown, no pre-selected provider and no reminder later. While an account is linked, the **Need an account?** screens aren't offered.
+5. **What linking does in Phase 4.** BannerTV shows the account's status and expiry. It keeps the token, encrypted, only to refresh that status, and deletes it on Unlink. Addons keep their own debrid keys, set on the addon's own settings page as today.
+   - Built-in debrid stays in Phase 5: BannerTV itself sending addons' torrent hashes to a provider and playing the result.
+   - It needs its own legal review, and TorBox's terms bear directly on it.
+
+**Rules to build to**
+
+- **Advertising (UK).** A referral screen is advertising, and BannerTV's developer and the provider share responsibility for it (ASA).
+  - CAP rule 2.1 requires it to be obviously identifiable as advertising, and rule 2.3 requires its commercial intent to be clear.
+  - The ASA suggests "Ad", placed before the QR code and in a colour that contrasts with the background (Card Factory).
+  - It ruled "affiliate" on its own not clear enough (Asos, 2020) and found a "may earn a commission" disclaimer ambiguous (MailOnline, 2022). ASA and CMA guidance advise against "#aff".
+  - Free premium days count as a reward (CMA).
+  - Under the DMCC Act 2024, failing to identify commercial intent is a misleading omission (section 227). Paid promotion presented as editorial content without making the payment clear is banned in all circumstances (Schedule 20, paragraph 12).
+  - A screen that shows a price and a way to buy is an invitation to purchase (section 230). It must then also show who sells the service, their business address, its main characteristics and the total price.
+  - The CMA can fine up to £300,000 or 10% of global turnover, whichever is higher. These rules have applied since 6 April 2025.
+- **Prices.** The price must be accurate when seen, and that stays the developer's responsibility even though the provider sets it (CAP 3.17 and 3.18, ASA guidance on prices set by others). No public page gives the total a UK buyer pays: VAT, payment-method surcharges and currency fees vary.
+  - Show a price only if it was checked against the provider's UK checkout, while signed in, in the last 7 days. It must include VAT and any fee most buyers pay.
+  - With the price, show the currency, whether it renews, the seller's name and business address, and the date it was checked. For example: "$5 a month, renews until you cancel. Charged in US dollars; your bank may add a conversion fee. Sold by TorBox, [address]. Checked 20 October 2026."
+  - Otherwise show no price, only the link to the provider's site. That is the default.
+  - Prices live in a small JSON file on the BannerTV website. For each provider it holds the price, currency, renewal terms and checked-on date, plus a flag that can hide that provider's referral screen but never show one.
+  - Providers, referral links and disclosure text are compiled into the build. The file can never switch the step on.
+- **Claims and wording.** Facts, not performance claims. No "instant streams", "faster" or "more reliable": each would need evidence (CAP 3.7), and Real-Debrid's filters make some untrue. Never mention films, series, sport, free content, torrents, Stremio or any addon by name on these screens, in the store listing or in screenshots.
+  - Before a provider gets a referral screen, check that the page its QR code opens doesn't mention those either. If it does, that provider gets no screen.
+  - Show the TorBox line about what the new user gets only while TorBox's referral page still promises it and the developer's paid TorBox plan is active. If either stops, hide that provider's referral screen.
+- **Copyright (UK, not legal advice).** BannerTV's defence is that it is a neutral player and users choose their own addons. A reward for each sign-up to a stream-access service weakens that.
+  - Newzbin was held to have authorised infringement.
+  - The CJEU treats profit as relevant (Filmspeler) and presumes knowledge when someone links for profit (GS Media). The Court of Appeal declined to depart from that case law in TuneIn v Warner Music (2021).
+  - In the Popcorn Time case (Twentieth Century Fox v Sky, 2015), the app's suppliers were held jointly liable with the host sites.
+  - UK prosecutions of app and add-on suppliers have mostly been brought as fraud. For example, a developer whose Kodi build promoted add-ons got 30 months in 2021. A cash reward would also meet the "gain" element of the s.107(2A) offence.
+  - No UK case naming a debrid service was found.
+  - The legal review covers civil and criminal exposure, for beta and store builds, before any build carries a referral screen.
+- **LG.**
+  - LG may test the referral screen under the self-checklist's Advertisement item, so Back must always leave it.
+  - Third-party guides say Seller Lounge's Test Info form asks about "In-App Ad" and "Paid Content" (reported; check in the form). Declare the screen there and in the UX scenario.
+  - Read the full self-checklist ZIP before building the screen.
+  - Never switch the step on remotely after approval: a change without review can get the app removed.
+- **Provider terms.**
+  - Get written permission where the terms ask for it, and keep the emails. Describe BannerTV as it is: a player for addons that users add themselves using the Stremio protocol, with a code-flow link screen and a referral screen labelled Ad. Ask for the public app, the provider's name, the referral link and the code flow, in beta and store builds.
+  - Never call TorBox's "add referral" API: the only referral is the QR code on a screen labelled Ad.
+  - Never store a developer key or client secret in the app.
+  - Treat a revoked token as a normal "link again" state. Real-Debrid reportedly revokes app access after a sharing warning, and TorBox rotates keys after abuse warnings.
+- **Privacy.** Use a fixed referral link with no per-TV or per-user tracking ID, and store nothing on the TV for the referral screens. That means no shown, skipped or dismissed flags, no counters, and fetching the price file when the screen opens without saving it. The screens are offered or hidden only on state the TV keeps for another reason, such as a linked account. That way nothing on the TV needs PECR consent, which the ICO requires for any advertising purpose. The provider's own site sets its cookies on the phone.
+  - The token is stored encrypted and deleted on Unlink.
+  - The privacy policy gains a debrid section: the token stays on the TV, the TV talks directly to the provider, and the provider sees the TV's IP address and what is requested. If the price file is used, the TV also contacts the BannerTV website.
+- **Tax.** HMRC's guidance on online income counts gifts and services received for promoting products as income, so premium days may count at their value, not only cash. Referral rewards share one £1,000 trading and miscellaneous allowance with any other side income, possibly including donations.
+  - Above the allowance, trading income means registering for Self Assessment by 5 October after the tax year.
+  - Miscellaneous income between £1,000 and £2,500 means contacting HMRC; above £2,500, registering.
+  - Keep a record of the days received and their list price, and check with HMRC or an accountant before the first reward arrives.
+
+**Phase 4 work**
+
+- [ ] Eyitayo reads Real-Debrid's and AllDebrid's referral terms while signed in, and asks TorBox and Premiumize for written permission (see Provider terms above)
+- [ ] Ask LG question 11 (STORE.md) and keep the answer
+- [ ] Read the full LG self-checklist ZIP for content and advertising items
+- [ ] Decide whether to publish BannerTV's source, which Real-Debrid linking needs
+- [ ] Build switch `debrid` with three settings: off; link only (link screens, with no sign-up screens or sign-up links of any kind); link and referral. Referral codes are build-time values, as in the Hydra launcher
+- [ ] Code flows for the approved providers, with fake-provider tests for expiry, denial, slow_down and revoked tokens; encrypted token storage
+- [ ] The Linked services screens, the Ad-labelled list and provider screens, and the price file on the website
+- [ ] For each provider with a referral screen, check the UK checkout total while signed in before publishing a price
+- [ ] Legal review before any build carries a referral screen
+- [ ] Beta release for the providers that have agreed in writing, then a store update once the conditions in the decision are met
+- [ ] When it ships in a store build: update the store docs as listed in data-safety.md, "Pending policy changes"
+
+**Open questions for Eyitayo**
+
+- [x] Store timing: the first store submission goes without it, and it's added in a later update (decided 27 October 2026)
+- [ ] Which providers to approach first (TorBox and Premiumize recommended)?
+- [ ] Publish BannerTV's source so Real-Debrid accounts can be linked?
+- [ ] Pull built-in debrid forward from Phase 5, so a linked account does more than show its status?
+
+**Sources for this section**
+
+- **Providers**
+  - Real-Debrid: [API](https://api.real-debrid.com/), [terms](https://real-debrid.com/terms), [referral FAQ copy, July 2024](https://github.com/debridmediamanager/awesome-debrid/discussions/7), [filters, November 2024](https://torrentfreak.com/real-debrid-implements-extreme-anti-piracy-filters-to-appease-film-companies-241122/), [filters, May 2026](https://torrentfreak.com/real-debrids-renewed-piracy-crackdown-follows-corporate-restructuring/).
+  - AllDebrid: [API](https://docs.alldebrid.com/), [terms](https://alldebrid.com/tos/), [prices](https://alldebrid.com/offer/), [fidelity points](https://help.alldebrid.com/en/faq/fidelity-points), [referral closure (reported)](https://referraldrop.com/en/drop/alldebrid/2).
+  - Premiumize: [API](https://www.premiumize.me/api), [terms](https://www.premiumize.me/legal), [webmasters](https://www.premiumize.me/webmasters), [prices](https://www.premiumize.me/premium), [supported hosts](https://www.premiumize.me/api/services/list).
+  - TorBox: [API terms](https://www.torbox.app/policies/api-developer-terms), [acceptable use](https://www.torbox.app/policies/acceptable-use), [referrals](https://support.torbox.app/en/articles/9875657-how-does-the-torbox-referral-system-work), [device code](https://www.postman.com/torbox/torbox-api/request/ezu2ude/start-device-code-authorization-process), [account restrictions](https://support.torbox.app/en/articles/9836418-account-restrictions), [prices](https://torbox.app/pricing).
+  - Other: [USTR 2025 Notorious Markets List](https://ustr.gov/sites/default/files/files/Press/Releases/2026/2025%20Notorious%20Markets%20List%20(final).pdf).
+- **UK rules**
+  - Advertising: [CAP Code section 2](https://www.asa.org.uk/type/non_broadcast/code_section/02.html) and [section 3](https://www.asa.org.uk/type/non_broadcast/code_section/03.html), [ASA on affiliate marketing](https://www.asa.org.uk/advice-online/affiliate-marketing.html), [ASA ruling on "affiliate" labels (Asos)](https://www.asa.org.uk/rulings/asos-com-ltd-a19-1025856-asos-com-ltd.html).
+  - Consumer law: [DMCC Act 2024 Schedule 20](https://www.legislation.gov.uk/ukpga/2024/13/schedule/20), [CMA unfair commercial practices guidance](https://www.gov.uk/government/publications/unfair-commercial-practices-cma207/unfair-commercial-practices), [CMA on hidden advertising](https://www.gov.uk/government/publications/social-media-endorsements-guidance-for-content-creators/social-media-endorsements-being-transparent-with-your-followers).
+  - Copyright: [Filmspeler, CJEU C-527/15](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=celex%3A62015CJ0527), [TuneIn v Warner Music, Court of Appeal 2021](https://www.wiggin.co.uk/insight/court-of-appeal-upholds-tunein-hyperlinking-decision-and-declines-to-depart-from-eu-retained-law/).
+  - Privacy: [ICO on storage and access exceptions](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guidance-on-the-use-of-storage-and-access-technologies/what-are-the-exceptions/).
+  - Tax: [HMRC trading allowance](https://www.gov.uk/guidance/tax-free-allowances-on-property-and-trading-income), [HMRC on income from online platforms](https://www.gov.uk/guidance/check-if-you-need-to-tell-hmrc-about-your-income-from-online-platforms).
+- **Stores and precedent**
+  - LG: [App Self Checklist](https://webostv.developer.lge.com/distribute/app-self-checklist), [in-app purchase guide](https://webostv.developer.lge.com/develop/guides/in-app-purchase).
+  - Stremio: [back on LG, August 2026](https://blog.stremio.com/stremio-for-lg-tv-is-back-2020-models-including-2026-models/), [back on Google Play](https://blog.stremio.com/were-back-on-google-play/).
+  - Nuvio: [its Play Store removal](https://nuvio.wiki/installation/android-mobile), [its linked services](https://github.com/NuvioMedia/NuvioTV/blob/main/app/src/main/res/values/strings.xml).
+  - Referral links in other apps: [Hydra's optional referral build variable](https://github.com/hydralauncher/hydra/blob/main/src/renderer/src/pages/settings/settings-real-debrid.tsx), [Comet's referral links](https://github.com/g0ldyy/comet/blob/main/comet/templates/index.html).
+
 ## Risks, legal and open questions
 
 The two risks that could sink the project were LG rejecting the app in its content test and webOS not exposing audio and subtitle tracks for direct-play files. The first is handled by how the store build is shaped. Phase 0 settled most of the second on webOS 22: audio tracks are exposed, embedded subtitles are not, and addon subtitles cover the gap.
@@ -662,13 +819,14 @@ The two risks that could sink the project were LG rejecting the app in its conte
 | Developer Mode expiry interrupts testing | High | Low | Reset the timer weekly, keep test TVs logged in |
 | Stremio's unofficial API changes (account import) | Medium | Low | Feature stays optional |
 | "BannerTV" name conflicts with an existing trademark | Low | Medium | Trademark search before store submission; never use Stremio or Nuvio branding |
+| The debrid referral screen is read as promoting piracy, by LG, rights holders or other app stores | Medium | High | Out of the first store submission (built with `debrid=off`); LG asked in writing first; providers' written permission; "Ad" label and neutral wording; legal review; build switch to ship without it |
 
 **Legal considerations** (not legal advice)
 
 - BannerTV is a neutral client, like a browser or Stremio itself. Legal exposure rises sharply if the project ships or promotes addons that point to infringing content, runs peer-to-peer on the TV, or charges for access to content. v1 does none of these.
 - Publish terms of use and a privacy policy before store launch (the store listing and the Trakt and TMDB integrations need them).
 - Respect TMDB and Trakt API terms, including attribution and rate limits.
-- Get a short legal review before adding payments or a hosted sync service.
+- Get a short legal review before adding payments, a hosted sync service or the debrid referral screen. A referral earns the developer a reward (premium days) for each sign-up to a stream-access service, which weakens the neutral-client position.
 - UK launch: rights holders and anti-piracy groups in the UK actively pursue apps and sellers that promote infringing streams. Keep the store listing, screenshots, demo addon and donation page free of copyrighted titles and of any mention of third-party stream addons.
 
 **Open questions for Eyitayo**
