@@ -3,7 +3,13 @@ import type { ContentType } from '@bannertv/protocol';
 import { useEffect, useMemo, useRef } from 'react';
 import { syncTraktSoon, traktAccount, traktAvailable } from '../../data/trakt';
 import type { PlaybackSession, SessionState } from '../../player/session';
-import { createScrobblePlace, type Runtimes } from './scrobble-progress';
+import {
+  createScrobblePlace,
+  onClose,
+  onStatus,
+  type Runtimes,
+  type Sent,
+} from './scrobble-progress';
 
 /** The title's running times as they are now, read from inside an effect. */
 function runtimesOf(
@@ -45,7 +51,7 @@ export function useScrobble(
   // One per video, like the scrobbler: another episode starts with no place.
   const place = useMemo(() => createScrobblePlace(videoId), [videoId]);
 
-  const sent = useRef<'none' | 'playing' | 'paused' | 'stopped'>('none');
+  const sent = useRef<Sent>('none');
   const latest = useRef(state);
   useEffect(() => {
     latest.current = state;
@@ -54,23 +60,10 @@ export function useScrobble(
 
   const { status, live } = state;
   useEffect(() => {
-    if (!scrobbler || live || sent.current === 'stopped') return;
-    const now = latest.current;
-    if (status === 'playing' && sent.current !== 'playing') {
-      // A clip starts nothing: Trakt hears again from a real file.
-      if (place.clip(now, runtimesOf(runtime, knownRuntime))) return;
-      sent.current = 'playing';
-      void scrobbler.start(place.now(now, runtimesOf(runtime, knownRuntime)) ?? 0);
-    } else if (status === 'paused' && sent.current === 'playing') {
-      const at = place.now(now, runtimesOf(runtime, knownRuntime));
-      if (at === undefined) return;
-      sent.current = 'paused';
-      void scrobbler.pause(at);
-    } else if (status === 'ended' && sent.current !== 'none') {
-      sent.current = 'stopped';
-      const at = place.end(now, runtimesOf(runtime, knownRuntime));
-      if (at !== undefined) void scrobbler.stop(at);
-    }
+    if (!scrobbler || live) return;
+    const next = onStatus(sent.current, latest.current, place, runtimesOf(runtime, knownRuntime));
+    sent.current = next.sent;
+    if (next.call) void scrobbler[next.call.action](next.call.percent);
   }, [scrobbler, place, status, live]);
 
   // Closing the player, or another episode replacing it, stops at where it got to.
@@ -78,10 +71,15 @@ export function useScrobble(
     if (!scrobbler || !session) return;
     return () => {
       const played = sent.current !== 'none';
-      if (played && sent.current !== 'stopped' && !latest.current.live) {
-        sent.current = 'stopped';
-        const at = place.now(latest.current, runtimesOf(runtime, knownRuntime));
-        if (at !== undefined) void scrobbler.stop(at);
+      if (!latest.current.live) {
+        const next = onClose(
+          sent.current,
+          latest.current,
+          place,
+          runtimesOf(runtime, knownRuntime),
+        );
+        sent.current = next.sent;
+        if (next.call) void scrobbler.stop(next.call.percent);
       }
       if (played) syncTraktSoon();
     };

@@ -126,9 +126,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     },
     clip,
     now(state, runtimes) {
-      // The last real file's place, as measured by that file. Another file
-      // than the one last seen means the one last seen is the last.
-      const lastSeenCounts = state.entry !== file && reached !== undefined && !wasClip;
+      // The last real file's place, as measured by that file: the one last
+      // seen, this one reopening (Try again) or the one before another opens.
+      const lastSeenCounts = reached !== undefined && !wasClip;
       const kept = () => lastReal(lastSeenCounts ? earlier.concat(reached!) : earlier, runtimes);
       // A clip: never its own place.
       if (clip(state, runtimes)) return kept();
@@ -142,4 +142,53 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     },
   };
   return place;
+}
+
+/** What this player has told Trakt of the video so far. */
+export type Sent = 'none' | 'playing' | 'paused' | 'stopped';
+
+/** A call to make to Trakt. */
+export interface ScrobbleCall {
+  action: 'start' | 'pause' | 'stop';
+  percent: number;
+}
+
+interface Told {
+  sent: Sent;
+  call?: ScrobbleCall;
+}
+
+function told(sent: Sent, action: ScrobbleCall['action'], percent: number | undefined): Told {
+  return percent === undefined ? { sent } : { sent, call: { action, percent } };
+}
+
+/**
+ * What a change of status tells Trakt: start when a real file plays, pause
+ * when it is paused, stop at its end. A clip starts nothing; a pause with no
+ * real place to send still counts as one, so the next real file starts.
+ */
+export function onStatus(
+  sent: Sent,
+  state: Played,
+  place: ScrobblePlace,
+  runtimes: Runtimes,
+): Told {
+  if (sent === 'stopped') return { sent };
+  if (state.status === 'playing' && sent !== 'playing') {
+    if (place.clip(state, runtimes)) return { sent };
+    return told('playing', 'start', place.now(state, runtimes) ?? 0);
+  }
+  if (state.status === 'paused' && sent === 'playing') {
+    return told('paused', 'pause', place.now(state, runtimes));
+  }
+  if (state.status === 'ended' && sent !== 'none') {
+    return told('stopped', 'stop', place.end(state, runtimes));
+  }
+  return { sent };
+}
+
+/** What closing the player, or another episode replacing it, tells Trakt. */
+export function onClose(sent: Sent, state: Played, place: ScrobblePlace, runtimes: Runtimes): Told {
+  if (sent === 'none' || sent === 'stopped') return { sent };
+  return told('stopped', 'stop', place.now(state, runtimes));
 }

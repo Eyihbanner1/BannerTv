@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionState, SessionStatus } from '../../player/session';
-import { createScrobblePlace, isClip, isSpecial, percent } from './scrobble-progress';
+import {
+  createScrobblePlace,
+  isClip,
+  isSpecial,
+  onClose,
+  onStatus,
+  percent,
+  type ScrobbleCall,
+  type Sent,
+} from './scrobble-progress';
 
 const EPISODE_S = 47 * 60;
 const EPISODE = 'tt0944947:1:3';
@@ -172,6 +181,19 @@ describe('createScrobblePlace', () => {
     expect(scrobble.now(own, known)).toBe(60);
   });
 
+  it('keeps a file’s own place while Try again opens it again', () => {
+    const scrobble = episode();
+    scrobble.see(played(1428, 2820), known);
+    // Another release picked in Sources plays to 91%, then fails.
+    scrobble.see(played(1428, 0, 'loading', false, OTHER), known);
+    scrobble.see(played(2628, 2880, 'playing', false, OTHER), known);
+    scrobble.see(played(2628, 2880, 'failed', false, OTHER), known);
+    // Try again: the same release opens again there, with no length yet.
+    const reopening = played(2628, 0, 'loading', false, OTHER);
+    scrobble.see(reopening, known);
+    expect(scrobble.now(reopening, known)).toBeCloseTo(91.25);
+  });
+
   it('measures the first file, opening at a saved place, against the running time', () => {
     const scrobble = episode();
     const opening = played(EPISODE_S / 2, 0, 'loading');
@@ -259,5 +281,105 @@ describe('createScrobblePlace', () => {
     expect(scrobble.clip(special, known)).toBe(false);
     expect(scrobble.now(special, known)).toBe(100);
     expect(scrobble.clip(played(10, 30, 'playing', true), known)).toBe(true);
+  });
+});
+
+describe('onStatus and onClose', () => {
+  const known = { runtimeSeconds: EPISODE_S, knownRuntimeSeconds: EPISODE_S };
+  const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
+
+  /** Feeds states through a place as the hook does, and lists what Trakt is told. */
+  function trakt(
+    steps: [ReturnType<typeof played>, typeof known | typeof guessed][],
+    close = true,
+  ) {
+    const scrobble = createScrobblePlace(EPISODE);
+    const calls: ScrobbleCall[] = [];
+    let sent: Sent = 'none';
+    let last:
+      { state: ReturnType<typeof played>; runtimes: typeof known | typeof guessed } | undefined;
+    for (const [state, runtimes] of steps) {
+      scrobble.see(state, runtimes);
+      // The hook asks only when the status changes.
+      if (last?.state.status !== state.status) {
+        const next = onStatus(sent, state, scrobble, runtimes);
+        sent = next.sent;
+        if (next.call) calls.push(next.call);
+      }
+      last = { state, runtimes };
+    }
+    if (close && last) {
+      const next = onClose(sent, last.state, scrobble, last.runtimes);
+      if (next.call) calls.push(next.call);
+    }
+    return calls.map((call) => `${call.action}(${Math.round(call.percent)})`);
+  }
+
+  it('tells Trakt an ordinary play: start, pause, stop at the end', () => {
+    expect(
+      trakt([
+        [played(0, 0, 'loading'), known],
+        [played(0, 2820, 'playing'), known],
+        [played(1410, 2820, 'paused'), known],
+        [played(1410, 2820, 'playing'), known],
+        [played(2820, 2820, 'ended'), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(50)', 'start(50)', 'stop(100)']);
+  });
+
+  it('stops where a play got to when the player closes', () => {
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(705, 2820, 'buffering'), known],
+      ]),
+    ).toEqual(['start(0)', 'stop(25)']);
+  });
+
+  it('starts nothing for a clip, and sends the episode’s place from a pause or close in it', () => {
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(1410, 2820, 'playing'), known],
+        [played(1410, 0, 'loading', false, CLIP), known],
+        [played(1410, 40, 'playing', true), known],
+        [played(1415, 40, 'paused', true), known],
+        [played(1415, 40, 'playing', true), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(50)', 'stop(50)']);
+  });
+
+  it('starts the real file after a pause in a clip found out late, with nothing to send', () => {
+    expect(
+      trakt([
+        [played(0, 0, 'loading', false, CLIP), guessed],
+        [played(5, 30, 'playing', false, CLIP), guessed],
+        // The page's running time comes: it was a clip.
+        [played(10, 30, 'paused', false, CLIP), known],
+        [played(10, 0, 'loading', false, OTHER), known],
+        [played(10, 2820, 'playing', false, OTHER), known],
+      ]),
+    ).toEqual(['start(17)', 'start(0)', 'stop(0)']);
+  });
+
+  it('never stops a clip that ends at 100%', () => {
+    expect(
+      trakt(
+        [
+          [played(0, 0, 'loading', false, CLIP), guessed],
+          [played(5, 30, 'playing', false, CLIP), guessed],
+          [played(30, 30, 'ended', false, CLIP), known],
+        ],
+        false,
+      ),
+    ).toEqual(['start(17)']);
+  });
+
+  it('tells Trakt nothing more once stopped, or before anything played', () => {
+    const scrobble = createScrobblePlace(EPISODE);
+    expect(onStatus('stopped', played(10, 2820, 'playing'), scrobble, known)).toEqual({
+      sent: 'stopped',
+    });
+    expect(onClose('none', played(10, 2820, 'paused'), scrobble, known)).toEqual({ sent: 'none' });
   });
 });
