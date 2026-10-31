@@ -1,9 +1,16 @@
 import { isMuchShorter } from '@bannertv/core';
 import type { SessionState } from '../../player/session';
 
-type Played = Pick<SessionState, 'status' | 'entry' | 'position' | 'duration' | 'clip'>;
+type Played = Pick<SessionState, 'status' | 'entry' | 'position' | 'duration' | 'clip' | 'live'>;
 
-const NO_PLAY: Played = { status: 'idle', entry: null, position: 0, duration: 0, clip: false };
+const NO_PLAY: Played = {
+  status: 'idle',
+  entry: null,
+  position: 0,
+  duration: 0,
+  clip: false,
+  live: false,
+};
 
 /** A special (season 0) can be a short extra of a long series, and plays whole. */
 export function isSpecial(videoId: string): boolean {
@@ -78,8 +85,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   /** This file, and the place it has reached while it passed for the title. */
   let file: SessionState['entry'] | undefined;
   let reached: Reached | undefined;
+  /** Whether this opening of the file has played, or got past opening at all. */
   let played = false;
+  let begun = false;
   let wasClip = false;
+  /** This file is a clip opened again (Try again): one until it shows otherwise. */
+  let reopenedClip = false;
   const clip = (state: Played, runtimes: Runtimes) =>
     isClip(state, runtimes.knownRuntimeSeconds, videoId);
   // A place kept from before the title's running time was known is judged
@@ -95,20 +106,36 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     }
     return undefined;
   };
+  // What the file reached is kept, if it was the title, and it starts over.
+  const startOver = () => {
+    if (reached && !wasClip) earlier.push(reached);
+    if (earlier.length > KEPT) earlier.shift();
+    reached = undefined;
+    played = false;
+    begun = false;
+    wasClip = false;
+  };
   const place: ScrobblePlace = {
     see(state, runtimes) {
+      const opening = state.status === 'loading' || state.status === 'idle';
       if (state.entry !== file) {
-        // Another file: what the last one reached is kept if it was the title.
-        if (reached && !wasClip) earlier.push(reached);
-        if (earlier.length > KEPT) earlier.shift();
+        startOver();
         file = state.entry;
-        reached = undefined;
-        played = false;
-        wasClip = false;
+        reopenedClip = false;
+      } else if (opening && begun) {
+        // The same link opened again (Try again, or a broadcast's live edge):
+        // like another file, but a clip stays one while it opens.
+        const clipBefore = wasClip;
+        startOver();
+        reopenedClip = clipBefore;
       }
-      // A file opened again (a retry of the same link) starts over too.
-      if (state.status === 'loading' || state.status === 'idle') played = false;
+      if (!opening) begun = true;
       if (state.status === 'playing') played = true;
+      if (state.live) {
+        // A broadcast's clock is no place in the title.
+        reached = undefined;
+        return;
+      }
       if (clip(state, runtimes)) {
         // Found out late (its running time came after it started): nothing it
         // reached counts.
@@ -126,16 +153,20 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     },
     clip,
     now(state, runtimes) {
-      // The last real file's place, as measured by that file: the one last
-      // seen, this one reopening (Try again) or the one before another opens.
+      // The last real file's place, as measured by that file: an earlier one,
+      // or this one's before another opens.
       const lastSeenCounts = reached !== undefined && !wasClip;
       const kept = () => lastReal(lastSeenCounts ? earlier.concat(reached!) : earlier, runtimes);
       // A clip: never its own place.
       if (clip(state, runtimes)) return kept();
       // A file still opening, with no length of its own yet, is where the
-      // last one was: not its place against the title's running time.
+      // last one was: not its place against the title's running time. A clip
+      // opened again is still at its own clock, so it has none.
       const opening = state.duration === 0 && (state.entry !== file || !played);
-      return (opening ? kept() : undefined) ?? percent(state, runtimes.runtimeSeconds);
+      if (!opening) return percent(state, runtimes.runtimeSeconds);
+      const at = kept();
+      if (at !== undefined || (reopenedClip && state.entry === file)) return at;
+      return percent(state, runtimes.runtimeSeconds);
     },
     end(state, runtimes) {
       return clip(state, runtimes) ? place.now(state, runtimes) : 100;

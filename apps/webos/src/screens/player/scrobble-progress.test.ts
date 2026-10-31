@@ -19,6 +19,13 @@ const REAL = { name: 'The episode' } as unknown as Entry;
 const OTHER = { name: 'Another release' } as unknown as Entry;
 const CLIP = { name: 'A 30 second clip' } as unknown as Entry;
 
+type Played = ReturnType<typeof played>;
+
+/** A state of a stream the player takes for a live broadcast. */
+function live(position: number, status: SessionStatus = 'playing', entry: Entry = OTHER): Played {
+  return { ...played(position, 0, status, false, entry), live: true };
+}
+
 function played(
   position: number,
   duration: number,
@@ -26,7 +33,7 @@ function played(
   clip = false,
   entry: Entry = clip ? CLIP : REAL,
 ) {
-  return { status, entry, position, duration, clip };
+  return { status, entry, position, duration, clip, live: false };
 }
 
 describe('isClip', () => {
@@ -289,26 +296,22 @@ describe('onStatus and onClose', () => {
   const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
 
   /** Feeds states through a place as the hook does, and lists what Trakt is told. */
-  function trakt(
-    steps: [ReturnType<typeof played>, typeof known | typeof guessed][],
-    close = true,
-  ) {
+  function trakt(steps: [Played, typeof known | typeof guessed][], close = true) {
     const scrobble = createScrobblePlace(EPISODE);
     const calls: ScrobbleCall[] = [];
     let sent: Sent = 'none';
-    let last:
-      { state: ReturnType<typeof played>; runtimes: typeof known | typeof guessed } | undefined;
+    let last: { state: Played; runtimes: typeof known | typeof guessed } | undefined;
     for (const [state, runtimes] of steps) {
       scrobble.see(state, runtimes);
-      // The hook asks only when the status changes.
-      if (last?.state.status !== state.status) {
+      // The hook asks only when the status changes, and never of a broadcast.
+      if (!state.live && (last?.state.status !== state.status || last.state.live !== state.live)) {
         const next = onStatus(sent, state, scrobble, runtimes);
         sent = next.sent;
         if (next.call) calls.push(next.call);
       }
       last = { state, runtimes };
     }
-    if (close && last) {
+    if (close && last && !last.state.live) {
       const next = onClose(sent, last.state, scrobble, last.runtimes);
       if (next.call) calls.push(next.call);
     }
@@ -360,6 +363,74 @@ describe('onStatus and onClose', () => {
         [played(10, 2820, 'playing', false, OTHER), known],
       ]),
     ).toEqual(['start(17)', 'start(0)', 'stop(0)']);
+  });
+
+  it('keeps the episode’s place when Try again brings back a clip of the same link', () => {
+    const real = [
+      [played(0, 2820, 'playing'), known],
+      [played(1410, 2820, 'playing'), known],
+      [played(1410, 2820, 'failed'), known],
+      // Try again: the same link opens again there, and serves a 10 s placeholder.
+      [played(1410, 0, 'loading'), known],
+    ] satisfies [Played, typeof known][];
+    expect(
+      trakt([
+        ...real,
+        [played(0, 10, 'loading', true, REAL), known],
+        [played(2, 10, 'playing', true, REAL), known],
+        [played(2, 10, 'paused', true, REAL), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(50)', 'stop(50)']);
+    // Auto-play with nothing left to move on to: the placeholder fails.
+    expect(trakt([...real, [played(1, 10, 'failed'), known]])).toEqual(['start(0)', 'stop(50)']);
+  });
+
+  it('sends nothing of a clip found out late while Try again opens it again', () => {
+    expect(
+      trakt([
+        [played(0, 0, 'loading', false, CLIP), guessed],
+        [played(0, 240, 'playing', false, CLIP), guessed],
+        [played(200, 240, 'playing', false, CLIP), guessed],
+        [played(200, 240, 'failed', false, CLIP), guessed],
+        // The page's running time comes: it was a clip. Try again opens it at its own clock.
+        [played(200, 240, 'failed', false, CLIP), known],
+        [played(200, 0, 'loading', false, CLIP), known],
+        [played(200, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+  });
+
+  it('never takes a broadcast’s clock for the episode’s place', () => {
+    const before = [
+      [played(0, 2820, 'playing'), known],
+      [played(1128, 2820, 'playing'), known],
+      [played(1128, 2820, 'failed'), known],
+      // Another release turns out to be live, and plays at its live edge.
+      [played(1128, 0, 'loading', false, OTHER), known],
+      [live(2400), known],
+      [live(2460), known],
+    ] satisfies [Played, typeof known][];
+    // It fails; Try again opens it again, and the player closes while it does.
+    expect(
+      trakt([
+        ...before,
+        [live(2460, 'failed'), known],
+        [played(0, 0, 'loading', false, OTHER), known],
+      ]),
+    ).toEqual(['start(0)', 'stop(40)']);
+    // A clip picked after it.
+    expect(
+      trakt([
+        ...before,
+        [played(0, 0, 'loading', false, CLIP), known],
+        [played(5, 40, 'playing', true), known],
+        [played(5, 40, 'paused', true), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(40)', 'stop(40)']);
+    // Another real release picked after it, paused and closed while it opens.
+    expect(
+      trakt([...before, [played(0, 0, 'loading'), known], [played(0, 0, 'paused'), known]]),
+    ).toEqual(['start(0)', 'pause(40)', 'stop(40)']);
   });
 
   it('never stops a clip that ends at 100%', () => {
