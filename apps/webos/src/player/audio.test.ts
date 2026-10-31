@@ -69,7 +69,10 @@ describe('audio rows', () => {
     expect(audioDetail(track('0', 'en', ''))).toBeUndefined();
     expect(audioDetail(track('0', 'eng', 'eng'))).toBeUndefined();
     expect(audioSummary(track('0', '', 'Main'))).toBe('Main');
-    expect(audioSummary(track('0', '', ''))).toBe('?');
+    // Neither: never a bare "?".
+    expect(audioSummary(track('0', '', ''))).toBe('Unknown language');
+    expect(audioSummary(track('0', '', '', { channels: '2.0' }))).toBe('Unknown language 2.0');
+    expect(audioSummary(track('0', 'und', ''))).toBe('Unknown language');
   });
 
   it('knows a commentary by its mark or its name', () => {

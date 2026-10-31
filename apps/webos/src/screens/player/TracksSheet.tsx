@@ -8,12 +8,7 @@ import {
   releaseMatch,
   type StreamEntry,
 } from '@bannertv/core';
-import {
-  doesFocusableExist,
-  FocusContext,
-  setFocus,
-  useFocusable,
-} from '@noriginmedia/norigin-spatial-navigation';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { Fragment, type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
@@ -21,11 +16,12 @@ import { Pressable } from '../../components/Pressable';
 import { preferences } from '../../data/preferences';
 import { focusedKey } from '../../navigation/spatial';
 import { inputMode } from '../../platform/input-mode';
-import { audioDetail, audioSummary } from '../../player/audio';
+import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
 import { streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { formatOffset, offsetWay, stepOffset, TIMING_STEPS } from '../../player/timing';
 import { type SheetRow, SheetList } from './SheetList';
+import { Pane, SheetTabs } from './SheetTabs';
 import { SubtitleStyleChoices, useStyleSummary } from './SubtitleStylePanel';
 import type { SubtitleChoice, Subtitles } from './use-subtitles';
 import styles from './TracksSheet.module.css';
@@ -100,79 +96,6 @@ interface TracksSheetProps {
 /** A column that only says something: still asking, nothing found. */
 function Note({ children }: { children: ReactNode }) {
   return <p className={styles.note}>{children}</p>;
-}
-
-/** A focusable box for one tab's content, so Up from anywhere in it reaches the tabs. */
-function Pane({
-  focusKey,
-  preferred,
-  className,
-  children,
-}: {
-  focusKey: string;
-  preferred?: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  const { ref, focusKey: key } = useFocusable<object, HTMLDivElement>({
-    focusKey,
-    saveLastFocusedChild: false,
-    preferredChildFocusKey: preferred,
-  });
-  return (
-    <FocusContext.Provider value={key}>
-      <div ref={ref} className={className}>
-        {children}
-      </div>
-    </FocusContext.Provider>
-  );
-}
-
-function Tabs({
-  tab,
-  values,
-  onTab,
-  aside,
-}: {
-  tab: SheetTab;
-  values: Record<SheetTab, string>;
-  onTab: (tab: SheetTab) => void;
-  aside?: string;
-}) {
-  const { t } = useTranslation();
-  const names: Record<SheetTab, string> = {
-    subtitles: t('player.subtitles'),
-    audio: t('player.audio'),
-    timing: t('player.timing'),
-    style: t('player.styleTab'),
-  };
-  return (
-    <Pane focusKey={`${SHEET}-tabs`} preferred={`${SHEET}-tab-${tab}`} className={styles.tabs}>
-      {TABS.map((name) => (
-        <Pressable
-          key={name}
-          focusKey={`${SHEET}-tab-${name}`}
-          label={`${names[name]}, ${values[name]}`}
-          className={name === tab ? `${styles.tab} ${styles.current}` : styles.tab}
-          focusedClassName={styles.tabFocused}
-          // Moving along the tabs shows each one's choices, as the season tabs
-          // do. The pointer passing over them on its way down does not: a click does.
-          onFocus={() => {
-            if (inputMode.get() !== 'pointer') onTab(name);
-          }}
-          onPress={() => {
-            if (name !== tab) onTab(name);
-            // On to its choices, when it has any: Timing with subtitles off has none.
-            else if (doesFocusableExist(`${SHEET}-${name}`)) void setFocus(`${SHEET}-${name}`);
-          }}
-        >
-          <span className={styles.tabName}>{names[name]}</span>
-          <span className={styles.tabValue}>{values[name]}</span>
-        </Pressable>
-      ))}
-      {aside && <span className={styles.aside}>{aside}</span>}
-    </Pane>
-  );
 }
 
 /**
@@ -341,7 +264,7 @@ export function TracksSheet(props: TracksSheetProps) {
   } else if (tab === 'audio') {
     const rows = audio.map((track): SheetRow => ({
       focusKey: `${SHEET}-audio-${track.id}`,
-      label: (track.lang && languageName(track.lang)) || track.label || '?',
+      label: audioLanguage(track),
       detail:
         [
           audioDetail(track),
@@ -430,6 +353,12 @@ export function TracksSheet(props: TracksSheetProps) {
   }
 
   const active = audio.find((track) => track.active) ?? audio[0];
+  const names: Record<SheetTab, string> = {
+    subtitles: t('player.subtitles'),
+    audio: t('player.audio'),
+    timing: t('player.timing'),
+    style: t('player.styleTab'),
+  };
   const values: Record<SheetTab, string> = {
     subtitles: subtitlesValue(subtitles) ?? t('player.subtitlesOff'),
     audio: active ? audioSummary(active) : t('player.audioDefault'),
@@ -458,7 +387,10 @@ export function TracksSheet(props: TracksSheetProps) {
       onBack={back}
       placement="bottom"
     >
-      <Tabs
+      <SheetTabs
+        sheet={SHEET}
+        tabs={TABS}
+        names={names}
         tab={tab}
         values={values}
         onTab={onTab}

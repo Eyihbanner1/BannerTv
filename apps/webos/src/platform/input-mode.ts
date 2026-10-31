@@ -1,4 +1,5 @@
 import { createStore } from '@bannertv/core';
+import { noteInput } from '../navigation/activity';
 import { movedByWheel } from '../navigation/spatial';
 
 export type InputMode = 'keys' | 'pointer';
@@ -40,12 +41,17 @@ export function initInputMode(): void {
     (event) => {
       // Chromium sends zero-distance moves when content slides under a still
       // pointer. Those must not steal focus from the remote.
-      if (event.movementX !== 0 || event.movementY !== 0) inputMode.set('pointer');
+      if (event.movementX !== 0 || event.movementY !== 0) {
+        inputMode.set('pointer');
+        noteInput();
+      }
     },
     // Capture runs before any element's handler, so the first move after the
     // arrows already counts as pointer input when it reaches a tile.
     { capture: true, passive: true },
   );
+  // On the TV the Magic Remote's OK is a click alone while the pointer shows.
+  window.addEventListener('click', noteInput, { capture: true, passive: true });
   window.addEventListener(
     'keydown',
     (event) => {

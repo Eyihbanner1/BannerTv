@@ -19,6 +19,7 @@ class FakeVideo extends EventTarget {
   currentTime = 0;
   duration = NaN;
   error: { code: number } | null = null;
+  seekable = { length: 0, start: () => 0, end: () => 0 };
 
   get firstChild() {
     return this.children[0] ?? null;
@@ -116,5 +117,16 @@ describe('the native engine', () => {
       video.duration = Infinity;
       expect(engine.isLive()).toBe(false);
     }
+  });
+
+  it('plays live a little back from the newest moment it can seek to, when it keeps any', () => {
+    const { video, engine } = open(0, 'https://media.example.com/live/master.m3u8');
+    video.duration = Infinity;
+    expect(engine.liveWindow()).toBeNull();
+    video.seekable = { length: 1, start: () => 100, end: () => 400 };
+    expect(engine.liveWindow()).toEqual({ start: 100, live: 390, slack: 10 });
+    // Nothing kept to go back through: no live point to show.
+    video.seekable = { length: 1, start: () => 400, end: () => 405 };
+    expect(engine.liveWindow()).toBeNull();
   });
 });

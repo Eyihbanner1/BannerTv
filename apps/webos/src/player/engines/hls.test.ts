@@ -34,7 +34,12 @@ class FakeHls {
   handlers: Record<string, Handler> = {};
   attached: unknown = null;
   destroyed = false;
-  latestLevelDetails: { live: boolean } | null = null;
+  latestLevelDetails: {
+    live: boolean;
+    targetduration?: number;
+    fragments?: Array<{ start: number }>;
+  } | null = null;
+  liveSyncPosition: number | null = null;
 
   constructor() {
     FakeHls.created.push(this);
@@ -113,5 +118,22 @@ describe('the hls.js engine', () => {
     expect(engine.isLive()).toBe(true);
     instance!.latestLevelDetails = { live: false };
     expect(engine.isLive()).toBe(false);
+  });
+
+  it('plays live where hls.js syncs to, back to the oldest segment listed, a segment of slack', async () => {
+    script.finish();
+    const engine = createHlsEngine(video, listener);
+    await engine.load('https://media.example.com/master.m3u8', 0);
+    const [instance] = FakeHls.created;
+    instance!.latestLevelDetails = {
+      live: true,
+      targetduration: 6,
+      fragments: [{ start: 120 }, { start: 126 }],
+    };
+    expect(engine.liveWindow()).toBeNull();
+    instance!.liveSyncPosition = 300;
+    expect(engine.liveWindow()).toEqual({ start: 120, live: 300, slack: 6 });
+    instance!.latestLevelDetails = { live: false };
+    expect(engine.liveWindow()).toBeNull();
   });
 });

@@ -303,6 +303,9 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
 
     isLive: () => live,
 
+    // Android's news gives no live point yet: a broadcast reads as live, and Go to live as unknown.
+    liveWindow: () => null,
+
     audioTracks: () => audio,
 
     selectAudio(id) {

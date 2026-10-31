@@ -7,6 +7,8 @@ import styles from './Menu.module.css';
 export interface MenuOption {
   value: string;
   label: string;
+  /** A quieter note after the label: "Spanish audio". */
+  detail?: string;
 }
 
 const ITEM_HEIGHT = 88;
@@ -56,7 +58,7 @@ export function Menu({
       <Pressable
         key={index}
         focusKey={`${focusKey}-${index}`}
-        label={option.label}
+        label={option.detail ? `${option.label}, ${option.detail}` : option.label}
         className={isSelected ? `${styles.option} ${styles.selected}` : styles.option}
         focusedClassName={styles.focused}
         style={{ top: index * ITEM_HEIGHT }}
@@ -65,7 +67,14 @@ export function Menu({
           if (canSlide()) setAnchor(anchorFor(index));
         }}
       >
-        {option.label}
+        {option.detail ? (
+          <>
+            <span className={styles.label}>{option.label}</span>
+            <span className={styles.detail}>{option.detail}</span>
+          </>
+        ) : (
+          option.label
+        )}
       </Pressable>,
     );
   }
