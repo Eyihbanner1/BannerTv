@@ -37,7 +37,14 @@ import {
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { back, type EventPlay, type PlayerRoute, remembersPlace, replace } from '../../app/router';
+import {
+  back,
+  type EventPlay,
+  type PlayerRoute,
+  remembersPlace,
+  replace,
+  topRoute,
+} from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
@@ -46,9 +53,9 @@ import { playedVideos, progress, speedMemory } from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
-import { markActivity, sinceActivity } from '../../navigation/activity';
+import { markActivity, sinceInput } from '../../navigation/activity';
 import { KeyCode } from '../../navigation/keys';
-import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
+import { answeredOk, clickCameWithOk, okWentDownOn } from '../../navigation/ok-click';
 import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
@@ -67,6 +74,7 @@ import {
   autoplaysSinceInput,
   countAutoplay,
   keepSleepTimer,
+  leaveSleepTimer,
   SLEEP_OFF,
   sleepTimerFor,
 } from '../../player/sleep';
@@ -251,6 +259,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const problem = nothing || state.status === 'failed';
   // Whether the controls show.
   const chrome = controls && !waiting;
+  // On a broadcast whose live point the engine knows, playing live leaves
+  // Forward 10 s, Fast forward and Go to live nowhere to go.
+  const atLive = state.live && state.liveWindow !== null && state.behind === 0;
 
   // Up Next, in the last 30 seconds of an episode: a card while nothing else
   // is on screen, else the count on Next episode. It counts to the real end,
@@ -298,7 +309,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       askPreference &&
         askStillWatching({
           autoplaysSinceInput: autoplaysSinceInput(),
-          sinceInputMs: sinceActivity(),
+          sinceInputMs: sinceInput(),
         }),
     );
   }
@@ -434,7 +445,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!session) return;
     const onVisibility = () => {
       if (!document.hidden) {
-        // Back again: the controls show, with Play ready unless a panel is open.
+        // Back again: the controls show, with Play ready unless a panel is
+        // open. The dark screen and "Still watching?" keep the remote.
+        if (asleep || asking) return;
         if (session.get().status === 'paused') {
           setControls(true);
           if (!panel) void setFocus('player-play');
@@ -446,7 +459,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [session, panel]);
+  }, [session, panel, asleep, asking]);
 
   // The audio language chosen last time, once per stream and engine: a stream
   // the TV's player hands to hls.js lists its tracks again, under other ids.
@@ -625,7 +638,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
       } else show('player-play');
       return false;
     },
-    onEnterPress: () => {
+    onEnterPress: (_props, details) => {
+      // An OK held down from a sheet's row or a button lands here: not a press of its own.
+      if ((details.pressedKeys.enter ?? 1) > 1 && okWentDownOn() !== 'player-surface') return;
       // OK leaves a starting stream to start: the controls show once it plays.
       if (waiting) {
         wantsControls.current = true;
@@ -662,6 +677,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
         const direction = event.keyCode === KeyCode.FastForward ? 1 : -1;
         if (state.live && session && !waiting) {
           // Within what the broadcast keeps, and the controls show where that is.
+          if (direction === 1 && atLive) {
+            show();
+            break;
+          }
           const at = session.trustedPosition() ?? state.position;
           session.seek(at + direction * skipStep(heldSkip.current));
           show();
@@ -808,7 +827,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     }
     const wanted = wantsControls.current;
     wantsControls.current = false;
-    if (problem || panel) return;
+    if (problem || panel || asleep || asking) return;
     if (wanted || state.status === 'paused') show('player-play');
     // Only the change of waiting matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -898,15 +917,19 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // The sleep timer: kept for the next screen of this title, read again as it
   // nears its warning and its end, and it pauses the video under its dark screen.
   useEffect(() => keepSleepTimer(metaId, sleep), [metaId, sleep]);
+  // Gone anywhere but on with this title, the player leaves no timer behind.
+  useEffect(() => () => leaveSleepTimer(metaId, topRoute()), [metaId]);
   useEffect(() => {
     const wait = nextSleepCheck(sleep, sleepNow);
     if (wait === null) return;
     const timer = window.setTimeout(() => setSleepNow(Date.now()), Math.min(wait, SLEEP_TICK_MS));
     return () => clearTimeout(timer);
   }, [sleep, sleepNow]);
+  // Again if a stream starts playing under the dark screen.
+  const playingNow = state.status === 'playing';
   useEffect(() => {
     if (asleep) session?.pause();
-  }, [asleep, session]);
+  }, [asleep, session, playingNow]);
   // Speed, where the Lab passed one for this kind of stream; in the Lab, its
   // test. Not on a broadcast, which can't run ahead of live.
   const source = state.entry?.stream.source;
@@ -1008,6 +1031,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!session || waiting) return;
     if (state.live) {
       // As Rewind on a broadcast: at once, within what it keeps.
+      if (direction === 1 && atLive) return;
       const at = session.trustedPosition() ?? state.position;
       session.seek(at + direction * skipStep(0));
       armHide();
@@ -1018,9 +1042,6 @@ export function PlayerScreen(props: PlayerScreenProps) {
     session.goToLive();
     armHide();
   }
-  // On a broadcast whose live point the engine knows, playing live leaves
-  // Forward 10 s and Go to live nowhere to go.
-  const atLive = state.live && state.liveWindow !== null && state.behind === 0;
   const showsPause = state.status !== 'paused' && state.status !== 'ended';
   function noNextReason(): string {
     if (!meta) return t('player.noEpisodeList');
@@ -1175,6 +1196,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (state.entry && entryKey(entry) === entryKey(state.entry)) {
       closedBy.current = 'pick';
       setPanel(null);
+      hide();
       return;
     }
     if (action.kind === 'play') {
@@ -1355,6 +1377,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
             if (target.id === videoId) {
               closedBy.current = 'pick';
               setPanel(null);
+              hide();
             } else playEpisode(target);
           }}
           onBack={backFromSheet}

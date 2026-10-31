@@ -3,7 +3,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { type EventPlay, type PlayerRoute, replace } from '../../app/router';
+import { type EventPlay, type PlayerRoute, replace, topRoute } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
@@ -16,6 +16,7 @@ import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
 import { streamRowText, streamsStatus } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, streamFinder } from '../../player/finder';
+import { leaveSleepTimer } from '../../player/sleep';
 import styles from './StreamsScreen.module.css';
 
 const ITEM_HEIGHT = 168;
@@ -63,6 +64,8 @@ export function StreamsScreen(props: StreamsScreenProps) {
   const [anchor, setAnchor] = useState(0);
 
   useEffect(() => finder.start(), [finder]);
+  // A sleep timer the player left for here goes on only into this title's player.
+  useEffect(() => () => leaveSleepTimer(metaId, topRoute()), [metaId]);
   useBack(
     'screen',
     () => {

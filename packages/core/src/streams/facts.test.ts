@@ -507,6 +507,41 @@ describe('describeStream, samples and release groups', () => {
     expect(read({ description: 'Film.2020.1080p.Samples.Included' }).sample).toBeUndefined();
   });
 
+  it("does not mark an episode whose own title has the word, but still marks the episode's sample", () => {
+    expect(read({ description: 'Show.S03E05.The.Trailer.1080p.WEB-DL.x264-GRP' }).sample).toBe(
+      undefined,
+    );
+    expect(read({ description: 'Show.S01E04.Free.Sample.1080p.WEB' }).sample).toBeUndefined();
+    expect(read({ description: 'Show S02E01 Teaser Trailer 720p HDTV' }).sample).toBeUndefined();
+    expect(
+      read({ behaviorHints: { filename: 'Show.S01E01.1080p.WEB.x264-GRP.sample.mkv' } }).sample,
+    ).toBe(true);
+    expect(read({ description: 'Show.S01E01.1080p.WEB.Trailer' }).sample).toBe(true);
+    // Any source or codec ends the title, and so does the end of a file's own name.
+    for (const tags of [
+      'PDTV.XviD-LOL',
+      'SDTV.AAC',
+      'DSR.XviD-GRP',
+      'HDRip.XviD-GRP',
+      'DVDR-GRP',
+    ]) {
+      expect(read({ description: `Show.S03E05.The.Trailer.${tags}` }).sample, tags).toBeUndefined();
+    }
+    expect(read({ description: 'Show.S01E01E02.Free.Sample.1080p.WEB-DL' }).sample).toBeUndefined();
+    expect(
+      read({
+        description: 'Show.S03.1080p.BluRay.x264-GRP',
+        behaviorHints: { filename: 'Show (1989) - S03E05 - The Trailer.mkv' },
+      }).sample,
+    ).toBeUndefined();
+    expect(
+      read({ description: 'Show.S03.1080p.WEB\nShow - S03E05 - The Trailer.mkv' }).sample,
+    ).toBe(undefined);
+    // In brackets it is a tag; in a release name with nothing after it, nothing says it is a title.
+    expect(read({ description: 'Show.S01E01.[Sample].1080p.WEB' }).sample).toBe(true);
+    expect(read({ description: 'Show.S01E01.Sample' }).sample).toBe(true);
+  });
+
   it('reads the release group from the file name first', () => {
     expect(
       read({

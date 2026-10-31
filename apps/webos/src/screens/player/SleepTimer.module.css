@@ -39,6 +39,11 @@
   box-shadow: var(--bt-focus-ring);
 }
 
+/* A speed while the Lab's test sets them: it takes no press. */
+.held {
+  opacity: 0.4;
+}
+
 .note {
   margin: 0;
   padding: 24px 36px 0;

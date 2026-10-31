@@ -71,15 +71,10 @@ export function runSpeedTest(
     });
 
   /** Reads the clock for a window at the speed set now. */
-  async function measure(): Promise<Omit<SpeedMeasurement, 'asked' | 'baseline'>> {
+  async function measure(): Promise<Omit<SpeedMeasurement, 'asked' | 'baseline' | 'interrupted'>> {
     const samples: ClockSample[] = [];
     const changes: number[] = [];
-    let interrupted = false;
-    const onBreak = () => {
-      interrupted = true;
-    };
     const onRate = () => changes.push(video.playbackRate);
-    BREAKS.forEach((type) => video.addEventListener(type, onBreak));
     video.addEventListener('ratechange', onRate);
     try {
       const readings = Math.round(SPEED_WINDOW_MS / SPEED_SAMPLE_MS) + 1;
@@ -88,21 +83,42 @@ export function runSpeedTest(
         samples.push({ media: video.currentTime, wall: performance.now() });
       }
     } finally {
-      BREAKS.forEach((type) => video.removeEventListener(type, onBreak));
       video.removeEventListener('ratechange', onRate);
     }
-    return {
-      measured: clockRate(samples),
-      reported: video.playbackRate,
-      changes,
-      interrupted: interrupted || video.paused,
-    };
+    return { measured: clockRate(samples), reported: video.playbackRate, changes };
   }
 
-  async function at(rate: number) {
-    video.playbackRate = rate;
-    await wait(SPEED_SETTLE_MS);
-    return measure();
+  /**
+   * Sets `rate`, gives it a moment to take hold, then reads a window. A wait
+   * while it takes hold breaks the window as much as one during it, unless
+   * the video has played on since: a TV that hitches at each new speed gets
+   * the moment again from there, once.
+   */
+  async function at(rate: number): Promise<Omit<SpeedMeasurement, 'asked' | 'baseline'>> {
+    let interrupted = false;
+    let held = false;
+    const onBreak = () => {
+      interrupted = true;
+      held = true;
+    };
+    const onPlaying = () => {
+      held = false;
+    };
+    BREAKS.forEach((type) => video.addEventListener(type, onBreak));
+    video.addEventListener('playing', onPlaying);
+    try {
+      video.playbackRate = rate;
+      await wait(SPEED_SETTLE_MS);
+      if (interrupted && !held && !video.paused) {
+        interrupted = false;
+        await wait(SPEED_SETTLE_MS);
+      }
+      const window = await measure();
+      return { ...window, interrupted: interrupted || video.paused };
+    } finally {
+      BREAKS.forEach((type) => video.removeEventListener(type, onBreak));
+      video.removeEventListener('playing', onPlaying);
+    }
   }
 
   async function run(): Promise<SpeedVerdict[]> {

@@ -8,7 +8,7 @@ import {
   type StreamEntry,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
@@ -95,6 +95,8 @@ export function InfoSheet({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<InfoTab>('about');
+  // Speed goes when another stream turns out to be a broadcast: Info shows in its place.
+  if (tab === 'speed' && !speed) setTab('about');
   const facts = entry?.facts;
   const playing = audio.find((track) => track.active);
   const lines: Line[] = [];
@@ -193,8 +195,14 @@ export function InfoSheet({
   // plays, which has nothing to choose, it closes.
   const back = () => {
     const at = focusedKey();
-    if (at.startsWith(`${SHEET}-`) && !at.startsWith(`${SHEET}-tab-`) && tab !== 'about') {
-      void setFocus(`${SHEET}-tab-${tab}`);
+    const tabKey = `${SHEET}-tab-${tab}`;
+    if (
+      at.startsWith(`${SHEET}-`) &&
+      !at.startsWith(`${SHEET}-tab-`) &&
+      tab !== 'about' &&
+      doesFocusableExist(tabKey)
+    ) {
+      void setFocus(tabKey);
       return true;
     }
     onBack();

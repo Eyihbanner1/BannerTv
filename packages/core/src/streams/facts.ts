@@ -73,6 +73,8 @@ interface Rule {
    * may be nothing but the word's line ("Trailer Park Boys").
    */
   afterTitle?: boolean;
+  /** A clip's word: not in an episode's own title ("Show.S03E05.The.Trailer.1080p"). */
+  clip?: boolean;
 }
 
 function hdr(format: HdrFormat): Apply {
@@ -246,6 +248,7 @@ const RULES: readonly Rule[] = [
       draft.sample = true;
     },
     titleWord: true,
+    clip: true,
   },
   {
     pattern: 'trailer|teaser|featurette',
@@ -253,6 +256,7 @@ const RULES: readonly Rule[] = [
       draft.sample = true;
     },
     afterTitle: true,
+    clip: true,
   },
   // Language names and the three-letter tags release names use. Tags that are
   // also common words ("por", "fin", "dan", "vie") are left out.
@@ -318,6 +322,14 @@ const WORDS = new RegExp(
 
 /** A year or season number ends the title in a release name. */
 const TITLE_END = /(?:^|[^a-z0-9])(?:(?:19|20)\d\d|s\d\d?(?:e\d{1,3})?)(?![a-z0-9])/;
+/**
+ * A season and episode, or several ("S01E01E02", "S01E01-E02"): the words
+ * after it, up to the first tag, can be the episode's own title.
+ */
+const EPISODE = /(?:^|[^a-z0-9])s\d\d?e\d{1,3}(?:-?e\d{1,3})*(?![a-z0-9])/;
+/** Where an episode's title ends: its resolution, or a source or codec the rules above read. */
+const TECH_TAG =
+  /(?:^|[^a-z0-9])(?:\d{3,4}[pi]|4k|uhd|remux|blu[ ._-]?ray|b[dr][ ._-]?rip|web(?:[ ._-]?(?:dl|rip))?|[hps]dtv(?:rip)?|hd[ ._-]?rip|dsr(?:ip)?|dvd(?:[ ._-]?rip|[59]|r)?|[xh][ ._]?26[45]|hevc|avc|av1|xvid|divx)(?![a-z0-9])/;
 
 /** The line last looked at, so a long line from a careless addon is searched once, not once per word. */
 interface TitleLine {
@@ -325,10 +337,41 @@ interface TitleLine {
   end: number;
   /** Where its title ends; -1 when it names no year or season, so nothing on it is a title. */
   titleEnd: number;
+  /**
+   * Where an episode's own title starts and ends, after its season and
+   * episode and before the first tag; both -1 when there is none.
+   */
+  episodeStart: number;
+  episodeEnd: number;
+  /** Where the file name and the link's file name end, and the description starts. */
+  filesEnd: number;
 }
 
-function titleLine(): TitleLine {
-  return { start: 0, end: -1, titleEnd: -1 };
+function titleLine(filesEnd = 0): TitleLine {
+  return { start: 0, end: -1, titleEnd: -1, episodeStart: -1, episodeEnd: -1, filesEnd };
+}
+
+/** Finds the line around `start` to `end`, and where its titles are, unless it is the line already read. */
+function readLine(text: string, start: number, end: number, line: TitleLine): void {
+  if (start >= line.start && end <= line.end) return;
+  line.start = text.lastIndexOf('\n', start) + 1;
+  const lineEnd = text.indexOf('\n', end);
+  line.end = lineEnd < 0 ? text.length : lineEnd;
+  const words = text.slice(line.start, line.end);
+  const anchor = TITLE_END.exec(words);
+  line.titleEnd = anchor ? line.start + anchor.index : -1;
+  line.episodeStart = line.episodeEnd = -1;
+  const episode = EPISODE.exec(words);
+  if (!episode) return;
+  const from = episode.index + episode[0].length;
+  const tag = TECH_TAG.exec(words.slice(from));
+  // With no tag after it, only a file's own name says its title runs to the
+  // end: "Show - S03E05 - The Trailer.mkv". A release name may end in a tag
+  // nothing here reads.
+  const fileName = line.start < line.filesEnd || VIDEO_EXTENSION.test(words.trim());
+  if (!tag && !fileName) return;
+  line.episodeStart = line.start + from;
+  line.episodeEnd = tag ? line.start + from + tag.index : line.end;
 }
 
 /**
@@ -339,14 +382,16 @@ function titleLine(): TitleLine {
 function inTitle(text: string, start: number, end: number, line: TitleLine): boolean {
   const before = text.charAt(start - 1);
   if (before === '[' || before === '(') return false;
-  if (start < line.start || end > line.end) {
-    line.start = text.lastIndexOf('\n', start) + 1;
-    const lineEnd = text.indexOf('\n', end);
-    line.end = lineEnd < 0 ? text.length : lineEnd;
-    const anchor = TITLE_END.exec(text.slice(line.start, line.end));
-    line.titleEnd = anchor ? line.start + anchor.index : -1;
-  }
+  readLine(text, start, end, line);
   return line.titleEnd >= end;
+}
+
+/** True for a word in an episode's own title, as "Trailer" in "Show.S03E05.The.Trailer.1080p". Not in brackets. */
+function inEpisodeTitle(text: string, start: number, end: number, line: TitleLine): boolean {
+  const before = text.charAt(start - 1);
+  if (before === '[' || before === '(') return false;
+  readLine(text, start, end, line);
+  return start >= line.episodeStart && end <= line.episodeEnd;
 }
 
 /** The line a clip's name alone makes: "Trailer", "Official Teaser". */
@@ -842,7 +887,7 @@ export function describeStream(stream: Stream): StreamFacts {
     languages: [],
     descriptionFrom: fileWords.length + urlWords.length + 2,
   };
-  const line = titleLine();
+  const line = titleLine(draft.descriptionFrom);
   WORDS.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = WORDS.exec(text)) !== null) {
@@ -852,9 +897,11 @@ export function describeStream(stream: Stream): StreamFacts {
       if (token !== undefined) {
         const rule = RULES[group - 1]!;
         const start = end - token.length;
-        const counts = rule.afterTitle
-          ? afterTitle(text, start, end, line)
-          : !rule.titleWord || !inTitle(text, start, end, line);
+        const counts =
+          !(rule.clip && inEpisodeTitle(text, start, end, line)) &&
+          (rule.afterTitle
+            ? afterTitle(text, start, end, line)
+            : !rule.titleWord || !inTitle(text, start, end, line));
         if (counts) rule.apply(draft, text, start, end);
         break;
       }

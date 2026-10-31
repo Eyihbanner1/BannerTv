@@ -93,6 +93,29 @@ describe('the Lab speed test', () => {
     expect(asked).toEqual([]);
   });
 
+  it('counts a wait while a speed takes hold, so a stall is not saved as the TV ignoring it', async () => {
+    const { video, asked, test } = setup();
+    // Normal speed read, then 0.75× set and taking hold.
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + SPEED_SETTLE_MS / 2);
+    video.dispatchEvent(new Event('waiting'));
+    await finish();
+    const verdicts = await test.done;
+    expect(verdicts).toContainEqual(expect.objectContaining({ rate: 0.75, why: 'unsteady' }));
+    expect(asked).toEqual([1.25, 1.5]);
+  });
+
+  it('measures a speed again after a hitch as it took hold, once the video plays on', async () => {
+    const { video, asked, test } = setup();
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + 100);
+    video.dispatchEvent(new Event('waiting'));
+    await vi.advanceTimersByTimeAsync(150);
+    video.dispatchEvent(new Event('playing'));
+    await finish();
+    const verdicts = await test.done;
+    expect(verdicts).toContainEqual(expect.objectContaining({ rate: 0.75, ok: true }));
+    expect(asked).toEqual([0.75, 1.25, 1.5]);
+  });
+
   it('stops while waiting for an answer, and puts normal speed back', async () => {
     const video = new FakeVideo();
     const test = runSpeedTest(video as unknown as HTMLVideoElement, {

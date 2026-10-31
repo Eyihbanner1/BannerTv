@@ -289,6 +289,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       wasBehind = false;
       return { liveWindow: null, behind: 0 };
     }
+    // No place to judge: an engine recovering the media reads 0 for a moment.
+    // A broadcast that keeps everything from its start has a real 0.
+    const noPlace = !(position >= 0) || video.readyState < 1 || (position === 0 && kept.start > 0);
+    if (noPlace) return { liveWindow: kept, behind: state.get().behind };
     const { behind, atLive } = judgeLive(kept, position, wasBehind);
     wasBehind = !atLive;
     return { liveWindow: kept, behind };
@@ -795,6 +799,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
       const wanted = kept ? clampToWindow(kept, position) : position;
+      // A jump forward, or to live, never lands behind where it started, as
+      // one to a live point read a moment late would.
+      if (
+        kept &&
+        wanted < video.currentTime &&
+        (position > video.currentTime || position >= kept.live)
+      ) {
+        return;
+      }
       const target = Math.max(0, Math.min(wanted, duration - 1));
       endBuffering();
       clearTimeout(judgeTimer);

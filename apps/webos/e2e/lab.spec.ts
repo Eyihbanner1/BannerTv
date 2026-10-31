@@ -105,8 +105,14 @@ test('the Lab measures each speed on what plays, asks about sound, and keeps wha
   ).toBeVisible();
   await expect(page.locator('[data-focus-key^="player-info-speed-1"]')).toHaveText(['Normal']);
   await press(page, 'Enter', 'player-info-speed-test');
-  await page.keyboard.press('Enter');
+  // Stop takes focus, under a key of its own: a held OK does not stop what it started.
+  await press(page, 'Enter', 'player-info-speed-stop');
   await expect(page.getByText('Measuring normal speed…')).toBeVisible();
+  // A speed pressed while the test sets them is not taken: Normal now would
+  // read as the TV putting 0.75× back.
+  await expect(page.getByText('Measuring 0.75×…')).toBeVisible({ timeout: 15000 });
+  await press(page, 'ArrowDown', 'player-info-speed-1');
+  await page.keyboard.press('Enter');
 
   // Each speed that kept time plays while the tester says whether there is sound.
   const yes = page.locator('[data-focus-key="player-info-speed-yes"]');
@@ -123,12 +129,14 @@ test('the Lab measures each speed on what plays, asks about sound, and keeps wha
     if (!heard) await press(page, 'ArrowRight', 'player-info-speed-no');
     await page.keyboard.press('Enter');
     await expect(yes).toHaveCount(0);
+    await expectFocus(page, 'player-info-speed-stop');
   }
   await expect(
     page.getByText(
       "Saved for the TV's player, files. 0.75×: passed · 1.25×: passed · 1.5×: no sound · Normal again: passed",
     ),
   ).toBeVisible({ timeout: 15000 });
+  await expectFocus(page, 'player-info-speed-test');
 
   // What passed is offered at once, and kept for the whole TV.
   await expect(page.locator('[data-focus-key^="player-info-speed-"]')).toHaveText([

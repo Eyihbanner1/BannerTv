@@ -759,10 +759,100 @@ test('the sleep timer, set in Info, warns a minute before, takes 15 minutes more
   await expect(page.getByRole('dialog', { name: ASLEEP })).toBeVisible();
   await expectFocus(page, 'player-asleep-wake');
   await expect.poll(async () => (await video(page)).playing).toBe(false);
+  // The TV going to another app and back leaves the remote with the dark screen.
+  await page.evaluate(() => {
+    const turn = (hidden: boolean) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    turn(true);
+    turn(false);
+  });
+  await page.waitForTimeout(300);
+  await expectFocus(page, 'player-asleep-wake');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog', { name: ASLEEP })).toHaveCount(0);
   await expectFocus(page, 'player-play');
   await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info',
+  );
+});
+
+test('a sleep timer goes with the player: the film played again starts with it off', async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(2026, 9, 30, 22, 0, 0).getTime() });
+  await playMovie(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await openSleepTimer(page, ['quality', 'streams']);
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await press(page, 'ArrowRight', 'player-info-sleep-15');
+  await page.keyboard.press('Enter');
+  await pressBack(page);
+  await pressBack(page);
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info, Sleep 22:15',
+  );
+  await pressBack(page);
+  await pressBack(page);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^details-/,
+  );
+
+  // Played again before its time, the film starts with no timer.
+  await page.clock.fastForward(5 * 60 * 1000);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole('dialog', { name: ASLEEP })).toHaveCount(0);
+  await press(page, 'ArrowUp', 'player-play');
+  await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
+    'aria-label',
+    'Info',
+  );
+});
+
+test('a sleep timer carried into All streams goes when All streams is left for anything else', async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(2026, 9, 30, 22, 0, 0).getTime() });
+  await playMovie(page);
+  await press(page, 'ArrowUp', 'player-play');
+  await openSleepTimer(page, ['quality', 'streams']);
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await press(page, 'ArrowRight', 'player-info-sleep-15');
+  await page.keyboard.press('Enter');
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+
+  // On to All streams from Sources, then away to Settings, and Home.
+  await press(page, 'ArrowLeft', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowUp', 'player-sources-all');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^streams-/,
+  );
+  await openSection(page, 'settings');
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+  // The film again, well within the 15 minutes: no timer.
+  await page.clock.fastForward(60 * 1000);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^details-/,
+  );
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await press(page, 'ArrowUp', 'player-play');
   await expect(page.locator('[data-focus-key="player-info-button"]')).toHaveAttribute(
     'aria-label',
     'Info',
@@ -1648,6 +1738,69 @@ test('in Sources, rows keep their places as a late addon answers, Sort is kept f
   await expect(sheet).toHaveCount(0);
   await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
 });
+
+for (const [list, streams] of [
+  ['a list that fills the sheet', DEFAULT_STREAMS],
+  // Two rows of three: the view must not settle back to the top.
+  ['a list shorter than the sheet', [DEFAULT_STREAMS[1]!, DEFAULT_STREAMS[2]!]],
+] as const) {
+  test(`in Sources, the row under a resting pointer stays under it as a late addon answers above it, on ${list}`, async ({
+    page,
+  }) => {
+    await mockAddons(page);
+    await seedStreamAddon(page, { slowAddon: true });
+    const mock = await mockPlayback(page, { streams: { [MOVIE]: streams } });
+    let answer = () => undefined as void;
+    const gate = new Promise<void>((done) => (answer = done));
+    await page.route(/^https:\/\/slow\.example\.com\/bannertv\/stream\//, async (route) => {
+      await gate;
+      mock.slowAnswers++;
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify({
+          streams: [
+            {
+              name: 'Slow Streams\n1080p',
+              description: 'Open Movie 1080p BluRay REMUX\n💾 1.6 GB ⚡ Cached',
+              url: `${MEDIA_HOST}/movie-1080p-remux.webm`,
+              behaviorHints: { filename: 'movie-1080p-remux.webm' },
+            },
+          ],
+        }),
+      });
+    });
+    await openMovie(page);
+    await press(page, 'Enter', 'player-surface');
+    await expect.poll(async () => (await video(page)).playing).toBe(true);
+    const playing = (await video(page)).src;
+    await press(page, 'ArrowUp', 'player-play');
+    await press(page, 'ArrowDown', 'player-tracks-button');
+    await press(page, 'ArrowRight', 'player-quality-button');
+    await press(page, 'ArrowRight', 'player-streams-button');
+    await press(page, 'Enter', source(0));
+    const sheet = page.getByRole('dialog', { name: 'Sources' });
+    await page.waitForTimeout(500);
+
+    // The pointer rests on the P2P row, last, as one that can't play here.
+    const p2p = page.locator(`[data-focus-key="${source(streams.length - 1)}"]`);
+    const box = (await p2p.boundingBox())!;
+    await page.mouse.move(box.x + 300, box.y + 40, { steps: 5 });
+    await expectFocus(page, source(streams.length - 1));
+
+    // The remux goes above it, among those that play, and the view moves with it.
+    answer();
+    await expect(sheet).toContainText(`${streams.length + 1} streams`);
+    expect(await p2p.boundingBox()).toEqual(box);
+    await expectFocus(page, source(streams.length - 1));
+    // So a click presses the row pointed at, not the one that came in.
+    await page.mouse.click(box.x + 300, box.y + 40);
+    await expect(sheet).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(mock.media).not.toContain('/movie-1080p-remux.webm');
+    expect((await video(page)).src).toBe(playing);
+  });
+}
 
 test('Start over is always there, and offers for a moment to go back to where the film was', async ({
   page,

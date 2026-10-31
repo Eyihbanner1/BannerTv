@@ -6,7 +6,7 @@ import {
   type StreamOrder,
   streamTier,
 } from '@bannertv/core';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
 import { Pressable } from '../../components/Pressable';
@@ -82,56 +82,66 @@ export function SourcesSheet({
     () => stable(order, listOrder(state.entries, order, finder.runtimeSeconds())),
     [stable, state.entries, order, finder],
   );
-  const names = addonNames();
   const playingKey = playing ? entryKey(playing) : undefined;
   const seconds = finder.runtimeSeconds();
-
-  const rows = entries.map((entry): SheetRow => {
-    const key = entryKey(entry);
-    const here = key === playingKey;
-    const text = streamRowText(t, entry, {
-      heavy: isHeavy(entry, seconds),
-      languages: otherLanguages(entry.facts, reference),
-    });
-    const name = names.get(entry.addonId) ?? entry.addonId;
-    const tested = state.probes[key] === 'works';
-    return {
-      focusKey: `${SHEET}-row-${key}`,
-      label: text.title,
-      spoken: [
-        name,
-        text.title,
-        text.badges.join(', '),
-        here ? t('player.playingNow') : undefined,
-        tested ? t('streams.tested') : undefined,
-        ...text.notes,
-      ]
-        .filter(Boolean)
-        .join('. '),
-      selected: here,
-      dim: !text.playable,
-      body: (
-        <>
-          <span className={styles.addon}>{name}</span>
-          <span className={styles.text}>
-            <span className={styles.title}>{text.title}</span>
-            <span className={styles.facts}>
-              {text.badges.map((badge) => (
-                <span key={badge} className={styles.badge}>
-                  {badge}
-                </span>
-              ))}
-              {tested && <span className={styles.works}>{t('streams.tested')}</span>}
-              {text.note && (
-                <span className={text.playable ? styles.warning : styles.reason}>{text.note}</span>
-              )}
-            </span>
-          </span>
-        </>
-      ),
-      onPress: () => onPick(entry),
-    };
+  // The player draws a few times a second as the film plays: the rows are
+  // built again only when the streams, what plays, or their tests change.
+  const pick = useRef(onPick);
+  useLayoutEffect(() => {
+    pick.current = onPick;
   });
+  const { probes } = state;
+  const rows = useMemo(() => {
+    const names = addonNames();
+    return entries.map((entry): SheetRow => {
+      const key = entryKey(entry);
+      const here = key === playingKey;
+      const text = streamRowText(t, entry, {
+        heavy: isHeavy(entry, seconds),
+        languages: otherLanguages(entry.facts, reference),
+      });
+      const name = names.get(entry.addonId) ?? entry.addonId;
+      const tested = probes[key] === 'works';
+      return {
+        focusKey: `${SHEET}-row-${key}`,
+        label: text.title,
+        spoken: [
+          name,
+          text.title,
+          text.badges.join(', '),
+          here ? t('player.playingNow') : undefined,
+          tested ? t('streams.tested') : undefined,
+          ...text.notes,
+        ]
+          .filter(Boolean)
+          .join('. '),
+        selected: here,
+        dim: !text.playable,
+        body: (
+          <>
+            <span className={styles.addon}>{name}</span>
+            <span className={styles.text}>
+              <span className={styles.title}>{text.title}</span>
+              <span className={styles.facts}>
+                {text.badges.map((badge) => (
+                  <span key={badge} className={styles.badge}>
+                    {badge}
+                  </span>
+                ))}
+                {tested && <span className={styles.works}>{t('streams.tested')}</span>}
+                {text.note && (
+                  <span className={text.playable ? styles.warning : styles.reason}>
+                    {text.note}
+                  </span>
+                )}
+              </span>
+            </span>
+          </>
+        ),
+        onPress: () => pick.current(entry),
+      };
+    });
+  }, [entries, playingKey, reference, probes, seconds, t]);
   const playingRow = rows.find((row) => row.selected)?.focusKey;
   const first = playingRow ?? rows[0]?.focusKey;
 

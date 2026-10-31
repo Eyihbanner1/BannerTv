@@ -809,6 +809,41 @@ describe('a live stream', () => {
     session.destroy();
   });
 
+  it('never jumps back on a skip forward, and takes no judgement from a reading of 0', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    session.seek(7100);
+    expect(session.get().behind).toBe(100);
+    // The clock ran on past where live was last read: forward stays put.
+    video.currentTime = 7203;
+    session.seek(7213);
+    expect(video.currentTime).toBe(7203);
+    // At live, the right end of the bar (live, read a moment late) stays put too.
+    session.seek(7200);
+    expect(video.currentTime).toBe(7203);
+    // An engine recovering the media reads 0 for a moment.
+    session.seek(7100);
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(session.get().behind).toBe(100);
+    session.destroy();
+  });
+
+  it('judges the start of a broadcast that keeps everything from 0', async () => {
+    const { video, session } = setup();
+    await live(session, video);
+    lastEngine().window = { start: 0, live: 2400, slack: 6 };
+    video.currentTime = 2400;
+    video.fire('timeupdate');
+    expect(session.get().behind).toBe(0);
+    session.seek(0);
+    expect(session.get().behind).toBe(2400);
+    vi.advanceTimersByTime(LIVE_TICK_MS);
+    expect(session.get().behind).toBe(2400);
+    session.destroy();
+  });
+
   it('reads as live, and leaves jumps alone, when the engine cannot tell where live is', async () => {
     const { video, session } = setup();
     await live(session, video);

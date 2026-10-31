@@ -62,17 +62,28 @@ export function SheetList({
   });
   const lastAnchor = Math.max(0, rows.length - visible);
   const anchorFor = (index: number) => Math.max(0, Math.min(lastAnchor, index - LEAD));
-  const [place, setPlace] = useState<{ anchor: number; focused?: string }>(() => ({
+  const [place, setPlace] = useState<{
+    anchor: number;
+    focused?: string;
+    /** Under a resting pointer: where the focused row was when the pointer took it. */
+    pointedAt?: number;
+  }>(() => ({
     anchor: anchorFor(rows.findIndex((row) => row.focusKey === preferred)),
   }));
   // A row added above the focused one (a stream's own track, listed first)
   // moves it down: the view follows it, rather than leave it out of sight.
+  // Under a resting pointer it moves with it exactly, so the row stays under
+  // the pointer and a click presses the row pointed at, not one slid in.
   const focusedIndex = rows.findIndex((row) => row.focusKey === place.focused);
   const anchor =
     focusedIndex < 0
       ? place.anchor
-      : Math.max(focusedIndex - visible + 1, Math.min(place.anchor, focusedIndex));
-  const top = Math.min(anchor, lastAnchor);
+      : place.pointedAt !== undefined
+        ? place.anchor + focusedIndex - place.pointedAt
+        : Math.max(focusedIndex - visible + 1, Math.min(place.anchor, focusedIndex));
+  // Pinned, it may leave space under the last row rather than slide.
+  const pinned = place.pointedAt !== undefined && focusedIndex >= 0;
+  const top = Math.max(0, pinned ? anchor : Math.min(anchor, lastAnchor));
 
   const first = Math.max(0, top - OVERSCAN);
   const last = Math.min(rows.length, top + visible + OVERSCAN);
@@ -110,6 +121,7 @@ export function SheetList({
         onPress={row.onPress}
         onFocus={() => {
           if (canSlide()) setPlace({ anchor: anchorFor(index), focused: row.focusKey });
+          else setPlace({ anchor: top, focused: row.focusKey, pointedAt: index });
           row.onFocus?.();
         }}
       >
@@ -138,7 +150,14 @@ export function SheetList({
         className={className ? `${styles.list} ${className}` : styles.list}
         style={{ height: visible * rowHeight }}
       >
-        <div className={styles.track} style={{ transform: `translateY(${-top * rowHeight}px)` }}>
+        <div
+          className={styles.track}
+          // Rows added above the one pointed at move the view at once: sliding, it would pass under the pointer.
+          style={{
+            transform: `translateY(${-top * rowHeight}px)`,
+            transition: place.pointedAt !== undefined ? 'none' : undefined,
+          }}
+        >
           {drawn}
         </div>
       </div>

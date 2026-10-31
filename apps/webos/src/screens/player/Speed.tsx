@@ -46,6 +46,8 @@ export function SpeedChoices({
   onChoose: (rate: number) => void;
 }) {
   const { t } = useTranslation();
+  // The test sets the speeds itself: a choice pressed meanwhile would read as the TV putting one back.
+  const [testing, setTesting] = useState(false);
   const choices = [1, ...rates];
   // A speed the TV put back, or one set by the test, is not a choice: Normal is the nearest.
   const chosen = choices.indexOf(current) >= 0 ? current : 1;
@@ -58,10 +60,14 @@ export function SpeedChoices({
   return (
     <Pane
       focusKey={focusKey}
-      preferred={lab ? `${focusKey}-test` : `${focusKey}-${chosen}`}
+      // Start and Stop have keys of their own, so a held OK presses only the
+      // first. As one gives way to the other, focus comes back here and goes on to it.
+      preferred={lab ? `${focusKey}-${testing ? 'stop' : 'test'}` : `${focusKey}-${chosen}`}
       className={styles.content}
     >
-      {lab && <SpeedTestPanel focusKey={focusKey} kind={kind} video={video} />}
+      {lab && (
+        <SpeedTestPanel focusKey={focusKey} kind={kind} video={video} onRunning={setTesting} />
+      )}
       <div className={styles.steps}>
         {choices.map((rate) => {
           const name = speedName(t, rate);
@@ -71,9 +77,11 @@ export function SpeedChoices({
               key={rate}
               focusKey={`${focusKey}-${rate}`}
               label={on ? `${name}. ${t('player.sleep.chosen')}` : name}
-              className={on ? `${styles.step} ${styles.chosen}` : styles.step}
+              className={`${styles.step}${on ? ` ${styles.chosen}` : ''}${testing ? ` ${styles.held}` : ''}`}
               focusedClassName={styles.stepFocused}
-              onPress={() => onChoose(rate)}
+              onPress={() => {
+                if (!testing) onChoose(rate);
+              }}
             >
               {name}
             </Pressable>
@@ -103,10 +111,12 @@ function SpeedTestPanel({
   focusKey,
   kind,
   video,
+  onRunning,
 }: {
   focusKey: string;
   kind: SpeedKind | undefined;
   video: HTMLVideoElement | null;
+  onRunning: (running: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [state, setState] = useState<TestState>({ phase: 'idle' });
@@ -114,6 +124,7 @@ function SpeedTestPanel({
   const answer = useRef<((heard: boolean) => void) | null>(null);
   useEffect(() => () => test.current?.stop(), []);
 
+  // The question takes focus wherever it is: the test waits on the answer.
   const listening = state.phase === 'running' && state.step.phase === 'listening';
   useEffect(() => {
     if (listening) void setFocus(`${focusKey}-yes`);
@@ -129,9 +140,11 @@ function SpeedTestPanel({
         }),
     });
     test.current = running;
+    onRunning(true);
     void running.done.then((verdicts) => {
       if (test.current !== running) return;
       test.current = null;
+      onRunning(false);
       const firmware = readDeviceInfo()?.platformVersion;
       const saved = speedMemory.record(kind, verdicts, firmware as string | undefined);
       setState({ phase: 'done', verdicts, saved });
@@ -141,13 +154,13 @@ function SpeedTestPanel({
     const running = test.current;
     test.current = null;
     running?.stop();
+    onRunning(false);
     setState({ phase: 'idle' });
   }
   function reply(heard: boolean) {
     const resolve = answer.current;
     answer.current = null;
     resolve?.(heard);
-    void setFocus(`${focusKey}-test`);
   }
 
   const status =
@@ -163,7 +176,7 @@ function SpeedTestPanel({
       <div className={styles.testRow}>
         {state.phase === 'running' ? (
           <Button
-            focusKey={`${focusKey}-test`}
+            focusKey={`${focusKey}-stop`}
             label={t('player.speed.test.stop')}
             onPress={stop}
           />
