@@ -23,6 +23,8 @@ export interface PressableProps {
   label: string;
   onPress?: () => void;
   onFocus?: (layout: FocusableComponentLayout) => void;
+  /** An arrow pressed while it has focus. False takes the press: focus stays where it is. */
+  onArrowPress?: (direction: string) => boolean;
   className?: string;
   focusedClassName?: string;
   style?: CSSProperties;
@@ -59,7 +61,12 @@ export const Pressable = memo(function Pressable(props: PressableProps) {
     },
     [slot],
   );
-  const onArrowPress = useCallback(() => slot.get(), [slot]);
+  const onArrowPress = useCallback(
+    (direction: string) =>
+      // Focus can sit on a screen for a moment after another opens on top of it.
+      slot.get() && (latest.current.onArrowPress?.(direction) ?? true),
+    [slot],
+  );
   const onFocus = useCallback(
     (layout: FocusableComponentLayout) => latest.current.onFocus?.(layout),
     [],

@@ -96,6 +96,8 @@ export interface StreamFinder {
   setRuntime(seconds: number | undefined): void;
   /** The running time bitrates are worked out with: the video's own, or an assumed one. */
   runtimeSeconds(): number;
+  /** The video's own running time, when its page gave one. */
+  knownRuntimeSeconds(): number | undefined;
   /**
    * Stops following the addons' answers, so the finder and its streams can be
    * let go. What it holds stays readable; start() follows them again.
@@ -356,6 +358,8 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     },
 
     runtimeSeconds,
+
+    knownRuntimeSeconds: () => runtime,
 
     destroy() {
       unsubscribe.forEach((undo) => undo());

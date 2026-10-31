@@ -10,6 +10,9 @@ import type { Page, Route } from '@playwright/test';
 
 // 40 s of blank VP8 (a WebM) with byte-range support.
 const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.webm'));
+// The same, 10 minutes long, at any media path starting /long-: long enough
+// that the player takes it for a title with a page saying it runs for hours.
+const LONG_FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-10min.webm'));
 
 /**
  * 10 s of HLS at MEDIA_HOST/hls/master.m3u8: VP9 and Opus in fMP4, audio in
@@ -151,18 +154,22 @@ export interface PlaybackOptions {
 
 /** Serves the fixture with byte ranges, which the media element needs to seek. */
 export function serveFixture(route: Route) {
+  return serveVideo(route, FIXTURE);
+}
+
+function serveVideo(route: Route, video: Buffer) {
   const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers()['range'] ?? '');
   const start = range ? Number(range[1]) : 0;
-  const end = range?.[2] ? Number(range[2]) : FIXTURE.length - 1;
+  const end = range?.[2] ? Number(range[2]) : video.length - 1;
   return route.fulfill({
     status: range ? 206 : 200,
     contentType: 'video/webm',
     headers: {
       'accept-ranges': 'bytes',
       'access-control-allow-origin': '*',
-      ...(range && { 'content-range': `bytes ${start}-${end}/${FIXTURE.length}` }),
+      ...(range && { 'content-range': `bytes ${start}-${end}/${video.length}` }),
     },
-    body: FIXTURE.subarray(start, end + 1),
+    body: video.subarray(start, end + 1),
   });
 }
 
@@ -386,7 +393,7 @@ export async function mockPlayback(
         body,
       });
     }
-    return serveFixture(route);
+    return serveVideo(route, path.indexOf('/long-') === 0 ? LONG_FIXTURE : FIXTURE);
   });
 
   await page.route(/^https:\/\/opensubtitles-v3\.strem\.io\/subtitles\//, async (route) => {

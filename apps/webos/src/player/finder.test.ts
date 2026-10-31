@@ -438,8 +438,11 @@ describe('heavy streams', () => {
     episode.setRuntime(NaN);
     episode.setRuntime(0);
     expect(episode.runtimeSeconds()).toBe(3600);
+    // Only one the page gave is known: a clip is judged against nothing assumed.
+    expect(episode.knownRuntimeSeconds()).toBeUndefined();
     episode.setRuntime(2700);
     expect(episode.runtimeSeconds()).toBe(2700);
+    expect(episode.knownRuntimeSeconds()).toBe(2700);
   });
 
   it('ranks a big file below a smaller one when the video turns out short', () => {

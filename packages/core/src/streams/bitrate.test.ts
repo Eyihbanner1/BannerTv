@@ -176,16 +176,23 @@ describe('isTooSmall', () => {
 });
 
 describe('isMuchShorter', () => {
-  it('finds a stream under half the length of a video of five minutes or more', () => {
+  it('finds a stream under five minutes of a video of 20 minutes or more', () => {
     expect(isMuchShorter(30, 2700)).toBe(true);
-    expect(isMuchShorter(149, 300)).toBe(true);
+    expect(isMuchShorter(299, 1200)).toBe(true);
+    expect(isMuchShorter(299, 3300)).toBe(true);
     expect(isMuchShorter(2400, 2700)).toBe(false);
     expect(isMuchShorter(1350, 2700)).toBe(false);
   });
 
-  it('says nothing for a short video or a stream with no length yet', () => {
+  it('never takes five minutes or more for a clip, as a running time can be far off for one episode', () => {
+    expect(isMuchShorter(300, 3300)).toBe(false);
+    expect(isMuchShorter(1300, 2700)).toBe(false);
+  });
+
+  it('says nothing for a video under 20 minutes or a stream with no length yet', () => {
+    expect(isMuchShorter(30, 900)).toBe(false);
+    expect(isMuchShorter(149, 1199)).toBe(false);
     expect(isMuchShorter(30, 200)).toBe(false);
-    expect(isMuchShorter(149, 299)).toBe(false);
     expect(isMuchShorter(0, 2700)).toBe(false);
     expect(isMuchShorter(NaN, 2700)).toBe(false);
     expect(isMuchShorter(30, NaN)).toBe(false);

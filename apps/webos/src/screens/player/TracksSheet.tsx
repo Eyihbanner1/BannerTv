@@ -16,7 +16,7 @@ import { Pressable } from '../../components/Pressable';
 import { preferences } from '../../data/preferences';
 import { focusedKey } from '../../navigation/spatial';
 import { inputMode } from '../../platform/input-mode';
-import { audioDetail, audioSummary } from '../../player/audio';
+import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
 import { streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { formatOffset, offsetWay, stepOffset, TIMING_STEPS } from '../../player/timing';
@@ -264,7 +264,7 @@ export function TracksSheet(props: TracksSheetProps) {
   } else if (tab === 'audio') {
     const rows = audio.map((track): SheetRow => ({
       focusKey: `${SHEET}-audio-${track.id}`,
-      label: (track.lang && languageName(track.lang)) || track.label || '?',
+      label: audioLanguage(track),
       detail:
         [
           audioDetail(track),

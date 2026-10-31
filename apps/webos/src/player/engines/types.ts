@@ -18,8 +18,9 @@ export interface EngineTrack {
 /**
  * format: the TV cannot play this container or codec. network: the link
  * failed or expired. decode: the file is broken or the decoder gave up.
+ * clip: it plays, but is a short clip far shorter than the video.
  */
-export type PlaybackErrorKind = 'format' | 'network' | 'decode' | 'other';
+export type PlaybackErrorKind = 'format' | 'network' | 'decode' | 'clip' | 'other';
 
 export class PlaybackError extends Error {
   readonly kind: PlaybackErrorKind;

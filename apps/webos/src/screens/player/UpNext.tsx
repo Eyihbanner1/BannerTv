@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Artwork } from '../../components/Artwork';
 import { Button } from '../../components/Button';
 import { useBack } from '../../navigation/use-back';
+import { cardArrows } from './card-arrows';
 import styles from './PlayerScreen.module.css';
 
 interface UpNextProps {
@@ -13,15 +14,18 @@ interface UpNextProps {
   seconds: number;
   onPlay: () => void;
   onDismiss: () => void;
+  /** Up or Down: the controls come up in its place, with the count on Next episode. */
+  onControls: () => void;
 }
 
 /**
  * "Up next", in the corner over the credits, counting to the end of the
- * episode. OK plays it now, Back keeps watching. The player shows it only
- * while nothing else is on screen (the controls, a sheet, a skip), so it
- * takes focus from the picture alone; the player says where focus goes after.
+ * episode. OK plays it now, Back keeps watching, Up or Down brings the
+ * controls. The player shows it only while nothing else is on screen (the
+ * controls, a sheet, a skip), so it takes focus from the picture alone; the
+ * player says where focus goes after.
  */
-export function UpNext({ video, seconds, onPlay, onDismiss }: UpNextProps) {
+export function UpNext({ video, seconds, onPlay, onDismiss, onControls }: UpNextProps) {
   const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-upnext',
@@ -34,6 +38,7 @@ export function UpNext({ video, seconds, onPlay, onDismiss }: UpNextProps) {
     onDismiss();
     return true;
   });
+  const onArrowPress = cardArrows(onControls);
 
   const number = video.episode;
   const name =
@@ -52,11 +57,13 @@ export function UpNext({ video, seconds, onPlay, onDismiss }: UpNextProps) {
             variant="primary"
             label={t('player.playNextIn', { seconds })}
             onPress={onPlay}
+            onArrowPress={onArrowPress}
           />
           <Button
             focusKey="player-upnext-dismiss"
             label={t('player.keepWatching')}
             onPress={onDismiss}
+            onArrowPress={onArrowPress}
           />
         </div>
       </div>

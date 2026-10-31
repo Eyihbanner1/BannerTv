@@ -98,8 +98,11 @@ const CONTROLS_HIDE_MS = 5000;
 const SCRUB_COMMIT_MS = 800;
 /** The note for a skip made with the controls hidden stays this long after it lands. */
 const SKIP_NOTE_MS = 1500;
-/** The wheel counts at most one notch this often, as it moves one row a notch elsewhere. */
-const WHEEL_STEP_MS = 150;
+/**
+ * The roll of the wheel that brought the controls up is spent until the wheel
+ * rests this long: on the TV a quick roll comes in flicks, with gaps between.
+ */
+const WHEEL_REST_MS = 500;
 /** Start over offers to go back to where the viewer was for this long. */
 const UNDO_MS = 8000;
 /** Start over this close to the start has nothing worth going back to. */
@@ -203,7 +206,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const noteTimer = useRef<number | undefined>(undefined);
   // How many times Fast forward or Rewind has repeated while held down.
   const heldSkip = useRef(0);
-  const lastWheel = useRef(0);
+  // The last notch of the roll that brought the controls up.
+  const showingRoll = useRef(0);
   const hideTimer = useRef<number | undefined>(undefined);
   // Whether the Magic Remote pointer rests on the title or the bar, which keeps them up.
   const pointerOnChrome = useRef(false);
@@ -744,21 +748,29 @@ export function PlayerScreen(props: PlayerScreenProps) {
     else armHide();
   };
 
+  // A roll ends with the controls it brought up: once they hide, the next notch brings them again.
+  useEffect(() => {
+    if (!controls) showingRoll.current = 0;
+  }, [controls]);
+
   // The wheel never skips (Eyitayo, 30 October 2026). With the controls hidden
   // a notch shows them, on Pause, as Up and Down do. Otherwise it moves between
   // rows, as everywhere else, and keeps the controls up.
   const onWheel = (event: WheelEvent) => {
     if (event.deltaY === 0 || panel || problem || card || asleep || asking) return;
     const now = Date.now();
+    // The rest of the roll that brought them up, however long and in however
+    // many flicks, would move on from Pause: it is spent until the wheel rests.
+    if (chrome && now - showingRoll.current < WHEEL_REST_MS) {
+      showingRoll.current = now;
+      // Still someone at the remote: the controls stay.
+      armHide();
+      event.stopPropagation();
+      return;
+    }
     const at = focusedKey();
     // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
     if (chrome && at !== 'player-surface') {
-      // The rest of the roll that brought them up, however long, would move on from Pause.
-      if (now - lastWheel.current < WHEEL_STEP_MS) {
-        lastWheel.current = now;
-        event.stopPropagation();
-        return;
-      }
       armHide();
       // Up stops at the bar, as the arrow does: the back arrow above it is the pointer's.
       if (event.deltaY < 0 && at === 'player-seek') event.stopPropagation();
@@ -768,12 +780,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // The notch is spent bringing them up, not on moving on from Pause as well.
     event.stopPropagation();
     // While a stream starts they would show without a picture.
-    if (waiting || now - lastWheel.current < WHEEL_STEP_MS) return;
-    lastWheel.current = now;
+    if (waiting) return;
     markActivity();
     wheelMovedFocus.current = true;
     // Shown before focus lands, or the TV's own focus (which Audio Guidance reads) stays put.
     flushSync(() => setControls(true));
+    // After the render, which first runs what a hide left waiting: its reset of the roll.
+    showingRoll.current = now;
     show('player-play');
   };
 
@@ -962,8 +975,15 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setSleepNow(now);
     setSleepWarningGone(false);
   }
-  function wake() {
+  // "Carry on watching" plays on from where the timer paused, with the
+  // controls up a moment to say where; Back leaves it paused. At an end the
+  // timer stopped, Next episode counts instead.
+  function wake(carryOn: boolean) {
     setAsleep(false);
+    // At an end, waking is the viewer's answer: "Still watching?" decided as
+    // it ended does not ask again over the count.
+    if (ended) setAskAtEnd(false);
+    else if (carryOn) session?.resume();
     show('player-play');
   }
   // An end nobody saw counted down gets a short count of its own, on the
@@ -1336,6 +1356,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onAdd={addSleep}
           onOff={() => chooseSleep('off')}
           onDismiss={() => setSleepWarningGone(true)}
+          onControls={() => show('player-play')}
         />
       )}
       {cardUp && next && (
@@ -1344,6 +1365,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           seconds={count}
           onPlay={playNextEpisode}
           onDismiss={() => setUpNextDismissed(true)}
+          onControls={() => show('player-play')}
         />
       )}
 

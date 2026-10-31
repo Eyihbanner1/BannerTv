@@ -79,14 +79,17 @@ export function isCommentary(track: EngineTrack, byName = true): boolean {
   );
 }
 
-/** The language's name, or the track's own name when it has no language. */
-function languageOf(track: EngineTrack): string {
-  return (track.lang && languageName(track.lang)) || track.label || '?';
+/**
+ * The language's name, or the track's own name when it has no language, or
+ * "Unknown language" when it has neither.
+ */
+export function audioLanguage(track: EngineTrack): string {
+  return (track.lang && languageName(track.lang)) || track.label || languageName('und');
 }
 
 /** "English 5.1": what an audio row's tab says is on. */
 export function audioSummary(track: EngineTrack): string {
-  const language = languageOf(track);
+  const language = audioLanguage(track);
   return track.channels ? `${language} ${track.channels}` : language;
 }
 
@@ -96,7 +99,7 @@ export function audioSummary(track: EngineTrack): string {
  */
 export function audioDetail(track: EngineTrack): string | undefined {
   const sound = [track.format, track.channels].filter(Boolean).join(' ');
-  const language = languageOf(track).toLowerCase();
+  const language = audioLanguage(track).toLowerCase();
   const name = track.label.trim();
   const says = name && name.toLowerCase() !== language && name !== track.lang ? name : '';
   return [sound, says].filter(Boolean).join(' · ') || undefined;

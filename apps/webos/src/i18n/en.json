@@ -417,6 +417,7 @@
       "format": "This TV can't play this stream's format.",
       "network": "The stream stopped loading. Its source may be busy or offline.",
       "decode": "The TV couldn't decode this stream.",
+      "clip": "This stream is only a short clip, not the video. Its source may not have it ready yet.",
       "other": "Something went wrong playing this stream.",
       "addonsFailed_one": "One addon didn't answer.",
       "addonsFailed_other": "{{count}} addons didn't answer.",

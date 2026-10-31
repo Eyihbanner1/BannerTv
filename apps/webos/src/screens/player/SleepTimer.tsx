@@ -6,6 +6,7 @@ import { Button } from '../../components/Button';
 import { Pressable } from '../../components/Pressable';
 import { useBack } from '../../navigation/use-back';
 import { formatClock } from '../../player/media';
+import { cardArrows } from './card-arrows';
 import { Pane } from './SheetTabs';
 import styles from './SleepTimer.module.css';
 import playerStyles from './PlayerScreen.module.css';
@@ -90,12 +91,15 @@ export function SleepWarning({
   onAdd,
   onOff,
   onDismiss,
+  onControls,
 }: {
   timer: SleepTimer;
   episode: boolean;
   onAdd: () => void;
   onOff: () => void;
   onDismiss: () => void;
+  /** Up or Down: the controls come up in its place. */
+  onControls: () => void;
 }) {
   const { t } = useTranslation();
   const minutes = timer.choice !== 'end';
@@ -110,6 +114,7 @@ export function SleepWarning({
     onDismiss();
     return true;
   });
+  const onArrowPress = cardArrows(onControls);
   const title = minutes
     ? t('player.sleep.pausingAt', { time: formatClock(timer.endsAt ?? 0) })
     : t(episode ? 'player.sleep.pausingEndOfEpisode' : 'player.sleep.pausingEndOfFilm');
@@ -130,6 +135,7 @@ export function SleepWarning({
               variant="primary"
               label={t('player.sleep.add')}
               onPress={onAdd}
+              onArrowPress={onArrowPress}
             />
           )}
           <Button
@@ -137,6 +143,7 @@ export function SleepWarning({
             variant={minutes ? 'secondary' : 'primary'}
             label={t('player.sleep.turnOff')}
             onPress={onOff}
+            onArrowPress={onArrowPress}
           />
         </div>
       </div>
@@ -146,9 +153,10 @@ export function SleepWarning({
 
 /**
  * Paused by the sleep timer: the screen goes dark over the paused picture,
- * and the TV's own screen saver can come over it. OK or Back wakes it.
+ * and the TV's own screen saver can come over it. OK on "Carry on watching"
+ * wakes it and plays on; Back wakes it, still paused.
  */
-export function SleepScreen({ onWake }: { onWake: () => void }) {
+export function SleepScreen({ onWake }: { onWake: (carryOn: boolean) => void }) {
   const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-asleep',
@@ -157,7 +165,7 @@ export function SleepScreen({ onWake }: { onWake: () => void }) {
   });
   useEffect(() => void setFocus('player-asleep-wake'), []);
   useBack('overlay', () => {
-    onWake();
+    onWake(false);
     return true;
   });
   return (
@@ -168,7 +176,7 @@ export function SleepScreen({ onWake }: { onWake: () => void }) {
           focusKey="player-asleep-wake"
           variant="primary"
           label={t('player.sleep.wake')}
-          onPress={onWake}
+          onPress={() => onWake(true)}
         />
       </div>
     </FocusContext.Provider>
