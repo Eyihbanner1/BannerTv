@@ -55,4 +55,10 @@ export default defineConfig(
     ],
     languageOptions: { globals: globals.node },
   },
+  {
+    // Metro, Babel and their plugins load CommonJS.
+    files: ['apps/mobile/*.config.js', 'apps/mobile/build/**/*.js'],
+    languageOptions: { globals: globals.node, sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 );
