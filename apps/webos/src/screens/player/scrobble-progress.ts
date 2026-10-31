@@ -56,8 +56,11 @@ export interface Runtimes {
 
 /** What one video tells Trakt, as it plays. */
 export interface ScrobblePlace {
-  /** Notes, at every change, how far a real file of the video has got. */
-  see(state: Played, runtimes: Runtimes): void;
+  /**
+   * Notes, at every change, how far a real file of the video has got;
+   * carryOn is where the player would open the next file now.
+   */
+  see(state: Played, runtimes: Runtimes, carryOn?: number): void;
   /** Whether the file playing now is a clip. */
   clip(state: Played, runtimes: Runtimes): boolean;
   /**
@@ -117,7 +120,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   // the file gave no length.
   const measure = (place: Reached, runtimes: Runtimes) =>
     percent(
-      { ...NO_PLAY, position: place.position, duration: place.duration },
+      {
+        ...NO_PLAY,
+        position: place.duration > 0 ? Math.min(place.position, place.duration) : place.position,
+        duration: place.duration,
+      },
       runtimes.runtimeSeconds,
     );
   // A place kept from before the title's running time was known is judged
@@ -137,6 +144,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   const keep = (place: Reached) => {
     earlier.push(place);
     if (earlier.length > KEPT) earlier.shift();
+  };
+  const forgetMoves = (entry: SessionState['entry']) => {
+    for (let index = earlier.length - 1; index >= 0; index--) {
+      if (earlier[index]!.moved && earlier[index]!.entry === entry) earlier.splice(index, 1);
+    }
   };
   // What the file reached is kept, if it was the title, and it starts over.
   // A place only moved to counts once the next opening starts there, as the
@@ -158,7 +170,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     (linkLength > 0 &&
       isClip({ ...NO_PLAY, duration: linkLength }, runtimes.knownRuntimeSeconds, videoId));
   const place: ScrobblePlace = {
-    see(state, runtimes) {
+    see(state, runtimes, carryOn) {
       const opening = state.status === 'loading' || state.status === 'idle';
       if (state.entry !== file) {
         startOver();
@@ -180,10 +192,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       if (!opening) begun = true;
       if (state.status === 'playing') played = true;
       if (state.live) {
-        // A broadcast's clock is no place in the title.
+        // A broadcast's clock is no place in the title, nor any place it was
+        // only moved to.
         begun = true;
         linkWasLive = true;
         reached = undefined;
+        forgetMoves(state.entry);
         return;
       }
       if (state.duration > 0) {
@@ -196,24 +210,23 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         // reached counts, nor any place it was only moved to.
         wasClip = true;
         reached = undefined;
-        for (let index = earlier.length - 1; index >= 0; index--) {
-          if (earlier[index]!.moved && earlier[index]!.entry === state.entry) {
-            earlier.splice(index, 1);
-          }
-        }
+        forgetMoves(state.entry);
         return;
       }
       // Once this file has played, or shows its own length, a place inside
-      // it; or, with no length, once the viewer moved it from where it opened.
+      // it; or, with no length, once the viewer moved it from where it opened
+      // and the player took the move (it opens the next file there).
       const underWay =
         state.status === 'playing' || state.status === 'paused' || state.status === 'buffering';
       if (!underWay || wasClip) return;
-      const inside = state.duration === 0 || state.position <= state.duration + SAME_PLACE_S;
+      const inside = state.duration === 0 || played || state.position <= state.duration;
       const moved =
         state.duration === 0 &&
         !played &&
         !linkWasLive &&
         !linkIsClip(runtimes) &&
+        carryOn !== undefined &&
+        Math.abs(carryOn - state.position) <= SAME_PLACE_S &&
         Math.abs(state.position - (openedAt ?? state.position)) > SAME_PLACE_S;
       if (inside && (played || state.duration > 0 || moved)) {
         reached = {

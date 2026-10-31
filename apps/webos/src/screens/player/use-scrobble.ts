@@ -55,7 +55,7 @@ export function useScrobble(
   const latest = useRef(state);
   useEffect(() => {
     latest.current = state;
-    place.see(state, runtimesOf(runtime, knownRuntime));
+    place.see(state, runtimesOf(runtime, knownRuntime), session?.carryOn());
   });
 
   const { status, live } = state;

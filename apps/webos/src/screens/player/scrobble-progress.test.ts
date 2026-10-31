@@ -295,14 +295,18 @@ describe('onStatus and onClose', () => {
   const known = { runtimeSeconds: EPISODE_S, knownRuntimeSeconds: EPISODE_S };
   const guessed = { runtimeSeconds: 3600, knownRuntimeSeconds: undefined };
 
-  /** Feeds states through a place as the hook does, and lists what Trakt is told. */
-  function trakt(steps: [Played, typeof known | typeof guessed][], close = true) {
+  /**
+   * Feeds states through a place as the hook does, and lists what Trakt is
+   * told. A step's third value is where the player would open the next file
+   * (by default where this one is: it took every move).
+   */
+  function trakt(steps: [Played, typeof known | typeof guessed, number?][], close = true) {
     const scrobble = createScrobblePlace(EPISODE);
     const calls: ScrobbleCall[] = [];
     let sent: Sent = 'none';
     let last: { state: Played; runtimes: typeof known | typeof guessed } | undefined;
-    for (const [state, runtimes] of steps) {
-      scrobble.see(state, runtimes);
+    for (const [state, runtimes, carryOn = state.position] of steps) {
+      scrobble.see(state, runtimes, carryOn);
       // The hook asks only when the status changes, and never of a broadcast.
       if (!state.live && (last?.state.status !== state.status || last.state.live !== state.live)) {
         const next = onStatus(sent, state, scrobble, runtimes);
@@ -589,6 +593,40 @@ describe('onStatus and onClose', () => {
         [played(600, 40, 'paused', true), known],
       ]),
     ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+  });
+
+  it('keeps no move the player did not take, even once Play is pressed', () => {
+    // No length to move by yet: the player still opens the next file at 60%.
+    expect(
+      trakt([
+        [played(1700, 2820, 'playing'), known],
+        [played(1705, 2820, 'playing'), known],
+        [played(1705, 2820, 'paused'), known],
+        [played(1705, 0, 'loading', false, OTHER), known],
+        [played(1705, 0, 'paused', false, OTHER), known],
+        [played(2305, 0, 'paused', false, OTHER), known, 1705],
+        [played(2305, 0, 'loading', false, OTHER), known, 1705],
+        [played(2305, 0, 'paused', false, OTHER), known, 1705],
+        [played(1705, 0, 'loading', false, CLIP), known],
+        [played(1705, 60, 'paused', true), known],
+      ]),
+    ).toEqual(['start(60)', 'pause(60)', 'stop(60)']);
+  });
+
+  it('measures a kept place no further than its own end', () => {
+    const guess = { runtimeSeconds: 6120, knownRuntimeSeconds: undefined };
+    expect(
+      trakt([
+        [played(0, 7035, 'playing'), guess],
+        [played(30, 7035, 'playing'), guess],
+        [played(30, 7035, 'paused'), guess],
+        // A 28 s "not ready yet" file, opened paused 2 s past its end.
+        [played(30, 0, 'loading', false, OTHER), guess],
+        [played(30, 28, 'paused', false, OTHER), guess],
+        [played(30, 0, 'loading', false, CLIP), guess],
+        [played(30, 0, 'paused', false, CLIP), guess],
+      ]),
+    ).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
   });
 
   it('forgets a move in a file that turns out to be a clip', () => {
