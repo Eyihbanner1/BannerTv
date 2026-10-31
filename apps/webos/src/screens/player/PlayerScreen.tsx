@@ -17,6 +17,8 @@ import {
   secondsToEnd,
   type SleepChoice,
   sleepPhase,
+  SPEED_KINDS,
+  speedKindOf,
   startSleep,
   stopsBeforeNext,
   type StreamEntry,
@@ -40,7 +42,7 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
 import { addonClient } from '../../data/addons';
-import { playedVideos, progress } from '../../data/playback';
+import { playedVideos, progress, speedMemory } from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
@@ -55,7 +57,7 @@ import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
-import { formatClock, formatTime } from '../../player/media';
+import { formatClock, formatTime, guessMimeType } from '../../player/media';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -223,6 +225,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     preferences.subscribe,
     () => preferences.get().stillWatching,
   );
+  // What the Lab passed on this TV, which its speed test can change while the sheet shows.
+  const speeds = useSyncExternalStore(speedMemory.subscribe, speedMemory.results);
 
   // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
@@ -903,6 +907,21 @@ export function PlayerScreen(props: PlayerScreenProps) {
   useEffect(() => {
     if (asleep) session?.pause();
   }, [asleep, session]);
+  // Speed, where the Lab passed one for this kind of stream; in the Lab, its
+  // test. Not on a broadcast, which can't run ahead of live.
+  const source = state.entry?.stream.source;
+  const speedKind = state.entry
+    ? speedKindOf(
+        state.engine,
+        state.entry.facts.container,
+        source?.kind === 'url' ? guessMimeType(source.url) : undefined,
+      )
+    : undefined;
+  const speedRates = speedMemory.rates(speedKind);
+  const speedShown =
+    !state.live &&
+    (!!props.lab || SPEED_KINDS.some((kind) => (speeds[kind]?.rates.length ?? 0) > 0));
+
   function chooseSleep(choice: SleepChoice) {
     const now = Date.now();
     setSleep(startSleep(choice, now));
@@ -1269,6 +1288,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         behind={state.behind}
         position={state.position}
         duration={state.duration}
+        rate={state.rate}
         scrubTo={scrubTo}
         transport={transport}
         tools={tools}
@@ -1356,6 +1376,18 @@ export function PlayerScreen(props: PlayerScreenProps) {
           reference={reference}
           sleep={sleep}
           onSleep={chooseSleep}
+          speed={
+            speedShown
+              ? {
+                  rates: speedRates,
+                  current: state.rate,
+                  kind: speedKind,
+                  lab: !!props.lab,
+                  video,
+                  onChoose: (rate) => session?.setRate(rate),
+                }
+              : undefined
+          }
           returnFocusKey={sheetReturn('player-info-button')}
           onBack={backFromSheet}
           onClose={() => setPanel(null)}

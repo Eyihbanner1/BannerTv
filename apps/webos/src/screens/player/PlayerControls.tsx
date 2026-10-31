@@ -52,6 +52,8 @@ interface PlayerControlsProps {
   behind: number;
   position: number;
   duration: number;
+  /** The playback speed, which brings the end nearer or further. */
+  rate: number;
   /** Where a scrub would land, while the viewer is moving along the bar. */
   scrubTo: number | null;
   /** Start over, back 10 s, Play or Pause, forward 10 s, Next episode; null leaves a place empty. */
@@ -358,7 +360,7 @@ export function PlayerControls(props: PlayerControlsProps) {
   const endsAt =
     !live && duration > 0
       ? // eslint-disable-next-line react-hooks/purity
-        Math.max(now, Date.now()) + Math.max(0, duration - shown) * 1000
+        Math.max(now, Date.now()) + (Math.max(0, duration - shown) * 1000) / props.rate
       : null;
   const pause = transport.find((action) => action?.icon === 'play' || action?.icon === 'pause');
   return (

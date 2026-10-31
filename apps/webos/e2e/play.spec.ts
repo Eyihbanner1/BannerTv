@@ -650,6 +650,66 @@ async function openSleepTimer(page: Page, tools: readonly string[]) {
   await press(page, 'ArrowRight', 'player-info-tab-sleep');
 }
 
+test('Speed shows in Info once the Lab passed one, and offers only what passed for the stream playing', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      'playback-speed': {
+        version: 1,
+        results: {
+          'native-file': { rates: [1.25], why: 'sound', testedAt: 1000 },
+          'hls.js': { rates: [0.75, 1.5], testedAt: 1000 },
+        },
+      },
+    },
+  });
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  const rate = () =>
+    page
+      .locator('video:not([aria-hidden])')
+      .evaluate((element: HTMLVideoElement) => element.playbackRate);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  for (const tool of ['quality', 'streams', 'info']) {
+    await press(page, 'ArrowRight', `player-${tool}-button`);
+  }
+  await press(page, 'Enter', 'player-info-about');
+  await press(page, 'ArrowUp', 'player-info-tab-about');
+  await press(page, 'ArrowRight', 'player-info-tab-speed');
+  const tab = page.locator('[data-focus-key="player-info-tab-speed"]');
+  await expect(tab).toHaveAttribute('aria-label', 'Speed, Normal');
+  // The film plays on the TV's own player: only what the Lab passed for files.
+  await expect(page.locator('[data-focus-key^="player-info-speed-"]')).toHaveText([
+    'Normal',
+    '1.25×',
+  ]);
+  await press(page, 'Enter', 'player-info-speed-1');
+  await press(page, 'ArrowRight', 'player-info-speed-1.25');
+  await page.keyboard.press('Enter');
+  await expect.poll(rate).toBe(1.25);
+  await expect(tab).toHaveAttribute('aria-label', 'Speed, 1.25×');
+  await expect(page.locator('[data-focus-key="player-info-speed-1.25"]')).toHaveAttribute(
+    'aria-label',
+    '1.25×. Set',
+  );
+  // The film plays on, faster: the end comes sooner.
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // Back to Normal, and the sleep timer is still the next tab along.
+  await press(page, 'ArrowLeft', 'player-info-speed-1');
+  await page.keyboard.press('Enter');
+  await expect.poll(rate).toBe(1);
+  await expect(tab).toHaveAttribute('aria-label', 'Speed, Normal');
+  await press(page, 'ArrowUp', 'player-info-tab-speed');
+  await press(page, 'ArrowRight', 'player-info-tab-sleep');
+});
+
 const SLEEP_WARNING = /^Sleep timer\. /;
 const ASLEEP = 'Paused by the sleep timer';
 

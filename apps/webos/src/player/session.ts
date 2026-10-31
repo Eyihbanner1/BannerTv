@@ -136,6 +136,8 @@ export interface PlaybackSession {
   seek(position: number): void;
   /** On a broadcast, back to where the engine plays live. */
   goToLive(): void;
+  /** Plays at this speed, until another stream opens at normal speed. */
+  setRate(rate: number): void;
   selectAudio(id: string): void;
   selectText(id: string | null): void;
   /** Saves where playback is now, for leaving or hiding the app. */
@@ -596,6 +598,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         patch({ status: 'ended', position: duration });
       },
     ],
+    [
+      'ratechange',
+      () => {
+        // Whatever set it: the viewer, the Lab's speed test, or the TV putting
+        // it back. Shaka sets 0 while it buffers, which is no speed.
+        const rate = video.playbackRate;
+        if (rate > 0 && isFinite(rate)) patch({ rate });
+      },
+    ],
   ];
   handlers.forEach(([event, handler]) => video.addEventListener(event, handler));
 
@@ -670,6 +681,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         streamCues: {},
         rate: 1,
       });
+      // A new load would put it back too, but not before the old stream lets go.
+      video.playbackRate = 1;
       // Like a pause before the first picture: no start clock until the viewer plays.
       if (!pausedByViewer) armStart(current);
 
@@ -796,6 +809,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       } else patch({ position: target, ...judge(target) });
       save();
       if (!live && savedLength() > 0) seekedToPlace = true;
+    },
+
+    setRate(rate) {
+      if (!(rate > 0) || !isFinite(rate)) return;
+      video.playbackRate = rate;
+      patch({ rate });
     },
 
     goToLive() {

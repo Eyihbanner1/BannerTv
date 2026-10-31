@@ -64,3 +64,27 @@
   font: var(--bt-text-heading);
   color: var(--bt-text-muted);
 }
+
+/* The Lab's speed test, above the speeds: its button, the sound question and what it found. */
+.test {
+  height: 176px;
+}
+
+.testRow {
+  height: 88px;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.testRow > * {
+  margin-right: 16px;
+}
+
+.testStatus {
+  margin: 0;
+  padding: 0 36px;
+  font: var(--bt-text-body);
+  color: var(--bt-text-muted);
+  overflow: hidden;
+  max-height: 80px;
+}

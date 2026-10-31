@@ -4,6 +4,7 @@ import {
   type QualityReference,
   type SleepChoice,
   type SleepTimer,
+  type SpeedKind,
   type StreamEntry,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
@@ -20,11 +21,24 @@ import { formatTime } from '../../player/media';
 import { focusedKey } from '../../navigation/spatial';
 import { SheetTabs } from './SheetTabs';
 import { SleepChoices, sleepValue } from './SleepTimer';
+import { SpeedChoices, speedName } from './Speed';
 import styles from './InfoSheet.module.css';
 
 const SHEET = 'player-info';
-type InfoTab = 'about' | 'sleep';
-const TABS: readonly InfoTab[] = ['about', 'sleep'];
+type InfoTab = 'about' | 'speed' | 'sleep';
+const TABS: readonly InfoTab[] = ['about', 'speed', 'sleep'];
+const NO_SPEED_TABS: readonly InfoTab[] = ['about', 'sleep'];
+
+/** The Speed tab, where it shows: in the Lab, and once the Lab passed any speed on this TV. */
+export interface InfoSpeed {
+  /** The speeds passed for the kind of stream playing, Normal left out. */
+  rates: readonly number[];
+  current: number;
+  kind: SpeedKind | undefined;
+  lab: boolean;
+  video: HTMLVideoElement | null;
+  onChoose: (rate: number) => void;
+}
 /** Starring, as Details names them. */
 const CAST = 4;
 
@@ -37,7 +51,8 @@ interface Line {
  * What plays and what it is, over the picture, which keeps playing: the
  * stream on the left (the addon, the release, its size and how it is
  * played), the title or episode on the right. It asks for nothing: what it
- * shows is what the player already has. A second tab sets the sleep timer.
+ * shows is what the player already has. Other tabs set the speed, where the
+ * Lab passed one, and the sleep timer.
  */
 export function InfoSheet({
   title,
@@ -53,6 +68,7 @@ export function InfoSheet({
   reference,
   sleep,
   onSleep,
+  speed,
   returnFocusKey,
   onBack,
   onClose,
@@ -72,6 +88,7 @@ export function InfoSheet({
   reference?: QualityReference;
   sleep: SleepTimer;
   onSleep: (choice: SleepChoice) => void;
+  speed?: InfoSpeed;
   returnFocusKey: () => string;
   onBack: () => void;
   onClose: () => void;
@@ -164,10 +181,12 @@ export function InfoSheet({
 
   const names: Record<InfoTab, string> = {
     about: t('player.info'),
+    speed: t('player.speed.title'),
     sleep: t('player.sleep.title'),
   };
   const values: Record<InfoTab, string> = {
     about: subtitle ?? title,
+    speed: speedName(t, speed?.current ?? 1),
     sleep: sleepValue(t, sleep, !!episode),
   };
   // Back from a tab's choices goes to the tabs; from the tabs, or from what
@@ -192,7 +211,14 @@ export function InfoSheet({
       onBack={back}
       placement="bottom"
     >
-      <SheetTabs sheet={SHEET} tabs={TABS} names={names} values={values} tab={tab} onTab={setTab} />
+      <SheetTabs
+        sheet={SHEET}
+        tabs={speed ? TABS : NO_SPEED_TABS}
+        names={names}
+        values={values}
+        tab={tab}
+        onTab={setTab}
+      />
       {tab === 'about' ? (
         // Nothing to choose: OK, as Back, closes it.
         <Pressable
@@ -217,6 +243,16 @@ export function InfoSheet({
             {cast && <p className={styles.cast}>{cast}</p>}
           </div>
         </Pressable>
+      ) : tab === 'speed' && speed ? (
+        <SpeedChoices
+          focusKey={`${SHEET}-speed`}
+          rates={speed.rates}
+          current={speed.current}
+          kind={speed.kind}
+          lab={speed.lab}
+          video={speed.video}
+          onChoose={speed.onChoose}
+        />
       ) : (
         <SleepChoices
           focusKey={`${SHEET}-sleep`}

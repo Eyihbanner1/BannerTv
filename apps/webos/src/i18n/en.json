@@ -238,6 +238,44 @@
       "chip": "Sleep {{time}}",
       "chipEnd": "Sleep at end"
     },
+    "speed": {
+      "title": "Speed",
+      "normal": "Normal",
+      "rate": "{{rate}}×",
+      "note": "Speeds this TV passed in the Lab for this kind of stream. The next stream starts at Normal.",
+      "notPassed": "The Lab has passed no other speed for {{kind}} on this TV.",
+      "notTested": "Other speeds aren't tested for this kind of stream.",
+      "kind": {
+        "native-file": "the TV's player, files",
+        "native-hls": "the TV's player, HLS",
+        "hlsjs": "hls.js",
+        "shaka": "Shaka"
+      },
+      "test": {
+        "start": "Test speeds on this stream",
+        "again": "Test again",
+        "stop": "Stop the test",
+        "ready": "Measures 0.75×, 1.25× and 1.5× for {{kind}}, and asks if you hear sound at each. Stay on this tab until it ends.",
+        "baseline": "Measuring normal speed…",
+        "measuring": "Measuring {{rate}}…",
+        "listening": "Playing at {{rate}}. Can you hear the sound, at the right pitch?",
+        "normal": "Checking normal speed comes back…",
+        "yes": "Yes, I hear it",
+        "no": "No sound",
+        "unsteady": "Couldn't measure: the video stopped or stuttered. Nothing was saved. Try again.",
+        "saved": "Saved for {{kind}}.",
+        "notSaved": "Nothing settled, so nothing was saved.",
+        "verdict": "{{rate}}: {{result}}",
+        "normalAgain": "Normal again",
+        "passed": "passed",
+        "why": {
+          "clock": "wrong speed",
+          "reset": "the TV put it back",
+          "sound": "no sound",
+          "unsteady": "couldn't measure"
+        }
+      }
+    },
     "stillWatching": {
       "title": "Still watching?",
       "message": "The next episode of {{title}} is ready.",

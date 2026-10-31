@@ -94,6 +94,7 @@ vi.mock('./engines/choose', () => ({
 class FakeVideo extends EventTarget {
   paused = true;
   currentTime = 0;
+  playbackRate = 1;
   // A two-hour film, so the bitrates below follow from the sizes.
   duration = 7200;
 
@@ -970,6 +971,26 @@ describe('a stream with an end', () => {
     expect(session.get().rate).toBe(1);
     await start(session, video, first, 600);
     expect(session.get().rate).toBe(1);
+  });
+
+  it('plays at the speed chosen, says so when the TV puts it back, and opens another stream at normal speed', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.setRate(1.25);
+    expect(video.playbackRate).toBe(1.25);
+    expect(session.get().rate).toBe(1.25);
+    // Not a speed: Shaka's 0 while it buffers.
+    video.playbackRate = 0;
+    video.fire('ratechange');
+    expect(session.get().rate).toBe(1.25);
+    video.playbackRate = 1;
+    video.fire('ratechange');
+    expect(session.get().rate).toBe(1);
+    session.setRate(1.5);
+    session.play(second, 0);
+    expect(video.playbackRate).toBe(1);
+    expect(session.get().rate).toBe(1);
+    session.destroy();
   });
 
   it('carries on from where it is', async () => {
