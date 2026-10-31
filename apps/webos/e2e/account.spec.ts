@@ -1,5 +1,5 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
-import { FIRST_ROW, mockAddons } from './addons';
+import { DEMO_ROW, FIRST_ROW, mockAddons } from './addons';
 import { readKv } from './play';
 import { GUEST_ID, lockedWith, main, seedProfiles } from './profiles';
 import {
@@ -1207,6 +1207,96 @@ test('a new PIN being chosen when another screen changes it asks for the changed
   expect(chosen).not.toBeNull();
   expect(errors).toEqual([]);
   expect(otherErrors).toEqual([]);
+});
+
+test('the welcome offers the account beside it: Create opens BannerTV account on Create, and Join on the code', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  await mockAddons(page, { firstRun: true });
+  await mockSync(page, sync);
+  await page.goto(APP_URL);
+  // Start browsing keeps focus: the account is offered, never in the way.
+  await expectFocus(page, 'welcome-start');
+  const welcome = page.getByRole('dialog', { name: 'Welcome to BannerTV' });
+  await expect(
+    welcome.getByRole('region', { name: 'Watching on more than one screen?' }),
+  ).toBeVisible();
+  await press(page, 'ArrowRight', 'welcome-add');
+  await press(page, 'ArrowRight', 'welcome-account-join');
+  await press(page, 'ArrowUp', 'welcome-account-create');
+
+  // Create leaves the welcome for the account, on its own Create, with what it means; nothing is made yet.
+  await press(page, 'Enter', 'account-create');
+  await expect(welcome).toHaveCount(0);
+  await expect(page.getByText('Everything is encrypted on this screen')).toBeVisible();
+  expect(sync.requests).toEqual(['GET /v1/status']);
+  const code = await createAccount(page);
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+
+  // A new screen, with no more accounts allowed: the welcome offers only Join.
+  sync.maxAccounts = 1;
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const other = await context.newPage();
+  const otherErrors = watchErrors(other);
+  await mockAddons(other, { firstRun: true });
+  await mockSync(other, sync);
+  await other.goto(APP_URL);
+  await expectFocus(other, 'welcome-start');
+  await expect(other.locator('[data-focus-key="welcome-account-join"]')).toBeVisible();
+  await expect(other.locator('[data-focus-key="welcome-account-create"]')).toHaveCount(0);
+  await press(other, 'ArrowRight', 'welcome-add');
+  await press(other, 'ArrowRight', 'welcome-account-join');
+
+  // Join opens straight on the code; Back goes to the account's menu, then Settings.
+  await press(other, 'Enter', 'account-code-field');
+  await pressBack(other);
+  await expectFocus(other, 'account-join');
+  await pressBack(other);
+  await expectFocus(other, 'settings-account');
+  await press(other, 'Enter', 'account-join');
+  await press(other, 'Enter', 'account-code-field');
+  await typeInto(other, CODE_LABEL, code);
+  // The screen has nothing of its own yet, so it simply becomes the account's, and starts
+  // again on Home: the welcome was left for good.
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+  await expectFocus(other, `${DEMO_ROW}-tile-0`);
+  expect(await other.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBe('1');
+  expect(errors).toEqual([]);
+  expect(otherErrors).toEqual([]);
+});
+
+test('a screen in an account whose localStorage lost the welcome and its flag offers no account there', async ({
+  page,
+}) => {
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  // At the next launch only: the welcome and the account's flag are gone, as a lost write leaves them.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('bannertv.test.lose') !== '1') return;
+    sessionStorage.setItem('bannertv.test.lose', 'done');
+    localStorage.removeItem('bannertv.welcomed');
+    localStorage.removeItem('bannertv.syncOn');
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  await createAccount(page);
+
+  await page.evaluate(() => sessionStorage.setItem('bannertv.test.lose', '1'));
+  await page.reload();
+  await expectFocus(page, 'welcome-start');
+  // The engine finds the account it kept, and the welcome leaves the offer out.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBe('1');
+  await expect(page.getByRole('region', { name: 'Watching on more than one screen?' })).toHaveCount(
+    0,
+  );
 });
 
 test('Diagnostics says whether this is a secure context and Web Crypto gives the known answers', async ({

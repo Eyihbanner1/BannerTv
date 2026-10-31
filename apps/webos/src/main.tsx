@@ -22,9 +22,22 @@ import { applyTuning, changedTuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
 
 function fitToWindow(root: HTMLElement) {
-  // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop, scale to fit.
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  root.style.transform = scale < 1 ? `scale(${scale})` : '';
+  // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop or a phone,
+  // scale to fit, in the middle. The window is measured on the root element: a phone's
+  // browser widens innerWidth to the 1920px page, so the UI would barely shrink.
+  const html = document.documentElement;
+  const width = html.clientWidth;
+  const height = html.clientHeight;
+  const scale = Math.min(width / 1920, height / 1080);
+  const scaled = scale < 1;
+  root.style.transform = scaled
+    ? `translate(${(width - 1920 * scale) / 2}px, ${(height - 1080 * scale) / 2}px) scale(${scale})`
+    : '';
+  // base.css makes the page 1920x1080, which a phone would let the person pan about.
+  for (const element of [html, document.body]) {
+    element.style.width = scaled ? `${width}px` : '';
+    element.style.height = scaled ? `${height}px` : '';
+  }
 }
 
 function start() {

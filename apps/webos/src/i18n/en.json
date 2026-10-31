@@ -429,7 +429,10 @@
     "noticeTitle": "Good to know",
     "notice": "Apart from BannerTV Demo, a few Creative Commons films from the Blender Foundation for trying the app, BannerTV doesn't host or provide any films or series. Everything else comes from the addons you add, and you're responsible for the addons you choose.",
     "start": "Start browsing",
-    "addAddon": "Add an addon"
+    "addAddon": "Add an addon",
+    "accountTitle": "Watching on more than one screen?",
+    "accountLead": "A free BannerTV account keeps your profiles, My List and Continue Watching the same on all of them. There's no email or password, just a code you write down.",
+    "join": "Join with a code"
   },
   "profiles": {
     "title": "Profiles",

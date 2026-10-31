@@ -80,7 +80,7 @@ function Screen({ route }: { route: Route }) {
     case 'trakt':
       return <TraktScreen />;
     case 'account':
-      return <AccountScreen />;
+      return <AccountScreen startOnJoin={route.join} />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;

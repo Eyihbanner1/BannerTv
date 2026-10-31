@@ -102,8 +102,11 @@ export type Route =
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */
   | { name: 'trakt' }
-  /** Settings > BannerTV account: create, join, sync now, leave, delete (ADR 0006). */
-  | { name: 'account' };
+  /**
+   * Settings > BannerTV account: create, join, sync now, leave, delete (ADR 0006).
+   * `join` opens it on typing a code, from the welcome's Join with a code.
+   */
+  | { name: 'account'; join?: boolean };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 

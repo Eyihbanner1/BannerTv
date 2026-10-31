@@ -62,8 +62,9 @@ import { createSyncTransport, SYNC_SERVICE } from './sync-service';
  * over the app's stores, and what Settings > BannerTV account asks of it.
  *
  * Without an account nothing here runs at launch: no store is watched, the
- * stores keep their own clocks, and the service hears nothing until
- * Settings is opened, which asks it once a day whether it is there.
+ * stores keep their own clocks, and the service hears nothing until the
+ * welcome or Settings shows on Main, which asks it once a day whether it is
+ * there.
  */
 
 // The last GET /v1/status answer and when it came, and when a sync last finished.
@@ -459,7 +460,10 @@ function startAccount(): void {
   );
 }
 
-/** The account screen opened: the engine reads what it kept, without asking the service anything. */
+/**
+ * The account screen, or the welcome's offer of it, opened: the engine reads what it
+ * kept, without asking the service anything.
+ */
 export function openAccount(): void {
   void openEngine();
 }

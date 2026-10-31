@@ -42,6 +42,7 @@ import {
   previewAccount,
   syncAccountNow,
 } from '../../data/sync';
+import { syncOn } from '../../data/sync-clock';
 import screen from '../Screen.module.css';
 import styles from './AccountScreen.module.css';
 
@@ -192,14 +193,17 @@ function viewOf(step: Step, state: AccountState): string {
  * the account is created or deleted, and a service that needs its setup key
  * asks for it before a new account is made. Back goes back a step, then to
  * Settings, but waits while a create, a confirm, a join, a leave or a
- * delete runs.
+ * delete runs. The welcome's Join with a code opens it on the code (`startOnJoin`);
+ * its Create an account opens the menu, on Create.
  */
-export function AccountScreen() {
+export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(accountState.subscribe, accountState.get);
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
   const now = useNow();
-  const [step, setStep] = useState<Step>({ name: 'menu' });
+  const [step, setStep] = useState<Step>(() =>
+    startOnJoin && !syncOn() ? { name: 'join' } : { name: 'menu' },
+  );
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [pinMessage, setPinMessage] = useState<string | undefined>(undefined);
