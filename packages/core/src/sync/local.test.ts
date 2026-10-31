@@ -7,10 +7,13 @@ import {
   expireAside,
   loadBase,
   loadPending,
+  loadSyncState,
   readSyncState,
   saveBase,
   savePending,
+  saveSyncState,
 } from './local';
+import { manualTimers } from './testing';
 
 const DAY = 24 * 60 * 60 * 1000;
 const CODE = 'ABCDEFGHJKMNPQRSTUVW';
@@ -40,6 +43,64 @@ describe('readSyncState', () => {
     expect(readSyncState({ ...state, phase: 'done' })).toBeUndefined();
     expect(readSyncState(null)).toBeUndefined();
   });
+
+  it('keeps the setup key only while a create waits for the service', () => {
+    const creating = { v: 1, code: CODE, accountId: 'id', phase: 'creating', key: 'k' };
+    expect(readSyncState(creating)!.key).toBe('k');
+    expect(readSyncState({ ...creating, epoch: 'e' })!.key).toBeUndefined();
+    expect(readSyncState({ ...creating, phase: 'ready' })!.key).toBeUndefined();
+    expect(readSyncState({ ...creating, key: 5 })!.key).toBeUndefined();
+  });
+});
+
+/** A store whose reads of `key` fail `times` times, then work. */
+function flaky(key: string, times: number) {
+  const storage = memoryKeyValueStore();
+  let left = times;
+  const reads = { count: 0 };
+  const flakyStorage: KeyValueStore = {
+    ...storage,
+    get(name) {
+      if (name !== key) return storage.get(name);
+      reads.count += 1;
+      if (left > 0) {
+        left -= 1;
+        return Promise.reject(new Error('IDB transaction aborted'));
+      }
+      return storage.get(name);
+    },
+  };
+  return { storage, flaky: flakyStorage, reads };
+}
+
+describe('reading what the engine kept', () => {
+  it('tells a missing state from one that could not be read', async () => {
+    const time = manualTimers();
+    expect(await loadSyncState(memoryKeyValueStore(), time.timers)).toBeUndefined();
+
+    const broken = flaky('sync/state', Infinity);
+    const failed = loadSyncState(broken.flaky, time.timers).catch((error: Error) => error);
+    await time.advance(5000);
+    expect(await failed).toBeInstanceOf(Error);
+    // Tried again three times, a quarter of a second apart.
+    expect(broken.reads.count).toBe(4);
+  });
+
+  it('tries a failed read again before giving up', async () => {
+    const time = manualTimers();
+    const once = flaky('sync/state', 1);
+    await saveSyncState(once.storage, { v: 1, code: CODE, accountId: 'id', phase: 'ready' });
+    const state = loadSyncState(once.flaky, time.timers);
+    await time.advance(250);
+    expect(await state).toMatchObject({ code: CODE, phase: 'ready' });
+
+    // Without timers, at once.
+    const again = flaky('sync/pend/addons', 2);
+    const items = newItems();
+    items.a = { t: 1, v: 1 };
+    await savePending(again.storage, 'addons', items);
+    expect(Object.keys(await loadPending(again.flaky, 'addons'))).toEqual(['a']);
+  });
 });
 
 describe('bases and pending edits', () => {
@@ -66,16 +127,28 @@ describe('bases and pending edits', () => {
     expect(Object.keys(await loadPending(storage, 'addons'))).toEqual([]);
   });
 
-  it('start again from nothing when unreadable', async () => {
+  it('start again from nothing when what was saved is not a base', async () => {
     const storage = memoryKeyValueStore();
     await storage.set('sync/base/profiles', { ver: 'two', at: 1, items: [] });
     expect((await loadBase(storage, 'profiles')).ver).toBe(0);
+  });
+
+  it('reject when they cannot be read, rather than read as empty', async () => {
     const failing: KeyValueStore = {
       get: () => Promise.reject(new Error('IDB')),
       set: () => Promise.resolve(),
     };
-    expect((await loadBase(failing, 'profiles')).ver).toBe(0);
-    expect(Object.keys(await loadPending(failing, 'profiles'))).toEqual([]);
+    await expect(loadBase(failing, 'profiles')).rejects.toThrow('IDB');
+    await expect(loadPending(failing, 'profiles')).rejects.toThrow('IDB');
+  });
+
+  it('keep the mark of a base not every store has taken', async () => {
+    const storage = memoryKeyValueStore();
+    await saveBase(storage, 'addons', { ver: 2, at: 5, items: newItems(), apply: true });
+    expect((await loadBase(storage, 'addons')).apply).toBe(true);
+    await saveBase(storage, 'addons', { ver: 2, at: 5, items: newItems() });
+    expect(await storage.get('sync/base/addons')).toEqual({ ver: 2, at: 5, items: [] });
+    expect((await loadBase(storage, 'addons')).apply).toBeUndefined();
   });
 });
 

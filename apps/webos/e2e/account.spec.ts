@@ -11,7 +11,15 @@ import {
   shownCode,
   typeInto,
 } from './sync';
-import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
+import {
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  focusedKey,
+  press,
+  pressBack,
+  watchErrors,
+} from './tv';
 
 const BUNNY = 'tt1254207';
 const SINTEL = 'tt1727587';
@@ -20,24 +28,27 @@ const ADA = { id: 'ada001', name: 'Ada', colour: 2 };
 const GUEST = { id: GUEST_ID, name: 'Guest', colour: 1 };
 const CHECK_LABEL = 'Last four characters of the code';
 const CODE_LABEL = 'Account code';
-
-// Chromium here gives a reloaded page a new document with a storage connection of its own,
-// which can open before the old document's last localStorage writes have arrived, so a
-// join's reload could start from an empty localStorage. The TVs' engines (Chromium 68 on
-// webOS, the Android WebView) keep one, as this does.
-test.use({ launchOptions: { args: ['--disable-features=RenderDocument'] } });
+/** The copy a join keeps in IndexedDB of what it wrote to localStorage (data/sync-joined.ts). */
+const JOINED = 'sync-joined';
 
 /** An error status the service answers with on purpose, which Chromium logs. */
-const ANSWERED = /^Failed to load resource: the server responded with a status of 401/;
+const ANSWERED = /^Failed to load resource: the server responded with a status of 40[13]/;
+/** A request to the service while it is down, which Chromium logs. */
+const UNREACHED = /^Failed to load resource: net::ERR_FAILED/;
 
 /**
- * Sintel on My List and Big Buck Bunny part way, saved a minute ago. The
- * times are not whole seconds: whole seconds would read as Trakt's.
+ * Sintel on My List and Big Buck Bunny part way, saved a minute ago, at the
+ * first launch only: never on a reload, which may not see sessionStorage yet
+ * (see seedProfiles). The times are never whole seconds: whole seconds would
+ * read as Trakt's.
  */
 async function seedWatching(page: Page): Promise<void> {
-  const at = Date.now() - 60000 + 123;
+  const at = Math.floor((Date.now() - 60000) / 1000) * 1000 + 123;
   await page.addInitScript(
     (seed: Record<string, unknown>) => {
+      const navigation = performance.getEntriesByType('navigation')[0] as
+        PerformanceNavigationTiming | undefined;
+      if (navigation?.type === 'reload') return;
       if (sessionStorage.getItem('bannertv.test.watching')) return;
       sessionStorage.setItem('bannertv.test.watching', '1');
       const request = indexedDB.open('bannertv', 1);
@@ -123,11 +134,22 @@ async function createAccount(page: Page, pin?: string): Promise<string> {
   return code;
 }
 
-/** Runs `action`, which ends in BannerTV starting again, and waits for that. */
+/**
+ * Runs `action`, which ends in a join starting BannerTV again, and waits for
+ * that launch to settle. A launch that missed some of the join's
+ * localStorage writes puts them back from the join's copy in IndexedDB and
+ * starts once more; the copy goes once a launch has read everything.
+ */
 async function reloadsAfter(page: Page, action: () => Promise<void>): Promise<void> {
   const loaded = page.waitForEvent('load', { timeout: 20000 });
   await action();
   await loaded;
+  await expect
+    .poll(async () => (await readKv(page, JOINED).catch(() => 'starting again')) ?? 'settled', {
+      timeout: 20000,
+    })
+    .toBe('settled');
+  await page.waitForLoadState();
 }
 
 /** On the account screen signed out: types the code and carries on. */
@@ -151,6 +173,46 @@ function profileIds(page: Page): Promise<string[]> {
 async function libraryIds(page: Page): Promise<string[]> {
   const library = (await readKv(page, 'library')) as { items: { id: string }[] } | undefined;
   return (library?.items ?? []).map((item) => item.id);
+}
+
+/** On Settings > Profiles: adds a profile called `name`, as the person would. */
+async function addProfile(page: Page, name: string): Promise<void> {
+  for (let i = 0; i < 8 && (await focusedKey(page)) !== 'profiles-add'; i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+  }
+  await press(page, 'Enter', 'profile-name');
+  await typeInto(page, 'Name', name);
+  await press(page, 'Enter', 'profile-name');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowDown', 'profile-kids');
+  await press(page, 'ArrowDown', 'profile-save');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible();
+}
+
+/** From Settings > Profiles to BannerTV account, Sync now, and back to Profiles. */
+async function syncFromProfiles(page: Page): Promise<void> {
+  await pressBack(page);
+  await expectFocus(page, 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'ArrowDown', 'settings-account');
+  await press(page, 'Enter', 'account-sync');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'In sync just now' })).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await press(page, 'ArrowUp', 'settings-home-rows');
+  await press(page, 'ArrowUp', 'settings-profiles');
+  await press(page, 'Enter', 'profiles-main');
+}
+
+/** The keys of one document in the copy Use keeps of what the screen had. */
+async function asideKeys(page: Page, document: string): Promise<string[]> {
+  const aside = (await readKv(page, 'sync-aside')) as
+    { documents: Record<string, Array<[string, unknown]>> } | undefined;
+  return (aside?.documents[document] ?? []).map(([key]) => key);
 }
 
 test('Settings offers BannerTV account to Main only once its service answers, and asks it once a day', async ({
@@ -396,8 +458,9 @@ test("Use replaces a screen's profiles with the account's, after asking, and kee
 
   const other = await secondScreen(browser, sync);
   await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
+  await seedWatching(other);
   await other.goto(APP_URL);
-  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await expectFocus(other, CONTINUE_TILE);
   await openSettings(other);
   await openAccount(other, 'account-create');
   await typeCode(other, code);
@@ -412,7 +475,384 @@ test("Use replaces a screen's profiles with the account's, after asking, and kee
 
   await expectFocus(other, `${FIRST_ROW}-tile-0`);
   await expect.poll(() => profileIds(other)).toEqual(['main', ADA.id]);
-  expect(await readKv(other, 'sync-aside')).toBeTruthy();
+  expect(await libraryIds(other)).toEqual([]);
+  // The copy holds what the screen had, not the account's.
+  expect(await asideKeys(other, 'profiles')).toContain(GUEST_ID);
+  expect(await asideKeys(other, 'profiles')).not.toContain(ADA.id);
+  expect(await asideKeys(other, 'p/main/list')).toEqual([SINTEL]);
+});
+
+test('Back waits while a join runs, and the copy Use keeps still holds what the screen had', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await seedProfiles(page, { profiles: [main(), ADA], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
+  await seedWatching(other);
+  await other.goto(APP_URL);
+  await expectFocus(other, CONTINUE_TILE);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await typeCode(other, code);
+  await expectFocus(other, 'account-use');
+  await press(other, 'Enter', 'account-use-dialog-cancel');
+  await press(other, 'ArrowLeft', 'account-use-dialog-confirm');
+
+  // A slow connection: each answer takes a second and a half.
+  sync.delay = 1500;
+  const joining = other.getByText("Joining the account. BannerTV starts again when it's done.");
+  await reloadsAfter(other, async () => {
+    await other.keyboard.press('Enter');
+    await expect(joining).toBeVisible();
+    // Back does nothing while the join runs: no menu offering to try again.
+    await pressBack(other);
+    await pressBack(other);
+    await other.waitForTimeout(300);
+    await expect(joining).toBeVisible();
+    await expect(other.locator('[data-focus-key="account-try"]')).toHaveCount(0);
+  });
+  sync.delay = 0;
+
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => profileIds(other)).toEqual(['main', ADA.id]);
+  expect(await asideKeys(other, 'profiles')).toContain(GUEST_ID);
+  expect(await asideKeys(other, 'p/main/list')).toEqual([SINTEL]);
+});
+
+test("a join's reload that misses what the join wrote to localStorage puts it back", async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await seedProfiles(page, { profiles: [main(), ADA], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  const errors = watchErrors(other);
+  await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
+  // As on a TV whose reload reads localStorage before the join's last writes have arrived.
+  // window.name carries what to lose, since a reload here may not see sessionStorage yet.
+  await other.addInitScript(() => {
+    if (window.name.indexOf('lost-join:') !== 0) return;
+    const lost = window.name.slice('lost-join:'.length);
+    window.name = '';
+    localStorage.setItem('bannertv.profiles', lost);
+    localStorage.removeItem('bannertv.syncOn');
+  });
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await typeCode(other, code);
+  await expectFocus(other, 'account-use');
+  await press(other, 'Enter', 'account-use-dialog-cancel');
+  await press(other, 'ArrowLeft', 'account-use-dialog-confirm');
+  await other.evaluate(() => {
+    window.name = `lost-join:${localStorage.getItem('bannertv.profiles')!}`;
+  });
+  let loads = 0;
+  other.on('load', () => (loads += 1));
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+
+  // The launch read Guest again, so BannerTV put the join's profiles back and started once more.
+  expect(loads).toBe(2);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  expect(await profileIds(other)).toEqual(['main', ADA.id]);
+  expect(await other.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBe('1');
+  await openSettings(other);
+  await press(other, 'ArrowRight', 'settings-profiles');
+  await press(other, 'Enter', 'profiles-main');
+  await expect(other.getByRole('button', { name: 'Guest' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a code no account has says so, and the screen stays as it was', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  await typeCode(page, 'ABCDEFGHJKMNPQRSTUVW');
+  await expect(
+    page.getByText('No account has that code. Check each character and try again.'),
+  ).toBeVisible();
+  await expectFocus(page, 'account-code-field');
+  // Back leaves the code and makes nothing.
+  await pressBack(page);
+  await expectFocus(page, 'account-create');
+  expect(await page.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBeNull();
+  expect(await readKv(page, 'sync/state')).toBeUndefined();
+  expect(errors.filter((error) => !ANSWERED.test(error))).toEqual([]);
+});
+
+test('creating and joining while the service is out of reach carry on once it answers', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await seedProfiles(page, { profiles: [main(), ADA], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+
+  // Create: the code is kept for when the service answers.
+  sync.down = true;
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByText("BannerTV can't reach its account service. Check the connection and try again."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Setting up the account isn't finished: its code still needs writing down."),
+  ).toBeVisible();
+  await expectFocus(page, 'account-setup-show');
+  sync.down = false;
+  await press(page, 'Enter', 'account-code-saved');
+  const code = await shownCode(page);
+  await press(page, 'Enter', 'account-check-field');
+  await typeInto(page, CHECK_LABEL, code.slice(-4));
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('This screen is in your account.')).toBeVisible();
+  expect(errors.filter((error) => !UNREACHED.test(error))).toEqual([]);
+
+  // Join: the code is checked, then the service goes as Bring starts.
+  const other = await secondScreen(browser, sync);
+  const otherErrors = watchErrors(other);
+  await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await typeCode(other, code);
+  await expectFocus(other, 'account-use');
+  await press(other, 'ArrowLeft', 'account-bring');
+  sync.down = true;
+  await other.keyboard.press('Enter');
+  await expect(
+    other.getByText(
+      "BannerTV couldn't reach its account service. Try again: joining carries on where it stopped.",
+    ),
+  ).toBeVisible();
+  await expect(
+    other.getByText(
+      "Joining the account didn't finish. BannerTV carries on when it can reach its service.",
+    ),
+  ).toBeVisible();
+  await expectFocus(other, 'account-try');
+  sync.down = false;
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => profileIds(other)).toEqual(['main', GUEST_ID, ADA.id]);
+  expect(otherErrors.filter((error) => !UNREACHED.test(error))).toEqual([]);
+});
+
+test('Bring is not offered when the profiles would pass six', async ({ page, browser }) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  const theirs = [
+    ADA,
+    { id: 'bea002', name: 'Bea', colour: 3 },
+    { id: 'cy0003', name: 'Cy', colour: 4 },
+  ];
+  await seedProfiles(page, { profiles: [main(), ...theirs], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  const errors = watchErrors(other);
+  const ours = [
+    GUEST,
+    { id: 'dee004', name: 'Dee', colour: 5 },
+    { id: 'eli005', name: 'Eli', colour: 6 },
+  ];
+  await seedProfiles(other, { profiles: [main(), ...ours], lastId: 'main', askAtLaunch: false });
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await typeCode(other, code);
+  await expectFocus(other, 'account-use');
+  await expect(
+    other.getByText(
+      "The account has 4 profiles and this screen would add 3, but BannerTV allows six. Use the account's profiles, or delete a profile on this screen first.",
+    ),
+  ).toBeVisible();
+  await expect(other.locator('[data-focus-key="account-bring"]')).toHaveCount(0);
+  await pressBack(other);
+  await expectFocus(other, 'account-create');
+  // Nothing was joined.
+  expect(await readKv(other, 'sync/state')).toBeUndefined();
+  expect(await profileIds(other)).toEqual(['main', ...ours.map((profile) => profile.id)]);
+  expect(errors).toEqual([]);
+});
+
+test('a service that needs its setup key asks for it before making the account, and again when it is wrong', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  sync.createKey = 'Owner2468Key';
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  await press(page, 'Enter', 'account-key-field');
+  await expect(page.getByRole('heading', { name: 'Setup key' })).toBeVisible();
+  await expect(
+    page.getByText("Type the setup key added in the account service's settings. Capitals count."),
+  ).toBeVisible();
+  expect(sync.requests).not.toContain('POST /v1/account/create');
+
+  // Nothing typed: nothing sent.
+  await press(page, 'ArrowDown', 'account-key-continue');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Type the setup key first.')).toBeVisible();
+  await expectFocus(page, 'account-key-field');
+  expect(sync.requests).not.toContain('POST /v1/account/create');
+
+  await typeInto(page, 'Setup key', 'owner2468key');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText("That setup key isn't right.")).toBeVisible();
+  await expectFocus(page, 'account-key-field');
+  expect(sync.requests.filter((request) => request === 'POST /v1/account/create')).toHaveLength(1);
+
+  // Typed again, on a slow connection: Back waits for the account.
+  await page.keyboard.press('Enter');
+  const field = page.locator('input[aria-label="Setup key"]');
+  await expect(field).toBeFocused();
+  await field.fill(' Owner2468Key ');
+  sync.delay = 1500;
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Setting up your account')).toBeVisible();
+  await pressBack(page);
+  await expect(page.getByText('Setting up your account')).toBeVisible();
+  await expectFocus(page, 'account-code-saved');
+  sync.delay = 0;
+  const code = await shownCode(page);
+  await press(page, 'Enter', 'account-check-field');
+  await typeInto(page, CHECK_LABEL, code.slice(-4));
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('This screen is in your account.')).toBeVisible();
+  // The key is never kept once the account exists.
+  expect(JSON.stringify(await readKv(page, 'sync/state'))).not.toContain('Owner2468Key');
+  expect(errors.filter((error) => !ANSWERED.test(error))).toEqual([]);
+});
+
+test('Create answered with new accounts closed leaves only Join', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  // Settings asked while there was room; the service has closed since.
+  await openAccount(page, 'account-create');
+  sync.maxAccounts = 0;
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'account-join');
+  await expect(page.getByText("New accounts aren't open yet.")).toHaveCount(1);
+  await expect(page.locator('[data-focus-key="account-create"]')).toHaveCount(0);
+  expect(sync.requests.filter((request) => request === 'POST /v1/account/create')).toHaveLength(1);
+  // Kept, so Settings does not offer Create again until it asks the service the next day.
+  const saved = await page.evaluate(() => localStorage.getItem('bannertv.syncStatus'));
+  expect(JSON.parse(saved ?? '{}')).toMatchObject({ create: false });
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'account-join');
+  expect(errors.filter((error) => !ANSWERED.test(error))).toEqual([]);
+});
+
+test('Settings > Profiles says when the account has more profiles than a screen shows', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  const theirs = [
+    ADA,
+    { id: 'bea002', name: 'Bea', colour: 3 },
+    { id: 'cy0003', name: 'Cy', colour: 4 },
+    { id: 'dee004', name: 'Dee', colour: 5 },
+  ];
+  await seedProfiles(page, { profiles: [main(), ...theirs], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  const errors = watchErrors(other);
+  await other.goto(APP_URL);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await reloadsAfter(other, () => typeCode(other, code));
+  // With the account's five profiles, BannerTV asks who is watching.
+  await expectFocus(other, 'profile-main');
+  await other.keyboard.press('Enter');
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+
+  // Both screens add a sixth profile before they hear of the other's: the account has seven.
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await press(page, 'ArrowUp', 'settings-home-rows');
+  await press(page, 'ArrowUp', 'settings-profiles');
+  await press(page, 'Enter', 'profiles-main');
+  await addProfile(page, 'Zed');
+  await openSettings(other);
+  await press(other, 'ArrowRight', 'settings-profiles');
+  await press(other, 'Enter', 'profiles-main');
+  await addProfile(other, 'Yan');
+  const note = 'The account has 1 more profile. Screens show six, and deleting one here shows it.';
+  await expect(page.getByText(note)).toHaveCount(0);
+
+  await syncFromProfiles(page);
+  await syncFromProfiles(other);
+  await syncFromProfiles(page);
+  // Each screen shows six, the same six, and says one more is in the account.
+  await expect(other.getByText(note)).toBeVisible();
+  await expect(page.getByText(note)).toBeVisible();
+  const shown = await profileIds(page);
+  expect(shown).toHaveLength(6);
+  expect((await profileIds(other)).slice().sort()).toEqual(shown.slice().sort());
+  expect(errors).toEqual([]);
 });
 
 test('Leave forgets the account on this screen and keeps everything on it', async ({ page }) => {
@@ -444,7 +884,7 @@ test('Leave forgets the account on this screen and keeps everything on it', asyn
   expect(errors).toEqual([]);
 });
 
-test("Show account code and Delete ask for Main's PIN, and deleting ends the account on every screen", async ({
+test("Show account code and Delete ask for Main's PIN, which cannot be taken off without it, and deleting ends the account on every screen", async ({
   page,
   browser,
 }) => {
@@ -458,10 +898,21 @@ test("Show account code and Delete ask for Main's PIN, and deleting ends the acc
     lastId: 'main',
     askAtLaunch: false,
   });
+  const mainPin = () =>
+    page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem('bannertv.profiles')!) as {
+        profiles: { id: string; pin?: unknown }[];
+      };
+      return saved.profiles.find((profile) => profile.id === 'main')?.pin ?? null;
+    });
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await openSettings(page);
   await openAccount(page, 'account-create');
+  // Back from the PIN pad goes back to the button pressed.
+  await press(page, 'Enter', 'account-pin-1');
+  await pressBack(page);
+  await expectFocus(page, 'account-create');
   const code = await createAccount(page, '2468');
 
   const other = await secondScreen(browser, sync);
@@ -473,8 +924,36 @@ test("Show account code and Delete ask for Main's PIN, and deleting ends the acc
   await reloadsAfter(other, () => typeCode(other, code));
   await expectFocus(other, `${FIRST_ROW}-tile-0`);
 
-  // The code again, behind Main's PIN.
+  // The only profile opens without its PIN, but Main's page asks for it before removing it.
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await press(page, 'ArrowUp', 'settings-home-rows');
+  await press(page, 'ArrowUp', 'settings-profiles');
+  await press(page, 'Enter', 'profiles-main');
+  await press(page, 'Enter', 'profile-name');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowDown', 'profile-save');
+  await press(page, 'ArrowDown', 'profile-pin');
+  await press(page, 'ArrowDown', 'profile-pin-remove');
+  await press(page, 'Enter', 'profile-pin-pad-1');
+  await expect(page.getByRole('dialog', { name: 'Enter the PIN for Main' })).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, 'profile-pin-remove');
+  expect(await mainPin()).not.toBeNull();
+  await pressBack(page);
+  await expectFocus(page, 'profiles-main');
+  await pressBack(page);
+  await expectFocus(page, 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'ArrowDown', 'settings-account');
+  await press(page, 'Enter', 'account-sync');
+
+  // The code again, still behind Main's PIN.
   await press(page, 'ArrowDown', 'account-show-code');
+  await press(page, 'Enter', 'account-pin-1');
+  await pressBack(page);
+  await expectFocus(page, 'account-show-code');
   await press(page, 'Enter', 'account-pin-1');
   await typeDigits(page, '1111');
   await expect(page.getByText('That PIN is not right.')).toBeVisible();
@@ -486,6 +965,9 @@ test("Show account code and Delete ask for Main's PIN, and deleting ends the acc
   await press(page, 'ArrowDown', 'account-show-code');
   await press(page, 'ArrowDown', 'account-leave');
   await press(page, 'ArrowDown', 'account-delete');
+  await press(page, 'Enter', 'account-pin-1');
+  await pressBack(page);
+  await expectFocus(page, 'account-delete');
   await press(page, 'Enter', 'account-pin-1');
   await typeDigits(page, '2468');
   await expectFocus(page, 'account-delete-dialog-cancel');

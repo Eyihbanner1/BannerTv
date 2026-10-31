@@ -17,13 +17,14 @@ export const MAX_PULL_CHARS = 1000 * 1000;
 /**
  * Documents one account may hold: three for each of six profiles and two for
  * the account make 20, and profiles deleted and made again add more over time.
+ * Only a new document counts against it.
  */
 export const MAX_DOCS = 120;
-/** Characters of bodies one account may hold. */
+/** Characters of bodies one account may hold. Only a document that grows counts against it. */
 export const MAX_ACCOUNT_CHARS = 10 * 1000 * 1000;
 /**
  * Documents one account may write in a UTC day, counted as pushed, whether
- * each commits or conflicts. A screen writes about 25 on a day of use.
+ * each commits, conflicts or does not fit. A screen writes about 25 on a day of use.
  */
 export const MAX_WRITES_PER_DAY = 2000;
 
@@ -43,17 +44,35 @@ const KEY = /^[A-Za-z0-9_-]{43}$/;
 const BODY = /^1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const WHOLE = /^\d{1,9}$/;
 
+/**
+ * A setting from [vars] as text. TOML reads `"30"` as text and `30` as a
+ * number, and Cloudflare passes either on as it is, so both count.
+ */
+function setting(value: unknown): string {
+  if (typeof value === 'number') return String(value);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 /** MAX_ACCOUNTS as set. Missing or unreadable, it closes account creation: the safe way to be wrong. */
 export function readMaxAccounts(value: unknown): number {
-  const text = typeof value === 'string' ? value.trim() : '';
+  const text = setting(value);
   return WHOLE.test(text) ? Number(text) : 0;
 }
 
 /** PULL_MINUTES as set, kept within MIN_PULL_MINUTES and MAX_PULL_MINUTES. */
 export function readPullMinutes(value: unknown): number {
-  const text = typeof value === 'string' ? value.trim() : '';
+  const text = setting(value);
   if (!WHOLE.test(text)) return PULL_MINUTES;
   return Math.min(MAX_PULL_MINUTES, Math.max(MIN_PULL_MINUTES, Number(text)));
+}
+
+/**
+ * The setup key a create must carry, from the CREATE_KEY secret, or '' when
+ * none is set and anyone may create while there is a place. Spaces at either
+ * end are dropped, as a pasted secret can bring them.
+ */
+export function readCreateKey(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -205,19 +224,6 @@ export function choosePull(
     chars += doc.size;
   }
   return { names, more: false };
-}
-
-/**
- * Whether the account stays within MAX_DOCS and MAX_ACCOUNT_CHARS once a
- * push is written, counted as though every document in it commits.
- */
-export function pushFits(listing: Listed[], puts: Put[]): boolean {
-  const sizes = new Map<string, number>();
-  for (const doc of listing) sizes.set(doc.name, doc.size);
-  for (const put of puts) sizes.set(put.name, put.body.length);
-  let chars = 0;
-  sizes.forEach((size) => (chars += size));
-  return sizes.size <= MAX_DOCS && chars <= MAX_ACCOUNT_CHARS;
 }
 
 /** The UTC day of a time, counted from 1 January 1970. */

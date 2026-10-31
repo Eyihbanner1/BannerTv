@@ -7,7 +7,9 @@
  *
  * Screens pull and push whole documents. A push names the version it started
  * from, and each document commits only while that is still the stored one
- * (compare and swap), so no screen overwrites a change it has not seen.
+ * (compare and swap), so no screen overwrites a change it has not seen. The
+ * account's limits are checked by the same statements that write, so pushes
+ * sent at once cannot pass them together.
  * Requests carry the auth key and the sealed bodies, so nothing here logs,
  * and no error repeats what was sent.
  *
@@ -18,10 +20,12 @@ import {
   base64Url,
   choosePull,
   type Listed,
+  MAX_ACCOUNT_CHARS,
+  MAX_DOCS,
   MAX_REQUEST_BYTES,
   MAX_WRITES_PER_DAY,
   PROTOCOL,
-  pushFits,
+  readCreateKey,
   readMaxAccounts,
   readPull,
   readPullMinutes,
@@ -59,9 +63,11 @@ export interface D1Database {
 export interface Env {
   DB: D1Database;
   /** How many accounts may exist. Missing, it closes account creation. */
-  MAX_ACCOUNTS?: string;
+  MAX_ACCOUNTS?: string | number;
   /** How often screens pull, in minutes. */
-  PULL_MINUTES?: string;
+  PULL_MINUTES?: string | number;
+  /** The setup key a create must carry, a secret. Missing, MAX_ACCOUNTS alone decides. */
+  CREATE_KEY?: string;
 }
 
 /** An account's row, without its id. */
@@ -110,18 +116,39 @@ WHERE (SELECT COUNT(*) FROM (SELECT 1 FROM accounts LIMIT ?5)) < ?5
 ON CONFLICT DO NOTHING`;
 const MARK_SEEN = 'UPDATE accounts SET seen = ?1 WHERE id = ?2 AND seen < ?1';
 const LIST_DOCS = 'SELECT name, ver, at, LENGTH(body) AS size FROM docs WHERE account = ?';
-// Each write also checks that the account still has the epoch the push was signed in
-// with, so a push that crosses a delete writes nothing a new account could inherit.
+
+// A push's statements share their first four values: the account (?1), the epoch it was
+// signed in with (?2), today (?3) and how many documents it carries (?4). Each write
+// checks that the account still has that epoch, so a push that crosses a delete writes
+// nothing a new account could inherit, and that the push fits in the day's writes. A push
+// changes the account's row only after its documents, when it counts them, so all of its
+// writes find the row the same: every one passes this check, or none does.
+const ROOM = `id = ?1 AND epoch = ?2
+AND (CASE WHEN day = ?3 THEN writes ELSE 0 END) + ?4 <= ${MAX_WRITES_PER_DAY}`;
+// The limits are checked by the write itself, so pushes sent at once cannot pass them
+// together. A new document fits while the account holds fewer than MAX_DOCS and its
+// bodies stay within MAX_ACCOUNT_CHARS.
 const ADD_DOC = `INSERT INTO docs (account, name, ver, at, body)
-SELECT ?1, ?2, 1, ?3, ?4
-WHERE EXISTS (SELECT 1 FROM accounts WHERE id = ?1 AND epoch = ?5)
+SELECT ?1, ?5, 1, ?6, ?7
+WHERE EXISTS (SELECT 1 FROM accounts WHERE ${ROOM})
+AND (SELECT COUNT(*) FROM docs WHERE account = ?1) < ${MAX_DOCS}
+AND (SELECT COALESCE(SUM(LENGTH(body)), 0) FROM docs WHERE account = ?1) + LENGTH(?7)
+  <= ${MAX_ACCOUNT_CHARS}
 ON CONFLICT DO NOTHING`;
-const CHANGE_DOC = `UPDATE docs SET ver = ver + 1, at = ?1, body = ?2
-WHERE account = ?3 AND name = ?4 AND ver = ?5
-AND EXISTS (SELECT 1 FROM accounts WHERE id = ?3 AND epoch = ?6)`;
+// A change that keeps its document's size or makes it smaller always fits, so an account
+// over a limit can come back under it. One that grows it fits while the bodies, with the
+// old one taken out, stay within MAX_ACCOUNT_CHARS.
+const CHANGE_DOC = `UPDATE docs SET ver = ver + 1, at = ?6, body = ?7
+WHERE account = ?1 AND name = ?5 AND ver = ?8
+AND EXISTS (SELECT 1 FROM accounts WHERE ${ROOM})
+AND (LENGTH(?7) <= LENGTH(docs.body)
+  OR (SELECT SUM(LENGTH(held.body)) FROM docs AS held WHERE held.account = ?1)
+    - LENGTH(docs.body) + LENGTH(?7) <= ${MAX_ACCOUNT_CHARS})`;
+// After the documents, under the same check, so whether it changed a row says whether the
+// push went in at all.
 const COUNT_WRITES = `UPDATE accounts
-SET seen = ?1, writes = CASE WHEN day = ?1 THEN writes + ?2 ELSE ?2 END, day = ?1
-WHERE id = ?3 AND epoch = ?4`;
+SET seen = ?3, writes = (CASE WHEN day = ?3 THEN writes ELSE 0 END) + ?4, day = ?3
+WHERE ${ROOM}`;
 const DELETE_DOCS = 'DELETE FROM docs WHERE account = ?';
 const DELETE_ACCOUNT = 'DELETE FROM accounts WHERE id = ?';
 
@@ -139,6 +166,7 @@ const PROBLEMS = {
   'bad-request': 400,
   denied: 401,
   closed: 403,
+  key: 403,
   'not-found': 404,
   exists: 409,
   epoch: 409,
@@ -225,10 +253,26 @@ async function database(env: Env): Promise<D1Database> {
   return db;
 }
 
-/** All the server keeps of an auth key: base64url SHA-256 of its characters. */
-async function hashAuth(auth: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(auth));
-  return base64Url(new Uint8Array(digest));
+/**
+ * Base64url SHA-256 of a text's characters: all the server keeps of an auth
+ * key, and what a setup key is compared as.
+ */
+async function digest(text: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return base64Url(new Uint8Array(hash));
+}
+
+/**
+ * Whether a create carries the setup key. Both are compared as digests, which
+ * have the same length whatever was sent, so the answer's timing says nothing
+ * about how much of the key was right.
+ */
+async function carriesKey(sent: unknown, key: string): Promise<boolean> {
+  const [a, b] = await Promise.all([
+    digest(typeof sent === 'string' ? sent.trim() : ''),
+    digest(key),
+  ]);
+  return sameText(a, b);
 }
 
 // What a request for an unknown account is compared with, so it takes as long
@@ -239,7 +283,7 @@ const NO_ACCOUNT = 'A'.repeat(43);
 async function signIn(db: D1Database, signed: Signed): Promise<Account | undefined> {
   const [account, hash] = await Promise.all([
     db.prepare(GET_ACCOUNT).bind(signed.account).first<Account>(),
-    hashAuth(signed.auth),
+    digest(signed.auth),
   ]);
   const match = sameText(hash, account ? account.auth : NO_ACCOUNT);
   return account && match ? account : undefined;
@@ -261,6 +305,7 @@ async function status(env: Env, now: number): Promise<Response> {
     v: PROTOCOL,
     now,
     create: count < max,
+    key: readCreateKey(env.CREATE_KEY) !== '',
     pullMinutes: readPullMinutes(env.PULL_MINUTES),
   });
 }
@@ -284,8 +329,14 @@ async function existing(
 async function create(body: unknown, env: Env, now: number): Promise<Response> {
   const signed = readSigned(body);
   if (!signed) return fail('bad-request', now);
+  // With a setup key set, only whoever holds it can take a place, and a create
+  // resumed after a lost answer carries it again. D1 is not asked without it.
+  const key = readCreateKey(env.CREATE_KEY);
+  if (key !== '' && !(await carriesKey((body as { key?: unknown }).key, key))) {
+    return fail('key', now);
+  }
   const db = await database(env);
-  const hash = await hashAuth(signed.auth);
+  const hash = await digest(signed.auth);
   const resumed = await existing(db, signed.account, hash, now);
   if (resumed) return resumed;
 
@@ -349,32 +400,58 @@ async function push(body: unknown, env: Env, now: number): Promise<Response> {
   if (!account) return fail('denied', now);
   const { epoch } = account;
   if (request.epoch !== epoch) return fail('epoch', now);
-  if (request.put.length === 0) return json({ now, epoch, done: [], conflicts: [] });
+  const puts = request.put;
+  if (puts.length === 0) return json({ now, epoch, done: [], conflicts: [], full: [] });
 
   const today = utcDay(now);
-  if (writesToday(account, today) + request.put.length > MAX_WRITES_PER_DAY) {
+  // Refused here when the day's count says so already. The batch checks again, for pushes
+  // sent at once.
+  if (writesToday(account, today) + puts.length > MAX_WRITES_PER_DAY) {
     return fail('limit', now, secondsToMidnight(now));
   }
-  if (!pushFits(await listDocs(db, request.account), request.put)) return fail('too-big', now);
 
   // One batch, so the documents, the day's write count and `seen` change together or not at all.
-  const statements = request.put.map((put) =>
+  const room: D1Value[] = [request.account, epoch, today, puts.length];
+  const statements = puts.map((put) =>
     put.base === 0
-      ? db.prepare(ADD_DOC).bind(request.account, put.name, now, put.body, epoch)
-      : db.prepare(CHANGE_DOC).bind(now, put.body, request.account, put.name, put.base, epoch),
+      ? db.prepare(ADD_DOC).bind(...room, put.name, now, put.body)
+      : db.prepare(CHANGE_DOC).bind(...room, put.name, now, put.body, put.base),
   );
-  statements.push(db.prepare(COUNT_WRITES).bind(today, request.put.length, request.account, epoch));
+  statements.push(db.prepare(COUNT_WRITES).bind(...room));
+  // Then the versions the documents were left at, which tell a document the limits
+  // refused, still at the version it started from, from one that had moved on.
+  const marks = puts.map(() => '?').join(', ');
+  statements.push(
+    db
+      .prepare(`SELECT name, ver FROM docs WHERE account = ? AND name IN (${marks})`)
+      .bind(request.account, ...puts.map((put) => put.name)),
+  );
   const results = await db.batch(statements);
 
+  if (results[puts.length]?.meta.changes !== 1) {
+    // Nothing was written: since sign-in the account went, or was made again under
+    // a new epoch, or other pushes used up the day's writes.
+    const after = await db.prepare(GET_ACCOUNT).bind(request.account).first<Account>();
+    if (!after) return fail('denied', now);
+    if (after.epoch !== epoch) return fail('epoch', now);
+    return fail('limit', now, secondsToMidnight(now));
+  }
+
+  const stored = new Map<string, number>();
+  const left = (results[puts.length + 1]?.results ?? []) as Array<{ name: string; ver: number }>;
+  for (const doc of left) stored.set(doc.name, doc.ver);
   const done: Array<{ name: string; ver: number; at: number }> = [];
   const conflicts: string[] = [];
-  request.put.forEach((put, index) => {
-    // No row changed: the document has moved on from `base`, or a new one exists already.
+  const full: string[] = [];
+  puts.forEach((put, index) => {
     if (results[index]?.meta.changes === 1)
       done.push({ name: put.name, ver: put.base + 1, at: now });
+    // No row changed, and the document is still at `base`: it did not fit the account's limits.
+    else if ((stored.get(put.name) ?? 0) === put.base) full.push(put.name);
+    // The document has moved on from `base`, or a new one exists already.
     else conflicts.push(put.name);
   });
-  return json({ now, epoch, done, conflicts });
+  return json({ now, epoch, done, conflicts, full });
 }
 
 async function remove(body: unknown, env: Env, now: number): Promise<Response> {

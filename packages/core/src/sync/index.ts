@@ -16,6 +16,7 @@ export { checkSyncCrypto, type CryptoCheck, type SyncCrypto } from './crypto';
 export {
   type ActiveProfile,
   type CodeCheck,
+  type CreateOptions,
   createSyncEngine,
   type PauseReason,
   type SetupProblem,

@@ -48,7 +48,13 @@ import styles from './AccountScreen.module.css';
 /** One part of the screen at a time; the menu shows what the account's status allows. */
 type Step =
   | { name: 'menu' }
-  | { name: 'busy'; text: string }
+  /**
+   * `held`: Back waits for it to finish. A create, a confirm or a join left
+   * half way would be offered again while it still runs.
+   */
+  | { name: 'busy'; text: string; held: boolean }
+  /** The service's setup key, typed before a new account is made. */
+  | { name: 'key' }
   /** The new account's code, to write down. */
   | { name: 'code'; code: string }
   /** Its last four characters typed back, so the person knows they have it. */
@@ -146,6 +152,8 @@ function focusFor(step: Step, state: AccountState, canCreate: boolean): string |
       return 'account-check-field';
     case 'join':
       return 'account-code-field';
+    case 'key':
+      return 'account-key-field';
     case 'choose':
       return 'account-use';
     case 'show':
@@ -180,7 +188,9 @@ function viewOf(step: Step, state: AccountState): string {
  * out it creates an account or joins one by its code; signed in it shows
  * how syncing is going, syncs now, shows the code, leaves, and deletes.
  * Main's PIN, when it has one, comes before the code is shown and before
- * the account is created or deleted. Back goes back a step, then to Settings.
+ * the account is created or deleted, and a service that needs its setup key
+ * asks for it before a new account is made. Back goes back a step, then to
+ * Settings, but waits while a create, a confirm or a join runs.
  */
 export function AccountScreen() {
   const { t } = useTranslation();
@@ -207,6 +217,8 @@ export function AccountScreen() {
   const shownView = useRef(view);
   // Where a closing dialog sends focus: what the screen shows once it has closed.
   const latestTarget = useRef(target);
+  // Where the PIN pad sends focus when it closes without the PIN: the button that opened it.
+  const pinOpener = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     latestTarget.current = target;
   });
@@ -226,22 +238,26 @@ export function AccountScreen() {
   useBack(
     'screen',
     () => {
-      toMenu();
+      if (step.name !== 'busy' || !step.held) toMenu();
       return true;
     },
     step.name !== 'menu',
   );
 
-  /** Runs `work` as a busy step; `done` and `failed` only if nothing else happened meanwhile. */
+  /**
+   * Runs `work` as a busy step; `done` and `failed` only if nothing else
+   * happened meanwhile. A `held` one stays on screen until it settles.
+   */
   function busy<T>(
     text: string,
     work: () => Promise<T>,
     done: (value: T) => void,
     failed: (error: unknown) => void,
+    held = false,
   ): void {
     const mine = ++action.current;
     setNote(null);
-    setStep({ name: 'busy', text });
+    setStep({ name: 'busy', text, held });
     work().then(
       (value) => {
         if (action.current === mine) done(value);
@@ -256,26 +272,54 @@ export function AccountScreen() {
   const lockedMessage = () =>
     t('pin.locked', { seconds: Math.ceil(pinGuard.waitMs(MAIN_PROFILE_ID) / 1000) });
 
-  const startCreate = () =>
+  /** Makes the account, or carries on making it; `key` is the service's setup key, when typed. */
+  const startCreate = (key?: string) =>
     busy(
       t('account.creating'),
-      createAccount,
+      () => createAccount(key),
       (code) => {
+        setTyped('');
         setStep({ name: 'code', code });
       },
       (error) => {
         const problem = problemOf(error);
-        toMenu(
-          problem === 'closed' || problem === 'exists' || problem === 'offline'
-            ? t(`account.${problem}`)
-            : t('account.failed'),
-        );
+        if (problem === 'key') {
+          // The service needs its setup key: asked for, or asked for again.
+          setStep({ name: 'key' });
+          setNote(key === undefined ? null : t('account.key'));
+        } else if (problem === 'closed') {
+          // createAccount has kept the answer, so the menu says so and offers only Join.
+          toMenu();
+        } else {
+          toMenu(
+            problem === 'exists' || problem === 'offline'
+              ? t(`account.${problem}`)
+              : t('account.failed'),
+          );
+        }
       },
+      true,
     );
 
+  const sendKey = () => {
+    if (typed.trim() === '') {
+      setNote(t('account.keyMissing'));
+      void setFocus('account-key-field');
+      return;
+    }
+    startCreate(typed);
+  };
+
   const proceed = (then: Guarded) => {
-    if (then === 'create') startCreate();
-    else if (then === 'delete') setDialog({ kind: 'delete' });
+    if (then === 'create') {
+      // A new account on a service that needs its setup key asks for it first. One carried
+      // on sends the key it was given before.
+      if (section.needsKey && state.engine === 'running' && state.status.state === 'off') {
+        setTyped('');
+        setNote(null);
+        setStep({ name: 'key' });
+      } else startCreate();
+    } else if (then === 'delete') setDialog({ kind: 'delete' });
     else {
       const code = accountCode();
       if (code) {
@@ -285,12 +329,13 @@ export function AccountScreen() {
     }
   };
 
-  /** Main's PIN first, when it has one. */
-  const guarded = (then: Guarded) => {
+  /** Main's PIN first, when it has one. `from` is the button pressed, where Back returns. */
+  const guarded = (then: Guarded, from: string) => {
     if (!main.pin) {
       proceed(then);
       return;
     }
+    pinOpener.current = from;
     setPinMessage(pinGuard.waitMs(MAIN_PROFILE_ID) > 0 ? lockedMessage() : undefined);
     setDialog({ kind: 'pin', then });
   };
@@ -307,6 +352,7 @@ export function AccountScreen() {
       confirmAccount,
       () => toMenu(t('account.created')),
       () => toMenu(t('account.offline')),
+      true,
     );
   };
 
@@ -323,6 +369,7 @@ export function AccountScreen() {
           toMenu(t(`account.${problem}`));
         } else toMenu(t('account.failed'));
       },
+      true,
     );
 
   const lookUp = () => {
@@ -467,6 +514,33 @@ export function AccountScreen() {
         </div>
       </div>
     );
+  } else if (step.name === 'key') {
+    body = (
+      <div className={styles.wide}>
+        <h2 className={styles.heading}>{t('account.keyTitle')}</h2>
+        <p className={styles.help}>{t('account.keyHelp')}</p>
+        <TextField
+          focusKey="account-key-field"
+          label={t('account.keyLabel')}
+          placeholder={t('account.keyPlaceholder')}
+          value={typed}
+          onChange={(value) => {
+            setNote(null);
+            setTyped(value.slice(0, 256));
+          }}
+          onSubmit={sendKey}
+        />
+        <div className={styles.actions}>
+          <Button
+            block
+            variant="primary"
+            focusKey="account-key-continue"
+            label={t('account.continue')}
+            onPress={sendKey}
+          />
+        </div>
+      </div>
+    );
   } else if (step.name === 'choose') {
     const total = profilesAfterBring(here, step.account);
     const fits = total <= MAX_PROFILES;
@@ -544,7 +618,7 @@ export function AccountScreen() {
                 variant="primary"
                 focusKey="account-create"
                 label={t('account.create')}
-                onPress={() => guarded('create')}
+                onPress={() => guarded('create', 'account-create')}
               />
             ) : (
               <p className={styles.line}>{t('account.closed')}</p>
@@ -596,7 +670,7 @@ export function AccountScreen() {
                 variant="primary"
                 focusKey="account-setup-show"
                 label={t('account.setupShow')}
-                onPress={() => guarded('create')}
+                onPress={() => guarded('create', 'account-setup-show')}
               />
               <Button
                 block
@@ -645,7 +719,7 @@ export function AccountScreen() {
                 block
                 focusKey="account-delete"
                 label={t('account.delete')}
-                onPress={() => guarded('delete')}
+                onPress={() => guarded('delete', 'account-delete')}
               />
             )}
           </div>
@@ -672,7 +746,7 @@ export function AccountScreen() {
             block
             focusKey="account-show-code"
             label={t('account.showCode')}
-            onPress={() => guarded('show')}
+            onPress={() => guarded('show', 'account-show-code')}
           />
           <Button
             block
@@ -684,7 +758,7 @@ export function AccountScreen() {
             block
             focusKey="account-delete"
             label={t('account.delete')}
-            onPress={() => guarded('delete')}
+            onPress={() => guarded('delete', 'account-delete')}
           />
         </div>
       </>
@@ -707,13 +781,15 @@ export function AccountScreen() {
           focusKey="account-pin"
           title={t('pin.enterFor', { name: main.name })}
           message={pinMessage}
-          returnFocusKey={() => latestTarget.current ?? 'account-pin'}
+          returnFocusKey={() => pinOpener.current ?? latestTarget.current ?? 'account-pin'}
           onPin={(digits) => {
             const result = pinGuard.attempt(main, digits);
             if (result !== 'ok') {
               setPinMessage(result === 'locked' ? lockedMessage() : t('pin.wrong'));
               return;
             }
+            // Right: focus goes where the next view says.
+            pinOpener.current = undefined;
             const then = dialog.then;
             setDialog(null);
             proceed(then);

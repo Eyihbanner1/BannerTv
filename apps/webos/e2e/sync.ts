@@ -18,10 +18,14 @@ export interface FakeSync {
   maxAccounts: number;
   /** While true, the service does not answer at all. */
   down: boolean;
+  /** How long each answer takes, in milliseconds: a slow connection. */
+  delay: number;
+  /** The Worker's CREATE_KEY secret: when set, making an account needs it. */
+  createKey?: string;
 }
 
 export function fakeSync(): FakeSync {
-  return { db: testD1(), requests: [], maxAccounts: 5, down: false };
+  return { db: testD1(), requests: [], maxAccounts: 5, down: false, delay: 0 };
 }
 
 /** Routes the page's account requests to `sync`. Call after mockAddons, which answers otherwise. */
@@ -31,6 +35,7 @@ export async function mockSync(page: Page, sync: FakeSync): Promise<void> {
     const url = request.url();
     sync.requests.push(`${request.method()} ${new URL(url).pathname}`);
     if (sync.down) return route.abort();
+    if (sync.delay > 0) await new Promise((done) => setTimeout(done, sync.delay));
     const body = request.postData();
     const response = await syncWorker.fetch(
       new Request(url, {
@@ -38,7 +43,12 @@ export async function mockSync(page: Page, sync: FakeSync): Promise<void> {
         headers: { 'Content-Type': 'text/plain' },
         body: request.method() === 'POST' ? (body ?? '') : undefined,
       }),
-      { DB: sync.db, MAX_ACCOUNTS: String(sync.maxAccounts), PULL_MINUTES: '30' },
+      {
+        DB: sync.db,
+        MAX_ACCOUNTS: String(sync.maxAccounts),
+        PULL_MINUTES: '30',
+        CREATE_KEY: sync.createKey,
+      },
     );
     const headers: Record<string, string> = {};
     response.headers.forEach((value, name) => (headers[name] = value));

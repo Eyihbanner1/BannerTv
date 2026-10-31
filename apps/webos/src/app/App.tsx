@@ -74,7 +74,7 @@ function Screen({ route }: { route: Route }) {
     case 'profiles':
       return <ProfilesScreen />;
     case 'profile-edit':
-      return <ProfileEditScreen id={route.id} />;
+      return <ProfileEditScreen id={route.id} unlocked={route.unlocked} />;
     case 'home-rows':
       return <HomeRowsScreen />;
     case 'trakt':

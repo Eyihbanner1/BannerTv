@@ -3,13 +3,12 @@ import {
   base64Url,
   choosePull,
   type Listed,
-  MAX_ACCOUNT_CHARS,
   MAX_BODY_CHARS,
   MAX_DOCS,
   MAX_PULL_CHARS,
   MAX_PUTS,
   MAX_WANT,
-  pushFits,
+  readCreateKey,
   readMaxAccounts,
   readPull,
   readPullMinutes,
@@ -194,24 +193,6 @@ describe('choosePull', () => {
   });
 });
 
-describe('pushFits', () => {
-  const doc = (n: number, size: number): Listed => ({ name: id(n), ver: 1, at: 1, size });
-  const put = (n: number, size: number) => ({ name: id(n), base: 1, body: 'x'.repeat(size) });
-
-  it('counts the account as it would be with every document written', () => {
-    const full = Array.from({ length: MAX_DOCS }, (_, n) => doc(n, 10));
-    expect(pushFits(full, [put(0, 20)])).toBe(true);
-    expect(pushFits(full, [put(MAX_DOCS, 1)])).toBe(false);
-
-    const heavy = [doc(1, MAX_ACCOUNT_CHARS - 100), doc(2, 50)];
-    expect(pushFits(heavy, [put(2, 100)])).toBe(true);
-    expect(pushFits(heavy, [put(2, 101)])).toBe(false);
-    expect(pushFits(heavy, [put(3, 51)])).toBe(false);
-    // Shrinking the largest document makes room.
-    expect(pushFits(heavy, [put(1, 10), put(3, 1000)])).toBe(true);
-  });
-});
-
 describe('days', () => {
   it('counts UTC days and the seconds to the next one', () => {
     const noon = Date.parse('2026-10-31T12:00:00Z');
@@ -232,7 +213,7 @@ describe('settings', () => {
   it('reads MAX_ACCOUNTS, closed when missing or unreadable', () => {
     expect(readMaxAccounts('1')).toBe(1);
     expect(readMaxAccounts(' 25 ')).toBe(25);
-    for (const value of [undefined, '', 'one', '-1', '1.5', '1e3']) {
+    for (const value of [undefined, null, '', 'one', '-1', '1.5', '1e3', true, -1, 1.5, NaN]) {
       expect(readMaxAccounts(value), String(value)).toBe(0);
     }
   });
@@ -242,8 +223,25 @@ describe('settings', () => {
     expect(readPullMinutes('120')).toBe(120);
     expect(readPullMinutes('1')).toBe(15);
     expect(readPullMinutes('100000')).toBe(24 * 60);
-    for (const value of [undefined, '', 'often', '-5', '7.5']) {
+    for (const value of [undefined, null, '', 'often', '-5', '7.5', -5, 7.5, Infinity]) {
       expect(readPullMinutes(value), String(value)).toBe(30);
+    }
+  });
+
+  it('takes a whole number as well as text, as TOML gives one without quotes', () => {
+    expect(readMaxAccounts(2)).toBe(2);
+    expect(readMaxAccounts(0)).toBe(0);
+    expect(readPullMinutes(60)).toBe(60);
+    expect(readPullMinutes(5)).toBe(15);
+    expect(readPullMinutes(100000)).toBe(24 * 60);
+  });
+
+  it('reads CREATE_KEY, none when missing or blank', () => {
+    expect(readCreateKey('k3yOnTheTV42')).toBe('k3yOnTheTV42');
+    // A secret pasted into the dashboard can bring a space or a line break with it.
+    expect(readCreateKey(' k3yOnTheTV42\n')).toBe('k3yOnTheTV42');
+    for (const value of [undefined, null, '', '   ', 42]) {
+      expect(readCreateKey(value), String(value)).toBe('');
     }
   });
 });

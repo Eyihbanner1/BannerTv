@@ -152,10 +152,14 @@ interface FakeDocument {
 /**
  * The sync service in memory, answering as `services/sync` does (ADR 0006,
  * "HTTP"), for the engine's tests. Every body goes through JSON both ways,
- * as on the wire.
+ * as on the wire. With `createKey`, making an account needs that setup key.
  */
-export function fakeSyncService(options: { now: () => number; maxAccounts?: number }) {
-  const { now, maxAccounts = 1 } = options;
+export function fakeSyncService(options: {
+  now: () => number;
+  maxAccounts?: number;
+  createKey?: string;
+}) {
+  const { now, maxAccounts = 1, createKey } = options;
   const accounts = new Map<string, { auth: string; epoch: string }>();
   const stored = new Map<string, Map<string, FakeDocument>>();
   const failures: FakeFailure[] = [];
@@ -163,6 +167,7 @@ export function fakeSyncService(options: { now: () => number; maxAccounts?: numb
   let epochs = 0;
   let pageChars = Infinity;
   let conflictAlways = false;
+  let maxDocuments = Infinity;
 
   const answer = (status: number, body: Fields) => ({
     status,
@@ -183,9 +188,16 @@ export function fakeSyncService(options: { now: () => number; maxAccounts?: numb
 
   function handle(path: string, body: Fields) {
     if (path === '/v1/status') {
-      return answer(200, { ok: true, v: 1, create: accounts.size < maxAccounts, pullMinutes: 30 });
+      return answer(200, {
+        ok: true,
+        v: 1,
+        create: accounts.size < maxAccounts,
+        key: createKey !== undefined,
+        pullMinutes: 30,
+      });
     }
     if (path === '/v1/account/create') {
+      if (createKey !== undefined && body.key !== createKey) return refuse(403, 'key');
       const existing = accounts.get(body.account as string);
       if (existing) {
         return existing.auth === body.auth
@@ -233,16 +245,21 @@ export function fakeSyncService(options: { now: () => number; maxAccounts?: numb
       if (put.length > 12) return refuse(413, 'too-big');
       const done: Array<{ name: string; ver: number; at: number }> = [];
       const conflicts: string[] = [];
+      const full: string[] = [];
       for (const item of put) {
         const current = docs.get(item.name)?.ver ?? 0;
         if (conflictAlways || current !== item.base) {
           conflicts.push(item.name);
           continue;
         }
+        if (!docs.has(item.name) && docs.size >= maxDocuments) {
+          full.push(item.name);
+          continue;
+        }
         docs.set(item.name, { ver: item.base + 1, at: now(), body: item.body });
         done.push({ name: item.name, ver: item.base + 1, at: now() });
       }
-      return answer(200, { epoch: account.epoch, done, conflicts });
+      return answer(200, { epoch: account.epoch, done, conflicts, full });
     }
     return refuse(404, 'not-found');
   }
@@ -275,6 +292,10 @@ export function fakeSyncService(options: { now: () => number; maxAccounts?: numb
     failNext(...next: FakeFailure[]) {
       failures.push(...next);
     },
+    /** Drops the failures from failNext() not given yet: the outage is over. */
+    heal() {
+      failures.length = 0;
+    },
     /** The documents an account holds, by name on the service. */
     documents: (account: string) => stored.get(account) ?? new Map<string, FakeDocument>(),
     /** Replaces a stored document, as another screen (or a broken one) would. */
@@ -293,6 +314,10 @@ export function fakeSyncService(options: { now: () => number; maxAccounts?: numb
     },
     conflictEveryPush(on: boolean) {
       conflictAlways = on;
+    },
+    /** An account holds at most this many documents: a push of another is refused as `full`. */
+    limitDocuments(count: number) {
+      maxDocuments = count;
     },
   };
 }

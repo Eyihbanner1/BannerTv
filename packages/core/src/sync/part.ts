@@ -29,6 +29,12 @@ export interface PartChange {
    * else on its account (Trakt's list keeps its titles).
    */
   reset?: boolean;
+  /**
+   * The account's item at any key of the part, with this screen's edits not
+   * yet sent, or undefined where it has none: for a part that chooses what
+   * to keep by the account's times (the six-profile cut).
+   */
+  account?(key: string): LiveItem | undefined;
 }
 
 /**
@@ -64,6 +70,13 @@ export interface SyncPart {
   /**
    * Writes the account's values into the store, saves it and tells its
    * subscribers. Keys it is not told about stay as they are.
+   *
+   * The whole change, with any trimming it causes (a cap, the six-profile
+   * cut), must be made to what `snapshot()` returns before adopt() returns,
+   * that is before its first await: only the saving may be waited for. The
+   * engine looks at the store just after the call to tell its own writes and
+   * the store's trimming from the person's edits, which can come at any
+   * moment after that and are edits like any other.
    */
   adopt(change: PartChange): Promise<void>;
   /**

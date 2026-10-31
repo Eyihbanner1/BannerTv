@@ -58,6 +58,7 @@ interface PushAnswer {
   epoch: string;
   done: Array<{ name: string; ver: number; at: number }>;
   conflicts: string[];
+  full: string[];
 }
 
 interface Put {
@@ -79,7 +80,7 @@ let env: Env;
 /**
  * One request to the Worker, with the checks every answer must pass: open to
  * any origin, never sniffed or cached, JSON with the server's time, an error
- * that repeats nothing that was sent, and never the auth key.
+ * that repeats nothing that was sent, and never the auth key or the setup key.
  */
 async function call<T = Record<string, unknown>>(
   method: string,
@@ -103,8 +104,9 @@ async function call<T = Record<string, unknown>>(
     expect((JSON.parse(answer) as { now: unknown }).now).toBe(Date.now());
   }
   if (response.status >= 400) expect(answer).toMatch(ERROR);
-  const auth = (sent as { auth?: unknown } | undefined)?.auth;
-  if (typeof auth === 'string' && auth !== '') expect(answer).not.toContain(auth);
+  for (const secret of [using.CREATE_KEY, (sent as { auth?: unknown } | undefined)?.auth]) {
+    if (typeof secret === 'string' && secret.trim() !== '') expect(answer).not.toContain(secret);
+  }
   return {
     status: response.status,
     headers: response.headers,
@@ -113,7 +115,7 @@ async function call<T = Record<string, unknown>>(
   };
 }
 
-async function create(screen: { account: string; auth: string }, using: Env = env) {
+async function create(screen: { account: string; auth: string; key?: unknown }, using: Env = env) {
   return call<{ now: number; epoch: string }>('POST', '/v1/account/create', screen, using);
 }
 
@@ -128,8 +130,8 @@ async function newAccount(using: Env = env): Promise<Screen> {
 const pull = (screen: Screen, want: string[], have: Record<string, number> = {}) =>
   call<PullAnswer>('POST', '/v1/pull', { ...screen, have, want });
 
-const push = (screen: Screen, put: Put[]) =>
-  call<PushAnswer>('POST', '/v1/push', { ...screen, put });
+const push = (screen: Screen, put: Put[], using: Env = env) =>
+  call<PushAnswer>('POST', '/v1/push', { ...screen, put }, using);
 
 const remove = (screen: { account: string; auth: string }) =>
   call('POST', '/v1/account/delete', { account: screen.account, auth: screen.auth });
@@ -163,7 +165,14 @@ describe('status', () => {
   it('names the protocol and the time, and says whether an account can be made', async () => {
     const open = await call('GET', '/v1/status');
     expect(open.status).toBe(200);
-    expect(open.body).toEqual({ ok: true, v: 1, now: START, create: true, pullMinutes: 30 });
+    expect(open.body).toEqual({
+      ok: true,
+      v: 1,
+      now: START,
+      create: true,
+      key: false,
+      pullMinutes: 30,
+    });
 
     await newAccount();
     expect((await call('GET', '/v1/status')).body).toMatchObject({ create: false });
@@ -186,10 +195,22 @@ describe('status', () => {
       ['soon', 30],
       ['1', 15],
       ['100000', 24 * 60],
+      [60, 60],
     ] as const) {
       const answer = await call('GET', '/v1/status', undefined, { ...env, PULL_MINUTES: value });
       expect(answer.body.pullMinutes, String(value)).toBe(minutes);
     }
+  });
+
+  it('reads settings written without quotes, which TOML gives as numbers', async () => {
+    const unquoted = { DB: d1, MAX_ACCOUNTS: 2, PULL_MINUTES: 60 };
+    expect((await call('GET', '/v1/status', undefined, unquoted)).body).toMatchObject({
+      create: true,
+      pullMinutes: 60,
+    });
+    expect((await create({ account: newId(), auth: random(32) }, unquoted)).status).toBe(201);
+    expect((await create({ account: newId(), auth: random(32) }, unquoted)).status).toBe(201);
+    expect((await create({ account: newId(), auth: random(32) }, unquoted)).status).toBe(403);
   });
 });
 
@@ -253,6 +274,61 @@ describe('create', () => {
     expect((await push(before, fresh(1))).status).toBe(409);
     const current = await pull({ ...before, epoch: again.body.epoch }, []);
     expect(current.body.vers).toEqual({});
+  });
+});
+
+describe('setup key', () => {
+  const KEY = 'k3yOnTheTV42';
+  let keyed: Env;
+  beforeEach(() => {
+    keyed = { ...env, CREATE_KEY: KEY };
+  });
+  const keys = () => ({ account: newId(), auth: random(32) });
+
+  it('says in the status whether a create needs it', async () => {
+    expect((await call('GET', '/v1/status', undefined, keyed)).body).toMatchObject({
+      create: true,
+      key: true,
+    });
+    for (const unset of [undefined, '', '  ']) {
+      const answer = await call('GET', '/v1/status', undefined, { ...env, CREATE_KEY: unset });
+      expect(answer.body, String(unset)).toMatchObject({ key: false });
+    }
+  });
+
+  it('refuses a create without it, or with another, before asking D1', async () => {
+    for (const key of [undefined, '', 'k3yOnTheTV4', `${KEY}2`, 'K3YONTHETV42', 42, [KEY]]) {
+      const answer = await create({ ...keys(), key }, keyed);
+      expect(answer.status, JSON.stringify(key)).toBe(403);
+      expect(answer.body).toEqual({ error: 'key', now: START });
+    }
+    expect(d1.calls).toEqual([]);
+    expect((await call('GET', '/v1/status', undefined, keyed)).body).toMatchObject({
+      create: true,
+    });
+  });
+
+  it('lets whoever holds it take the place, and resume a lost create', async () => {
+    const owner = keys();
+    const made = await create({ ...owner, key: KEY }, keyed);
+    expect(made.status).toBe(201);
+    // Spaces at either end, as a keyboard can add, do not matter.
+    const resumed = await create({ ...owner, key: ` ${KEY} ` }, keyed);
+    expect(resumed.status).toBe(200);
+    expect(resumed.body).toEqual({ now: START, epoch: made.body.epoch });
+
+    // The key comes first: without it nobody learns whether the place is taken.
+    expect((await create(owner, keyed)).body).toEqual({ error: 'key', now: START });
+    expect((await create(keys(), keyed)).body).toEqual({ error: 'key', now: START });
+    expect((await create({ ...keys(), key: KEY }, keyed)).body).toEqual({
+      error: 'closed',
+      now: START,
+    });
+    expect(rows('SELECT id FROM accounts')).toEqual([{ id: owner.account }]);
+  });
+
+  it('is not asked for when CREATE_KEY is not set', async () => {
+    expect((await create({ ...keys(), key: 'anything' })).status).toBe(201);
   });
 });
 
@@ -364,6 +440,7 @@ describe('push', () => {
       epoch: screen.epoch,
       done: [{ name: doc.name, ver: 1, at: START }],
       conflicts: [],
+      full: [],
     });
 
     vi.setSystemTime(START + 5000);
@@ -406,6 +483,7 @@ describe('push', () => {
       { name: c.name, ver: 1, at: START },
     ]);
     expect(answer.body.conflicts).toEqual([a.name, unknown]);
+    expect(answer.body.full).toEqual([]);
     expect(rows('SELECT body FROM docs WHERE name = ?', a.name)).toEqual([{ body: lgBody }]);
     expect(rows('SELECT name FROM docs')).toHaveLength(3);
 
@@ -423,16 +501,20 @@ describe('push', () => {
 
     const batches = writes();
     expect(batches).toHaveLength(1);
-    expect(batches[0]).toHaveLength(4);
+    // The three documents, the day's count, then the versions they were left at.
+    expect(batches[0]).toHaveLength(5);
     expect(batches[0]!.filter((sql) => /INSERT INTO docs/.test(sql))).toHaveLength(3);
     expect(batches[0]!.filter((sql) => /UPDATE accounts/.test(sql))).toHaveLength(1);
+    expect(batches[0]![4]).toMatch(/^SELECT name, ver FROM docs/);
+    // Nothing else is asked of D1: the limits are checked in the batch, not by a listing first.
+    expect(d1.calls).toEqual([[expect.stringMatching(/^SELECT auth/)], batches[0]]);
     expect(rows('SELECT seen, day, writes FROM accounts')).toEqual([
       { seen: TODAY + 1, day: TODAY + 1, writes: 3 },
     ]);
     expect(rows('SELECT name FROM docs')).toHaveLength(3);
   });
 
-  it('writes nothing for a push that crosses a delete and a new create', async () => {
+  it('writes nothing for a push that crosses a delete and a new create, and says so', async () => {
     const screen = await newAccount();
     const [a, b] = fresh(2) as [Put, Put];
     await push(screen, [a]);
@@ -443,11 +525,23 @@ describe('push', () => {
       return batch(statements);
     };
     const answer = await push(screen, [{ name: a.name, base: 1, body: sealed() }, b]);
-    expect(answer.body).toMatchObject({ done: [], conflicts: [a.name, b.name] });
+    expect(answer.status).toBe(409);
+    expect(answer.body).toEqual({ error: 'epoch', now: START });
     expect(rows('SELECT name, ver, body FROM docs')).toEqual([
       { name: a.name, ver: 1, body: a.body },
     ]);
     expect(rows('SELECT writes FROM accounts')).toEqual([{ writes: 1 }]);
+
+    // And one that crosses a delete is told the account is gone.
+    const { epoch } = rows<{ epoch: string }>('SELECT epoch FROM accounts')[0]!;
+    d1.batch = async (statements) => {
+      d1.sqlite.exec('DELETE FROM accounts');
+      return batch(statements);
+    };
+    const gone = await push({ ...screen, epoch }, [b]);
+    expect(gone.status).toBe(401);
+    expect(gone.body).toEqual({ error: 'denied', now: START });
+    expect(rows('SELECT name FROM docs')).toEqual([{ name: a.name }]);
   });
 
   it('refuses a push for another epoch, writing nothing', async () => {
@@ -466,6 +560,7 @@ describe('push', () => {
       epoch: screen.epoch,
       done: [],
       conflicts: [],
+      full: [],
     });
     expect(writes()).toEqual([]);
   });
@@ -492,7 +587,7 @@ describe('limits', () => {
     expect((await pull(screen, names.slice(1))).status).toBe(200);
   });
 
-  it('keeps an account within 120 documents', async () => {
+  it('keeps an account within 120 documents, refusing only the new ones', async () => {
     const screen = await newAccount();
     const all: Put[] = [];
     while (all.length < MAX_DOCS) {
@@ -500,29 +595,95 @@ describe('limits', () => {
       expect((await push(screen, puts)).body.done).toHaveLength(MAX_PUTS);
       all.push(...puts);
     }
-    expect((await push(screen, fresh(1))).status).toBe(413);
-    const changed = await push(screen, [{ name: all[0]!.name, base: 1, body: sealed() }]);
-    expect(changed.body.done).toHaveLength(1);
+    // A Continue Watching change and a new profile's first document, in one push: the
+    // change commits, and the new document is listed as not fitting.
+    const [extra] = fresh(1) as [Put];
+    const watch = { name: all[5]!.name, base: 1, body: sealed(300) };
+    const answer = await push(screen, [watch, extra]);
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({
+      now: START,
+      epoch: screen.epoch,
+      done: [{ name: watch.name, ver: 2, at: START }],
+      conflicts: [],
+      full: [extra.name],
+    });
+    expect(rows('SELECT ver FROM docs WHERE name = ?', watch.name)).toEqual([{ ver: 2 }]);
+    expect(rows('SELECT name FROM docs WHERE name = ?', extra.name)).toEqual([]);
+
+    // A conflict is still a conflict when the account is full, and not one that did not fit.
+    const stale = await push(screen, [{ ...watch, body: sealed() }, extra]);
+    expect(stale.body).toMatchObject({ done: [], conflicts: [watch.name], full: [extra.name] });
+    // A new document that exists already is a conflict too.
+    const twice = await push(screen, [{ ...all[0]!, base: 0 }]);
+    expect(twice.body).toMatchObject({ conflicts: [all[0]!.name], full: [] });
   });
 
-  it('keeps an account within 10,000,000 characters', async () => {
+  it('keeps an account within 10,000,000 characters, counting only growth', async () => {
     const screen = await newAccount();
     // Ten documents 100 characters short of a tenth each.
     const size = MAX_ACCOUNT_CHARS / 10 - 10;
     const first = fresh(1, size)[0]!;
     await push(screen, [first]);
     for (let n = 1; n < 10; n++) expect((await push(screen, fresh(1, size))).status).toBe(200);
-    const change = (body: string) => push(screen, [{ name: first.name, base: 1, body }]);
+    let ver = 1;
+    const change = async (body: string) => {
+      const answer = await push(screen, [{ name: first.name, base: ver, body }]);
+      if (answer.body.done.length === 1) ver += 1;
+      return answer.body;
+    };
 
-    expect((await push(screen, fresh(1, 101))).status).toBe(413);
-    expect((await push(screen, fresh(1, 100))).status).toBe(200);
-    expect((await change(sealed(size + 1))).status).toBe(413);
+    const over = fresh(1, 101);
+    expect((await push(screen, over)).body).toMatchObject({ done: [], full: [over[0]!.name] });
+    expect((await push(screen, fresh(1, 100))).body.done).toHaveLength(1);
+    // The account is exactly full: a change that grows does not fit, one the same size does.
+    expect(await change(sealed(size + 1))).toMatchObject({ done: [], full: [first.name] });
+    expect((await change(sealed(size))).done).toHaveLength(1);
     // Making a document smaller makes room.
-    expect((await change(sealed(size - 100))).status).toBe(200);
-    expect((await push(screen, fresh(1, 100))).status).toBe(200);
+    expect((await change(sealed(size - 100))).done).toHaveLength(1);
+    expect((await push(screen, fresh(1, 100))).body.done).toHaveLength(1);
     expect(rows('SELECT SUM(LENGTH(body)) AS chars FROM docs')).toEqual([
       { chars: MAX_ACCOUNT_CHARS },
     ]);
+    // Growing one document while making another smaller: in the order sent, the growth
+    // comes first and does not fit, and the push still commits what does.
+    const [other] = rows<{ name: string }>('SELECT name FROM docs WHERE LENGTH(body) = ?', size);
+    const mixed = await push(screen, [
+      { name: first.name, base: ver, body: sealed(size) },
+      { name: other!.name, base: 1, body: sealed(100) },
+    ]);
+    expect(mixed.body).toMatchObject({ full: [first.name], conflicts: [] });
+    expect(mixed.body.done.map((doc) => doc.name)).toEqual([other!.name]);
+  });
+
+  it('lets an account already over its limits come back under them', async () => {
+    const screen = await newAccount();
+    // As pushes sent at once could leave an account before the limits were checked in the batch.
+    const add = d1.sqlite.prepare(
+      'INSERT INTO docs (account, name, ver, at, body) VALUES (?, ?, 1, ?, ?)',
+    );
+    const held = Array.from({ length: MAX_DOCS + 5 }, () => newId());
+    for (const name of held) add.run(screen.account, name, START, sealed(100 * 1000));
+    const heavy = newId();
+    add.run(screen.account, heavy, START, sealed(MAX_BODY_CHARS));
+    expect(rows('SELECT COUNT(*) AS n, SUM(LENGTH(body)) AS chars FROM docs')).toEqual([
+      { n: MAX_DOCS + 6, chars: (MAX_DOCS + 5) * 100 * 1000 + MAX_BODY_CHARS },
+    ]);
+    expect((MAX_DOCS + 5) * 100 * 1000 + MAX_BODY_CHARS).toBeGreaterThan(MAX_ACCOUNT_CHARS);
+
+    const [extra] = fresh(1, 100) as [Put];
+    const answer = await push(screen, [
+      { name: held[0]!, base: 1, body: sealed(100 * 1000) },
+      { name: held[1]!, base: 1, body: sealed(1000) },
+      { name: held[2]!, base: 1, body: sealed(100 * 1000 + 1) },
+      extra,
+      { name: heavy, base: 1, body: sealed(100) },
+    ]);
+    expect(answer.status).toBe(200);
+    // The same size and smaller go through; growing and adding do not.
+    expect(answer.body.done.map((doc) => doc.name)).toEqual([held[0], held[1], heavy]);
+    expect(answer.body.full).toEqual([held[2], extra.name]);
+    expect(answer.body.conflicts).toEqual([]);
   });
 
   it('stops an account at 2,000 writes a UTC day, until the next one', async () => {
@@ -547,6 +708,69 @@ describe('limits', () => {
     vi.setSystemTime(Date.parse('2026-11-01T00:00:01Z'));
     expect((await push(screen, fresh(1))).status).toBe(200);
     expect(rows('SELECT day, writes FROM accounts')).toEqual([{ day: TODAY + 1, writes: 1 }]);
+  });
+});
+
+describe('pushes sent at once', () => {
+  // D1 is a network call away, so pushes sent together all sign in before any of them
+  // writes. Each waits as long here, and none of them can pass a limit by it.
+  let slow: Env;
+  beforeEach(() => {
+    d1 = testD1({ latency: 3 });
+    slow = { ...env, DB: d1 };
+  });
+
+  const together = (screen: Screen, pushes: Put[][]) =>
+    Promise.all(pushes.map((puts) => push(screen, puts, slow)));
+  const stored = () =>
+    rows<{ n: number; chars: number }>(
+      'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(body)), 0) AS chars FROM docs',
+    )[0]!;
+
+  it('cannot pass 120 documents together', async () => {
+    const screen = await newAccount(slow);
+    const answers = await together(
+      screen,
+      Array.from({ length: 30 }, () => fresh(MAX_PUTS, 1000)),
+    );
+    expect(answers.every((answer) => answer.status === 200)).toBe(true);
+    const done = answers.reduce((n, answer) => n + answer.body.done.length, 0);
+    const full = answers.reduce((n, answer) => n + answer.body.full.length, 0);
+    expect(done).toBe(MAX_DOCS);
+    expect(full).toBe(30 * MAX_PUTS - MAX_DOCS);
+    expect(stored().n).toBe(MAX_DOCS);
+    // Every document pushed is counted, whether it went in or not.
+    expect(rows('SELECT writes FROM accounts')).toEqual([{ writes: 30 * MAX_PUTS }]);
+  });
+
+  it('cannot pass 10,000,000 characters together', async () => {
+    const screen = await newAccount(slow);
+    const size = 990 * 1000;
+    const answers = await together(
+      screen,
+      Array.from({ length: 25 }, () => fresh(1, size)),
+    );
+    expect(answers.filter((answer) => answer.body.done.length === 1)).toHaveLength(10);
+    expect(answers.filter((answer) => answer.body.full.length === 1)).toHaveLength(15);
+    expect(stored()).toEqual({ n: 10, chars: 10 * size });
+  });
+
+  it('cannot pass 2,000 writes a day together', async () => {
+    const screen = await newAccount(slow);
+    // Room for two pushes of 12 and not a third. Each finds room when it signs in.
+    d1.sqlite.prepare('UPDATE accounts SET writes = ?').run(MAX_WRITES_PER_DAY - 30);
+    const answers = await together(
+      screen,
+      Array.from({ length: 10 }, () => fresh(MAX_PUTS)),
+    );
+    expect(answers.filter((answer) => answer.status === 200)).toHaveLength(2);
+    const refused = answers.filter((answer) => answer.status === 429);
+    expect(refused).toHaveLength(8);
+    for (const answer of refused) {
+      expect(answer.body).toEqual({ error: 'limit', now: START, retryAfter: 12 * 60 * 60 });
+    }
+    expect(stored().n).toBe(2 * MAX_PUTS);
+    expect(rows('SELECT writes FROM accounts')).toEqual([{ writes: MAX_WRITES_PER_DAY - 6 }]);
   });
 });
 

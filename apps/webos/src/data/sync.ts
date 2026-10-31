@@ -9,6 +9,7 @@ import {
   itemAt,
   type Items,
   type JoinMode,
+  loadBase,
   loadSyncState,
   MAIN_PROFILE_ID,
   openDocument,
@@ -32,18 +33,28 @@ import { preferences, profilePreferences } from './preferences';
 import { deleteProfile } from './profile-delete';
 import {
   activeProfileId,
+  confirmHeldKids,
   forgetHeldDeletion,
   heldDeletions,
+  heldKidsChange,
   holdKidsChange,
+  holdProfileAside,
   holdProfileDeletion,
+  kidsHeldAtLaunch,
+  launchSaved,
   MAIN_NAME,
   profilePrefix,
   profiles,
+  restoreSaved,
+  savedProfiles,
+  setHiddenProfiles,
 } from './profiles';
 import { browserTimers, sportsChoices } from './sports';
 import { storage } from './storage';
 import { accountClock, setSyncOn, storeNow, syncOn } from './sync-clock';
+import { markJoined, settleJoined } from './sync-joined';
 import { preferencesPart, profilesPart, sportsPart } from './sync-parts';
+import { reloadWhenSafe } from './sync-reload';
 import { createSyncTransport, SYNC_SERVICE } from './sync-service';
 
 /**
@@ -65,6 +76,8 @@ interface SavedStatus {
   at?: number;
   /** Whether it said new accounts can be made. */
   create?: boolean;
+  /** Whether it said making one needs its setup key. */
+  key?: boolean;
   /** When a sync last finished, for the status line before the first one of a launch. */
   lastSync?: number;
 }
@@ -74,10 +87,11 @@ function readSavedStatus(): SavedStatus {
     const raw = localStorage.getItem(STATUS_KEY);
     const value: unknown = raw ? JSON.parse(raw) : undefined;
     if (typeof value !== 'object' || value === null) return {};
-    const { at, create, lastSync } = value as Record<string, unknown>;
+    const { at, create, key, lastSync } = value as Record<string, unknown>;
     const saved: SavedStatus = {};
     if (typeof at === 'number') saved.at = at;
     if (typeof create === 'boolean') saved.create = create;
+    if (typeof key === 'boolean') saved.key = key;
     if (typeof lastSync === 'number') saved.lastSync = lastSync;
     return saved;
   } catch {
@@ -100,19 +114,42 @@ export interface AccountSection {
   shown: boolean;
   /** The service last said new accounts can be made. */
   canCreate: boolean;
+  /** The service last said making one needs its setup key, which createAccount then takes. */
+  needsKey: boolean;
 }
 
 /** Whether Settings offers the account. A signed-in screen always does. */
 export const accountSection = createStore<AccountSection>({
   shown: !!SYNC_SERVICE && syncOn(),
   canCreate: readSavedStatus().create !== false,
+  needsKey: readSavedStatus().key === true,
 });
 
-function showSection(shown: boolean, canCreate = accountSection.get().canCreate): void {
+function showSection(
+  shown: boolean,
+  canCreate = accountSection.get().canCreate,
+  needsKey = accountSection.get().needsKey,
+): void {
   const current = accountSection.get();
-  if (current.shown !== shown || current.canCreate !== canCreate) {
-    accountSection.set({ shown, canCreate });
+  if (current.shown !== shown || current.canCreate !== canCreate || current.needsKey !== needsKey) {
+    accountSection.set({ shown, canCreate, needsKey });
   }
+}
+
+/**
+ * The service answered a create with `closed`: no new accounts now. Kept
+ * with its status, so the menu offers only Join, as when the status says
+ * so, and asks again in a day. createAccount calls it itself.
+ */
+export function newAccountsClosed(): void {
+  saveStatus({ at: Date.now(), create: false });
+  showSection(true, false);
+}
+
+/** The service answered a create with `key`: making an account needs its setup key. */
+function keyNeeded(): void {
+  saveStatus({ key: true });
+  showSection(true, accountSection.get().canCreate, true);
 }
 
 let checking = false;
@@ -139,7 +176,7 @@ export function checkAccountSection(): void {
       const saved = readSavedStatus();
       const age = saved.at === undefined ? -1 : Date.now() - saved.at;
       if (age >= 0 && age < DAY_MS) {
-        showSection(true, saved.create !== false);
+        showSection(true, saved.create !== false, saved.key === true);
         return;
       }
       const status = await checkSyncService(transport);
@@ -147,8 +184,8 @@ export function checkAccountSection(): void {
         showSection(false);
         return;
       }
-      saveStatus({ at: Date.now(), create: status.create });
-      showSection(true, status.create);
+      saveStatus({ at: Date.now(), create: status.create, key: status.key });
+      showSection(true, status.create, status.key);
     } finally {
       checking = false;
     }
@@ -179,6 +216,8 @@ export const accountState = createStore<AccountState>({
 
 let engine: SyncEngine | undefined;
 let opening: Promise<SyncEngine | undefined> | undefined;
+/** The engine once it has read what it kept: before that, `off` says nothing. */
+let started: SyncEngine | undefined;
 
 function setState(next: AccountState): void {
   const current = accountState.get();
@@ -195,8 +234,11 @@ function setState(next: AccountState): void {
 /** Mirrors the engine's status for the screen, the stores' clock and the next launch. */
 function follow(made: SyncEngine): void {
   const status = made.status();
+  // A state the engine could not read is not "no account": the flag stays for the next launch.
+  if (status.state === 'off' && started !== made) return;
   setSyncOn(status.state !== 'off');
   if (status.state !== 'off') showSection(true);
+  else setHiddenProfiles(0);
   if (status.lastSync !== undefined && status.lastSync !== readSavedStatus().lastSync) {
     saveStatus({ lastSync: status.lastSync });
   }
@@ -206,12 +248,16 @@ function follow(made: SyncEngine): void {
     return;
   }
   setState({ engine: 'running', status, setup: current.setup, mode: current.mode });
-  void loadSyncState(storage.kv).then((saved) => {
-    if (!saved || made.status() !== status) return;
-    const setup: SetupStage =
-      saved.phase === 'joining' ? 'joining' : saved.step === 1 ? 'confirmed' : 'creating';
-    setState({ engine: 'running', status, setup, mode: saved.mode });
-  });
+  void loadSyncState(storage.kv, browserTimers).then(
+    (saved) => {
+      if (!saved || made.status() !== status) return;
+      const setup: SetupStage =
+        saved.phase === 'joining' ? 'joining' : saved.step === 1 ? 'confirmed' : 'creating';
+      setState({ engine: 'running', status, setup, mode: saved.mode });
+    },
+    // Unread, the screen says what it said before.
+    () => undefined,
+  );
 }
 
 /** The parts of the profile in use, over the stores the app already has open. */
@@ -245,7 +291,10 @@ function accountParts(): SyncPart[] {
       activeId: () => activeProfileId.get(),
       mainName: MAIN_NAME,
       holdDeletion: holdProfileDeletion,
+      holdAside: holdProfileAside,
       holdKids: holdKidsChange,
+      heldKids: heldKidsChange,
+      hidden: setHiddenProfiles,
     }),
     collectionPart(addonCollection),
   ];
@@ -272,13 +321,23 @@ async function open(): Promise<SyncEngine | undefined> {
     accountParts: accountParts(),
     profileParts: spareParts,
     lastSync: readSavedStatus().lastSync,
-    // A join carried on at this launch finished: start again as the account's screen.
-    onJoined: () => window.location.reload(),
+    // A join that carried on by itself finished: start again as the account's screen, once
+    // that interrupts nothing.
+    onJoined: () => reloadWhenSafe(() => void reloadJoined()),
   });
   engine = made;
   if (typeof document !== 'undefined' && document.hidden) made.hide();
-  made.subscribe(() => follow(made));
-  await made.start({ id, parts: activeParts(id) });
+  const off = made.subscribe(() => follow(made));
+  try {
+    await made.start({ id, parts: activeParts(id) });
+  } catch (error) {
+    // What the engine kept could not be read: nothing runs for this launch, and nothing is
+    // taken for signed out.
+    off();
+    engine = undefined;
+    throw error;
+  }
+  started = made;
   follow(made);
   return made;
 }
@@ -315,32 +374,87 @@ async function deleteHeldProfiles(): Promise<void> {
   }
 }
 
+/** Starts the app again after a join, with a copy of what the join wrote that the reload cannot lose. */
+async function reloadJoined(): Promise<void> {
+  try {
+    await markJoined(storage.kv, savedProfiles);
+  } catch {
+    // Without the copy the reload most often reads everything anyway.
+  }
+  window.location.reload();
+}
+
+/** The account's profiles as the engine last saved them, or undefined when they cannot be read. */
+async function savedAccountProfiles(): Promise<Items | undefined> {
+  try {
+    return (await loadBase(storage.kv, 'profiles', browserTimers)).items;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What the last launch left to check, before the profiles are used for
+ * anything else: a join's reload that lost some of what it wrote, and kids
+ * settings held for this launch that the account has changed back since.
+ * Resolves false when the app starts again instead.
+ */
+async function settleLaunch(): Promise<boolean> {
+  const settled = await settleJoined({
+    kv: storage.kv,
+    launch: launchSaved,
+    restore: restoreSaved,
+    signIn: () => setSyncOn(true),
+    reload: () => window.location.reload(),
+  });
+  if (!settled) return false;
+  if (kidsHeldAtLaunch() && confirmHeldKids(await savedAccountProfiles())) {
+    window.location.reload();
+    return false;
+  }
+  return true;
+}
+
 /**
  * Starts the account at launch. A signed-in screen watches its stores from
  * the moment a profile is chosen and pulls two seconds later; one without
  * an account does nothing until Settings > BannerTV account is opened.
  */
 export function startSync(): void {
+  if (SYNC_SERVICE) {
+    // Hidden: everything waiting is pushed and pulls stop. Back after two minutes or more: a pull.
+    document.addEventListener('visibilitychange', () => {
+      if (!engine) return;
+      if (document.hidden) engine.hide();
+      else engine.show();
+    });
+    window.addEventListener('pagehide', () => engine?.hide());
+  }
+  void settleLaunch().then(
+    (go) => {
+      if (go) startAccount();
+    },
+    // Left unchecked, the profiles are as this launch read them: the account starts all the same.
+    () => startAccount(),
+  );
+}
+
+function startAccount(): void {
   void profilePrefix.then(deleteHeldProfiles);
   if (!SYNC_SERVICE) return;
-  // Hidden: everything waiting is pushed and pulls stop. Back after two minutes or more: a pull.
-  document.addEventListener('visibilitychange', () => {
-    if (!engine) return;
-    if (document.hidden) engine.hide();
-    else engine.show();
-  });
-  window.addEventListener('pagehide', () => engine?.hide());
   if (syncOn()) {
     void openEngine();
     return;
   }
   // The flag is a copy, for the first paint, of what the engine keeps in IndexedDB. Where
   // localStorage lost it, the engine's own state still says this screen is in an account.
-  void loadSyncState(storage.kv).then(
+  // Where that cannot be read either, the engine is opened all the same: it then reads it
+  // again, and without an account it does nothing.
+  void loadSyncState(storage.kv, browserTimers).then(
     (saved) => {
       if (saved) void openEngine();
     },
-    () => undefined,
+    () => void openEngine(),
   );
 }
 
@@ -349,9 +463,22 @@ export function openAccount(): void {
   void openEngine();
 }
 
-/** Makes the account, or carries on making it, and returns its code. Nothing is sent yet. */
-export async function createAccount(): Promise<string> {
-  return (await running()).create();
+/**
+ * Makes the account, or carries on making it, and returns its code. Nothing
+ * is sent yet. `key` is the service's setup key, when accountSection says it
+ * needs one; a create carried on sends the one given before. A `closed` or
+ * `key` answer is kept with the service's status (see newAccountsClosed).
+ */
+export async function createAccount(key?: string): Promise<string> {
+  const made = await running();
+  const typed = key === undefined ? '' : key.trim();
+  try {
+    return await made.create(typed === '' ? {} : { key: typed });
+  } catch (error) {
+    if (error instanceof SyncSetupError && error.problem === 'closed') newAccountsClosed();
+    if (error instanceof SyncSetupError && error.problem === 'key') keyNeeded();
+    throw error;
+  }
 }
 
 /** The code has been written down: everything on this screen goes to the account. */
@@ -375,10 +502,15 @@ export async function hasOwnData(): Promise<boolean> {
   return (await running()).hasLocalData();
 }
 
-/** Joins the account, then starts the app again as one of its screens. */
+/**
+ * Joins the account, then starts the app again as one of its screens, at
+ * once: the person is watching the join. One the service did not answer
+ * rejects with `offline` and carries on by itself; the app then starts
+ * again once that interrupts nothing.
+ */
 export async function joinAccount(input: string, mode: JoinMode): Promise<void> {
   await (await running()).join(input, mode);
-  window.location.reload();
+  await reloadJoined();
 }
 
 /** Forgets the account here; the screen keeps everything it has. */

@@ -392,7 +392,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
       );
     },
     adopt(change) {
-      return state.update((current) => {
+      return state.updateNow((current) => {
         const set = (change.set ?? [])
           .map(readItem)
           .filter((item): item is LibraryItem => item !== undefined);

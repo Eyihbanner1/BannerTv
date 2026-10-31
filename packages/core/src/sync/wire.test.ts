@@ -13,13 +13,23 @@ describe('readServiceStatus', () => {
   it('reads the status, keeping pullMinutes between 15 minutes and a day', () => {
     expect(readServiceStatus({ ok: true, v: 1, now: 1, create: true, pullMinutes: 30 })).toEqual({
       create: true,
+      key: false,
       pullMinutes: 30,
     });
     expect(readServiceStatus({ ok: true, v: 1, pullMinutes: 1 })!.pullMinutes).toBe(15);
     expect(readServiceStatus({ ok: true, v: 1, pullMinutes: 1e9 })!.pullMinutes).toBe(1440);
-    expect(readServiceStatus({ ok: true, v: 1 })).toEqual({ create: false, pullMinutes: 30 });
+    expect(readServiceStatus({ ok: true, v: 1 })).toEqual({
+      create: false,
+      key: false,
+      pullMinutes: 30,
+    });
     expect(readServiceStatus({ ok: true, v: 2 })).toBeUndefined();
     expect(readServiceStatus('ok')).toBeUndefined();
+  });
+
+  it('says whether making an account needs the setup key', () => {
+    expect(readServiceStatus({ ok: true, v: 1, create: true, key: true })!.key).toBe(true);
+    expect(readServiceStatus({ ok: true, v: 1, create: true, key: 'yes' })!.key).toBe(false);
   });
 });
 
@@ -37,7 +47,11 @@ describe('checkSyncService', () => {
       }),
       post: () => Promise.reject(new Error('unused')),
     };
-    expect(await checkSyncService(transport, clock)).toEqual({ create: false, pullMinutes: 30 });
+    expect(await checkSyncService(transport, clock)).toEqual({
+      create: false,
+      key: false,
+      pullMinutes: 30,
+    });
     expect(transport.get).toHaveBeenCalledWith('/v1/status');
     expect(clock.now()).toBe(50100);
   });
@@ -81,8 +95,16 @@ describe('answers', () => {
         epoch: 'e',
         done: [{ name: 'a', ver: 3, at: 9 }, { name: 'b' }],
         conflicts: ['c', 4],
+        full: ['d', null],
       }),
-    ).toEqual({ epoch: 'e', done: [{ name: 'a', ver: 3, at: 9 }], conflicts: ['c'] });
+    ).toEqual({
+      epoch: 'e',
+      done: [{ name: 'a', ver: 3, at: 9 }],
+      conflicts: ['c'],
+      full: ['d'],
+    });
+    // From a service that refuses nothing for the account's limits.
+    expect(readPushAnswer({ epoch: 'e', done: [], conflicts: [] })!.full).toEqual([]);
   });
 
   it('reads a refusal', () => {

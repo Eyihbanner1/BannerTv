@@ -2,7 +2,7 @@
  * D1 in memory for the tests, over Node's own SQLite. D1 is SQLite too, so
  * the Worker's statements run for real: the compare and swap, the counters
  * and the schema are checked, not imitated. Only what the Worker uses is
- * here, and a batch is one transaction, as in D1.
+ * here, and a batch is one transaction, as in D1: batches never interleave.
  */
 import { DatabaseSync } from 'node:sqlite';
 import type { D1Database, D1PreparedStatement, D1Result, D1Value } from '../worker';
@@ -23,11 +23,17 @@ interface Statement extends D1PreparedStatement {
 
 const READS = /^\s*(SELECT|WITH)\b/i;
 
-export function testD1(): TestD1 {
+/**
+ * `latency` makes every call wait that many milliseconds before it runs, as
+ * a call to D1 over the network does, so that requests sent at once all get
+ * between their reads and their writes.
+ */
+export function testD1({ latency = 0 }: { latency?: number } = {}): TestD1 {
   const sqlite = new DatabaseSync(':memory:');
   const calls: string[][] = [];
 
-  function begin(sqls: string[]): void {
+  async function begin(sqls: string[]): Promise<void> {
+    if (latency > 0) await new Promise((resolve) => setTimeout(resolve, latency));
     calls.push(sqls);
     // The message quotes the statements, as D1's can, so a test can see it goes nowhere.
     if (d1.down) throw new Error(`D1 is unavailable: ${sqls.join('; ')}`);
@@ -48,16 +54,16 @@ export function testD1(): TestD1 {
       values,
       bind: (...bound) => statement(sql, bound),
       async first<T>() {
-        begin([sql]);
+        await begin([sql]);
         const row = sqlite.prepare(sql).get(...values);
         return row ? ({ ...row } as unknown as T) : null;
       },
       async all<T>() {
-        begin([sql]);
+        await begin([sql]);
         return execute(sql, values) as D1Result<T>;
       },
       async run() {
-        begin([sql]);
+        await begin([sql]);
         return execute(sql, values);
       },
     };
@@ -70,7 +76,7 @@ export function testD1(): TestD1 {
     prepare: (sql) => statement(sql, []),
     async batch(statements) {
       const list = statements as Statement[];
-      begin(list.map((each) => each.sql));
+      await begin(list.map((each) => each.sql));
       sqlite.exec('BEGIN');
       try {
         const results = list.map((each) => execute(each.sql, each.values));

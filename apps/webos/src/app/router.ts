@@ -91,9 +91,13 @@ export type Route =
     }
   | { name: 'diagnostics' }
   | { name: 'lab' }
-  /** Settings > Profiles, and one profile's page; without an id it adds a profile. */
+  /**
+   * Settings > Profiles, and one profile's page; without an id it adds a
+   * profile. `unlocked`: its PIN was entered to open the page, so changing
+   * the PIN does not ask for it again.
+   */
   | { name: 'profiles' }
-  | { name: 'profile-edit'; id?: string }
+  | { name: 'profile-edit'; id?: string; unlocked?: boolean }
   /** Settings > Home rows: their order, and which are hidden. */
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */

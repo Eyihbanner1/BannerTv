@@ -24,18 +24,43 @@ function change(set: Array<[string, LiveItem]> = [], remove: string[] = []): Par
   return { set: new Map(set), remove };
 }
 
+/** A change from an account whose `<id>` items have these times, as the engine passes it. */
+function changeIn(
+  times: { [id: string]: number },
+  set: Array<[string, LiveItem]> = [],
+  remove: string[] = [],
+): PartChange {
+  return {
+    ...change(set, remove),
+    account: (key) => (times[key] === undefined ? undefined : { t: times[key]!, v: 1 }),
+  };
+}
+
 function setup(list: Profile[], active: string | null = 'main', lastId = 'main') {
   const profiles = createStore<ProfilesState>({ profiles: list, lastId, askAtLaunch: true });
-  const held = { deleted: [] as string[], kids: [] as Array<[string, KidsRating | null]> };
+  let writes = 0;
+  profiles.subscribe(() => (writes += 1));
+  const held = {
+    deleted: [] as string[],
+    aside: [] as string[],
+    kids: new Map<string, KidsRating | null>(),
+    hidden: [] as number[],
+  };
   const part = profilesPart({
     profiles,
     activeId: () => active,
     mainName: MAIN,
     holdDeletion: (id) => held.deleted.push(id),
-    holdKids: (id, kids) => held.kids.push([id, kids]),
+    holdAside: (id) => held.aside.push(id),
+    holdKids: (id, kids) => {
+      if (kids === undefined) held.kids.delete(id);
+      else held.kids.set(id, kids);
+    },
+    heldKids: (id) => held.kids.get(id),
+    hidden: (count) => held.hidden.push(count),
   });
   const ids = () => profiles.get().profiles.map((profile) => profile.id);
-  return { profiles, held, part, ids };
+  return { profiles, held, part, ids, writes: () => writes };
 }
 
 const main: Profile = { id: 'main', name: MAIN, colour: 0 };
@@ -127,7 +152,7 @@ describe('profilesPart', () => {
     ]);
   });
 
-  it('holds back a kids change to the profile in use until the next launch', () => {
+  it('holds back a kids change to the profile in use until the next launch, and says so', () => {
     const { part, profiles, held } = setup(
       [
         main,
@@ -144,19 +169,40 @@ describe('profilesPart', () => {
     );
     expect(profiles.get().profiles[1]!.kids).toBe('U');
     expect(profiles.get().profiles[2]!.kids).toBe('PG');
-    expect(held.kids).toEqual([['abc123', '12']]);
+    expect(held.kids.get('abc123')).toBe('12');
+    // What waits is what the part says the profile has, so the account's next change reaches it.
+    expect(part.snapshot().get('abc123/kids')).toEqual({ v: '12' });
     void part.adopt(change([], ['abc123/kids']));
-    expect(held.kids).toEqual([
-      ['abc123', '12'],
-      ['abc123', null],
-    ]);
+    expect(held.kids.get('abc123')).toBe(null);
+    expect(part.snapshot().get('abc123/kids')).toEqual({ v: null });
+  });
+
+  it('lets go of a held kids change once the account goes back to the profile’s own', () => {
+    const { part, profiles, held } = setup(
+      [main, { id: 'kid001', name: 'Kid', colour: 1, kids: 'U' }],
+      'kid001',
+    );
+    void part.adopt(change([['kid001/kids', { t: 1, v: null }]]));
+    expect(held.kids.get('kid001')).toBe(null);
+    void part.adopt(change([['kid001/kids', { t: 2, v: 'U' }]]));
+    expect(held.kids.has('kid001')).toBe(false);
+    expect(part.snapshot().get('kid001/kids')).toEqual({ v: 'U' });
+    expect(profiles.get().profiles[1]!.kids).toBe('U');
+
+    // And the other way: a profile with none, which the account restricts and then frees again.
+    const free = setup([main, { id: 'ada001', name: 'Ada', colour: 2 }], 'ada001');
+    void free.part.adopt(change([['ada001/kids', { t: 1, v: 'PG' }]]));
+    expect(free.held.kids.get('ada001')).toBe('PG');
+    void free.part.adopt(change([], ['ada001/kids']));
+    expect(free.held.kids.has('ada001')).toBe(false);
+    expect(free.part.snapshot().get('ada001/kids')).toEqual({ v: null });
   });
 
   it('never makes Main a kids profile', () => {
     const { part, profiles, held } = setup([main]);
     void part.adopt(change([['main/kids', { t: 1, v: 'U' }]]));
     expect(profiles.get().profiles[0]!.kids).toBeUndefined();
-    expect(held.kids).toEqual([]);
+    expect(held.kids.size).toBe(0);
   });
 
   it('takes a deleted profile away now, and the one in use at the next launch', () => {
@@ -172,17 +218,70 @@ describe('profilesPart', () => {
     expect(profiles.get().lastId).toBe('main');
   });
 
-  it('shows at most six profiles, keeping Main and the one in use', () => {
+  it('shows at most six profiles: Main, the one in use, then the oldest in the account', () => {
     const here: Profile[] = [main];
     for (let i = 1; i <= 5; i++) here.push({ id: `here0${i}`, name: `Here ${i}`, colour: 0 });
-    const { part, ids } = setup(here, 'here05');
-    void part.adopt(
-      change([
-        ['new001', { t: 1, v: 1 }],
-        ['new001/name', { t: 1, v: 'New' }],
+    const times = { main: 0, here01: 100, here02: 200, here03: 300, here04: 400, here05: 500 };
+    const newer = setup(here, 'here05');
+    void newer.part.adopt(
+      changeIn({ ...times, new001: 600 }, [
+        ['new001', { t: 600, v: 1 }],
+        ['new001/name', { t: 600, v: 'New' }],
       ]),
     );
-    expect(ids()).toEqual(['main', 'here01', 'here02', 'here03', 'here04', 'here05']);
+    expect(newer.ids()).toEqual(['main', 'here01', 'here02', 'here03', 'here04', 'here05']);
+    expect(newer.held.hidden).toEqual([1]);
+    // The list was already that: nothing is written, though each pull brings the profile again.
+    expect(newer.writes()).toBe(0);
+
+    // One older than this screen's in the account goes in, and this screen's newest goes,
+    // though the one in use is newer still.
+    const older = setup(here, 'here05');
+    void older.part.adopt(
+      changeIn({ ...times, new001: 50 }, [
+        ['new001', { t: 50, v: 1 }],
+        ['new001/name', { t: 50, v: 'New' }],
+      ]),
+    );
+    expect(older.ids()).toEqual(['main', 'here01', 'here02', 'here03', 'here05', 'new001']);
+    expect(older.held.hidden).toEqual([1]);
+    // Main never counts towards the five.
+    const mainInUse = setup(here, 'main');
+    void mainInUse.part.adopt(
+      changeIn({ ...times, new001: 50 }, [
+        ['new001', { t: 50, v: 1 }],
+        ['new001/name', { t: 50, v: 'New' }],
+      ]),
+    );
+    expect(mainInUse.ids()).toEqual(['main', 'here01', 'here02', 'here03', 'here04', 'new001']);
+  });
+
+  it('counts none left off once there is room again', () => {
+    const { part, held } = setup([main, { id: 'abc123', name: 'Ada', colour: 2 }]);
+    void part.adopt(change([['abc123/colour', { t: 1, v: 3 }]]));
+    expect(held.hidden).toEqual([0]);
+  });
+
+  it('takes this screen’s own profiles away when joining with Use, deleting nothing', () => {
+    const list = [
+      main,
+      { id: 'dad001', name: 'Dad', colour: 2 },
+      { id: 'kid001', name: 'Kid', colour: 1 },
+    ];
+    const use = change([], ['dad001', 'dad001/name', 'kid001', 'kid001/name']);
+    use.reset = true;
+    const fromMain = setup(list);
+    void fromMain.part.adopt(use);
+    expect(fromMain.ids()).toEqual(['main']);
+    expect(fromMain.held.deleted).toEqual([]);
+    expect(fromMain.held.aside).toEqual([]);
+
+    // The profile in use stays until the next launch, set aside, its data kept.
+    const fromDad = setup(list, 'dad001');
+    void fromDad.part.adopt(use);
+    expect(fromDad.ids()).toEqual(['main', 'dad001']);
+    expect(fromDad.held.aside).toEqual(['dad001']);
+    expect(fromDad.held.deleted).toEqual([]);
   });
 
   it('puts Main back first if a list ever lacks it', () => {

@@ -22,6 +22,8 @@ export interface SyncTransport {
 export interface ServiceStatus {
   /** Whether a new account can be made now. */
   create: boolean;
+  /** Whether making one needs the service's setup key (SyncEngine.create's `key`). */
+  key: boolean;
   /** How often screens pull while on screen. */
   pullMinutes: number;
 }
@@ -69,6 +71,7 @@ export function readServiceStatus(body: unknown): ServiceStatus | undefined {
   const minutes = typeof body.pullMinutes === 'number' ? body.pullMinutes : DEFAULT_PULL_MINUTES;
   return {
     create: body.create === true,
+    key: body.key === true,
     pullMinutes: Number.isFinite(minutes)
       ? Math.min(MAX_PULL_MINUTES, Math.max(MIN_PULL_MINUTES, Math.round(minutes)))
       : DEFAULT_PULL_MINUTES,
@@ -149,6 +152,11 @@ export interface PushAnswer {
   done: Array<{ name: string; ver: number; at: number }>;
   /** Documents someone else wrote first. */
   conflicts: string[];
+  /**
+   * Documents refused because the account is at its limit of documents or
+   * size. Their versions are unchanged, and they are not conflicts.
+   */
+  full: string[];
 }
 
 export function readPushAnswer(body: unknown): PushAnswer | undefined {
@@ -160,5 +168,6 @@ export function readPushAnswer(body: unknown): PushAnswer | undefined {
     }
   }
   const conflicts = (Array.isArray(body.conflicts) ? body.conflicts : []).filter(isText);
-  return { epoch: body.epoch, done, conflicts };
+  const full = (Array.isArray(body.full) ? body.full : []).filter(isText);
+  return { epoch: body.epoch, done, conflicts, full };
 }

@@ -82,7 +82,8 @@ export interface ProgressStore {
   /**
    * Makes progress match a change from the BannerTV account: entries in
    * `set` are kept as given, their time included and with no rescaling, and
-   * videos in `remove` are forgotten.
+   * videos in `remove` are forgotten. Once the list has been read, the
+   * change is made before adopt() returns; only the save comes later.
    */
   adopt(change: ProgressAdoption): Promise<void>;
   /**
@@ -324,20 +325,30 @@ export function createProgressStore(options: {
       resort();
       return taken;
     },
-    async adopt(change) {
-      await load().catch(() => undefined);
-      if (!loaded) return;
-      let touched = false;
-      for (const videoId of change.remove ?? []) {
-        if (entries.delete(videoId)) touched = true;
+    adopt(change) {
+      const take = () => {
+        let touched = false;
+        for (const videoId of change.remove ?? []) {
+          if (entries.delete(videoId)) touched = true;
+        }
+        for (const value of change.set ?? []) {
+          const entry = readEntry(value);
+          if (!entry) continue;
+          entries.set(entry.videoId, entry);
+          touched = true;
+        }
+        if (touched) resort();
+      };
+      // Once the list has been read, the change is made before adopt() returns (SyncPart.adopt).
+      if (loaded) {
+        take();
+        return Promise.resolve();
       }
-      for (const value of change.set ?? []) {
-        const entry = readEntry(value);
-        if (!entry) continue;
-        entries.set(entry.videoId, entry);
-        touched = true;
-      }
-      if (touched) resort();
+      return load()
+        .catch(() => undefined)
+        .then(() => {
+          if (loaded) take();
+        });
     },
     resumeAt(videoId) {
       const entry = entries.get(videoId);

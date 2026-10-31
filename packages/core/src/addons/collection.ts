@@ -102,7 +102,8 @@ export interface AddonCollection extends Pick<Store<CollectionState>, 'get' | 's
    * that install, or one at the same address, or else joins the end. One
    * already here at the same address keeps its own manifest. Installs named in
    * `remove` leave, and `order` (install names) puts the rest in order, any
-   * it does not name after it as they were.
+   * it does not name after it as they were. The change is made before
+   * adopt() returns.
    */
   adopt(change: CollectionAdoption): Promise<void>;
 }

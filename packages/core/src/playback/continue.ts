@@ -66,6 +66,7 @@ export interface PlayedVideos {
   /**
    * Makes the cards match a change from the BannerTV account: cards in `set`
    * are kept as given, their time included, and videos in `remove` lose theirs.
+   * Once the cards have been read, the change is made before adopt() returns.
    */
   adopt(change: PlayedAdoption): Promise<void>;
   /** Bumps on every change, for screens that show the cards. */
@@ -263,28 +264,38 @@ export function createPlayedVideos(options: {
       save();
       changed();
     },
-    async adopt(change) {
-      await load().catch(() => undefined);
-      if (!loaded) return;
-      let touched = false;
-      for (const videoId of change.remove ?? []) {
-        if (cards.delete(videoId)) touched = true;
+    adopt(change) {
+      const take = () => {
+        let touched = false;
+        for (const videoId of change.remove ?? []) {
+          if (cards.delete(videoId)) touched = true;
+        }
+        const set = (change.set ?? [])
+          .map(readCard)
+          .filter((card): card is PlayedVideo => card !== undefined);
+        if (set.length === 0 && !touched) return;
+        const replaced = new Set(set.map((card) => card.videoId));
+        // Least recently played first again, so the limit drops the oldest wherever they came from.
+        const all = Array.from(cards.values())
+          .filter((card) => !replaced.has(card.videoId))
+          .concat(set)
+          .map((card, index) => ({ card, index }))
+          .sort((a, b) => a.card.updatedAt - b.card.updatedAt || a.index - b.index);
+        cards.clear();
+        all.forEach(({ card }) => put(card));
+        save();
+        changed();
+      };
+      // Once the cards have been read, the change is made before adopt() returns (SyncPart.adopt).
+      if (loaded) {
+        take();
+        return Promise.resolve();
       }
-      const set = (change.set ?? [])
-        .map(readCard)
-        .filter((card): card is PlayedVideo => card !== undefined);
-      if (set.length === 0 && !touched) return;
-      const replaced = new Set(set.map((card) => card.videoId));
-      // Least recently played first again, so the limit drops the oldest wherever they came from.
-      const all = Array.from(cards.values())
-        .filter((card) => !replaced.has(card.videoId))
-        .concat(set)
-        .map((card, index) => ({ card, index }))
-        .sort((a, b) => a.card.updatedAt - b.card.updatedAt || a.index - b.index);
-      cards.clear();
-      all.forEach(({ card }) => put(card));
-      save();
-      changed();
+      return load()
+        .catch(() => undefined)
+        .then(() => {
+          if (loaded) take();
+        });
     },
     version: () => changes,
     subscribe(listener) {

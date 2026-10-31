@@ -89,7 +89,7 @@ export function createSubtitleOffsets(options: { storage: KeyValueStore }): Subt
       }),
     offsets: () => state.get(),
     adopt: (adoption) =>
-      state.update((current) => {
+      state.updateNow((current) => {
         const set = readOffsets(adoption.set ?? []);
         const removing = new Set(adoption.remove ?? []);
         for (const saved of adoption.set ?? []) {

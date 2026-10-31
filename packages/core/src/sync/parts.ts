@@ -187,7 +187,7 @@ export function watchPart(
         offPlayed();
       };
     },
-    async adopt(change: PartChange) {
+    adopt(change: PartChange) {
       const entries: ProgressEntry[] = [];
       const cards: PlayedVideo[] = [];
       for (const [videoId, item] of oldestFirst(change.set)) {
@@ -214,11 +214,13 @@ export function watchPart(
           } as PlayedVideo);
         }
       }
-      await progress.adopt({ set: entries, remove: change.remove });
+      // Both stores change before either is waited for (SyncPart.adopt).
+      const saved = [progress.adopt({ set: entries, remove: change.remove })];
       // Only a join with Use takes progress away; its cards go with it.
       if (cards.length > 0 || change.remove.length > 0) {
-        await played.adopt({ set: cards, remove: change.remove });
+        saved.push(played.adopt({ set: cards, remove: change.remove }));
       }
+      return Promise.all(saved).then(() => undefined);
     },
     markTrakt(keys) {
       const set: ProgressEntry[] = [];
@@ -295,7 +297,7 @@ export function homeLayoutPart(profileId: string, layout: HomeLayoutStore): Sync
     },
     subscribe: (listener) => layout.subscribe(listener),
     adopt(change) {
-      return layout.update((current) => {
+      return layout.updateNow((current) => {
         const order = change.set.get(ORDER);
         const hidden = change.set.get(HIDDEN);
         const next: HomeLayout = {

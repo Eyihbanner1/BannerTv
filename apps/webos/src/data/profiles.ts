@@ -2,6 +2,9 @@ import {
   cleanName,
   createPinGuard,
   createStore,
+  isRemoval,
+  itemAt,
+  type Items,
   KIDS_RATINGS,
   type KidsRating,
   MAIN_PROFILE_ID,
@@ -70,9 +73,26 @@ function forgetSessionChoice(): void {
 /** Main's name until it is renamed. Saved data rather than UI text, so it is not translated. */
 export const MAIN_NAME = 'Main';
 
-function readSaved(): ProfilesState {
+/** A value in localStorage as it is written, or null when there is none or it cannot be read. */
+function readRaw(key: string): string | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeRaw(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // The account's next pull, or the next launch, tries again.
+  }
+}
+
+function readSaved(raw: string | null): ProfilesState {
+  try {
     return readProfiles(raw ? (JSON.parse(raw) as unknown) : undefined, MAIN_NAME);
   } catch {
     return readProfiles(undefined, MAIN_NAME);
@@ -91,30 +111,42 @@ function save(state: ProfilesState): void {
 // profile in use deleted on another screen, or its kids setting changed there.
 const HELD_KEY = 'bannertv.syncHeld';
 
+/**
+ * A kids setting held for the profile in use: its id, the account's setting,
+ * and the profile's own, which an older build did not keep.
+ */
+type HeldKids = [string, KidsRating | null, (KidsRating | null)?];
+
 interface HeldChanges {
   /** Profiles the account deleted: gone from the list at launch, their data deleted once started. */
   deleted: string[];
-  /** Kids settings of the profile that was in use, by id: a rating, or null for none. */
-  kids: Array<[string, KidsRating | null]>;
+  /**
+   * Profiles that joining with Use took away while in use: gone from the
+   * list at launch, their data kept, as with the rest of what Use sets aside.
+   */
+  aside: string[];
+  /** Kids settings of the profile in use, for the next launch to apply, until the account confirms them. */
+  kids: HeldKids[];
 }
 
-function readHeld(): HeldChanges {
-  const held: HeldChanges = { deleted: [], kids: [] };
+const isRating = (value: unknown): value is KidsRating | null =>
+  value === null || KIDS_RATINGS.indexOf(value as KidsRating) !== -1;
+
+function readHeld(raw: string | null = readRaw(HELD_KEY)): HeldChanges {
+  const held: HeldChanges = { deleted: [], aside: [], kids: [] };
   try {
-    const raw = localStorage.getItem(HELD_KEY);
     const value: unknown = raw ? JSON.parse(raw) : undefined;
     if (typeof value !== 'object' || value === null) return held;
-    const { deleted, kids } = value as Record<string, unknown>;
-    if (Array.isArray(deleted)) {
-      held.deleted = deleted.filter((id): id is string => typeof id === 'string');
-    }
+    const { deleted, aside, kids } = value as Record<string, unknown>;
+    const ids = (list: unknown) =>
+      Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
+    held.deleted = ids(deleted);
+    held.aside = ids(aside);
     if (Array.isArray(kids)) {
-      for (const pair of kids) {
-        if (!Array.isArray(pair) || typeof pair[0] !== 'string') continue;
-        const rating = pair[1] as unknown;
-        if (rating === null || KIDS_RATINGS.indexOf(rating as KidsRating) !== -1) {
-          held.kids.push([pair[0], rating as KidsRating | null]);
-        }
+      for (const entry of kids) {
+        if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !isRating(entry[1])) continue;
+        const own: unknown = entry[2];
+        held.kids.push(isRating(own) ? [entry[0], entry[1], own] : [entry[0], entry[1]]);
       }
     }
   } catch {
@@ -124,26 +156,19 @@ function readHeld(): HeldChanges {
 }
 
 function saveHeld(held: HeldChanges): void {
-  try {
-    if (held.deleted.length === 0 && held.kids.length === 0) localStorage.removeItem(HELD_KEY);
-    else localStorage.setItem(HELD_KEY, JSON.stringify(held));
-  } catch {
-    // The account sends the change again at its next pull.
-  }
+  const empty = held.deleted.length === 0 && held.aside.length === 0 && held.kids.length === 0;
+  writeRaw(HELD_KEY, empty ? null : JSON.stringify(held));
 }
 
 /** The saved profiles with what the account held back applied, before anyone is chosen. */
 function withHeld(state: ProfilesState, held: HeldChanges): ProfilesState {
-  if (held.deleted.length === 0 && held.kids.length === 0) return state;
+  if (held.deleted.length === 0 && held.aside.length === 0 && held.kids.length === 0) return state;
+  const gone = held.deleted.concat(held.aside);
   const list = state.profiles
-    .filter((p) => p.id === MAIN_PROFILE_ID || held.deleted.indexOf(p.id) === -1)
+    .filter((p) => p.id === MAIN_PROFILE_ID || gone.indexOf(p.id) === -1)
     .map((profile) => {
       const kids = held.kids.filter(([id]) => id === profile.id)[0];
-      if (!kids || profile.id === MAIN_PROFILE_ID) return profile;
-      const next: Profile = { ...profile };
-      if (kids[1] === null) delete next.kids;
-      else next.kids = kids[1];
-      return next;
+      return kids && profile.id !== MAIN_PROFILE_ID ? withKids(profile, kids[1]) : profile;
     });
   return {
     ...state,
@@ -152,14 +177,68 @@ function withHeld(state: ProfilesState, held: HeldChanges): ProfilesState {
   };
 }
 
-const heldAtLaunch = readHeld();
+function withKids(profile: Profile, kids: KidsRating | null): Profile {
+  const next: Profile = { ...profile };
+  if (kids === null) delete next.kids;
+  else next.kids = kids;
+  return next;
+}
 
-export const profiles = createStore<ProfilesState>(withHeld(readSaved(), heldAtLaunch));
+/** The profiles and the changes held for them, as localStorage has them written. */
+export interface SavedProfiles {
+  profiles: string | null;
+  held: string | null;
+}
+
+/**
+ * What this launch read before the first paint, for a join's check that
+ * its reload lost nothing (sync-joined.ts).
+ */
+export const launchSaved: Readonly<SavedProfiles> = {
+  profiles: readRaw(KEY),
+  held: readRaw(HELD_KEY),
+};
+
+const heldAtLaunch = readHeld(launchSaved.held);
+
+export const profiles = createStore<ProfilesState>(
+  withHeld(readSaved(launchSaved.profiles), heldAtLaunch),
+);
 profiles.subscribe(() => save(profiles.get()));
-if (heldAtLaunch.deleted.length > 0 || heldAtLaunch.kids.length > 0) {
+if (
+  heldAtLaunch.deleted.length > 0 ||
+  heldAtLaunch.aside.length > 0 ||
+  heldAtLaunch.kids.length > 0
+) {
   save(profiles.get());
-  // Kids changes are in the list now. Deletions wait for their data to go (deleteHeldProfiles).
-  saveHeld({ deleted: heldAtLaunch.deleted, kids: [] });
+  // Profiles set aside are off the list now. Deletions wait for their data to go
+  // (deleteHeldProfiles), and kids settings for the account to confirm them (confirmHeldKids).
+  if (heldAtLaunch.aside.length > 0) saveHeld({ ...heldAtLaunch, aside: [] });
+}
+
+/** The profiles and held changes as saved now, for a join to keep before its reload. */
+export function savedProfiles(): SavedProfiles {
+  return { profiles: readRaw(KEY), held: readRaw(HELD_KEY) };
+}
+
+/**
+ * Writes back what a join saved, where this launch read an older copy
+ * (sync-joined.ts). With `now`, the profiles change at once, as the next
+ * launch would read them, the profile in use staying until then; without,
+ * only localStorage changes, for the app to start again at once.
+ */
+export function restoreSaved(saved: SavedProfiles, now: boolean): void {
+  writeRaw(HELD_KEY, saved.held);
+  if (!now) {
+    writeRaw(KEY, saved.profiles);
+    return;
+  }
+  const next = withHeld(readSaved(saved.profiles), readHeld(saved.held));
+  const inUse = activeProfile();
+  if (inUse && !next.profiles.some((p) => p.id === inUse.id)) {
+    next.profiles = next.profiles.concat(inUse);
+  }
+  profiles.set(next);
 }
 
 /**
@@ -174,12 +253,82 @@ export function holdProfileDeletion(id: string): void {
   saveHeld(held);
 }
 
-/** The account changed the kids setting of the profile in use: it takes effect at the next launch. */
-export function holdKidsChange(id: string, kids: KidsRating | null): void {
+/** Joining with Use took away the profile in use: it leaves the list at the next launch, its data kept. */
+export function holdProfileAside(id: string): void {
   if (id === MAIN_PROFILE_ID) return;
   const held = readHeld();
-  held.kids = held.kids.filter(([other]) => other !== id).concat([[id, kids]]);
+  if (held.aside.indexOf(id) !== -1) return;
+  held.aside.push(id);
   saveHeld(held);
+}
+
+/**
+ * The account changed the kids setting of the profile in use: it takes
+ * effect at the next launch. Undefined drops what was held, as when the
+ * account goes back to the profile's own setting.
+ */
+export function holdKidsChange(id: string, kids: KidsRating | null | undefined): void {
+  if (id === MAIN_PROFILE_ID) return;
+  const held = readHeld();
+  const others = held.kids.filter(([other]) => other !== id);
+  if (kids === undefined) {
+    if (others.length === held.kids.length) return;
+    held.kids = others;
+  } else {
+    const profile = profiles.get().profiles.filter((p) => p.id === id)[0];
+    held.kids = others.concat([[id, kids, profile?.kids ?? null]]);
+  }
+  saveHeld(held);
+}
+
+/** The kids setting held for a profile until the next launch, or undefined when none is. */
+export function heldKidsChange(id: string): KidsRating | null | undefined {
+  const held = readHeld().kids.filter(([other]) => other === id)[0];
+  return held ? held[1] : undefined;
+}
+
+/** Whether this launch applied kids settings the account held for it, which confirmHeldKids checks. */
+export function kidsHeldAtLaunch(): boolean {
+  return heldAtLaunch.kids.length > 0;
+}
+
+/**
+ * Checks the kids settings this launch applied against the account's
+ * profiles document as the engine last saved it (ADR 0006, decision 6), or
+ * undefined when it could not be read. A setting the account has changed
+ * back since is taken back, so a profile never opens with one the account
+ * no longer has. Returns whether that was the profile in use, for the app
+ * to start again with the setting it should have.
+ */
+export function confirmHeldKids(account: Items | undefined): boolean {
+  if (heldAtLaunch.kids.length === 0) return false;
+  let restart = false;
+  let state = profiles.get();
+  for (const [id, kids, own] of heldAtLaunch.kids) {
+    const item = account && itemAt(account, `${id}/kids`);
+    // Nothing there to go by: the setting stays.
+    if (!item || id === MAIN_PROFILE_ID) continue;
+    const now = isRemoval(item) ? null : item.v;
+    if (!isRating(now) || now === kids) continue;
+    // Held by an older build, the profile's own setting is the one it was saved with.
+    const back =
+      own !== undefined
+        ? own
+        : (readSaved(launchSaved.profiles).profiles.filter((p) => p.id === id)[0]?.kids ?? null);
+    state = {
+      ...state,
+      profiles: state.profiles.map((p) => (p.id === id ? withKids(p, back) : p)),
+    };
+    if (id === activeProfileId.get()) restart = true;
+  }
+  if (state !== profiles.get()) profiles.set(state);
+  // Held for this launch only: what the account changes from now on is held anew.
+  const held = readHeld();
+  saveHeld({
+    ...held,
+    kids: held.kids.filter((entry) => !heldAtLaunch.kids.some((done) => done[0] === entry[0])),
+  });
+  return restart;
 }
 
 /** Profiles the account deleted whose data is still on this screen. */
@@ -192,7 +341,21 @@ export function forgetHeldDeletion(id: string): void {
   const held = readHeld();
   const deleted = held.deleted.filter((other) => other !== id);
   if (deleted.length === held.deleted.length) return;
-  saveHeld({ deleted, kids: held.kids });
+  saveHeld({ ...held, deleted });
+}
+
+/**
+ * How many of the account's profiles this screen does not show (ADR 0006,
+ * decision 7): it shows six at most, Main, the one in use and then the
+ * oldest in the account. Counted again whenever the account's profiles
+ * reach this screen, the first pull of each launch included; 0 until then.
+ * Deleting a profile makes room for one of them.
+ */
+export const hiddenProfiles = createStore<number>(0);
+
+/** Sets how many of the account's profiles this screen leaves off. */
+export function setHiddenProfiles(count: number): void {
+  if (hiddenProfiles.get() !== count) hiddenProfiles.set(count);
 }
 
 /**

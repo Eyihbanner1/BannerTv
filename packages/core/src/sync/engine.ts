@@ -44,7 +44,7 @@ import {
   profileDocuments,
   tidyItems,
 } from './merge';
-import { type PartItem, partOwns, type SyncPart } from './part';
+import { type PartChange, type PartItem, partOwns, type SyncPart } from './part';
 import { openDocument, SealError, sealDocument } from './seal';
 import {
   answerTime,
@@ -58,8 +58,15 @@ import {
   WIRE_LIMITS,
 } from './wire';
 
-/** Why syncing is paused. It tries again by itself, except for `update`, which waits for a newer build. */
-export type PauseReason = 'offline' | 'limit' | 'too-big' | 'update' | 'busy';
+/**
+ * Why syncing is paused. It tries again by itself, except for `update`,
+ * which waits for a newer build, and a document too big for one body or
+ * refused as `full`, which waits until it changes. `limit` (the service's
+ * daily writes), `busy`, `too-big` (that document, or a request the service
+ * refused for its size) and `full` (the account at its limit of documents or
+ * size) stop only what this screen sends: the account's changes still come.
+ */
+export type PauseReason = 'offline' | 'limit' | 'too-big' | 'full' | 'update' | 'busy';
 
 export interface SyncStatus {
   /**
@@ -78,9 +85,11 @@ export interface SyncStatus {
  * Why a create or join stopped. `invalid`: not an account code. `unknown`:
  * no account has this code. `offline`: the service did not answer; trying
  * again carries on where it stopped. `closed`: no new accounts now.
- * `exists`: the new code was taken (try again). `profiles`: Bring would
- * pass six profiles. `signed-in`: this screen already has an account.
- * `not-started`: start() has not run, or confirmCreate() came before create().
+ * `exists`: the new code was taken (try again). `key`: making an account
+ * needs the service's setup key, and it was missing or wrong. `profiles`:
+ * Bring would pass six profiles. `signed-in`: this screen already has an
+ * account. `not-started`: start() has not run or could not read what the
+ * engine kept, or confirmCreate() came before create().
  */
 export type SetupProblem =
   | 'invalid'
@@ -88,6 +97,7 @@ export type SetupProblem =
   | 'offline'
   | 'closed'
   | 'exists'
+  | 'key'
   | 'profiles'
   | 'signed-in'
   | 'not-started';
@@ -104,6 +114,12 @@ export class SyncSetupError extends Error {
 
 /** What checking a typed code with the service found. */
 export type CodeCheck = 'ok' | 'invalid' | 'unknown' | 'offline';
+
+/** What creating an account may need. */
+export interface CreateOptions {
+  /** The service's setup key, when its status says making an account needs one (`key`). */
+  key?: string;
+}
 
 /** The profile in use and its parts: the core's (profileParts) and the app's preferences part. */
 export interface ActiveProfile {
@@ -134,7 +150,11 @@ export interface SyncEngineOptions {
   profileParts(profileId: string): readonly SyncPart[];
   /** When the last sync finished, as the app saved it, so the status line has it at launch. */
   lastSync?: number;
-  /** Called when a join that was interrupted finishes at a later launch: the app reloads. */
+  /**
+   * Called when a join that was interrupted finishes by itself, carried on
+   * at a later launch or after the person's join could not reach the
+   * service: the app reloads.
+   */
   onJoined?: () => void;
 }
 
@@ -146,7 +166,9 @@ export interface SyncEngine {
    * kept; on a signed-in screen it then watches the stores, pulls two
    * seconds later and every `pullMinutes` after. Carries on a create or
    * join that was interrupted. Makes no request on a screen without an
-   * account.
+   * account. Rejects when what the engine kept (its state, or a document's
+   * edits or base) cannot be read even when tried again: nothing is then
+   * watched or changed for this launch.
    */
   start(profile: ActiveProfile): Promise<void>;
   /** The app went off screen: everything pending is pushed and pulls stop. */
@@ -161,14 +183,25 @@ export interface SyncEngine {
   hasLocalData(): Promise<boolean>;
   /**
    * Makes the account (or carries on making it) and returns its code to
-   * show. Nothing is sent until confirmCreate().
+   * show. Nothing is sent until confirmCreate(). A setup key given here is
+   * kept until the account exists, so carrying on sends it again. While a
+   * create runs, another call gets the same promise.
    */
-  create(): Promise<string>;
-  /** The person has written the code down: everything on the screen is sent. */
+  create(options?: CreateOptions): Promise<string>;
+  /**
+   * The person has written the code down: everything on the screen is sent.
+   * While it runs, another call gets the same promise.
+   */
   confirmCreate(): Promise<void>;
   /** Checks a typed code with the service, without joining. */
   checkCode(input: string): Promise<CodeCheck>;
-  /** Joins the account, bringing this screen's data or using the account's. The app then reloads. */
+  /**
+   * Joins the account, bringing this screen's data or using the account's.
+   * The app then reloads. While a join runs, another call gets the same
+   * promise. When the service could not be reached it rejects with
+   * `offline` and carries on by itself, calling `onJoined` once it is done.
+   * Resolves at once when a join carried on with this code has finished.
+   */
   join(input: string, mode: JoinMode): Promise<void>;
   /** The account code, for Show account code. Undefined when signed out. */
   code(): string | undefined;
@@ -215,7 +248,16 @@ class Stop extends Error {
   }
 }
 
-type TimerName = 'push' | 'watch' | 'pull' | 'first' | 'retry' | 'resume';
+type TimerName = 'push' | 'watch' | 'pull' | 'first' | 'retry' | 'hold' | 'resume';
+
+/** Why a document was not sent as it stands. */
+type Refusal = 'too-big' | 'full';
+
+/** Why every push waits for a while, the pulls going on. */
+interface HeldPushes {
+  reason: 'limit' | 'busy' | 'too-big';
+  retryAfterMs: number | undefined;
+}
 
 interface Doc {
   name: string;
@@ -224,13 +266,18 @@ interface Doc {
   pend: Items;
   /** Written by a newer BannerTV: neither applied nor pushed over. */
   newer: boolean;
+  /**
+   * Refused with these edits over this version: too big for one body, or
+   * the account is full. Not sealed or sent again until either changes.
+   */
+  refused?: { reason: Refusal; pend: Items; ver: number };
 }
 
 interface Watch {
   part: SyncPart;
   /** What the store held when last looked at, after the engine's own changes. */
   seen: Map<string, PartItem>;
-  /** While the engine writes into the store, its changes are not edits. */
+  /** While adopt() runs, the store's changes are the engine's own, not edits. */
   adopting: number;
   /** Watched for edits, rather than only written to during a create or join. */
   live: boolean;
@@ -277,8 +324,12 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   let lastSync = options.lastSync;
   let syncing = false;
+  /** Why the last sync failed as a whole, until one gets through. */
   let paused: PauseReason | undefined;
   let failures = 0;
+  /** Why pushes wait while pulls go on: the service's daily limit, `busy`, or a request it refused for its size. */
+  let holding: PauseReason | undefined;
+  let pushFailures = 0;
   let pullMinutes = DEFAULT_PULL_MINUTES;
   let serviceChecked = false;
   let visible = true;
@@ -341,13 +392,22 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   function ensureDoc(name: string): Promise<Doc> {
     let load = docLoads.get(name);
     if (!load) {
-      load = Promise.all([loadBase(storage, name), loadPending(storage, name)]).then(
+      const loading = Promise.all([
+        loadBase(storage, name, timers),
+        loadPending(storage, name, timers),
+      ]).then(
         ([base, pend]) => {
           const doc: Doc = { name, base, pend, newer: false };
           docs.set(name, doc);
           return doc;
         },
+        (error: unknown) => {
+          // Read again when next needed: taken as empty, edits waiting would be lost.
+          if (docLoads.get(name) === loading) docLoads.delete(name);
+          throw error;
+        },
       );
+      load = loading;
       docLoads.set(name, load);
     }
     return load;
@@ -372,6 +432,17 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   function pendingCount(doc: Doc): number {
     return Object.keys(doc.pend).length;
+  }
+
+  /** Whether a document is still as it was when refused: the same edits over the same version. */
+  function stillRefused(doc: Doc): boolean {
+    const refused = doc.refused;
+    if (!refused || refused.ver !== doc.base.ver) return false;
+    const keys = Object.keys(doc.pend);
+    return (
+      keys.length === Object.keys(refused.pend).length &&
+      keys.every((key) => itemAt(refused.pend, key) === doc.pend[key])
+    );
   }
 
   /** Drops edits the account already carries or has beaten. */
@@ -434,16 +505,19 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     return parts;
   }
 
-  function sameItem(part: SyncPart, key: string, a: PartItem, b: PartItem): boolean {
-    if (a.t !== b.t) return false;
+  function sameValue(part: SyncPart, key: string, a: unknown, b: unknown): boolean {
     const compare = part.compare ? (value: unknown) => part.compare!(key, value) : undefined;
-    return compare ? canon(compare(a.v)) === canon(compare(b.v)) : canon(a.v) === canon(b.v);
+    return compare ? canon(compare(a)) === canon(compare(b)) : canon(a) === canon(b);
+  }
+
+  function sameItem(part: SyncPart, key: string, a: PartItem, b: PartItem): boolean {
+    return a.t === b.t && sameValue(part, key, a.v, b.v);
   }
 
   /**
    * Turns what changed in a store since `watch.seen` into edits. Keys in
    * `touched` were just written by the engine and are taken as they are now;
-   * anything that went away while the engine wrote was the store trimming
+   * anything that went away as the engine wrote was the store trimming
    * itself, not a removal.
    */
   function diff(watch: Watch, next: Map<string, PartItem>, touched?: Set<string>): void {
@@ -452,16 +526,26 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     if (!doc || doc.newer || profileRemoved(doc.name)) return;
     const kind = documentKind(doc.name);
     let edited = false;
+    let restamped = false;
     next.forEach((item, key) => {
       if ((touched && touched.has(key)) || !partOwns(part, key) || item.trakt) return;
       const old = watch.seen.get(key);
       if (old === item || (old && sameItem(part, key, old, item))) return;
       const current = viewItem(doc, key);
-      const edit: LiveItem = {
+      let edit: LiveItem = {
         t: item.t !== undefined ? item.t : clock.stamp(current?.t),
         v: item.v,
       };
-      if (!changesItem(doc.name, key, current, edit)) return;
+      if (!changesItem(doc.name, key, current, edit)) {
+        // A value the store just gave a time of its own (a title added back, progress saved)
+        // loses only on time to an account item stamped ahead of this screen's clock. It goes
+        // just after that item instead, and the store is given the same time.
+        if (touched || item.t === undefined || !current || (old && old.t === item.t)) return;
+        if (!isRemoval(current) && sameValue(part, key, current.v, item.v)) return;
+        edit = { t: Math.max(item.t, current.t + 1), v: item.v };
+        if (!changesItem(doc.name, key, current, edit)) return;
+        restamped = true;
+      }
       doc.pend[key] = edit;
       edited = true;
     });
@@ -483,6 +567,12 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     void savePendLater(doc);
     schedulePush(kind === 'watch');
     updateStatus();
+    if (restamped) {
+      // After the store has told everyone of the change that is being looked at now.
+      void Promise.resolve().then(() => {
+        if (watches.indexOf(watch) !== -1) return apply(watch);
+      });
+    }
   }
 
   function capture(watch: Watch): void {
@@ -497,12 +587,13 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
    * are written, removed ones deleted, and keys the account does not know
    * are left, unless `clear` (joining with Use) takes away everything of the
    * person's own that the account lacks. Trakt's items give way only to
-   * newer account items.
+   * newer account items. Resolves true once the store matches, or had
+   * nothing to take; false when it could not take the change.
    */
-  async function apply(watch: Watch, clear = false): Promise<void> {
+  async function apply(watch: Watch, clear = false): Promise<boolean> {
     const part = watch.part;
     const doc = docs.get(part.document);
-    if (!doc || doc.newer) return;
+    if (!doc || doc.newer) return false;
     const view = mergeItems(doc.name, doc.base.items, doc.pend);
     const here = part.snapshot();
     const set = new Map<string, LiveItem>();
@@ -526,12 +617,21 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
         if (!mine.trakt && !hasItem(view, key) && partOwns(part, key)) remove.push(key);
       });
     }
-    if (set.size === 0 && remove.length === 0) return;
+    if (set.size === 0 && remove.length === 0) return true;
+    const change: PartChange = clear ? { set, remove, reset: true } : { set, remove };
+    change.account = (key) => {
+      const item = partOwns(part, key) ? itemAt(view, key) : undefined;
+      return item && !isRemoval(item) ? item : undefined;
+    };
+    // A part makes its whole change before adopt() returns (SyncPart.adopt), so the store
+    // as it is just after is what the engine wrote, trimming included. What changes while
+    // the store then saves is the person's, and is an edit like any other.
+    let adopted: Promise<void>;
     watch.adopting += 1;
     try {
-      await part.adopt(clear ? { set, remove, reset: true } : { set, remove });
-    } catch {
-      // A store that cannot take the change keeps what it had; the next pull tries again.
+      adopted = part.adopt(change);
+    } catch (error) {
+      adopted = Promise.reject(error);
     } finally {
       watch.adopting -= 1;
     }
@@ -542,14 +642,40 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       diff(watch, next, touched);
     }
     watch.seen = next;
+    try {
+      await adopted;
+      return true;
+    } catch {
+      // A store that cannot take the change keeps what it had; the next sync tries again.
+      return false;
+    }
   }
 
-  async function applyActive(only?: Set<Doc>): Promise<void> {
+  /** Not yet taken by every store: changed since the stores last matched it. */
+  const unapplied = (doc: Doc) => doc.base.apply === true;
+
+  /**
+   * Makes the stores match the documents `only` picks, or all of them. A
+   * document every store took is no longer marked; one a store could not
+   * take stays marked, so the next sync tries again.
+   */
+  async function applyActive(only?: (doc: Doc) => boolean): Promise<void> {
+    const results = new Map<Doc, { base: DocumentBase; taken: boolean }>();
     for (const watch of watches) {
       const doc = docs.get(watch.part.document);
-      if (!doc || (only && !only.has(doc))) continue;
-      await apply(watch);
+      if (!doc || (only && !only(doc))) continue;
+      let result = results.get(doc);
+      if (!result) {
+        result = { base: doc.base, taken: true };
+        results.set(doc, result);
+      }
+      if (!(await apply(watch))) result.taken = false;
     }
+    results.forEach((result, doc) => {
+      if (!result.taken || doc.base !== result.base || !doc.base.apply) return;
+      doc.base = { ver: doc.base.ver, at: doc.base.at, items: doc.base.items };
+      void saveBaseLater(doc);
+    });
   }
 
   async function markTrakt(parts: readonly SyncPart[]): Promise<void> {
@@ -636,13 +762,18 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
         return false;
       }
       // Nothing in it can be read, by this screen or any other: the next push writes over it.
-      doc.base = { ver: wire.ver, at: wire.at, items: doc.base.items };
+      doc.base = { ...doc.base, ver: wire.ver, at: wire.at };
       void saveBaseLater(doc);
       return false;
     }
     doc.newer = false;
     const merged = mergeItems(doc.name, doc.base.items, clampItems(items, wire.at));
-    doc.base = { ver: wire.ver, at: wire.at, items: tidyItems(doc.name, merged, clock.now()) };
+    doc.base = {
+      ver: wire.ver,
+      at: wire.at,
+      items: tidyItems(doc.name, merged, clock.now()),
+      apply: true,
+    };
     void saveBaseLater(doc);
     return true;
   }
@@ -673,7 +804,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           if (await takeVersion(doc, wire)) changed.add(doc);
         } else if (!answer.vers.has(name) && doc.base.ver > 0) {
           // No longer on the service: the next push starts it again.
-          doc.base = { ver: 0, at: 0, items: doc.base.items };
+          doc.base = { ...doc.base, ver: 0, at: 0 };
           void saveBaseLater(doc);
         }
       }
@@ -700,25 +831,30 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   function pushable(): Doc[] {
     const ready: Doc[] = [];
     docs.forEach((doc) => {
-      if (pendingCount(doc) > 0 && !doc.newer && !profileRemoved(doc.name)) ready.push(doc);
+      if (pendingCount(doc) === 0 || doc.newer || profileRemoved(doc.name)) return;
+      if (!stillRefused(doc)) ready.push(doc);
     });
     return ready;
   }
 
   /** Pushes each document once. Returns those someone else wrote first. */
-  async function pushOnce(ready: Doc[], touched: Set<Doc>): Promise<Doc[]> {
+  async function pushOnce(ready: Doc[]): Promise<Doc[]> {
     const now = clock.now();
     const sealed: Sealed[] = [];
-    let tooBig = false;
     for (const doc of ready) {
-      const items = tidyItems(doc.name, mergeItems(doc.name, doc.base.items, doc.pend), now);
-      const body = await sealDocument(crypto, keys!, doc.name, doc.base.ver + 1, items);
+      // Exactly the edits sealed here leave sync/pend once the push is done: one made while
+      // sealing waits for the next push.
+      const pend = copyItems(doc.pend);
+      const base = doc.base.ver;
+      const items = tidyItems(doc.name, mergeItems(doc.name, doc.base.items, pend), now);
+      const body = await sealDocument(crypto, keys!, doc.name, base + 1, items);
       if (body.length > WIRE_LIMITS.bodyChars) {
-        tooBig = true;
+        // The rest still go, and this one is not sealed again until it changes.
+        doc.refused = { reason: 'too-big', pend, ver: base };
         continue;
       }
       const name = await wireName(crypto, keys!, doc.name);
-      sealed.push({ doc, name, base: doc.base.ver, body, items, pend: copyItems(doc.pend) });
+      sealed.push({ doc, name, base, body, items, pend });
     }
     const batches: Sealed[][] = [];
     let batch: Sealed[] = [];
@@ -744,39 +880,57 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       );
       if (!answer) throw new Stop('offline');
       await checkEpoch(answer.epoch);
+      const sent = (name: string) => put.filter((candidate) => candidate.name === name)[0];
       for (const done of answer.done) {
-        const item = put.filter((candidate) => candidate.name === done.name)[0];
+        const item = sent(done.name);
         if (!item) continue;
         const doc = item.doc;
-        doc.base = { ver: done.ver, at: done.at, items: clampItems(item.items, done.at) };
+        doc.base = {
+          ver: done.ver,
+          at: done.at,
+          items: clampItems(item.items, done.at),
+          apply: true,
+        };
+        doc.refused = undefined;
         // Edits made while the push was out wait for the next one.
         for (const key of Object.keys(item.pend)) {
           if (itemAt(doc.pend, key) === item.pend[key]) delete doc.pend[key];
         }
         void saveBaseLater(doc);
         void savePendLater(doc);
-        touched.add(doc);
       }
       for (const name of answer.conflicts) {
-        const item = put.filter((candidate) => candidate.name === name)[0];
+        const item = sent(name);
         if (item) conflicted.push(item.doc);
       }
+      for (const name of answer.full) {
+        const item = sent(name);
+        // The account is at its limit: this one waits until it changes, and the rest still go.
+        if (item) item.doc.refused = { reason: 'full', pend: item.pend, ver: item.base };
+      }
     }
-    if (tooBig) throw new Stop('too-big');
     return conflicted;
   }
 
   /** Pushes what waits; a conflict pulls, merges and pushes again, three rounds at most. */
-  async function push(touched: Set<Doc>): Promise<void> {
+  async function push(): Promise<void> {
     for (let round = 0; ; round++) {
       const ready = pushable();
       if (ready.length === 0) return;
-      const conflicted = await pushOnce(ready, touched);
+      const conflicted = await pushOnce(ready);
       if (conflicted.length === 0) return;
       if (round === CONFLICT_ROUNDS) throw new Stop('busy');
-      const changed = await pull(conflicted.map((doc) => doc.name));
-      changed.forEach((doc) => touched.add(doc));
+      await pull(conflicted.map((doc) => doc.name));
     }
+  }
+
+  /** A refusal that concerns only what this screen sends: what other screens sent still comes. */
+  function sendingOnly(error: unknown): HeldPushes | undefined {
+    if (!(error instanceof Stop)) return undefined;
+    const reason = error.reason;
+    return reason === 'limit' || reason === 'busy' || reason === 'too-big'
+      ? { reason, retryAfterMs: error.retryAfterMs }
+      : undefined;
   }
 
   let wantPush = false;
@@ -790,8 +944,10 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   function request(push: boolean, pull: boolean): Promise<void> {
     if (!canRun()) return Promise.resolve();
-    wantPush = wantPush || push;
+    // While pushes wait, only pulls go.
+    wantPush = wantPush || (push && !holding);
     wantPull = wantPull || pull;
+    if (!wantPush && !wantPull) return running ?? Promise.resolve();
     if (!running) running = drain();
     return running;
   }
@@ -824,27 +980,62 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           if (timersOn.has('pull')) startPulls();
         }
       }
-      const touched = new Set<Doc>();
-      if (pushing) await push(touched);
-      if (pulling) (await pull(activeDocuments())).forEach((doc) => touched.add(doc));
-      // The first pull of a run makes the stores match all of it: a profile not in use then catches up.
-      if (pulling && !appliedOnce) {
+      // What an earlier sync took in and a store did not, the sync failing or the store refusing.
+      await applyActive(unapplied);
+      let held: HeldPushes | undefined;
+      if (pushing && !holding) {
+        try {
+          await push();
+          pushFailures = 0;
+        } catch (error) {
+          held = sendingOnly(error);
+          if (!held) throw error;
+        }
+      }
+      // Pushes held back stop only what this screen sends: what other screens sent still comes.
+      const pullNow = pulling || held !== undefined;
+      if (pullNow) await pull(activeDocuments());
+      if (pullNow && !appliedOnce) {
+        // The first pull of a launch makes the stores match all of it: a profile not in use then catches up.
         appliedOnce = true;
         await applyActive();
-      } else if (touched.size > 0) {
-        await applyActive(touched);
+      } else {
+        await applyActive(unapplied);
       }
       failures = 0;
       paused = undefined;
       lastSync = clock.local();
       cancel('retry');
       if (!timersOn.has('pull')) startPulls();
+      if (held) holdPushes(held);
     } catch (error) {
       await failed(error);
     } finally {
       syncing = false;
       updateStatus();
     }
+  }
+
+  /** Pushes wait, the regular pulls going on: as long as the service asks, or backing off. */
+  function holdPushes(held: HeldPushes): void {
+    pushFailures += 1;
+    holding = held.reason;
+    const delay =
+      held.reason === 'limit' && held.retryAfterMs
+        ? Math.max(held.retryAfterMs, BACKOFF_MS[0]!)
+        : BACKOFF_MS[Math.min(pushFailures, BACKOFF_MS.length) - 1]!;
+    after('hold', delay, () => {
+      holding = undefined;
+      updateStatus();
+      void request(true, false);
+    });
+  }
+
+  /** Pushes go again at once, except while the service asked for quiet. */
+  function releasePushes(): void {
+    if (holding === 'limit') return;
+    holding = undefined;
+    cancel('hold');
   }
 
   async function failed(error: unknown): Promise<void> {
@@ -922,18 +1113,24 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     else if (state.phase !== 'ready') next = { state: 'setup' };
     else if (syncing) next = { state: 'syncing' };
     else if (paused) next = { state: 'paused', reason: paused };
+    else if (holding) next = { state: 'paused', reason: holding };
     else {
       let newer = false;
+      let refused: Refusal | undefined;
       let waiting = false;
-      docs.forEach((doc) => {
+      for (const doc of Array.from(docs.values())) {
         if (doc.newer) newer = true;
-        else if (pendingCount(doc) > 0 && !profileRemoved(doc.name)) waiting = true;
-      });
+        else if (pendingCount(doc) === 0 || profileRemoved(doc.name)) continue;
+        else if (stillRefused(doc)) refused = refused ?? doc.refused!.reason;
+        else waiting = true;
+      }
       next = newer
         ? { state: 'paused', reason: 'update' }
-        : waiting
-          ? { state: 'waiting' }
-          : { state: 'idle' };
+        : refused
+          ? { state: 'paused', reason: refused }
+          : waiting
+            ? { state: 'waiting' }
+            : { state: 'idle' };
     }
     if (lastSync !== undefined) next.lastSync = lastSync;
     if (!sameStatus(status.get(), next)) status.set(next);
@@ -961,7 +1158,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     watches.forEach((watch) => watch.off?.());
     watches = [];
     watching = false;
-    (['push', 'watch', 'pull', 'first', 'retry'] as const).forEach(cancel);
+    holding = undefined;
+    (['push', 'watch', 'pull', 'first', 'retry', 'hold'] as const).forEach(cancel);
   }
 
   function scheduleFirstPull(): void {
@@ -995,6 +1193,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       docLoads.clear();
       paused = undefined;
       failures = 0;
+      pushFailures = 0;
       appliedOnce = false;
       serviceChecked = false;
       // Signed out, the stores go back to this screen's own clock.
@@ -1055,13 +1254,14 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
   async function finishJoin(): Promise<void> {
     const mode = state!.mode ?? 'bring';
-    const step = state!.step ?? 0;
+    // How far the join got, as saved: read at each step, so no step runs twice for one join.
+    const step = () => state!.step ?? 0;
     await loadParts(accountParts);
     await pull(ACCOUNT_DOCUMENTS);
     const accountIds = liveProfiles(docs.get('profiles')!.base.items);
     if (accountIds.indexOf(MAIN_PROFILE_ID) === -1) accountIds.push(MAIN_PROFILE_ID);
     const localIds = localProfileIds().filter(usableProfileId);
-    if (mode === 'bring' && step < JOIN_APPLIED) {
+    if (mode === 'bring' && step() < JOIN_APPLIED) {
       const all = accountIds.slice();
       localIds.forEach((id) => {
         if (all.indexOf(id) === -1) all.push(id);
@@ -1075,15 +1275,16 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     if (documents.length > 0) await pull(documents);
     const everything = await everyPart(localIds);
     const parts = await everyPart(kept);
-    if (step < JOIN_MARKED) {
+    if (step() < JOIN_MARKED) {
       await markTrakt(everything);
       await saveState({ ...state!, step: JOIN_MARKED });
     }
-    if (mode === 'use' && step < JOIN_ASIDE) {
+    // The copy is made once, before anything changes: never over the one this join already made.
+    if (mode === 'use' && step() < JOIN_ASIDE) {
       await writeAside(everything);
       await saveState({ ...state!, step: JOIN_ASIDE });
     }
-    if (step < JOIN_APPLIED) {
+    if (step() < JOIN_APPLIED) {
       if (mode === 'bring') {
         // The account's settings win where both have one; My List and Continue Watching keep their own times.
         await seed(parts, (doc, key, item) => {
@@ -1109,12 +1310,24 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     await request(true, false);
   }
 
-  /** A create or join interrupted at an earlier launch, carried on until it gets through. */
+  /**
+   * A create or join interrupted at an earlier launch, or a join the person
+   * started that could not reach the service, carried on until it gets through.
+   */
   let resuming: { task: () => Promise<void>; done?: () => void } | undefined;
 
   function resume(task: () => Promise<void>, done?: () => void): void {
     resuming = { task, done };
     void carryOn();
+  }
+
+  /** As resume(), after the first wait of the backoff. */
+  function resumeLater(task: () => Promise<void>, done?: () => void): void {
+    resuming = { task, done };
+    failures += 1;
+    after('resume', BACKOFF_MS[Math.min(failures, BACKOFF_MS.length) - 1]!, () => {
+      void carryOn();
+    });
   }
 
   let carrying: Promise<void> | undefined;
@@ -1156,21 +1369,56 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     }
   }
 
+  /** A create, confirm or join the person started, while it runs: a second call gets the same promise. */
+  interface Running<T> {
+    promise?: Promise<T>;
+  }
+  const creating: Running<string> = {};
+  const confirming: Running<void> = {};
+  const joining: Running<void> = {};
+
+  function once<T>(slot: Running<T>, task: () => Promise<T>): Promise<T> {
+    if (!slot.promise) {
+      const promise = task().then(
+        (value) => {
+          slot.promise = undefined;
+          return value;
+        },
+        (error: unknown) => {
+          slot.promise = undefined;
+          throw error;
+        },
+      );
+      slot.promise = promise;
+    }
+    return slot.promise;
+  }
+
   function flush(): Promise<void> {
     // A limit is the service asking for quiet: that wait is kept.
     if (paused !== 'limit') cancel('retry');
+    releasePushes();
     cancel('push');
     cancel('watch');
     return backingOff() ? Promise.resolve() : request(true, false);
   }
 
-  /** Waits for the start, and for a create or join being carried on, which the person now takes over. */
-  async function started(): Promise<void> {
+  /**
+   * Waits for the start, and for a create or join being carried on, which
+   * the person now takes over; then for a join the person started, unless
+   * this is that join, so that nothing runs alongside it.
+   */
+  async function started(joinToo = true): Promise<void> {
     if (!starting) throw new SyncSetupError('not-started');
-    await starting;
+    try {
+      await starting;
+    } catch {
+      throw new SyncSetupError('not-started');
+    }
     if (carrying) await carrying;
     resuming = undefined;
     cancel('resume');
+    if (joinToo && joining.promise) await joining.promise.catch(() => undefined);
   }
 
   return {
@@ -1182,7 +1430,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       active = profile;
       starting = (async () => {
         await expireAside(storage, clock.local());
-        state = await loadSyncState(storage);
+        // A read that failed is not "no account": the start fails, and nothing is watched or changed.
+        state = await loadSyncState(storage, timers);
         if (state) keys = await deriveAccountKeys(crypto, state.code);
         updateStatus();
         if (!state) return;
@@ -1218,6 +1467,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     syncNow() {
       if (resuming) return carryOn();
       cancel('retry');
+      releasePushes();
       cancel('push');
       cancel('watch');
       return request(true, true);
@@ -1231,42 +1481,64 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       return parts.some((part) => (part.ownData ? part.ownData() : false));
     },
 
-    async create() {
-      await started();
-      if (state && state.phase !== 'creating') throw new SyncSetupError('signed-in');
-      if (!state) {
-        const code = newAccountCode(crypto);
-        keys = await deriveAccountKeys(crypto, code);
-        await saveState({ v: 1, code, accountId: keys.accountId, phase: 'creating' });
-      }
-      if (state!.epoch === undefined) {
-        let answer;
-        try {
-          answer = readCreateAnswer(await send('/v1/account/create', signed()));
-        } catch (error) {
-          if (error instanceof Stop && (error.error === 'closed' || error.error === 'exists')) {
-            await forget();
-            throw new SyncSetupError(error.error);
-          }
-          throw new SyncSetupError('offline');
+    create(options = {}) {
+      return once(creating, async () => {
+        await started();
+        if (state && state.phase !== 'creating') throw new SyncSetupError('signed-in');
+        if (!state) {
+          const code = newAccountCode(crypto);
+          keys = await deriveAccountKeys(crypto, code);
+          const made: SyncState = { v: 1, code, accountId: keys.accountId, phase: 'creating' };
+          if (options.key !== undefined) made.key = options.key;
+          await saveState(made);
+        } else if (
+          state.epoch === undefined &&
+          options.key !== undefined &&
+          options.key !== state.key
+        ) {
+          await saveState({ ...state, key: options.key });
         }
-        if (!answer) throw new SyncSetupError('offline');
-        await saveState({ ...state!, epoch: answer.epoch });
-      }
-      return state!.code;
+        if (state!.epoch === undefined) {
+          const body: { account: string; auth: string; key?: string } = signed();
+          if (state!.key !== undefined) body.key = state!.key;
+          let answer;
+          try {
+            answer = readCreateAnswer(await send('/v1/account/create', body));
+          } catch (error) {
+            if (
+              error instanceof Stop &&
+              (error.error === 'closed' || error.error === 'exists' || error.error === 'key')
+            ) {
+              await forget();
+              throw new SyncSetupError(error.error);
+            }
+            throw new SyncSetupError('offline');
+          }
+          if (!answer) throw new SyncSetupError('offline');
+          // The account exists: its setup key is not kept.
+          const made: SyncState = { ...state!, epoch: answer.epoch };
+          delete made.key;
+          await saveState(made);
+        }
+        return state!.code;
+      });
     },
 
-    async confirmCreate() {
-      await started();
-      if (!state || state.phase !== 'creating' || state.epoch === undefined) {
-        throw new SyncSetupError(state && state.phase !== 'creating' ? 'signed-in' : 'not-started');
-      }
-      await saveState({ ...state, step: CREATE_CONFIRMED });
-      try {
-        await finishCreate();
-      } catch (error) {
-        throw setupError(error);
-      }
+    confirmCreate() {
+      return once(confirming, async () => {
+        await started();
+        if (!state || state.phase !== 'creating' || state.epoch === undefined) {
+          throw new SyncSetupError(
+            state && state.phase !== 'creating' ? 'signed-in' : 'not-started',
+          );
+        }
+        await saveState({ ...state, step: CREATE_CONFIRMED });
+        try {
+          await finishCreate();
+        } catch (error) {
+          throw setupError(error);
+        }
+      });
     },
 
     async checkCode(input) {
@@ -1290,25 +1562,38 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       }
     },
 
-    async join(input, mode) {
-      await started();
-      const code = readAccountCode(input);
-      if (!code) throw new SyncSetupError('invalid');
-      if (state && !(state.phase === 'joining' && state.code === code)) {
-        throw new SyncSetupError('signed-in');
-      }
-      if (!state) {
-        keys = await deriveAccountKeys(crypto, code);
-        await saveState({ v: 1, code, accountId: keys.accountId, phase: 'joining', mode, step: 0 });
-      }
-      try {
-        await finishJoin();
-      } catch (error) {
-        const problem = setupError(error);
-        // Nothing has changed on the screen yet unless the join got past its checks.
-        if (problem.problem !== 'offline') await forget();
-        throw problem;
-      }
+    join(input, mode) {
+      return once(joining, async () => {
+        await started(false);
+        const code = readAccountCode(input);
+        if (!code) throw new SyncSetupError('invalid');
+        // A join carried on with this code got there first.
+        if (state && state.phase === 'ready' && state.code === code) return;
+        if (state && !(state.phase === 'joining' && state.code === code)) {
+          throw new SyncSetupError('signed-in');
+        }
+        if (!state) {
+          keys = await deriveAccountKeys(crypto, code);
+          await saveState({
+            v: 1,
+            code,
+            accountId: keys.accountId,
+            phase: 'joining',
+            mode,
+            step: 0,
+          });
+        }
+        try {
+          await finishJoin();
+        } catch (error) {
+          const problem = setupError(error);
+          // Out of reach: it carries on by itself, as the screen says. Otherwise nothing has
+          // changed on the screen yet, unless the join got past its checks.
+          if (problem.problem === 'offline') resumeLater(finishJoin, options.onJoined);
+          else await forget();
+          throw problem;
+        }
+      });
     },
 
     code: () => state?.code,

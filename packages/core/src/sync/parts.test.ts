@@ -10,7 +10,7 @@ import { createProgressStore } from '../playback/progress';
 import { createTrackMemory } from '../playback/tracks';
 import { profileKeyPrefix } from '../profiles/profiles';
 import { profileKeyValueStore } from '../profiles/scoped';
-import { memoryKeyValueStore } from '../storage';
+import { type KeyValueStore, memoryKeyValueStore } from '../storage';
 import type { LiveItem } from './items';
 import type { PartChange } from './part';
 import {
@@ -459,5 +459,77 @@ describe('profileParts', () => {
     expect(again.library.get('tt1')?.addedAt).toBe(9);
     // Main's keys are untouched.
     expect(await kv.get('library')).toBeUndefined();
+  });
+});
+
+describe('every part', () => {
+  /** A store whose saves wait until `release`, as a slow IndexedDB's. */
+  function slowStorage() {
+    const storage = memoryKeyValueStore();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const slow: KeyValueStore = {
+      ...storage,
+      set: (key, value) => held.then(() => storage.set(key, value)),
+    };
+    return { storage: slow, release };
+  }
+
+  it('makes its whole change, trimming included, before adopt() returns', async () => {
+    const { storage, release } = slowStorage();
+    const stores = createProfileStores(storage);
+    const parts = profileParts('main', stores);
+    await Promise.all(parts.map((part) => part.load()));
+    const [library, watch, layout, tracks, offsets] = parts;
+
+    // My List keeps its newest thousand: the oldest added here is cut at once.
+    const titles: { [id: string]: LiveItem } = {};
+    for (let i = 0; i <= 1000; i++) {
+      titles[`tt${i}`] = { t: 5000 + i, v: { type: 'movie', name: `Title ${i}` } };
+    }
+    const saving = [library!.adopt(change(titles))];
+    const kept = library!.snapshot();
+    expect(kept.size).toBe(1000);
+    expect(kept.has('tt0')).toBe(false);
+
+    saving.push(
+      watch!.adopt(
+        change({
+          tt1: {
+            t: 7000,
+            v: { metaId: 'tt1', type: 'movie', position: 5, duration: 9, card: { name: 'One' } },
+          },
+        }),
+      ),
+    );
+    expect(watch!.snapshot().get('tt1')).toMatchObject({ t: 7000, v: { card: { name: 'One' } } });
+    saving.push(layout!.adopt(change({ 'home/hidden': { t: 1, v: ['h'] } })));
+    expect(layout!.snapshot().get('home/hidden')).toEqual({ v: ['h'] });
+    saving.push(tracks!.adopt(change({ 'track/tt1': { t: 1, v: { a: 'fr' } } })));
+    expect(tracks!.snapshot().get('track/tt1')).toEqual({ v: { a: 'fr' } });
+    saving.push(offsets!.adopt(change({ 'offset/k': { t: 1, v: 2 } })));
+    expect(offsets!.snapshot().get('offset/k')).toEqual({ v: 2 });
+
+    // Only the saves were waited for.
+    let saved = false;
+    void Promise.all(saving).then(() => (saved = true));
+    await Promise.resolve();
+    expect(saved).toBe(false);
+    release();
+    await Promise.all(saving);
+  });
+
+  it('and the collection too', async () => {
+    const collection = createAddonCollection({
+      storage: memoryKeyValueStore(),
+      fetchJson: () => Promise.reject(new Error('unused')),
+      defaults: DEFAULT_ADDONS,
+    });
+    await collection.load();
+    const part = collectionPart(collection);
+    const [demo] = collection.toStored();
+    const adopted = part.adopt(change({}, [`a/${demo!.installId}`]));
+    expect(part.snapshot().has(`a/${demo!.installId}`)).toBe(false);
+    await adopted;
   });
 });

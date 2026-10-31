@@ -455,6 +455,8 @@
     "youNotKids": "Switch to another profile to make this one a kids profile.",
     "save": "Save",
     "askAtLaunch": "Ask who's watching when BannerTV opens: {{value}}",
+    "hidden_one": "The account has 1 more profile. Screens show six, and deleting one here shows it.",
+    "hidden_other": "The account has {{count}} more profiles. Screens show six, and deleting one here shows the next.",
     "delete": "Delete profile",
     "deleteTitle": "Delete {{name}}?",
     "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt."
@@ -546,6 +548,12 @@
     "exists": "That code was taken just now. Try again for a new one.",
     "offline": "BannerTV can't reach its account service. Check the connection and try again.",
     "failed": "That didn't work. Try again.",
+    "keyTitle": "Setup key",
+    "keyHelp": "Type the setup key added in the account service's settings. Capitals count.",
+    "keyLabel": "Setup key",
+    "keyPlaceholder": "Letters and numbers",
+    "keyMissing": "Type the setup key first.",
+    "key": "That setup key isn't right.",
     "join": "Join with an account code",
     "creating": "Setting up your account",
     "codeTitle": "Your account code",
@@ -596,8 +604,9 @@
       "waiting": "Waiting to sync",
       "paused": {
         "offline": "Paused: BannerTV can't reach its account service. Changes wait on this screen.",
-        "limit": "Paused: the account had too many changes today. Syncing starts again later.",
-        "too-big": "Paused: the account is too big to sync.",
+        "limit": "Paused: the account had too many changes today. This screen's changes wait until later.",
+        "too-big": "Paused: some of this screen's changes are too big to send. Everything else still syncs.",
+        "full": "Paused: the account is full, so some of this screen's changes aren't saved in it. Everything else still syncs.",
         "update": "Paused: some of the account needs a newer BannerTV.",
         "busy": "Paused: other screens are changing the account. BannerTV tries again soon."
       }

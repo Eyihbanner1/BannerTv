@@ -93,7 +93,7 @@ export function createTrackMemory(options: { storage: KeyValueStore }): TrackMem
     rememberSubtitle: (metaId, language) => change(metaId, { subtitle: language }),
     choices: () => state.get(),
     adopt: (adoption) =>
-      state.update((current) => {
+      state.updateNow((current) => {
         const set = readChoices(adoption.set ?? []);
         const removing = new Set(adoption.remove ?? []);
         set.forEach((choice) => removing.add(choice.metaId));

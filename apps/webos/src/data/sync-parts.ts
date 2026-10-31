@@ -52,8 +52,31 @@ export interface ProfilesPartOptions {
   mainName: string;
   /** The account deleted a profile: it goes at the next launch, its data with it. */
   holdDeletion: (id: string) => void;
-  /** The account changed the kids setting of the profile in use. */
-  holdKids: (id: string, kids: KidsRating | null) => void;
+  /**
+   * Joining with Use took away the profile in use, which the account does
+   * not have: it goes at the next launch, its data kept.
+   */
+  holdAside: (id: string) => void;
+  /**
+   * The account changed the kids setting of the profile in use; undefined
+   * when it went back to the profile's own, and nothing waits any more.
+   */
+  holdKids: (id: string, kids: KidsRating | null | undefined) => void;
+  /** The kids setting waiting for the next launch for a profile, or undefined when none is. */
+  heldKids: (id: string) => KidsRating | null | undefined;
+  /** How many of the account's profiles the six-profile cut leaves off this screen. */
+  hidden: (count: number) => void;
+}
+
+function sameProfile(a: Profile, b: Profile): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.colour === b.colour &&
+    a.kids === b.kids &&
+    (a.pin === b.pin ||
+      (!!a.pin && !!b.pin && a.pin.salt === b.pin.salt && a.pin.hash === b.pin.hash))
+  );
 }
 
 /**
@@ -64,9 +87,15 @@ export interface ProfilesPartOptions {
  *
  * The account's changes show at once, except two to the profile in use: its
  * deletion and its kids setting, which wait for the next launch, since what
- * a kids profile may see is fixed when it opens. A profile deleted here
- * leaves the list now and its data goes at the next launch, through the
- * same guarded deletion as Settings > Profiles.
+ * a kids profile may see is fixed when it opens. A kids setting waiting is
+ * what the part says the profile has, so the account going back to the
+ * profile's own setting reaches it, and nothing is left waiting. A profile
+ * deleted here leaves the list now and its data goes at the next launch,
+ * through the same guarded deletion as Settings > Profiles. Joining with
+ * Use takes this screen's own profiles off the list and keeps their data.
+ *
+ * At most six show: Main, the one in use, then the oldest in the account
+ * (ADR 0006, decision 7), so every screen leaves off the same ones.
  */
 export function profilesPart(options: ProfilesPartOptions): SyncPart {
   const { profiles, activeId, mainName } = options;
@@ -83,12 +112,14 @@ export function profilesPart(options: ProfilesPartOptions): SyncPart {
       if (state !== seen) {
         seen = state;
         items = new Map();
+        const active = activeId();
         for (const profile of state.profiles) {
           const id = profile.id;
+          const held = id === active ? options.heldKids(id) : undefined;
           items.set(id, id === MAIN_PROFILE_ID ? { v: 1, t: 0 } : { v: 1 });
           items.set(`${id}/name`, { v: profile.name });
           items.set(`${id}/colour`, { v: profile.colour });
-          items.set(`${id}/kids`, { v: profile.kids ?? null });
+          items.set(`${id}/kids`, { v: held !== undefined ? held : (profile.kids ?? null) });
           items.set(`${id}/pin`, {
             v: profile.pin ? { salt: profile.pin.salt, hash: profile.pin.hash } : null,
           });
@@ -102,6 +133,15 @@ export function profilesPart(options: ProfilesPartOptions): SyncPart {
       const active = activeId();
       let list: Profile[] = state.profiles.map((profile) => ({ ...profile }));
       const find = (id: string) => list.filter((profile) => profile.id === id)[0];
+      /** The profile in use keeps its kids setting until the next launch: it waits instead. */
+      const holdKids = (profile: Profile, kids: KidsRating | null) => {
+        const own = profile.kids ?? null;
+        const held = options.heldKids(profile.id);
+        if (kids === own ? held === undefined : held === kids) return;
+        options.holdKids(profile.id, kids === own ? undefined : kids);
+        // The snapshot says what waits, so it is read again.
+        seen = undefined;
+      };
 
       // New profiles go after this screen's, the oldest first.
       const arrived: Array<[string, LiveItem]> = [];
@@ -133,7 +173,7 @@ export function profilesPart(options: ProfilesPartOptions): SyncPart {
             const kids = readKids(value);
             if (kids === undefined || profile.id === MAIN_PROFILE_ID) break;
             if (profile.id === active) {
-              if ((profile.kids ?? null) !== kids) options.holdKids(profile.id, kids);
+              holdKids(profile, kids);
               break;
             }
             if (kids === null) delete profile.kids;
@@ -157,25 +197,42 @@ export function profilesPart(options: ProfilesPartOptions): SyncPart {
           const field = key.slice(slash + 1);
           if (profile && field === 'pin') delete profile.pin;
           if (profile && field === 'kids' && profile.id !== MAIN_PROFILE_ID) {
-            if (profile.id === active) {
-              if (profile.kids !== undefined) options.holdKids(profile.id, null);
-            } else delete profile.kids;
+            if (profile.id === active) holdKids(profile, null);
+            else delete profile.kids;
           }
           continue;
         }
         if (key === MAIN_PROFILE_ID || !find(key)) continue;
-        options.holdDeletion(key);
+        if (change.reset) {
+          // Joining with Use: this screen's own profile is set aside with the rest of what it
+          // had, so its data and Trakt sign-in stay. Deleting what was set aside once the
+          // 30-day copy runs out comes with PR B2.
+          if (key === active) options.holdAside(key);
+        } else options.holdDeletion(key);
         if (key !== active) list = list.filter((profile) => profile.id !== key);
       }
 
       // A profile that came without a name is left until it has one.
       list = list.filter((profile) => profile.name !== '');
-      // At most six: Main, the one in use, then the rest in order.
-      while (list.length > MAX_PROFILES) {
-        let cut = list.length - 1;
-        while (cut > 0 && (list[cut]!.id === MAIN_PROFILE_ID || list[cut]!.id === active)) cut--;
-        list.splice(cut, 1);
+      // At most six: Main, the one in use, then the oldest in the account (ADR 0006, decision
+      // 7). One the account does not have yet counts as the newest.
+      const others = list.filter(
+        (profile) => profile.id !== MAIN_PROFILE_ID && profile.id !== active,
+      );
+      const room = MAX_PROFILES - (active !== MAIN_PROFILE_ID && find(active ?? '') ? 2 : 1);
+      if (others.length > room) {
+        const time = (id: string) => {
+          const item = change.account ? change.account(id) : change.set.get(id);
+          return item ? item.t : Number.MAX_VALUE;
+        };
+        const kept = others
+          .sort((a, b) => time(a.id) - time(b.id) || (a.id < b.id ? -1 : 1))
+          .slice(0, room);
+        list = list.filter(
+          (profile) => others.indexOf(profile) === -1 || kept.indexOf(profile) !== -1,
+        );
       }
+      options.hidden(Math.max(0, others.length - room));
       const main = list.filter((profile) => profile.id === MAIN_PROFILE_ID)[0];
       if (main) {
         // Main set BannerTV up and is first, and never a kids profile.
@@ -184,13 +241,15 @@ export function profilesPart(options: ProfilesPartOptions): SyncPart {
       } else {
         list.unshift({ id: MAIN_PROFILE_ID, name: mainName, colour: 0 });
       }
-      profiles.set({
-        ...state,
-        profiles: list,
-        lastId: list.some((profile) => profile.id === state.lastId)
-          ? state.lastId
-          : MAIN_PROFILE_ID,
-      });
+      const lastId = list.some((profile) => profile.id === state.lastId)
+        ? state.lastId
+        : MAIN_PROFILE_ID;
+      // Each pull brings what was left off again: nothing is written when nothing changed.
+      const same =
+        lastId === state.lastId &&
+        list.length === state.profiles.length &&
+        list.every((profile, i) => sameProfile(profile, state.profiles[i]!));
+      if (!same) profiles.set({ ...state, profiles: list, lastId });
       return Promise.resolve();
     },
     ownData() {

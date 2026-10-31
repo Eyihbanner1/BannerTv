@@ -1,15 +1,17 @@
 import type { KeyValueStore } from '../storage';
+import type { Timers } from '../timers';
 import { readAccountCode } from './code';
 import { type Item, type Items, newItems, readItem } from './items';
 
 /**
  * What the engine keeps in the device-wide key-value store, all under
  * `sync/` so that leaving the account forgets exactly this (ADR 0006,
- * "On screen"):
+ * "On the screen"):
  *
- * - `sync/state`: the account code, its id and epoch, and how far a create
- *   or join got;
- * - `sync/base/<document>`: the account's version of a document as last seen;
+ * - `sync/state`: the account code, its id and epoch, how far a create or
+ *   join got, and the setup key while a create waits for the service;
+ * - `sync/base/<document>`: the account's version of a document as last
+ *   seen, marked until every store has taken it;
  * - `sync/pend/<document>`: edits waiting for a push.
  *
  * `sync-aside`, the copy a join with Use keeps for 30 days, is outside
@@ -20,6 +22,9 @@ const STATE_KEY = 'sync/state';
 export const ASIDE_KEY = 'sync-aside';
 export const ASIDE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** A read that failed is tried again this many times, this long apart, before it counts as failed. */
+const READ_RETRIES = 3;
+const READ_RETRY_MS = 250;
 
 export type SyncPhase = 'creating' | 'joining' | 'ready' | 'gone';
 export type JoinMode = 'bring' | 'use';
@@ -36,6 +41,11 @@ export interface SyncState {
   mode?: JoinMode;
   /** How far a create or join got, so each step runs once when it carries on. */
   step?: number;
+  /**
+   * The service's setup key, while a create waits for the service: a create
+   * carried on sends it again. Dropped once the account exists. Never logged.
+   */
+  key?: string;
 }
 
 const PHASES: readonly string[] = ['creating', 'joining', 'ready', 'gone'];
@@ -63,15 +73,37 @@ export function readSyncState(value: unknown): SyncState | undefined {
   if (isText(value.epoch)) state.epoch = value.epoch;
   if (value.mode === 'bring' || value.mode === 'use') state.mode = value.mode;
   if (isWhole(value.step)) state.step = value.step;
+  if (state.phase === 'creating' && state.epoch === undefined && typeof value.key === 'string') {
+    state.key = value.key;
+  }
   return state;
 }
 
-export async function loadSyncState(storage: KeyValueStore): Promise<SyncState | undefined> {
-  try {
-    return readSyncState(await storage.get(STATE_KEY));
-  } catch {
-    return undefined;
+/**
+ * Reads one of the engine's keys, telling a failed read from a missing key
+ * (ADR 0006: a failed read must never look like empty data). A failed read
+ * is tried again a few times, `timers` apart, and then rejects.
+ */
+async function readKey(storage: KeyValueStore, key: string, timers?: Timers): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await storage.get(key);
+    } catch (error) {
+      if (attempt === READ_RETRIES) throw error;
+      if (timers) await new Promise<void>((resolve) => timers.after(READ_RETRY_MS, resolve));
+    }
   }
+}
+
+/**
+ * The saved state: undefined when there is none (no account here), or when
+ * what was saved is not a state. Rejects when it cannot be read.
+ */
+export async function loadSyncState(
+  storage: KeyValueStore,
+  timers?: Timers,
+): Promise<SyncState | undefined> {
+  return readSyncState(await readKey(storage, STATE_KEY, timers));
 }
 
 /** Saves the state. Unlike the others this one must land, so a failure rejects. */
@@ -85,6 +117,8 @@ export interface DocumentBase {
   /** Server milliseconds when that version was written. */
   at: number;
   items: Items;
+  /** Set when it changed and not every store has taken it yet: the next sync makes them match. */
+  apply?: true;
 }
 
 export const emptyBase = (): DocumentBase => ({ ver: 0, at: 0, items: newItems() });
@@ -111,14 +145,17 @@ function readPairs(value: unknown): Items {
 const baseKey = (document: string) => `${SYNC_PREFIX}base/${document}`;
 const pendKey = (document: string) => `${SYNC_PREFIX}pend/${document}`;
 
-export async function loadBase(storage: KeyValueStore, document: string): Promise<DocumentBase> {
-  try {
-    const saved = await storage.get(baseKey(document));
-    if (!isObject(saved) || !isWhole(saved.ver) || !isWhole(saved.at)) return emptyBase();
-    return { ver: saved.ver, at: saved.at, items: readPairs(saved.items) };
-  } catch {
-    return emptyBase();
-  }
+/** The saved base, empty when there is none or it is not one. Rejects when it cannot be read. */
+export async function loadBase(
+  storage: KeyValueStore,
+  document: string,
+  timers?: Timers,
+): Promise<DocumentBase> {
+  const saved = await readKey(storage, baseKey(document), timers);
+  if (!isObject(saved) || !isWhole(saved.ver) || !isWhole(saved.at)) return emptyBase();
+  const base: DocumentBase = { ver: saved.ver, at: saved.at, items: readPairs(saved.items) };
+  if (saved.apply === true) base.apply = true;
+  return base;
 }
 
 export function saveBase(
@@ -126,19 +163,22 @@ export function saveBase(
   document: string,
   base: DocumentBase,
 ): Promise<void> {
-  return storage.set(baseKey(document), {
+  const saved: { ver: number; at: number; items: Array<[string, Item]>; apply?: true } = {
     ver: base.ver,
     at: base.at,
     items: writeItems(base.items),
-  });
+  };
+  if (base.apply) saved.apply = true;
+  return storage.set(baseKey(document), saved);
 }
 
-export async function loadPending(storage: KeyValueStore, document: string): Promise<Items> {
-  try {
-    return readPairs(await storage.get(pendKey(document)));
-  } catch {
-    return newItems();
-  }
+/** The saved edits, none when there are none. Rejects when they cannot be read. */
+export async function loadPending(
+  storage: KeyValueStore,
+  document: string,
+  timers?: Timers,
+): Promise<Items> {
+  return readPairs(await readKey(storage, pendKey(document), timers));
 }
 
 export function savePending(storage: KeyValueStore, document: string, items: Items): Promise<void> {

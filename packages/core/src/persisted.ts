@@ -17,6 +17,12 @@ export interface Persisted<T> {
    * waits for the read and starts it if needed.
    */
   update(change: (value: T) => T): Promise<void>;
+  /**
+   * As update(), except that once the saved value has been read the change
+   * is made before updateNow() returns, and only the save is waited for: the
+   * sync engine's parts need this (SyncPart.adopt).
+   */
+  updateNow(change: (value: T) => T): Promise<void>;
   /** Told of every change, and once when the saved value has been read, even if it is `initial`. */
   subscribe(listener: Listener): () => void;
 }
@@ -72,6 +78,22 @@ export function createPersisted<T>(options: PersistedOptions<T>): Persisted<T> {
     return loading;
   }
 
+  function change(next: (value: T) => T): Promise<void> {
+    const before = state.get();
+    let after: T;
+    try {
+      after = next(before);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    state.set(after);
+    if (state.get() === before) return Promise.resolve();
+    dirty = true;
+    if (saving) return Promise.resolve();
+    saving = true;
+    return saveLatest();
+  }
+
   async function saveLatest() {
     try {
       while (dirty) {
@@ -91,15 +113,13 @@ export function createPersisted<T>(options: PersistedOptions<T>): Persisted<T> {
     load,
     loaded: () => isLoaded,
     get: state.get,
-    async update(change) {
+    async update(next) {
       await load();
-      const before = state.get();
-      state.set(change(before));
-      if (state.get() === before) return;
-      dirty = true;
-      if (saving) return;
-      saving = true;
-      await saveLatest();
+      await change(next);
+    },
+    updateNow(next) {
+      if (isLoaded) return change(next);
+      return load().then(() => change(next));
     },
     subscribe(listener) {
       listeners.add(listener);
