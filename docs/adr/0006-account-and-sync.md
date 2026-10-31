@@ -1,0 +1,158 @@
+# ADR 0006: The BannerTV account and sync
+
+- Status: accepted, built for Phase 5 (PR B) on the branch `claude/project-thread-c4lj9d-sync`
+- Date: 31 October 2026
+
+## Context
+
+Phase 5's second step is a free BannerTV account, so that a person's profiles, addons, My List, Continue Watching and settings follow them between the LG app (webOS 5 and newer, Chromium 68, run from `file://`), the Android TV and phone app (the same build in a WebView at `https://appassets.androidplatform.net/assets/web/`, ADR 0005) and, later, phone apps built on `packages/core`.
+
+Eyitayo decided on 30 October 2026:
+
+- **Sign-in is by account code, with no email.** The first screen creates the account and shows the code. Another screen joins by typing the code, or by showing a short code that a signed-in screen approves. Data is encrypted on the screen with keys derived from the code; the server holds a random account number and ciphertext it cannot read. Losing every screen and the code loses the account.
+- **The server** is a Cloudflare Worker, `sync`, with a small D1 database, no secrets and no logs, on the free plan first (100,000 Worker requests a day shared with `api` and `pair`, 100,000 D1 rows written a day).
+- **What follows the account:** profiles (names, colours, kids ratings, PINs); addons, their order and settings, debrid keys included; My List; Continue Watching and resume points; audio and subtitle choices per title; subtitle style and timing; Home row order and hidden rows; Sports settings; language and stream preferences. **What stays on each screen:** Trakt sign-in, device tuning, link testing, connection speed, caches and recent searches.
+- **Conflicts:** the latest change wins, item by item. The first sign-in on a screen that already has profiles asks whether to bring them into the account or use the account's.
+- The app works fully without an account, and the account screens are hidden where the service is not set up or cannot work. Nobody but Eyitayo uses the account until the ICO fee, a privacy notice, and delete and export in the app are in place.
+
+The code shaped the design in five ways:
+
+- **Every store reads once and saves its whole value under one key** (`packages/core/src/persisted.ts`, `library/library.ts`, `playback/progress.ts`, `playback/continue.ts`, `addons/collection.ts`). Profiles and preferences are in localStorage, everything else in IndexedDB's `kv` store, with `p/<id>/` before every key of a profile other than Main.
+- **A failed read looks like empty data.** `createPersisted` turns a failed read into its initial value, IndexedDB falls back to memory (`apps/webos/src/platform/idb.ts:79-85`), and a failed localStorage read gives one Main with default preferences. Anything that reads a missing item as a deletion would let one bad launch wipe the account.
+- **Stores rewrite what nobody changed:** preferences at every profile choice, the profiles blob at every picker choice, the addon list at the daily manifest refresh, Continue Watching cards whenever a screen fills one in.
+- **Nothing marks data that came from Trakt.** Watchlist titles become ordinary My List items and Trakt's paused videos ordinary progress.
+- **TV clocks are wrong before the network sets them, and jump.** Continue Watching is ordered by time.
+
+Before this ADR, three designs (lean, security first, data integrity first) were written, scored by three reviewers and attacked by three more. This ADR keeps the lean design's shape and the others' crypto and clock rules, and leaves out machinery whose own attack findings outweighed what it protected (a persisted "view" of every store diffed at launch, sharded documents, an id map between screen and account).
+
+## Decision
+
+1. **Documents of items.** An account holds a few documents, each a JSON map from an item key to `{t, v}` (a time and a value) or `{t, x: 1}` (a removal). The account-wide documents are `profiles` and `addons`; each profile has `p/<id>/settings`, `p/<id>/list` (My List) and `p/<id>/watch` (Continue Watching and resume points). A document is encrypted whole on the screen and stored whole by the Worker with a version number; the Worker replaces it only when the writer names the version it started from (compare and swap). There is no operation log and no CRDT library.
+2. **The merge.** Per key the newer `t` wins; on equal `t` a removal wins, then the larger canonical JSON. In `watch`, `watched` is true if either side had it. A profile's removal is final. After a merge each document is tidied the same way on every screen: caps by newest first, removals older than 400 days dropped (never in `profiles`), a second addon with the same address dropped. The merge is commutative, associative and idempotent, so screens agree whatever order they sync in.
+3. **Edits are what changed in this run, never what is missing.** Each store is watched from the moment its saved value has loaded: the engine keeps a snapshot of it as items, and every later change of the store is compared with the snapshot. What is new or different is an edit; what went away is a removal. A store whose read failed starts from its initial value, and that value is the snapshot, so a bad launch removes nothing. Changes the engine makes itself (applying the account) move the snapshot without making edits. Values that only carry along (a manifest, artwork, a card's description) are not compared, so the daily manifest refresh and artwork updates are not edits. Edits wait in `sync/pend` until a push carries them.
+4. **What is never sent.** Items Trakt brought in are marked `from: 'trakt'` (set where `mergeRemote` adds watchlist titles and where Trakt's paused and finished videos become progress; dropped by `library.add` and `progress.record`, because the person then did it in BannerTV). Marked items are never edits and never uploaded, and applying the account removes or replaces them only with a newer account item. For data saved before this build, creating or joining treats a My List item or progress entry whose time is a whole second as Trakt's: Trakt's times always are, BannerTV's about once in a thousand. Continue Watching cards a screen filled in from an addon (`filled`) are not edits either. Trakt sign-in, `traktWatched`, the library's Trakt outbox, the PIN tries, the response cache, link testing, the bandwidth estimate, which addons played here, Sports' evidence and kick-offs, recent searches, tuning and the welcome flag never sync.
+5. **One clock for the account.** Every answer from the Worker carries its time. A screen keeps `skew` (server time minus its own, from the latest answer, half the round trip added) in localStorage and stamps edits with `Date.now() + skew`, so screens with wrong clocks still agree. A value with no time of its own (a setting, an addon, a profile's name) is stamped at least one millisecond after the time it replaces, so a change made just after a remote one still wins. When merging, any time more than a minute after the server stored the document becomes that moment, so one screen with a clock in the future cannot pin its titles to the top everywhere. The progress, Continue Watching and library stores take the account clock as their `now` while the screen is signed in.
+6. **Applying the account.** After a pull the engine merges, then makes each store match the merged document: present items are written, removed items deleted, and items the account does not know are left as they are (they may be Trakt's, or from an older build). Only the stores that exist are updated: the account-wide ones and the active profile's, through a new `adopt` method on each store, so screens update through their existing subscriptions. A profile not in use catches up when it is next chosen, which always reloads the app (`apps/webos/src/data/profiles.ts:156-159`) and pulls its documents. Two changes wait for the next launch rather than changing a running app: the profile in use being deleted elsewhere (its pushes stop at once, and its data is deleted once it is no longer in use), and its kids setting or rating changing.
+7. **Profile ids are the account's.** A profile keeps its id on every screen; Main is `main` everywhere. Joining with Bring keeps this screen's ids (six random characters, now from `crypto.getRandomValues`), so nothing moves between storage keys. A screen never shows more than six profiles: Main, then the oldest five.
+8. **The account code and its keys.** The code is 20 symbols from the pair relay's alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (`services/pair/src/rules.ts:12`), about 99 bits, shown in five groups of four. Every key comes from it through HKDF-SHA256: the account id (the "random account number"), an auth key whose SHA-256 the server keeps, an AES-256-GCM data key and an HMAC key for document names. At 99 bits no slow key derivation is needed, which also keeps a pure-JavaScript fallback possible. Each screen keeps the code in IndexedDB, as it already keeps Trakt sign-ins and debrid keys: neither platform offers anything safer to a web page.
+9. **What the server can learn.** Bodies are AES-256-GCM with a fresh 96-bit IV. The authenticated data binds the account id, the document's name and the version it is written as, so a swapped or replayed body will not open, and a screen refuses a version lower than one it has already seen. Document names on the server are keyed HMACs, so they name neither profiles nor what a document holds. Plaintext is padded with spaces to a multiple of 1 KB (8 KB above 64 KB). The server sees how many documents there are, their padded sizes and when they change.
+10. **The Worker.** `services/sync`, deployed as `sync` beside `api` and `pair`, in the same style: plain TypeScript with no framework and nothing imported from the workspace, tests in Vitest against an in-memory D1 stand-in, `[observability]` off, never a `console` call, and simple CORS requests only (GET, or POST with a `text/plain` JSON body and no credentials) answered with `Access-Control-Allow-Origin: *`. One D1 database with two tables, `accounts` and `docs`; the Worker creates them if they are missing. A new account gets a random epoch, returned in every answer: a screen that sees a different epoch knows the account was deleted and made again, and stops. Limits: `MAX_ACCOUNTS` (a `wrangler.toml` variable, `"1"` until the legal steps are done, so only Eyitayo's account can exist; deleting it frees the place), and per account 120 documents, 10 MB and 2,000 document writes a day. `GET /v1/status` also says how often screens should pull (`pullMinutes`, 30), so every screen can be slowed down without a release.
+11. **When sync runs.** Pulls: two seconds after a profile is chosen, every `pullMinutes` while the app is on screen, when it comes back on screen after two minutes or more, and on Sync now. Pushes: three seconds after the last edit, 15 seconds after the last progress save (playback saves every 10 seconds, so this follows a pause or a stop), and everything pending when the app is hidden. A compare-and-swap conflict pulls, merges and pushes again, three rounds at most; failures back off for 30 seconds, then 2, 10 and 30 minutes. That is about 25 requests and 25 rows written per screen on a day of use. Only the active profile's documents and the two account-wide ones are pulled; another profile's are pulled when it is chosen.
+12. **Screens.** Settings has **BannerTV account**, on Main only, after Home rows. Kids profiles and other profiles never see it.
+    - Signed out: **Create an account**, and **Join with an account code**.
+    - Create asks for Main's PIN when Main has one, shows the code with "Write this down: it is the only way to add another screen, and nobody can recover it", and asks for its last four characters back so the person has read it. Everything on the screen is then sent.
+    - Join takes the code on the on-screen keyboard (ignoring case, spaces and dashes), checks it with the Worker, and, when this screen has data of its own (more than one profile, a renamed Main or a Main with a PIN, My List or Continue Watching items of its own, or addons other than the defaults), asks once: **Bring this screen's profiles into the account** or **Use the account's profiles**. Bring merges: Main joins Main, other profiles are added, the account's settings win where both have one, and My List and Continue Watching keep their own times; it is refused when the profiles would pass six. Use keeps a copy of this screen's data in `sync-aside` for 30 days, then makes the screen match the account. The app reloads once the join is done.
+    - Signed in: a status line ("In sync 2 minutes ago", "Waiting to sync", "Paused: …"), **Sync now**, **Show account code** (Main's PIN first), **Leave this account on this screen** (forgets the account and keeps everything on the screen), and **Delete the account** (Main's PIN first; removes it from the server, then leaves).
+    - A create or join interrupted at any point carries on at the next launch.
+13. **Hidden unless it can work.** The section shows on a signed-in screen, or where `SYNC_SERVICE` is set, the Web Crypto self-test passes (known answers for SHA-256, HMAC, HKDF and AES-GCM), IndexedDB is not running from memory, and `GET /v1/status` answered within the last day. Diagnostics gains two rows, Secure context and Web Crypto, so an LG run shows what its engine offers. Without an account none of this runs: no hook records anything, the stores keep `Date.now`, and no request is made unless Settings is opened.
+14. **Not in this PR (PR B2, before anyone else uses the account):** joining by a short code that a signed-in screen approves (an ECDH P-256 exchange with a check number, so the relay never sees the account code), the export download, restoring the set-aside copy, deleting accounts unused for 400 days, the privacy notice, and raising `MAX_ACCOUNTS`. A pure-JavaScript crypto fallback comes only if an LG engine turns out to lack Web Crypto.
+
+## Protocol (version 1)
+
+### Codes and keys
+
+| Thing | Form |
+| --- | --- |
+| Account code | 20 symbols from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, drawn by rejection sampling of random bytes below 248. Shown as `K7QM 3XTP W9RD HE4A 6BNC`. |
+| Key derivation | HKDF-SHA256, input the UTF-8 of the 20 symbols, salt the UTF-8 of `bannertv account v1` |
+| Account id | info `id`, 16 bytes, base64url without padding (22 characters) |
+| Auth key | info `auth`, 32 bytes, base64url (43 characters). The server keeps base64url(SHA-256(UTF-8 of those 43 characters)). |
+| Data key | info `data`, 32 bytes, an AES-GCM key |
+| Name key | info `name`, 32 bytes, an HMAC-SHA256 key |
+| Name on the server | base64url of the first 16 bytes of HMAC-SHA256(name key, UTF-8 of `bannertv/doc/<document>`) |
+| Epoch | 16 random bytes, base64url, new at each create |
+
+### Sealed documents
+
+```text
+plaintext = UTF-8 of {"s":1,"items":{…}} with keys sorted, padded with spaces to a multiple of
+            1,024 bytes (8,192 above 65,536)
+iv        = 12 random bytes
+aad       = UTF-8 of "bannertv/1|" + accountId + "|" + document + "|" + version
+body      = "1." + base64url(iv) + "." + base64url(ciphertext and 16-byte tag)
+```
+
+`version` is the version the body is written as, the base plus one. A screen that reads an `s` larger than it knows neither applies nor pushes that document.
+
+### Documents and items
+
+Profile ids are the account's. Times are account-clock milliseconds.
+
+| Document | Key | Value | Time |
+| --- | --- | --- | --- |
+| `profiles` | `<id>` | `1` (exists) | creation; `main` is `{t: 0, v: 1}` and is never removed |
+| | `<id>/name`, `<id>/colour`, `<id>/kids`, `<id>/pin` | as `bannertv.profiles` keeps them (`kids` and `pin` may be null) | the change |
+| `addons` | `a/<installId>` | `{u: transportUrl, o: official, m: manifest}`; `m` rides along | the change |
+| | `order` | installId[]; live addons missing from it go last, by time | the change |
+| | `s/<manifestId>` | Show in Sports, `"yes"` or `"no"`; `auto` is a removal | the change |
+| `p/<id>/settings` | `pref/streamChoice`, `pref/allStreamsOrder`, `pref/audioLanguage`, `pref/subtitleLanguage`, `pref/tmdb`, `style/size`, `style/colour`, `style/background`, `style/position` | as `data/preferences.ts` | the change |
+| | `home/order`, `home/hidden` | row ids, 300 at most | the change |
+| | `track/<metaId>` | `{a?, s?}` audio and subtitle language | the change; 300 at most |
+| | `offset/<fileKey>` | seconds; a reset to 0 is a removal | the change; 300 at most |
+| `p/<id>/list` | `<titleId>` | the saved tile: type, name, artwork, year, rating, genres (only type and time are compared) | `addedAt`; 1,000 at most |
+| `p/<id>/watch` | `<videoId>` | progress (`metaId`, type, position, duration, watched, `continueRow`) and the card without its description past 300 characters (the card is not compared) | `updatedAt`; 500 at most |
+
+`probing` (link testing) stays on each screen.
+
+### HTTP
+
+Base address `https://sync.bannertv.workers.dev`. Every body is JSON, every answer carries `now` (server milliseconds) and `Access-Control-Allow-Origin: *`, `OPTIONS` answers 204, errors are `{"error": code, "now"}` and never echo what was sent, and a D1 failure is 503 `unavailable`. An unknown account and a wrong auth key get the same 401.
+
+| Route | Request | Answer |
+| --- | --- | --- |
+| `GET /v1/status` | | `{ok: true, v: 1, now, create: boolean, pullMinutes}` |
+| `POST /v1/account/create` | `{account, auth}` | 201 `{now, epoch}`; 200 with the same body when the account exists with this auth (a create that resumed); 403 `closed`, 409 `exists` |
+| `POST /v1/pull` | `{account, auth, epoch?, have: {name: ver}, want: [name]}` | `{now, epoch, vers: {name: ver}, docs: {name: {ver, at, body}}, more}`: bodies of wanted names whose version differs from `have`, up to 1 MB, `more` when cut short; 401, 409 `epoch` |
+| `POST /v1/push` | `{account, auth, epoch, put: [{name, base, body}]}` | `{now, epoch, done: [{name, ver, at}], conflicts: [name]}`; each document commits or conflicts on its own; 401, 409 `epoch`, 413 `too-big`, 429 `limit` with `retryAfter` |
+| `POST /v1/account/delete` | `{account, auth}` | `{now}`; 401 |
+
+Limits: 12 documents per push, 64 names per pull, 1.1 MB per request, a body at most 1,000,000 characters.
+
+### D1 schema
+
+```sql
+CREATE TABLE IF NOT EXISTS accounts (
+  id      TEXT PRIMARY KEY,   -- account id
+  auth    TEXT NOT NULL,      -- base64url SHA-256 of the auth key
+  epoch   TEXT NOT NULL,
+  created INTEGER NOT NULL,   -- UTC day number, coarse on purpose
+  seen    INTEGER NOT NULL,   -- UTC day of the last pull or push
+  day     INTEGER NOT NULL,   -- the UTC day `writes` counts
+  writes  INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS docs (
+  account TEXT NOT NULL,
+  name    TEXT NOT NULL,
+  ver     INTEGER NOT NULL,
+  at      INTEGER NOT NULL,   -- server ms when this version was written
+  body    TEXT NOT NULL,
+  PRIMARY KEY (account, name)
+) WITHOUT ROWID;
+```
+
+A new document is `INSERT … ON CONFLICT DO NOTHING` at version 1; a change is `UPDATE docs SET ver = ver + 1, at = ?, body = ? WHERE account = ? AND name = ? AND ver = ?`, and no row changed means a conflict.
+
+### On the screen
+
+| Where | What |
+| --- | --- |
+| kv `sync/state` | `{v: 1, code, accountId, epoch, phase: "creating" \| "joining" \| "ready" \| "gone", mode?: "bring" \| "use", step?}` |
+| kv `sync/base/<document>` | `{ver, at, items}`: the last version pulled or pushed, decrypted |
+| kv `sync/pend/<document>` | `{key: item}`: edits not yet pushed |
+| kv `sync-aside` | the copy kept by Use, with its expiry; outside `sync/`, so Leave keeps it |
+| localStorage `bannertv.syncOn` | `"1"` while signed in, read before the first paint |
+| localStorage `bannertv.syncClock` | the skew |
+| localStorage `bannertv.syncStatus` | the last `/v1/status` answer and when it came |
+
+## Consequences
+
+- Without an account nothing changes: no hook records anything, the stores keep their own clocks, and no request is made unless Settings is opened.
+- With an account, everything listed above follows the person between the LG and Android. Continue Watching agrees within a pull of a pause, and at the next launch or return to the app at the latest. Remote changes show in a running app, except the two that wait for the next launch.
+- Trakt history saved before this build stays on the screen that has it, together with about one in a thousand of the person's own items; anything added or watched from now on follows the account. Trakt still carries a Trakt-signed-in profile's history between screens that are signed in to Trakt.
+- The same title saved under two ids (`tt…` on one screen, `tmdb:…` on another) shows twice: only Trakt's merge knows a title's other ids.
+- An edit made on a build without this engine, or in the moment before the TV was switched off, does not travel; the account's value replaces it the next time that item changes elsewhere.
+- Losing the code and every screen loses the account; nobody can recover it. Whoever holds the code can read everything, debrid keys included, and anyone with developer access to a TV can read the code from IndexedDB. Main's PIN guards showing it in the app.
+- Delete removes the server's copy at once. Cloudflare's D1 Time Travel keeps a restorable history for 7 days on the free plan (30 on Workers Paid), which holds only ciphertext; the Delete dialog says so. Other screens stop at their next sync.
+- If an LG engine lacks Web Crypto, the account stays hidden there until a pure-JavaScript fallback is added; Diagnostics shows it.
+- On the free plan the requests carry roughly a thousand active screens and the D1 writes about four thousand, before Workers Paid, which is Eyitayo's decision.
+- Phone apps reuse the engine, the merge, the keys and the documents from `packages/core`, and inject their own crypto, storage and clock.
