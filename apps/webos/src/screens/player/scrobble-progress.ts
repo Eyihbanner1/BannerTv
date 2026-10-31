@@ -115,7 +115,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   };
   // What the file reached is kept, if it was the title, and it starts over.
   const startOver = () => {
-    if (reached && !wasClip) earlier.push(reached);
+    // A place only moved to, before the file played or showed a length, is
+    // this opening's alone: the session does not carry it on either.
+    if (reached && !wasClip && (played || reached.duration > 0)) earlier.push(reached);
     if (earlier.length > KEPT) earlier.shift();
     reached = undefined;
     played = false;
@@ -165,7 +167,8 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       // the last file's.
       const underWay =
         state.status === 'playing' || state.status === 'paused' || state.status === 'buffering';
-      const moved = Math.abs(state.position - (openedAt ?? state.position)) > 1;
+      const moved =
+        !linkIsClip(runtimes) && Math.abs(state.position - (openedAt ?? state.position)) > 1;
       if (underWay && !wasClip && (played || state.duration > 0 || moved)) {
         reached = { percent: percent(state, runtimes.runtimeSeconds), duration: state.duration };
       }

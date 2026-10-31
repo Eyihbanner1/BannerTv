@@ -453,6 +453,35 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(0)', 'pause(32)', 'stop(85)']);
   });
 
+  it('keeps a move before the first picture to that opening alone', () => {
+    // Quality while paused opens a clip; the viewer moves it before its length shows.
+    // Its length then shows it a clip, and the player moves on to another release.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(2100, 2820, 'playing'), known],
+        [played(2100, 2820, 'paused'), known],
+        [played(2100, 0, 'loading', false, CLIP), known],
+        [played(2100, 0, 'paused', false, CLIP), known],
+        [played(2400, 0, 'paused', false, CLIP), known],
+        [played(2100, 0, 'loading', false, OTHER), known],
+        [played(2100, 0, 'paused', false, OTHER), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(74)', 'stop(74)']);
+    // A clip found out late, opened again, paused and skipped before its picture.
+    expect(
+      trakt([
+        [played(0, 0, 'loading', false, CLIP), guessed],
+        [played(0, 240, 'playing', false, CLIP), guessed],
+        [played(200, 240, 'playing', false, CLIP), guessed],
+        [played(200, 240, 'failed', false, CLIP), known],
+        [played(200, 0, 'loading', false, CLIP), known],
+        [played(200, 0, 'paused', false, CLIP), known],
+        [played(230, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+  });
+
   it('never takes a broadcast’s clock for the episode’s place', () => {
     const before = [
       [played(0, 2820, 'playing'), known],
