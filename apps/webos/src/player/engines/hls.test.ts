@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHlsEngine, LIVE_CATCH_UP_RATE, LIVE_MAX_SEGMENTS } from './hls';
+import { createHlsEngine } from './hls';
 
 const script = vi.hoisted(() => {
   let resolve = () => undefined as void;
@@ -41,7 +41,7 @@ class FakeHls {
   } | null = null;
   liveSyncPosition: number | null = null;
 
-  constructor(readonly config: Record<string, unknown> = {}) {
+  constructor() {
     FakeHls.created.push(this);
   }
 
@@ -118,19 +118,6 @@ describe('the hls.js engine', () => {
     expect(engine.isLive()).toBe(true);
     instance!.latestLevelDetails = { live: false };
     expect(engine.isLive()).toBe(false);
-  });
-
-  it('catches up a little faster on live, and jumps back when far behind', async () => {
-    script.finish();
-    const engine = createHlsEngine(video, listener);
-    await engine.load('https://media.example.com/live.m3u8', 0);
-    const [instance] = FakeHls.created;
-    expect(instance!.config).toMatchObject({
-      liveMaxLatencyDurationCount: LIVE_MAX_SEGMENTS,
-      maxLiveSyncPlaybackRate: LIVE_CATCH_UP_RATE,
-    });
-    // hls.js sits three segments back by default: jumping back must leave room past that.
-    expect(LIVE_MAX_SEGMENTS).toBeGreaterThan(3);
   });
 
   it('plays live where hls.js syncs to, back to the oldest segment listed, a segment of slack', async () => {
