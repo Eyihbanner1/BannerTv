@@ -89,27 +89,27 @@ describe('applyTuning', () => {
   it('adds a class for each CSS switch away from what the stylesheets draw', () => {
     expect(classesFor({ ...TUNING_DEFAULTS })).toEqual([
       'tune-motion-jump',
-      'tune-screens-jump',
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
       'tune-no-hero-fade',
+      'tune-screens-jump',
     ]);
     expect(classesFor({ ...TUNING_DEFAULTS, motion: 'layer', zoom: 'off' })).toEqual([
       'tune-motion-layer',
-      'tune-screens-jump',
       'tune-zoom-off',
       'tune-no-pan',
       'tune-no-mips',
       'tune-no-hero-fade',
+      'tune-screens-jump',
     ]);
     expect(classesFor({ ...TUNING_DEFAULTS, homeLayer: true, heroFade: true })).toEqual([
       'tune-motion-jump',
-      'tune-screens-jump',
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
       'tune-home-layer',
+      'tune-screens-jump',
     ]);
     // Switches that work in code add no class.
     expect(

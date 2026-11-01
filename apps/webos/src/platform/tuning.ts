@@ -177,10 +177,10 @@ export function changedTuning(value: Tuning = tuning): Partial<Tuning> {
  */
 export function applyTuning(root: HTMLElement, value: Tuning = tuning): void {
   if (value.motion !== 'slide') root.classList.add(`tune-motion-${value.motion}`);
-  if (value.screenMotion === 'jump') root.classList.add('tune-screens-jump');
   if (value.zoom !== 'animate') root.classList.add(`tune-zoom-${value.zoom}`);
   if (!value.heroPan) root.classList.add('tune-no-pan');
   if (!value.mips) root.classList.add('tune-no-mips');
   if (value.homeLayer) root.classList.add('tune-home-layer');
   if (!value.heroFade) root.classList.add('tune-no-hero-fade');
+  if (value.screenMotion === 'jump') root.classList.add('tune-screens-jump');
 }
