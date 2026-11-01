@@ -45,6 +45,7 @@ import {
   ActivityIndicator,
   AppState,
   BackHandler,
+  Pressable,
   StyleSheet,
   Text,
   useTVEventHandler,
@@ -434,6 +435,16 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
   })();
   const backdrop = item?.background ?? item?.poster;
   const showControls = controlsUp && !problem && panel === null && !waiting;
+  const upNextShown =
+    !showControls &&
+    !problem &&
+    panel === null &&
+    ((counting && playing) || (ended && decision === 'hold')) &&
+    !!next;
+  const askShown = ended && decision === 'ask' && !!next;
+  // With nothing on screen to land on, Android drops focus and the arrows and OK stop reaching
+  // the app, so the controls could never come back. This invisible layer holds focus instead.
+  const holdFocus = !showControls && !problem && panel === null && !upNextShown && !askShown;
 
   return (
     <View style={styles.screen}>
@@ -592,11 +603,17 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
         </View>
       ) : null}
 
-      {!showControls &&
-      !problem &&
-      panel === null &&
-      ((counting && playing) || (ended && decision === 'hold')) &&
-      next ? (
+      {holdFocus ? (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          focusable
+          hasTVPreferredFocus={active}
+          onPress={poke}
+          accessibilityLabel={title}
+        />
+      ) : null}
+
+      {upNextShown && next ? (
         <View style={styles.upNext}>
           <Text style={styles.upNextTitle}>{t('player.upNext')}</Text>
           <Text style={styles.upNextLine} numberOfLines={1}>
@@ -614,7 +631,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
         </View>
       ) : null}
 
-      {ended && decision === 'ask' && next ? (
+      {askShown && next ? (
         <View style={styles.centre}>
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>{t('player.stillWatching.title')}</Text>
