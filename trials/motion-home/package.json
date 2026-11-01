@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --dir src",
     "check:bundle": "npx --yes es-check@9.8.1 es2017 'dist/**/*.js'",
     "e2e": "playwright test",
     "package": "npx --yes -p @webos-tools/cli@3.2.6 ares-package --no-minify --outdir out dist"
