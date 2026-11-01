@@ -13,6 +13,8 @@ export const HELPER_PORT = 47020;
 
 const STATUS_TIMEOUT_MS = 2500;
 const REQUEST_TIMEOUT_MS = 5000;
+/** Unpairing tells the helper, but never waits long for it. */
+const FORGET_TIMEOUT_MS = 2000;
 /** A reachability answer is trusted this long, so a stream list doesn't ask per stream. */
 const REACHABLE_FOR_MS = 15000;
 
@@ -168,7 +170,20 @@ export function createStreamHelper(options: StreamHelperOptions) {
       return 'paired';
     },
 
+    /**
+     * Forgets the helper. Tells it first, so it stops honouring this TV's key;
+     * if it is off or out of reach the TV forgets it anyway.
+     */
     async unpair(): Promise<void> {
+      await pairing.load();
+      const to = pairing.get();
+      if (to) {
+        await request(
+          `${base(to)}/forget`,
+          { method: 'POST', headers: { Authorization: `Bearer ${to.key}` } },
+          FORGET_TIMEOUT_MS,
+        );
+      }
       await pairing.update(() => null);
       checkedAt = -Infinity;
       reachability.set('unknown');

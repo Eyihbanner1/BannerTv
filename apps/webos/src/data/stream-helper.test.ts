@@ -39,6 +39,7 @@ function helperAnswers(call: Call): Response {
     return String(call.init.body) === 'code=123456' ? json({ key: KEY }) : json({}, 403);
   }
   if (call.url.endsWith('/links')) return json({ link: '/s/token/aHR0cHM/live.m3u8' });
+  if (call.url.endsWith('/forget')) return new Response(null, { status: 204 });
   return json({}, 404);
 }
 
@@ -114,18 +115,32 @@ describe('pairing', () => {
     expect(tv.get()).toBeNull();
   });
 
-  it('forgets the helper on unpair', async () => {
-    const tv = createStreamHelper({
-      storage: memoryKeyValueStore(),
-      fetch: fakeHelper(helperAnswers).fetch,
-    });
+  it('forgets the helper on unpair, and tells it to forget this TV', async () => {
+    const helper = fakeHelper(helperAnswers);
+    const tv = createStreamHelper({ storage: memoryKeyValueStore(), fetch: helper.fetch });
     await tv.pair('192.168.1.42', '123456');
     await tv.unpair();
+    const forget = helper.calls[helper.calls.length - 1]!;
+    expect(forget.url).toBe('http://192.168.1.42:47020/forget');
+    expect(forget.init.method).toBe('POST');
+    expect((forget.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${KEY}`);
     expect(tv.get()).toBeNull();
     expect(tv.reachability.get()).toBe('unknown');
     await expect(tv.link('https://a.example/live.m3u8', {})).rejects.toEqual(
       new HelperUnavailable('unpaired'),
     );
+  });
+
+  it('still unpairs when the helper is off', async () => {
+    let on = true;
+    const helper = fakeHelper((call) =>
+      on ? helperAnswers(call) : Promise.reject(new TypeError('Failed to fetch')),
+    );
+    const tv = createStreamHelper({ storage: memoryKeyValueStore(), fetch: helper.fetch });
+    await tv.pair('192.168.1.42', '123456');
+    on = false;
+    await tv.unpair();
+    expect(tv.get()).toBeNull();
   });
 });
 
