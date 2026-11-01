@@ -16,7 +16,7 @@ import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
-import { shouldReturnToLive } from './live';
+import { rewindWindow, shouldReturnToLive } from './live';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
 export const STALL_MS = 20000;
@@ -882,7 +882,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     seek(position) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
-      const wanted = kept ? clampToWindow(kept, position) : position;
+      const wanted = kept ? clampToWindow(rewindWindow(kept), position) : position;
       // A jump forward never lands behind where it started, as one past a
       // live point read a moment late would.
       if (kept && wanted < video.currentTime && position > video.currentTime) return;
