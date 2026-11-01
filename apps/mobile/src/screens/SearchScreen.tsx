@@ -12,17 +12,65 @@ import { sportsState } from '@tv/data/sports';
 import { useQuery } from '@tv/data/use-query';
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { MetaPreview } from '@bannertv/protocol';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openTitle } from '../nav/routes';
 import { reportTyping } from '../runtime/whereabouts';
+import { phone } from '@brand/tokens/design';
+import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
-import { Icon } from '../ui/icons';
+import { Chip } from '../ui/Chip';
+import { Icon, OutlineIcon } from '../ui/icons';
 import { Message } from '../ui/Message';
-import { Row } from '../ui/Row';
-import { colors, radius, space, type } from '../ui/theme';
+import { phoneArt } from '../ui/Tile';
+import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 
 const TYPING_PAUSE_MS = 500;
+/** Results shown per addon catalog before "Show all". */
+const FIRST_RESULTS = 6;
+
+type Kind = 'all' | 'movie' | 'series';
+const KINDS: readonly Kind[] = ['all', 'movie', 'series'];
+
+/** One found title: the poster, its name and what it is. Tapping opens Details. */
+const Result = memo(function Result({
+  item,
+  tag,
+  onPress,
+}: {
+  item: MetaPreview;
+  tag: string;
+  onPress: (item: MetaPreview) => void;
+}) {
+  const facts = [item.releaseInfo, tag].filter(Boolean).join(' · ');
+  return (
+    <Pressable
+      onPress={() => onPress(item)}
+      accessibilityRole="button"
+      accessibilityLabel={[item.name, item.releaseInfo].filter(Boolean).join(', ')}
+      style={({ pressed }) => [styles.result, pressed && styles.pressed]}
+    >
+      <Artwork
+        src={phoneArt(item.poster, 'small')}
+        retrySrc={item.poster}
+        seed={item.id}
+        style={styles.poster}
+      />
+      <View style={styles.resultText}>
+        <Text style={styles.resultName} numberOfLines={2}>
+          {item.name}
+        </Text>
+        {facts ? (
+          <Text style={styles.resultFacts} numberOfLines={1}>
+            {facts}
+          </Text>
+        ) : null}
+      </View>
+      <OutlineIcon name="chevron" size={20} color={colors.textMuted} />
+    </Pressable>
+  );
+});
 const MIN_TERM_LENGTH = 2;
 const termOf = (text: string) => {
   const term = text.trim().replace(/\s+/g, ' ');
@@ -66,28 +114,51 @@ const ResultRow = memo(function ResultRow({
     if (state.status === 'success') onFound(source.key, items?.length ?? 0);
     if (state.status === 'error') onFound(source.key, 0);
   }, [state.status, items, onFound, source.key]);
+  const [all, setAll] = useState(false);
   if (state.status === 'success' && items?.length === 0) return null;
+  const shown = items ? (all ? items : items.slice(0, FIRST_RESULTS)) : null;
+  const typeName = typeLabel(t, source.catalog.type);
+  const open = (item: MetaPreview) => {
+    recentSearches.add(term);
+    openTitle(item);
+  };
   return (
-    <Row
-      title={typeLabel(t, source.catalog.type)}
-      tag={tag}
-      shape="poster"
-      items={items?.map((item, index) => ({ item, key: `${index}:${item.id}` })) ?? null}
-      onPress={(entry) => {
-        recentSearches.add(term);
-        openTitle(entry.item);
-      }}
-      footer={
-        state.status === 'error' ? (
-          <View style={styles.error}>
-            <Text style={styles.muted}>
-              {describeAddonError(t, state.error, source.addon.manifest.name)}
-            </Text>
-            <Button label={t('common.tryAgain')} onPress={() => query.retry()} />
-          </View>
-        ) : undefined
-      }
-    />
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
+          {typeName}
+        </Text>
+        <Text style={styles.sectionTag} numberOfLines={1}>
+          {tag}
+        </Text>
+      </View>
+      {state.status === 'error' ? (
+        <View style={styles.error}>
+          <Text style={styles.muted}>
+            {describeAddonError(t, state.error, source.addon.manifest.name)}
+          </Text>
+          <Button label={t('common.tryAgain')} onPress={() => query.retry()} />
+        </View>
+      ) : shown === null ? (
+        <View style={[styles.result, styles.placeholder]}>
+          <View style={styles.poster} />
+        </View>
+      ) : (
+        <>
+          {shown.map((item, index) => (
+            <Result key={`${index}:${item.id}`} item={item} tag={typeName} onPress={open} />
+          ))}
+          {!all && items && items.length > FIRST_RESULTS ? (
+            <Button
+              kind="quiet"
+              label={t('home.seeAll')}
+              onPress={() => setAll(true)}
+              style={styles.more}
+            />
+          ) : null}
+        </>
+      )}
+    </View>
   );
 });
 
@@ -134,6 +205,7 @@ export function SearchScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
+  const [kind, setKind] = useState<Kind>('all');
   const [term, setTerm] = useState('');
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
@@ -145,6 +217,16 @@ export function SearchScreen() {
     const all = searchSources(collection.addons);
     return isKidsProfile() ? kidsSearchSources(all) : all;
   }, [ready, collection.addons]);
+  const shownSources = useMemo(
+    () => (kind === 'all' ? sources : sources.filter((source) => source.catalog.type === kind)),
+    [sources, kind],
+  );
+  const kindLabel = (value: Kind) =>
+    value === 'all'
+      ? t('library.all')
+      : value === 'movie'
+        ? t('library.films')
+        : t('library.series');
 
   useEffect(() => {
     loadRecentSearches();
@@ -155,9 +237,12 @@ export function SearchScreen() {
   }, [text]);
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + space.s }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + space.m }]}>
+      <Text style={styles.title} accessibilityRole="header">
+        {t('phone.tabs.search')}
+      </Text>
       <View style={styles.field}>
-        <Icon name="search" size={22} color={colors.textSubtle} />
+        <OutlineIcon name="search" size={20} color={colors.textMuted} weight={2.2} />
         <TextInput
           value={text}
           onChangeText={setText}
@@ -176,15 +261,36 @@ export function SearchScreen() {
           accessibilityLabel={t('search.label')}
         />
         {text ? (
-          <Pressable onPress={() => setText('')} hitSlop={10} accessibilityLabel={t('phone.close')}>
-            <Icon name="close" size={20} color={colors.textSubtle} />
+          <Pressable
+            onPress={() => setText('')}
+            accessibilityRole="button"
+            accessibilityLabel={t('phone.close')}
+            style={styles.clearText}
+          >
+            <OutlineIcon name="close" size={18} color={colors.textMuted} />
           </Pressable>
         ) : null}
       </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.chips}
+        contentContainerStyle={styles.chipsContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {KINDS.map((value) => (
+          <Chip
+            key={value}
+            label={kindLabel(value)}
+            on={kind === value}
+            onPress={() => setKind(value)}
+          />
+        ))}
+      </ScrollView>
       {!ready ? null : sources.length === 0 ? (
         <Message lead={t('search.noAddons')} />
       ) : term ? (
-        <Results key={term} term={term} sources={sources} />
+        <Results key={term} term={term} sources={shownSources} />
       ) : recent.length > 0 ? (
         <View style={styles.recent}>
           <Text style={styles.heading}>{t('search.recent')}</Text>
@@ -218,22 +324,48 @@ export function SearchScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
+  title: { ...type.display, color: colors.text, paddingHorizontal: gutter, marginBottom: 14 },
   field: {
-    marginHorizontal: space.l,
+    marginHorizontal: gutter,
+    minHeight: touch.min,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.s,
+    gap: 10,
     backgroundColor: colors.surface2,
-    borderRadius: radius.m,
-    paddingHorizontal: space.m,
+    borderRadius: 14,
+    paddingLeft: 14,
   },
-  input: { flex: 1, ...type.body, color: colors.text, paddingVertical: space.m },
-  recent: { padding: space.l, gap: space.xs },
+  input: { flex: 1, ...type.body, fontSize: 16, fontWeight: '600', color: colors.text },
+  clearText: {
+    width: touch.min,
+    height: touch.min,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chips: { flexGrow: 0, marginTop: 14, marginBottom: space.s },
+  chipsContent: { gap: space.s, paddingHorizontal: gutter },
+  section: { paddingHorizontal: gutter, paddingTop: space.m, gap: space.m },
+  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: space.s },
+  sectionTitle: { ...type.heading, color: colors.text, flexShrink: 1 },
+  sectionTag: { ...type.small, color: colors.textSubtle, flexShrink: 1 },
+  result: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: radius.m },
+  placeholder: { opacity: 0.6 },
+  poster: {
+    width: phone.resultPosterW,
+    height: phone.resultPosterH,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface2,
+  },
+  resultText: { flex: 1, gap: space.xs },
+  resultName: { ...type.body, fontSize: 16, fontWeight: '700', color: colors.text },
+  resultFacts: { ...type.meta, color: colors.textMuted },
+  more: { alignSelf: 'flex-start', paddingHorizontal: 0 },
+  recent: { padding: gutter, gap: space.xs },
   heading: { ...type.heading, color: colors.text, marginBottom: space.s },
-  recentRow: { flexDirection: 'row', alignItems: 'center', gap: space.m, paddingVertical: space.s },
+  recentRow: { flexDirection: 'row', alignItems: 'center', gap: space.m, minHeight: touch.min },
   pressed: { opacity: 0.6 },
   recentText: { ...type.body, color: colors.text },
   clear: { alignSelf: 'flex-start', paddingHorizontal: 0 },
-  error: { paddingHorizontal: space.l, gap: space.s, alignItems: 'flex-start' },
+  error: { gap: space.s, alignItems: 'flex-start' },
   muted: { ...type.body, color: colors.textMuted },
 });
