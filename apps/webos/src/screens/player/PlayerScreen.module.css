@@ -220,6 +220,11 @@
   transition: opacity var(--bt-motion) ease-out;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: the player keeps its fades and slides. */
+:global(.tune-screens-jump) .player {
+  --bt-motion: 180ms;
+}
+
 /* The top: a back arrow for the pointer, the title and three facts, the clock. */
 .top {
   position: absolute;
