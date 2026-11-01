@@ -14,7 +14,6 @@ import {
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
-import { LIVE_CATCH_UP_RATE } from './engines/hls';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import { shouldReturnToLive } from './live';
@@ -688,8 +687,6 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         // Whatever set it: the viewer, the Lab's speed test, or the TV putting
         // it back. Shaka sets 0 while it buffers, which is no speed.
         const rate = video.playbackRate;
-        // hls.js winning back a wait on a broadcast is not the viewer's speed.
-        if (live && engine?.name === 'hls.js' && rate > 1 && rate <= LIVE_CATCH_UP_RATE) return;
         if (rate > 0 && isFinite(rate)) patch({ rate });
       },
     ],
