@@ -51,6 +51,13 @@ const versionKey = (choice: NonNullable<SubtitleChoice>) =>
 const sameChoice = (a: SubtitleChoice, b: SubtitleChoice) =>
   a !== null && b !== null && versionId(a) === versionId(b);
 
+/** The drift row's choices, by the name of their focus key and words. */
+const DRIFT_CHOICES = [
+  { name: 'none', drift: null, label: 'player.driftNone' },
+  { name: 'ahead', drift: 'ahead', label: 'player.driftAhead' },
+  { name: 'behind', drift: 'behind', label: 'player.driftBehind' },
+] as const;
+
 /** The language of the subtitles showing, for the chip and the tab; none when off. */
 export function subtitlesValue(subtitles: Subtitles): string | undefined {
   const { choice } = subtitles;
@@ -341,7 +348,26 @@ export function TracksSheet(props: TracksSheetProps) {
               {t('player.timingReset')}
             </Pressable>
           </div>
-          <p className={styles.kept}>{t('player.timingKept')}</p>
+          {/* For a file timed for another frame rate, which slides further out as the film goes on. */}
+          <div className={styles.steps}>
+            <span className={styles.rowLabel}>{t('player.drift')}</span>
+            {DRIFT_CHOICES.map(({ name, drift, label }) => {
+              const on = subtitles.drift === drift;
+              return (
+                <Pressable
+                  key={name}
+                  focusKey={`${SHEET}-drift-${name}`}
+                  label={on ? `${t(label)}, ${t('player.driftChosen')}` : t(label)}
+                  className={on ? `${styles.step} ${styles.stepOn}` : styles.step}
+                  focusedClassName={styles.stepFocused}
+                  onPress={() => subtitles.setDrift(drift)}
+                >
+                  {t(label)}
+                </Pressable>
+              );
+            })}
+          </div>
+          <p className={styles.kept}>{`${t('player.driftHint')} ${t('player.timingKept')}`}</p>
         </Pane>
       );
   } else {
@@ -362,7 +388,9 @@ export function TracksSheet(props: TracksSheetProps) {
   const values: Record<SheetTab, string> = {
     subtitles: subtitlesValue(subtitles) ?? t('player.subtitlesOff'),
     audio: active ? audioSummary(active) : t('player.audioDefault'),
-    timing: formatOffset(subtitles.offset),
+    timing: subtitles.drift
+      ? `${formatOffset(subtitles.offset)} · ${t('player.driftFixed')}`
+      : formatOffset(subtitles.offset),
     style: styleSummary,
   };
 
