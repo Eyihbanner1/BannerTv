@@ -14,7 +14,7 @@ export interface HeroTitle {
   item: MetaPreview;
   /** The small line above the title: the row it came from. */
   eyebrow: string;
-  /** Play goes straight to the player (Continue Watching); otherwise it opens the title. */
+  /** Play goes straight to the player for a film or Continue Watching; a series opens its page. */
   play: () => void;
   playLabel: string;
 }
@@ -54,9 +54,15 @@ export function HeroBackdrop({ item }: { item: MetaPreview | null }) {
 export function HeroText({
   hero,
   onButtonFocus,
+  preferred = false,
+  onPlay,
 }: {
   hero: HeroTitle | null;
   onButtonFocus: () => void;
+  /** The first button takes focus, as when Home opens or is on top again. */
+  preferred?: boolean;
+  /** Called before the first button's action, so Home knows to come back to it. */
+  onPlay?: () => void;
 }) {
   const { t } = useTranslation();
   useSyncExternalStore(library.subscribe, library.version);
@@ -100,8 +106,12 @@ export function HeroText({
           kind="primary"
           icon="play"
           label={hero.playLabel}
-          onPress={hero.play}
+          onPress={() => {
+            onPlay?.();
+            hero.play();
+          }}
           onFocus={onButtonFocus}
+          preferred={preferred}
         />
         <Button
           icon={saved ? 'check' : 'plus'}

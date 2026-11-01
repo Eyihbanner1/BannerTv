@@ -15,6 +15,7 @@ const TV = {
     profile: 'Switch profile, now {{name}}',
   },
   play: 'Play',
+  episodes: 'Episodes',
   resume: 'Resume',
   myList: 'My List',
   onMyList: 'On My List',

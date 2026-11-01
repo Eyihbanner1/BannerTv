@@ -20,9 +20,10 @@ import { color } from './ui/theme';
 function Screen({ route, active }: { route: Route; active: boolean }) {
   switch (route.name) {
     case 'section':
-      if (route.section === 'home') return <HomeScreen />;
-      if (route.section === 'library') return <LibraryScreen />;
-      return <SoonScreen section={route.section} />;
+      if (route.section === 'home') return <HomeScreen active={active} fromNav={!!route.fromNav} />;
+      if (route.section === 'library')
+        return <LibraryScreen active={active} fromNav={!!route.fromNav} />;
+      return <SoonScreen section={route.section} active={active} />;
     case 'details':
       return <DetailsScreen item={route.item} active={active} />;
     case 'streams':

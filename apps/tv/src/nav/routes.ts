@@ -27,7 +27,8 @@ export interface StreamsRoute {
 export type Section = 'home' | 'search' | 'discover' | 'sports' | 'library';
 
 export type Route =
-  | { name: 'section'; section: Section }
+  /** `fromNav`: opened from the nav row, so focus starts back on its tab. */
+  | { name: 'section'; section: Section; fromNav?: boolean }
   | { name: 'details'; item: MetaPreview }
   | { name: 'streams'; streams: StreamsRoute }
   | { name: 'player'; player: PlayerRoute }
@@ -56,7 +57,7 @@ export function open(route: Route): void {
 }
 
 export function openSection(section: Section): void {
-  screens.set(() => reset(entry({ name: 'section', section })));
+  screens.set(() => reset(entry({ name: 'section', section, fromNav: true })));
 }
 
 export function openTitle(item: MetaPreview): void {

@@ -17,10 +17,17 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FlatList, StyleSheet, Text, TVFocusGuideView, View } from 'react-native';
+import {
+  FlatList,
+  type LayoutChangeEvent,
+  StyleSheet,
+  Text,
+  TVFocusGuideView,
+  View,
+} from 'react-native';
 import { openPlayer, openTitle } from '../../nav/routes';
 import { Button } from '../../ui/Button';
-import { NavBar } from '../../ui/NavBar';
+import { NavBar, type NavTarget } from '../../ui/NavBar';
 import { Row, type RowItem } from '../../ui/Row';
 import { color, layout, motion, px, spacing, type } from '../../ui/theme';
 import { HeroBackdrop, type HeroTitle, HeroText } from './Hero';
@@ -58,9 +65,27 @@ function continueNote(t: Translate, item: ContinueItem): string | undefined {
   return item.upNext ? t('home.nextNote') : undefined;
 }
 
+/**
+ * A film plays straight from the hero, as its button says. A series opens its page to choose an
+ * episode, and its button says so; a kids profile always goes through the page, as on the LG.
+ */
 function titleHero(t: Translate, item: MetaPreview, eyebrow: string): HeroTitle {
-  return { item, eyebrow, play: () => openTitle(item), playLabel: t('tv.play') };
+  if (item.type === 'movie' && !isKidsProfile()) {
+    return {
+      item,
+      eyebrow,
+      play: () => openPlayer({ type: item.type, metaId: item.id, videoId: item.id, preview: item }),
+      playLabel: t('tv.play'),
+    };
+  }
+  return { item, eyebrow, play: () => openTitle(item), playLabel: t('tv.episodes') };
 }
+
+/** Where focus goes when Home is on top again. */
+type Back =
+  | { kind: 'hero' }
+  | { kind: 'nav'; target: NavTarget }
+  | { kind: 'tile'; row: string; key: string };
 
 const HomeRow = memo(function HomeRow({
   row,
@@ -68,9 +93,13 @@ const HomeRow = memo(function HomeRow({
   onFirst,
   onEmpty,
   onFocusTitle,
+  preferredKey,
+  onOpen,
 }: {
   row: BoardRow;
   enabled: boolean;
+  preferredKey: string | null;
+  onOpen: (row: string, key: string) => void;
   onFirst: (key: string, item: MetaPreview) => void;
   onEmpty: (key: string) => void;
   onFocusTitle: (hero: HeroTitle) => void;
@@ -127,7 +156,11 @@ const HomeRow = memo(function HomeRow({
       title={title}
       items={rowItems}
       shape={row.style === 'landscape' ? 'landscape' : 'poster'}
-      onPress={(entry) => openTitle(entry.item)}
+      preferredKey={preferredKey}
+      onPress={(entry) => {
+        onOpen(row.key, entry.key);
+        openTitle(entry.item);
+      }}
       onItemFocus={(entry) => onFocusTitle(titleHero(t, entry.item, row.name))}
     />
   );
@@ -135,8 +168,24 @@ const HomeRow = memo(function HomeRow({
 
 type HomeEntry = { key: 'continue' } | { key: string; row: BoardRow };
 
-export function HomeScreen() {
+export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: boolean }) {
   const { t } = useTranslation();
+  // Android forgets focus when a screen is hidden, so Home puts it back itself.
+  const [back, setBack] = useState<Back>(() =>
+    fromNav ? { kind: 'nav', target: 'current' } : { kind: 'hero' },
+  );
+  const onOpen = useCallback((row: string, key: string) => setBack({ kind: 'tile', row, key }), []);
+  const onLeaveNav = useCallback((target: NavTarget) => setBack({ kind: 'nav', target }), []);
+  const preferredIn = (row: string) =>
+    active && back.kind === 'tile' && back.row === row ? back.key : null;
+  const restoreKey = active && back.kind === 'tile' ? `${back.row}\n${back.key}` : '';
+  // The list of rows is sized from the space under the hero, measured, rather than by flex:
+  // on Android TV the list's own wrapper took no height and the rows were drawn at 0 px.
+  const [rowsHeight, setRowsHeight] = useState(0);
+  const onRowsLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = Math.round(event.nativeEvent.layout.height);
+    setRowsHeight((before) => (before === height ? before : height));
+  }, []);
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
   const ready = collection.ready && sports.ready;
@@ -210,7 +259,7 @@ export function HomeScreen() {
           <Row
             title={t('home.continueWatching')}
             shape="landscape"
-            preferredFirst
+            preferredKey={preferredIn('continue')}
             items={continueRow.map((item) => {
               const note = continueNote(t, item);
               return {
@@ -222,7 +271,9 @@ export function HomeScreen() {
             })}
             onPress={(rowEntry) => {
               const item = continueRow.find((candidate) => candidate.videoId === rowEntry.key);
-              if (item) playContinue(item);
+              if (!item) return;
+              onOpen('continue', rowEntry.key);
+              playContinue(item);
             }}
             onItemFocus={(rowEntry) => {
               const item = continueRow.find((candidate) => candidate.videoId === rowEntry.key);
@@ -246,6 +297,8 @@ export function HomeScreen() {
           onFirst={onFirst}
           onEmpty={onEmpty}
           onFocusTitle={onFocusTitle}
+          preferredKey={preferredIn(entry.row.key)}
+          onOpen={onOpen}
         />
       </TVFocusGuideView>
     );
@@ -254,10 +307,17 @@ export function HomeScreen() {
   return (
     <View style={styles.screen}>
       <HeroBackdrop item={hero?.item ?? null} />
-      <NavBar current="home" />
+      <NavBar
+        current="home"
+        active={active}
+        focus={back.kind === 'nav' ? back.target : null}
+        onLeave={onLeaveNav}
+      />
       <View style={styles.heroArea}>
         <HeroText
           hero={hero}
+          preferred={active && back.kind === 'hero'}
+          onPlay={() => setBack({ kind: 'hero' })}
           onButtonFocus={() => list.current?.scrollToOffset({ offset: 0, animated: true })}
         />
       </View>
@@ -279,21 +339,26 @@ export function HomeScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          ref={list}
-          style={styles.rows}
-          data={entries}
-          keyExtractor={(entry) => entry.key}
-          renderItem={renderEntry}
-          contentContainerStyle={styles.rowsContent}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={3}
-          windowSize={5}
-          removeClippedSubviews={false}
-          onScrollToIndexFailed={({ index, averageItemLength }) =>
-            list.current?.scrollToOffset({ offset: index * averageItemLength, animated: true })
-          }
-        />
+        <View style={styles.rows} onLayout={onRowsLayout}>
+          {rowsHeight > 0 ? (
+            <FlatList
+              ref={list}
+              style={{ height: rowsHeight }}
+              data={entries}
+              extraData={restoreKey}
+              keyExtractor={(entry) => entry.key}
+              renderItem={renderEntry}
+              contentContainerStyle={styles.rowsContent}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={3}
+              windowSize={5}
+              removeClippedSubviews={false}
+              onScrollToIndexFailed={({ index, averageItemLength }) =>
+                list.current?.scrollToOffset({ offset: index * averageItemLength, animated: true })
+              }
+            />
+          ) : null}
+        </View>
       )}
     </View>
   );

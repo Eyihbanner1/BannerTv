@@ -22,6 +22,7 @@ export const Row = memo(function Row({
   onPress,
   onItemFocus,
   preferredFirst,
+  preferredKey,
 }: {
   title: string;
   items: readonly RowItem[];
@@ -29,6 +30,8 @@ export const Row = memo(function Row({
   onPress: (entry: RowItem) => void;
   onItemFocus?: (entry: RowItem) => void;
   preferredFirst?: boolean;
+  /** The tile that takes focus, as when the screen is on top again after a title was opened. */
+  preferredKey?: string | null;
 }) {
   const list = useRef<FlatList<RowItem>>(null);
   const { width, height } = tileSize(shape);
@@ -48,6 +51,7 @@ export const Row = memo(function Row({
         data={items}
         keyExtractor={(entry) => entry.key}
         getItemLayout={getItemLayout}
+        extraData={preferredKey}
         showsHorizontalScrollIndicator={false}
         // Room for the focused tile to grow and its ring to show.
         style={{ height: height * 1.2 }}
@@ -63,7 +67,9 @@ export const Row = memo(function Row({
               shape={shape}
               {...(entry.note ? { note: entry.note } : {})}
               {...(entry.progress !== undefined ? { progress: entry.progress } : {})}
-              {...(preferredFirst && index === 0 ? { preferred: true } : {})}
+              {...((preferredFirst && index === 0) || entry.key === preferredKey
+                ? { preferred: true }
+                : {})}
               onPress={() => onPress(entry)}
               onFocus={() => {
                 list.current?.scrollToOffset({ offset: step * index, animated: true });

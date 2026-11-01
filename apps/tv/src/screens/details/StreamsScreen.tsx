@@ -57,6 +57,8 @@ export function StreamsScreen({ route }: { route: StreamsRoute }) {
               onPress={() => pick(entry)}
               disabled={!text.playable}
               radius={radii.lg}
+              // The ring follows this box, so it takes the row's width rather than the list's.
+              style={styles.rowBox}
               {...(index === 0 ? { preferred: true } : {})}
               accessibilityLabel={[text.title, ...text.badges, ...text.notes].join(', ')}
             >
@@ -97,12 +99,12 @@ const styles = StyleSheet.create({
   },
   statusText: { ...type.meta, color: color.textMuted },
   list: { paddingHorizontal: layout.heroLeft, paddingBottom: px(200), gap: spacing.md },
+  rowBox: { width: px(1400) },
   row: {
     padding: spacing.lg,
     borderRadius: radii.lg,
     backgroundColor: color.surface,
     gap: spacing.xs,
-    width: px(1400),
   },
   rowFocused: { backgroundColor: color.focusFill },
   dim: { opacity: 0.5 },

@@ -92,7 +92,8 @@ const styles = StyleSheet.create({
   focused: { backgroundColor: color.focusFill },
   words: { flex: 1, gap: px(4) },
   title: { ...type.label, color: color.text },
-  detail: { ...type.small, color: color.textMuted },
+  // A size up from `small`: these lines are read from across a room.
+  detail: { ...type.meta, color: color.textMuted },
   value: { ...type.label, color: color.accent },
   onFocus: { color: color.onFocus },
   onFocusSoft: { color: color.raised },

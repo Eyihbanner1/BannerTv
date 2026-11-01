@@ -15,10 +15,29 @@ const SECTIONS: { section: Section; label: string }[] = [
   { section: 'library', label: 'tv.nav.myList' },
 ];
 
-/** The row along the top: the wordmark, the places, Settings and who is watching. */
-export function NavBar({ current }: { current: Section }) {
+/** Where on the nav row focus goes back to when its screen is on top again. */
+export type NavTarget = 'current' | 'settings' | 'profile';
+
+/**
+ * The row along the top: the wordmark, the places, Settings and who is watching.
+ * `focus` names the item that takes focus while the screen is `active`, so coming back from
+ * Settings lands on the gear and choosing a place lands on its tab. `onLeave` says which item
+ * opened another screen, for the screen to pass back as `focus`.
+ */
+export function NavBar({
+  current,
+  active = false,
+  focus = null,
+  onLeave,
+}: {
+  current: Section;
+  active?: boolean;
+  focus?: NavTarget | null;
+  onLeave?: (target: NavTarget) => void;
+}) {
   const { t } = useTranslation();
   const profile = activeProfile();
+  const preferred = (target: NavTarget) => (active && focus === target ? { preferred: true } : {});
   return (
     <View style={styles.bar}>
       <Text style={styles.wordmark}>
@@ -30,6 +49,7 @@ export function NavBar({ current }: { current: Section }) {
             key={section}
             radius={radii.pill}
             onPress={() => openSection(section)}
+            {...(section === current ? preferred('current') : {})}
             accessibilityLabel={t(label)}
           >
             {(focused) => (
@@ -57,7 +77,11 @@ export function NavBar({ current }: { current: Section }) {
       <View style={styles.end}>
         <Focusable
           radius={px(32)}
-          onPress={() => open({ name: 'settings' })}
+          onPress={() => {
+            onLeave?.('settings');
+            open({ name: 'settings' });
+          }}
+          {...preferred('settings')}
           accessibilityLabel={t('tv.nav.settings')}
         >
           {(focused) => (
@@ -73,7 +97,11 @@ export function NavBar({ current }: { current: Section }) {
         {profile ? (
           <Focusable
             radius={px(32)}
-            onPress={() => open({ name: 'profiles' })}
+            onPress={() => {
+              onLeave?.('profile');
+              open({ name: 'profiles' });
+            }}
+            {...preferred('profile')}
             accessibilityLabel={t('tv.nav.profile', { name: profile.name })}
           >
             <Avatar profile={profile} size={px(64)} />

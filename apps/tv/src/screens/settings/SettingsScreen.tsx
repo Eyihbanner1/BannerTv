@@ -14,7 +14,7 @@ import { androidHostInfo } from '@tv/platform/android';
 import Constants from 'expo-constants';
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, Text, TVFocusGuideView, View } from 'react-native';
+import { BackHandler, ScrollView, StyleSheet, Text, TVFocusGuideView, View } from 'react-native';
 import { open } from '../../nav/routes';
 import { Avatar } from '../../ui/Avatar';
 import { Focusable } from '../../ui/Focusable';
@@ -60,18 +60,35 @@ export function SettingsScreen({ active }: { active: boolean }) {
   const kids = isKidsProfile();
   const sections = kids ? KIDS_SECTIONS : SECTIONS;
   const [section, setSection] = useState<SectionKey>(sections[0]!);
+  // Focus starts on the rail and goes back to it from the panel on Back; while it is on the
+  // rail, the panel's rows never take it, so Down walks the sections.
+  const [inPanel, setInPanel] = useState(false);
+  const [pullRail, setPullRail] = useState(true);
+  useEffect(() => {
+    if (!active || !inPanel) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setInPanel(false);
+      setPullRail(true);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [active, inPanel]);
   return (
     <View style={styles.screen}>
       <TVFocusGuideView autoFocus style={styles.rail}>
         <Text style={styles.railTitle}>{t('tv.settings.title')}</Text>
-        {sections.map((key, index) => (
+        {sections.map((key) => (
           <Focusable
             key={key}
             radius={radii.lg}
             // Landing on a section shows it, so the arrows browse without pressing OK.
-            onFocus={() => setSection(key)}
+            onFocus={() => {
+              setInPanel(false);
+              setPullRail(false);
+              setSection(key);
+            }}
             onPress={() => setSection(key)}
-            {...(index === 0 && active ? { preferred: true } : {})}
+            {...(active && pullRail && key === section ? { preferred: true } : {})}
             accessibilityLabel={t(`tv.settings.${key}`)}
           >
             {(focused) => (
@@ -96,7 +113,7 @@ export function SettingsScreen({ active }: { active: boolean }) {
           </Focusable>
         ))}
       </TVFocusGuideView>
-      <TVFocusGuideView autoFocus style={styles.panel}>
+      <TVFocusGuideView autoFocus style={styles.panel} onFocusEnter={() => setInPanel(true)}>
         <ScrollView contentContainerStyle={styles.panelContent}>
           <Text style={styles.panelTitle}>{t(`tv.settings.${section}`)}</Text>
           <SectionBody section={section} />
@@ -209,7 +226,6 @@ function PlaybackSection() {
         onPress={() =>
           setPreference('streamChoice', nextChoice(STREAM_CHOICES, prefs.streamChoice))
         }
-        preferred
       />
       <SettingRow
         title={t('player.stillWatching.title')}
@@ -229,21 +245,16 @@ function PlaybackSection() {
 function SubtitlesSection() {
   const { t } = useTranslation();
   const style = useSyncExternalStore(preferences.subscribe, preferences.get).subtitleStyle;
-  const row = <K extends keyof SubtitleStyle>(
-    key: K,
-    options: readonly SubtitleStyle[K][],
-    first = false,
-  ) => (
+  const row = <K extends keyof SubtitleStyle>(key: K, options: readonly SubtitleStyle[K][]) => (
     <SettingRow
       title={t(`player.styleField.${key}`)}
       value={t(`player.styleValue.${key}.${style[key]}`)}
       onPress={() => setSubtitleStyle(key, nextChoice(options, style[key]))}
-      {...(first ? { preferred: true } : {})}
     />
   );
   return (
     <>
-      {row('size', SIZES, true)}
+      {row('size', SIZES)}
       {row('colour', COLOURS)}
       {row('background', BACKGROUNDS)}
       {row('position', POSITIONS)}
