@@ -42,6 +42,15 @@ class Pairing(
     @Synchronized
     fun isPaired(key: String?): Boolean = key != null && keys.any { constantTimeEquals(it, key) }
 
+    /** Forgets one TV's key (the TV unpaired itself). True if it was known. */
+    @Synchronized
+    fun forget(key: String?): Boolean {
+        val known = key?.let { asked -> keys.firstOrNull { constantTimeEquals(it, asked) } } ?: return false
+        keys.remove(known)
+        save(keys.toSet())
+        return true
+    }
+
     /** Forgets every paired TV. */
     @Synchronized
     fun forgetAll() {
