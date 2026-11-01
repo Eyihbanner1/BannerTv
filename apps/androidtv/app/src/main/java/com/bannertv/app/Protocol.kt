@@ -18,6 +18,9 @@ object Protocol {
     /** The oldest Chromium the web build supports (the LG floor too). */
     const val MIN_WEBVIEW_MAJOR: Int = 68
 
+    /** What the page may ask of the stream helper through helper(). */
+    val HELPER_COMMANDS: Set<String> = setOf("start", "stop", "forget")
+
     const val STREAM_HLS: String = "hls"
     const val STREAM_DASH: String = "dash"
 
