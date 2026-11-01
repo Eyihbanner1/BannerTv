@@ -162,6 +162,18 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  readSkipSegments,
+  SKIP_CARD_S,
+  SKIP_REARM_S,
+  SKIP_TAIL_S,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  type SkipKind,
+  skipRearms,
+  type SkipSegment,
+} from './playback/skips';
+export {
   type EndAction,
   endAction,
   type EndState,
@@ -308,6 +320,15 @@ export {
   type TmdbPerson,
 } from './integrations/tmdb/client';
 export {
+  createIntroDbClient,
+  episodeOf,
+  INTRODB_POLICY,
+  INTRODB_TIMEOUT_MS,
+  INTRODB_URL,
+  type IntroDbClient,
+  type IntroDbClientOptions,
+} from './integrations/introdb/client';
+export {
   createTraktAccount,
   TRAKT_REFRESH_BEFORE_MS,
   type TraktAccount,
@@ -330,19 +351,5 @@ export {
 export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
 export {
   createTraktSync,
-  TRAKT_RECENT_SHOW_MS,
-  type TraktSync,
-  type TraktSyncOptions,
-  type TraktSyncResult,
+  TRAKT_REFRESH_BEFORE_MS as _unused,
 } from './integrations/trakt/sync';
-export {
-  readTraktAnswer,
-  TraktError,
-  type TraktErrorKind,
-  type TraktMethod,
-  type TraktRequest,
-  type TraktResponse,
-  type TraktSend,
-  type TraktTimers,
-} from './integrations/trakt/transport';
-export type { Timers } from './timers';
