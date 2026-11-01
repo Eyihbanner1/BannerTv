@@ -85,6 +85,30 @@ async function detect(): Promise<TvCapabilities> {
   };
 }
 
+let relay: () => boolean = () => false;
+let lastIn: TvCapabilities | undefined;
+let lastOut: TvCapabilities | undefined;
+
+/**
+ * Off Android, an addon's request headers can still be sent through the
+ * stream helper on the home network (data/stream-helper.ts): `paired` says
+ * whether one is paired now.
+ */
+export function setRequestHeaderRelay(paired: () => boolean): void {
+  relay = paired;
+  lastIn = undefined;
+}
+
+/** The capabilities with the stream helper's answer, the same object while nothing changed. */
+function withRelay(caps: TvCapabilities): TvCapabilities {
+  if (caps.requestHeaders === true) return caps;
+  const requestHeaders = relay();
+  if (lastIn === caps && lastOut?.requestHeaders === requestHeaders) return lastOut;
+  lastIn = caps;
+  lastOut = { ...caps, requestHeaders };
+  return lastOut;
+}
+
 let cached: Promise<TvCapabilities> | undefined;
 let known: TvCapabilities = UNKNOWN;
 
@@ -94,11 +118,11 @@ export function tvCapabilities(): Promise<TvCapabilities> {
     cached = detect().catch(() => UNKNOWN);
     void cached.then((caps) => (known = caps));
   }
-  return cached;
+  return cached.then(withRelay);
 }
 
 /** The answer if it has arrived (unknown until then), for code that cannot wait. */
 export function knownCapabilities(): TvCapabilities {
   void tvCapabilities();
-  return known;
+  return withRelay(known);
 }
