@@ -94,6 +94,12 @@ function FullSettings() {
         />
         <Button
           block
+          focusKey="settings-stream-helper"
+          label={t('settings.streamHelper')}
+          onPress={() => push({ name: 'stream-helper' })}
+        />
+        <Button
+          block
           focusKey="settings-diagnostics"
           label={t('settings.diagnostics')}
           onPress={() => push({ name: 'diagnostics' })}
