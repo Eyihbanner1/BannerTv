@@ -377,6 +377,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position)) {
       setSkipShown({ key, at: state.position, gone: false });
     }
+  } else if (!waiting && skipShown && skipRearms(skipShown.at, state.position)) {
+    // Back before the intro or recap: it shows again when playback reaches it,
+    // even after OK or Back let it go.
+    setSkipShown(null);
   }
   const skipUp =
     !!skipping &&
