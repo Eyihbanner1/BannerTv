@@ -26,6 +26,8 @@ export const color = {
   barBuffer: 'rgba(241, 237, 255, 0.32)',
   kidsBg: '#1F3A2E',
   kidsText: '#BFEBD6',
+  playerDim: 'rgba(5, 3, 10, 0.45)',
+  controlPress: 'rgba(241, 237, 255, 0.14)',
 } as const;
 
 export const font = {
@@ -112,4 +114,40 @@ export const player = {
   bar: 6,
   scrim: 300,
   seekStep: 10,
+} as const;
+
+export const phoneType = {
+  display: 30,
+  heroTitle: 26,
+  wordmark: 22,
+  heading: 18,
+  body: 15,
+  label: 14,
+  meta: 13,
+  small: 12,
+} as const;
+
+export const touch = {
+  min: 48,
+  chip: 40,
+  row: 52,
+  play: 52,
+  skip: 52,
+  playBig: 72,
+} as const;
+
+export const phone = {
+  gutter: 20,
+  heroH: 300,
+  heroRadius: 20,
+  backdropH: 260,
+  tilePosterW: 104,
+  tilePosterH: 156,
+  tileWideW: 200,
+  tileWideH: 112,
+  resultPosterW: 72,
+  resultPosterH: 108,
+  progress: 4,
+  sideSheetW: 424,
+  sideSheetRadius: 24,
 } as const;

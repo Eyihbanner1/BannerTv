@@ -1,34 +1,72 @@
-/** The brand's dark palette (brand/tokens/tokens.json), sized for a phone held upright. */
+import { color, font as fontToken, phone, phoneType, touch } from '@brand/tokens/design';
+
+/**
+ * The phone's palette, from the redesign's shared tokens (brand/tokens/design.json, which the
+ * TV apps read too). The older names stay so every screen keeps working; new screens use the
+ * token names (`sheet`, `raised`, `textSoft` and so on).
+ */
 export const colors = {
-  bg: '#0B0815',
-  surface1: '#120E20',
-  surface2: '#1B1430',
-  surface3: '#261C42',
-  text: '#F1EDFF',
-  textMuted: '#B9B0D6',
-  textSubtle: '#9A90BD',
-  accent: '#A98BFF',
-  action: '#6A3BF0',
-  actionPressed: '#7B4DFF',
-  prismTop: '#C9B5FF',
+  bg: color.bg,
+  surface1: color.sheet,
+  surface2: color.surface,
+  surface3: color.raised,
+  sheet: color.sheet,
+  raised: color.raised,
+  text: color.text,
+  textSoft: color.textSoft,
+  textMuted: color.textMuted,
+  textSubtle: color.textFaint,
+  accent: color.accent,
+  action: color.brand,
+  actionPressed: color.brandBright,
+  prismTop: color.focus,
+  /** The light "Play" fill and the text on it. */
+  playFill: color.focusFill,
+  onPlay: color.onFocus,
+  playerBg: color.playerBg,
+  playerDim: color.playerDim,
+  controlPress: color.controlPress,
+  barTrack: color.barTrack,
+  barBuffer: color.barBuffer,
   danger: '#FF8A8A',
   scrim: 'rgba(11, 8, 21, 0.72)',
 } as const;
 
-export const font = 'Urbanist';
+export const font = fontToken.family;
 
 export const type = {
-  display: { fontFamily: font, fontWeight: '800', fontSize: 28, lineHeight: 34 },
-  title: { fontFamily: font, fontWeight: '700', fontSize: 22, lineHeight: 28 },
-  heading: { fontFamily: font, fontWeight: '700', fontSize: 18, lineHeight: 24 },
-  body: { fontFamily: font, fontWeight: '500', fontSize: 15, lineHeight: 21 },
-  label: { fontFamily: font, fontWeight: '600', fontSize: 14, lineHeight: 18 },
-  small: { fontFamily: font, fontWeight: '500', fontSize: 12, lineHeight: 16 },
+  display: {
+    fontFamily: font,
+    fontWeight: '800',
+    fontSize: phoneType.display,
+    lineHeight: 36,
+  },
+  title: { fontFamily: font, fontWeight: '800', fontSize: phoneType.heroTitle, lineHeight: 32 },
+  heading: { fontFamily: font, fontWeight: '700', fontSize: phoneType.heading, lineHeight: 24 },
+  body: { fontFamily: font, fontWeight: '500', fontSize: phoneType.body, lineHeight: 22 },
+  label: { fontFamily: font, fontWeight: '700', fontSize: phoneType.label, lineHeight: 18 },
+  meta: { fontFamily: font, fontWeight: '500', fontSize: phoneType.meta, lineHeight: 18 },
+  small: { fontFamily: font, fontWeight: '500', fontSize: phoneType.small, lineHeight: 16 },
+  /** The small capitals over a group of settings or a sheet's column. */
+  overline: {
+    fontFamily: font,
+    fontWeight: '700',
+    fontSize: phoneType.small,
+    lineHeight: 16,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
 } as const;
 
 export const space = { xs: 4, s: 8, m: 12, l: 16, xl: 24, xxl: 32 } as const;
 
-export const radius = { s: 6, m: 10, l: 16, pill: 999 } as const;
+/** The page's side margin. */
+export const gutter = phone.gutter;
+
+export const radius = { s: 6, m: 10, l: 16, xl: 20, pill: 999 } as const;
+
+/** Every tap target is at least `touch.min` high and wide. */
+export { touch };
 
 /** Six violet pairs for tiles with no artwork (as the TV's Tile.tsx). */
 export const FALLBACK_ART: ReadonlyArray<readonly [string, string]> = [
