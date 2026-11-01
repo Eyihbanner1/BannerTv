@@ -268,7 +268,7 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
   const engine: Engine = {
     name: 'android',
 
-    load(url, startAt) {
+    load(url, startAt, headers) {
       unsubscribe?.();
       unsubscribe = onAndroidPlayer(onEvent);
       position = startAt;
@@ -297,6 +297,8 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
         // Android works out files itself; adaptive streams without an extension need saying.
         mime:
           mime === 'application/vnd.apple.mpegurl' || mime === 'application/dash+xml' ? mime : '',
+        // A Referer, Origin or User-Agent some addons' links (often sport) only open with.
+        ...(headers && Object.keys(headers).length > 0 ? { headers: { ...headers } } : {}),
       });
       return Promise.resolve();
     },
