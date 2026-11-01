@@ -130,6 +130,23 @@ class HelperServerTest {
     }
 
     @Test
+    fun forgetsATvThatUnpairs() {
+        val (_, _, keyJson) = call("POST", "/pair", mapOf("code" to pairing.code))
+        val key = keyJson.substringAfter("\"key\":\"").substringBefore('"')
+        val auth = mapOf("Authorization" to "Bearer $key")
+        assertEquals(1, pairing.pairedCount())
+
+        val (forgot, _, _) = call("POST", "/forget", emptyMap(), auth)
+        assertEquals(204, forgot)
+        assertEquals(0, pairing.pairedCount())
+
+        val (again, _, _) = call("POST", "/forget", emptyMap(), auth)
+        assertEquals(401, again)
+        val (link, _, _) = call("POST", "/links", mapOf("url" to "$upstreamBase/video.mp4"), auth)
+        assertEquals(401, link)
+    }
+
+    @Test
     fun sendsTheHeadersAndPointsThePlaylistBackAtItself() {
         val link = pairAndLink(
             "$upstreamBase/live/master.m3u8",

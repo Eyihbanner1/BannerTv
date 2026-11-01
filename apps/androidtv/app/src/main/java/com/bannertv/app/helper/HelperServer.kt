@@ -26,6 +26,7 @@ import java.util.concurrent.Semaphore
  * - GET /status: who this is, so the TV knows it found the helper.
  * - POST /pair (code=123456): the pairing code for a key.
  * - POST /links (url=…&h.Referer=…, Authorization: Bearer <key>): a stream for a helper link.
+ * - POST /forget (Authorization: Bearer <key>): the TV unpaired, so its key stops working.
  * - GET or HEAD /s/<token>/<address>/<name>: the stream, fetched with its headers. Playlists come
  *   back with every address they name pointed at the helper too.
  *
@@ -145,6 +146,12 @@ class HelperServer(
                 }
             }
             request.method == "POST" && path == "/links" -> addLink(request, output)
+            request.method == "POST" && path == "/forget" ->
+                if (pairing.forget(bearerKey(request))) {
+                    respond(output, 204, emptyMap(), null)
+                } else {
+                    respondText(output, 401, "Not paired")
+                }
             (request.method == "GET" || request.method == "HEAD") && path.startsWith("/s/") ->
                 relay(request, output)
             else -> respondText(output, 404, "Not found")
@@ -152,14 +159,16 @@ class HelperServer(
     }
 
     private fun addLink(request: Request, output: OutputStream) {
-        val key = request.headers["authorization"]?.removePrefix("Bearer ")?.trim()
-        if (!pairing.isPaired(key)) return respondText(output, 401, "Not paired")
+        if (!pairing.isPaired(bearerKey(request))) return respondText(output, 401, "Not paired")
         val form = request.form()
         val target = webAddress(form["url"]) ?: return respondText(output, 400, "Bad address")
         val asked = form.filterKeys { it.startsWith("h.") }.mapKeys { it.key.removePrefix("h.") }
         val token = links.add(target, Protocol.requestHeaders(asked))
         respondJson(output, 200, """{"link":"${jsonEscape(linkPath(token, target))}"}""")
     }
+
+    private fun bearerKey(request: Request): String? =
+        request.headers["authorization"]?.removePrefix("Bearer ")?.trim()
 
     private fun relay(request: Request, output: OutputStream) {
         // /s/<token>/<address>[/<name>]: the name is only there for players that look at it.
