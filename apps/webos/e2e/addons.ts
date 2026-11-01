@@ -303,6 +303,10 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
       json(route, { trakt: false, tmdb: false }),
     );
   }
+  // IntroDB has no intro or recap timings for any title unless mockPlayback gives some.
+  await page.route(/^https:\/\/api\.introdb\.app\//, (route) =>
+    json(route, { intro: null, recap: null, outro: null }),
+  );
   // The BannerTV account's service not set up yet: its address answers, but not as the
   // service, so Settings leaves the account out. mockSync puts the service there.
   if (SYNC_SERVICE) {
