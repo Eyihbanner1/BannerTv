@@ -1,7 +1,11 @@
 .actions {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+}
+
+/* Margins, not flex gap: webOS 5 (Chromium 68) has no flex gap. */
+.actions > * + * {
+  margin-top: 16px;
 }
 
 .note {
