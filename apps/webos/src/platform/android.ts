@@ -84,7 +84,15 @@ export type AndroidEvent =
   | AndroidPlayerEvent;
 
 export type AndroidPlayerCommand =
-  | { op: 'load'; id: number; url: string; startAt: number; mime: string }
+  | {
+      op: 'load';
+      id: number;
+      url: string;
+      startAt: number;
+      mime: string;
+      /** Request headers the addon asks to be sent with the link, for every request of the stream. */
+      headers?: Record<string, string>;
+    }
   | { op: 'play' }
   | { op: 'pause' }
   | { op: 'seek'; position: number }
@@ -127,7 +135,10 @@ export function androidHostInfo(): AndroidHostInfo | null {
   return info;
 }
 
-/** What the device can decode and pass to the TV or receiver. Nothing is known off Android. */
+/**
+ * What the device can decode and pass to the TV or receiver. Nothing is known off Android.
+ * Android's player always sends an addon's request headers (the build ships inside the app).
+ */
 export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
   const bridge = host();
   if (!bridge) return null;
@@ -144,6 +155,7 @@ export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
     av1: flag(facts.av1),
     dts: flag(facts.dts),
     truehd: flag(facts.truehd),
+    requestHeaders: true,
   };
 }
 
