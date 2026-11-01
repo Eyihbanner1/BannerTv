@@ -51,12 +51,8 @@ export interface EngineListener {
  */
 export interface Engine {
   readonly name: 'native' | 'hls.js' | 'shaka' | 'android';
-  /**
-   * Starts loading at `startAt` seconds (0 for the beginning). Rejects when it cannot start at all.
-   * `headers`: request headers the addon asks to be sent with the link. Only Android's engine
-   * can send them; streams that need them are offered nowhere else.
-   */
-  load(url: string, startAt: number, headers?: Readonly<Record<string, string>>): Promise<void>;
+  /** Starts loading at `startAt` seconds (0 for the beginning). Rejects when it cannot start at all. */
+  load(url: string, startAt: number): Promise<void>;
   /** A live broadcast, which has no end: nothing to resume, and another stream starts at the live edge. */
   isLive(): boolean;
   /**
