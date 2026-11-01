@@ -107,3 +107,20 @@ test('Skip intro goes by itself after a few seconds, never skipping', async ({ p
   expect(time).toBeLessThan(30);
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 });
+
+test('Back before the intro brings Skip intro back after Back let it go', async ({ page }) => {
+  await playEpisode(page, { intro: [3, 25] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await pressBack(page);
+  await expect(card).toHaveCount(0);
+
+  // Rewind to before the intro and play into it again: the card is back.
+  await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((element: HTMLVideoElement) => void (element.currentTime = 0.5));
+  await expect(card).toBeVisible({ timeout: 10000 });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+});
