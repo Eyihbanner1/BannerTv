@@ -2,7 +2,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import type { ReactElement } from 'react';
 import { FlatList, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Tile } from './Tile';
-import { space } from './theme';
+import { gutter, space } from './theme';
 
 const COLUMNS = 3;
 
@@ -21,7 +21,7 @@ export function Grid({
   onEndReached?: () => void;
 }) {
   const { width } = useWindowDimensions();
-  const tileWidth = Math.floor((width - space.l * 2 - space.m * (COLUMNS - 1)) / COLUMNS);
+  const tileWidth = Math.floor((width - gutter * 2 - space.m * (COLUMNS - 1)) / COLUMNS);
   return (
     <FlatList
       data={items}
@@ -44,6 +44,6 @@ export function Grid({
 
 const styles = StyleSheet.create({
   content: { paddingBottom: space.xxl },
-  columns: { gap: space.m, paddingHorizontal: space.l },
+  columns: { gap: space.m, paddingHorizontal: gutter },
   cell: { marginBottom: space.m },
 });
