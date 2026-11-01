@@ -11,7 +11,6 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . && node tools/scripts/check-css.mjs && node tools/scripts/build-tokens.mjs --check",
-    "tokens": "node tools/scripts/build-tokens.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
@@ -22,7 +21,8 @@
     "ares": "pnpm --filter @bannertv/webos exec",
     "tv:install": "node tools/scripts/tv.mjs install",
     "tv:launch": "node tools/scripts/tv.mjs launch",
-    "tv:inspect": "node tools/scripts/tv.mjs inspect"
+    "tv:inspect": "node tools/scripts/tv.mjs inspect",
+    "tokens": "node tools/scripts/build-tokens.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

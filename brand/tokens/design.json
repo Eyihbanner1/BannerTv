@@ -25,7 +25,9 @@
     "bar-track": "rgba(241, 237, 255, 0.22)",
     "bar-buffer": "rgba(241, 237, 255, 0.32)",
     "kids-bg": "#1F3A2E",
-    "kids-text": "#BFEBD6"
+    "kids-text": "#BFEBD6",
+    "player-dim": "rgba(5, 3, 10, 0.45)",
+    "control-press": "rgba(241, 237, 255, 0.14)"
   },
   "font": {
     "family": "Urbanist",
@@ -103,5 +105,38 @@
     "bar": 6,
     "scrim": 300,
     "seek-step": 10
+  },
+  "phone-type": {
+    "display": 30,
+    "hero-title": 26,
+    "wordmark": 22,
+    "heading": 18,
+    "body": 15,
+    "label": 14,
+    "meta": 13,
+    "small": 12
+  },
+  "touch": {
+    "min": 48,
+    "chip": 40,
+    "row": 52,
+    "play": 52,
+    "skip": 52,
+    "play-big": 72
+  },
+  "phone": {
+    "gutter": 20,
+    "hero-h": 300,
+    "hero-radius": 20,
+    "backdrop-h": 260,
+    "tile-poster-w": 104,
+    "tile-poster-h": 156,
+    "tile-wide-w": 200,
+    "tile-wide-h": 112,
+    "result-poster-w": 72,
+    "result-poster-h": 108,
+    "progress": 4,
+    "side-sheet-w": 424,
+    "side-sheet-radius": 24
   }
 }

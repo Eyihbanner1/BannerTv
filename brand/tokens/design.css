@@ -26,6 +26,8 @@
   --bt-color-bar-buffer: rgba(241, 237, 255, 0.32);
   --bt-color-kids-bg: #1F3A2E;
   --bt-color-kids-text: #BFEBD6;
+  --bt-color-player-dim: rgba(5, 3, 10, 0.45);
+  --bt-color-control-press: rgba(241, 237, 255, 0.14);
   /* font */
   --bt-font-family: "Urbanist", system-ui, sans-serif;
   --bt-font-weight-medium: 500;
@@ -94,4 +96,34 @@
   --bt-player-bar: 6px;
   --bt-player-scrim: 300px;
   --bt-player-seek-step: 10;
+  /* phone-type */
+  --bt-phone-type-display: 30px;
+  --bt-phone-type-hero-title: 26px;
+  --bt-phone-type-wordmark: 22px;
+  --bt-phone-type-heading: 18px;
+  --bt-phone-type-body: 15px;
+  --bt-phone-type-label: 14px;
+  --bt-phone-type-meta: 13px;
+  --bt-phone-type-small: 12px;
+  /* touch */
+  --bt-touch-min: 48px;
+  --bt-touch-chip: 40px;
+  --bt-touch-row: 52px;
+  --bt-touch-play: 52px;
+  --bt-touch-skip: 52px;
+  --bt-touch-play-big: 72px;
+  /* phone */
+  --bt-phone-gutter: 20px;
+  --bt-phone-hero-h: 300px;
+  --bt-phone-hero-radius: 20px;
+  --bt-phone-backdrop-h: 260px;
+  --bt-phone-tile-poster-w: 104px;
+  --bt-phone-tile-poster-h: 156px;
+  --bt-phone-tile-wide-w: 200px;
+  --bt-phone-tile-wide-h: 112px;
+  --bt-phone-result-poster-w: 72px;
+  --bt-phone-result-poster-h: 108px;
+  --bt-phone-progress: 4px;
+  --bt-phone-side-sheet-w: 424px;
+  --bt-phone-side-sheet-radius: 24px;
 }
