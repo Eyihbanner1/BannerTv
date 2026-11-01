@@ -23,6 +23,9 @@ export default defineConfig(
       'apps/mobile/ios/**',
       'apps/mobile/.expo/**',
       'apps/mobile/expo-env.d.ts',
+      // The native TV app's generated Android project and Expo's own folders.
+      'apps/tv/android/**',
+      'apps/tv/.expo/**',
     ],
   },
   js.configs.recommended,
@@ -33,8 +36,9 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
-    // The phone app: React Native, where fetch, timers and console are the only browser-like globals.
-    files: ['apps/mobile/src/**/*.{ts,tsx}'],
+    // The phone app and the native TV app: React Native, where fetch, timers and console are the
+    // only browser-like globals.
+    files: ['apps/mobile/src/**/*.{ts,tsx}', 'apps/tv/src/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat['recommended-latest']],
   },
   {
@@ -57,7 +61,7 @@ export default defineConfig(
   },
   {
     // Metro, Babel and their plugins load CommonJS.
-    files: ['apps/mobile/*.config.js', 'apps/mobile/build/**/*.js'],
+    files: ['apps/mobile/*.config.js', 'apps/mobile/build/**/*.js', 'apps/tv/*.config.js'],
     languageOptions: { globals: globals.node, sourceType: 'commonjs' },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },

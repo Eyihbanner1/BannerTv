@@ -1,5 +1,7 @@
 packages:
   - apps/*
+  # The native TV app installs with npm on its own (apps/tv/README.md), so it stays out of the lockfile.
+  - '!apps/tv'
   - packages/*
   - services/*
 

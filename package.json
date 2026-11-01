@@ -11,6 +11,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . && node tools/scripts/check-css.mjs && node tools/scripts/build-tokens.mjs --check",
+    "tokens": "node tools/scripts/build-tokens.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
