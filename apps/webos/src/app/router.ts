@@ -102,7 +102,9 @@ export type Route =
   /** Settings > Home rows: their order, and which are hidden. */
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */
-  | { name: 'trakt' };
+  | { name: 'trakt' }
+  /** Settings > Stream helper: run it (Android) or pair with one (the LG). */
+  | { name: 'stream-helper' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 
