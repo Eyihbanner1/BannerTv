@@ -6,7 +6,7 @@ The phone app: React Native through Expo, upright and touch-first, on the same d
 
 - `src/app`: the screens' routes (expo-router). `(tabs)` holds Home, Search, Sports (shown only with a sports addon), My List and Settings.
 - `modules/banner-relaunch`: a small native module that reports a launcher tap on the running app.
-- `src/screens`, `src/ui`: the phone's screens and their parts.
+- `src/screens`, `src/ui`: the phone's screens and their parts. Colours, type sizes and touch sizes come from `brand/tokens/design.json` (imported as `@brand/tokens/design`), the same tokens the TV apps use; change them there and run `node tools/scripts/build-tokens.mjs`.
 - `src/player`: the player. `phone-host.ts` is the Android TV app's bridge over expo-video, so the TV's playback session runs unchanged.
 - `src/runtime`, `src/shims`, `build/`: the browser stand-ins the shared code needs (storage, crypto, events).
 - `@tv/*` imports come from `apps/webos/src`; nothing there changes for the phone.

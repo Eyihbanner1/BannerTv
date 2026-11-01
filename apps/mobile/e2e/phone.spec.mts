@@ -67,10 +67,12 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
     .poll(() => page.evaluate(() => document.querySelector('video')?.currentTime ?? 0))
     .toBeGreaterThan(1);
 
-  // Quality switches to the 720p stream. The controls hide while the film plays: a tap brings them.
-  const quality = page.getByRole('button', { name: /^Quality, 1080p/ });
-  if (!(await quality.isVisible())) await page.mouse.click(206, 160);
-  await quality.click();
+  // Quality, under More options, switches to the 720p stream. The controls hide while the film
+  // plays: a tap brings them.
+  const more = page.getByRole('button', { name: 'More options' });
+  if (!(await more.isVisible())) await page.mouse.click(206, 160);
+  await more.click();
+  await page.getByRole('button', { name: /^Quality, 1080p/ }).click();
   await page.getByText('720p', { exact: true }).click();
   await expect.poll(() => playback.media).toContain('/movie-720p.webm');
 

@@ -1,3 +1,4 @@
+import { phone } from '@brand/tokens/design';
 import {
   kidsTitleAllowed,
   MIN_RESUME_SECONDS,
@@ -40,9 +41,36 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openPlayer, openStreams } from '../nav/routes';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
-import { Icon } from '../ui/icons';
-import { colors, radius, space, type } from '../ui/theme';
+import { Icon, type IconName, OutlineIcon } from '../ui/icons';
+import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
+
+/** A square-ish button in the row of three under Play: My List, All streams and so on. */
+function ActionTile({
+  label,
+  icon,
+  onPress,
+  accessibilityLabel,
+}: {
+  label: string;
+  icon: IconName;
+  onPress: () => void;
+  accessibilityLabel?: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
+    >
+      <Icon name={icon} size={20} color={colors.text} />
+      <Text style={styles.tileLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 /** The season each title last showed, for this run. */
 const shownSeason = new Map<string, number>();
@@ -250,14 +278,12 @@ export function TitleScreen({
 
   const backdrop = item.background ?? (extra?.backdropPath ? undefined : item.poster);
   const backdropSrc = phoneArt(backdrop) ?? tmdbImageUrl(extra?.backdropPath, 'w1280');
-  const logo = phoneArt(item.logo) ?? tmdbImageUrl(extra?.logoPath, 'w500');
-  const facts = [...metaFacts(t, item), extra?.certificate, extra?.network]
-    .filter(Boolean)
-    .join(' · ');
+  const facts = [...metaFacts(t, item), extra?.network].filter(Boolean).join(' · ');
+  const certificate = extra?.certificate;
   const saved = library.has(item.id);
   const trailer = item.trailers[0];
   const cast = meta?.cast.slice(0, 6) ?? [];
-  const heroHeight = Math.round((width * 9) / 16) + 80;
+  const heroHeight = Math.max(phone.backdropH, Math.round((width * 9) / 16) + insets.top);
 
   const header = (
     <View>
@@ -269,8 +295,8 @@ export function TitleScreen({
           style={StyleSheet.absoluteFill}
         />
         <LinearGradient
-          colors={['rgba(11,8,21,0.35)', 'rgba(11,8,21,0)', colors.bg]}
-          locations={[0, 0.3, 1]}
+          colors={['rgba(11,8,21,0)', colors.bg]}
+          locations={[0.6, 1]}
           style={StyleSheet.absoluteFill}
         />
         <Pressable
@@ -278,26 +304,20 @@ export function TitleScreen({
           accessibilityRole="button"
           accessibilityLabel={t('common.back')}
           style={[styles.back, { top: insets.top + space.s }]}
-          hitSlop={8}
         >
-          <Icon name="back" />
+          <OutlineIcon name="back" size={22} weight={2.4} />
         </Pressable>
       </View>
       <View style={styles.body}>
-        {logo ? (
-          <Artwork
-            src={logo}
-            retrySrc={item.logo}
-            seed={`${item.id}-logo`}
-            contentFit="contain"
-            backdrop={false}
-            style={styles.logo}
-            fallback={<Text style={styles.name}>{item.name}</Text>}
-          />
-        ) : (
-          <Text style={styles.name}>{item.name}</Text>
-        )}
-        {facts ? <Text style={styles.facts}>{facts}</Text> : null}
+        <Text style={styles.name} accessibilityRole="header">
+          {item.name}
+        </Text>
+        {facts || certificate ? (
+          <View style={styles.factsRow}>
+            {facts ? <Text style={styles.factsLine}>{facts}</Text> : null}
+            {certificate ? <Text style={styles.certificate}>{certificate}</Text> : null}
+          </View>
+        ) : null}
         {item.genres.length > 0 ? (
           <Text style={styles.facts}>{item.genres.slice(0, 4).join(' · ')}</Text>
         ) : null}
@@ -309,7 +329,7 @@ export function TitleScreen({
         <View style={styles.actions}>
           {watchVideoId !== null ? (
             <Button
-              kind="primary"
+              kind="play"
               icon="play"
               label={
                 resumeAt === undefined
@@ -317,12 +337,12 @@ export function TitleScreen({
                   : t('details.resumeFrom', { time: formatTime(resumeAt) })
               }
               onPress={() => play(watchVideoId)}
-              style={styles.wide}
+              style={styles.main}
             />
           ) : null}
           {latestVideo && latestAgain ? (
             <Button
-              kind="primary"
+              kind="play"
               icon="play"
               label={
                 latestVideo.season !== undefined && latestVideo.episode !== undefined
@@ -333,12 +353,12 @@ export function TitleScreen({
                   : t('phone.play')
               }
               onPress={() => play(latestVideo.id, 0)}
-              style={styles.wide}
+              style={styles.main}
             />
           ) : null}
           {latestVideo && latestResume !== undefined ? (
             <Button
-              kind="primary"
+              kind="play"
               icon="play"
               label={
                 latestVideo.season !== undefined && latestVideo.episode !== undefined
@@ -349,12 +369,12 @@ export function TitleScreen({
                   : t('details.resumeFrom', { time: formatTime(latestResume) })
               }
               onPress={() => play(latestVideo.id)}
-              style={styles.wide}
+              style={styles.main}
             />
           ) : null}
           {upNext ? (
             <Button
-              kind="primary"
+              kind="play"
               icon="play"
               label={
                 upNext.season !== undefined && upNext.episode !== undefined
@@ -362,23 +382,27 @@ export function TitleScreen({
                   : t('home.nextNote')
               }
               onPress={() => play(upNext.id)}
-              style={styles.wide}
+              style={styles.main}
             />
           ) : null}
           {firstEpisode && kidsAllowed ? (
             <Button
-              kind="primary"
+              kind="play"
               icon="play"
               label={t('phone.play')}
               onPress={() => play(firstEpisode.id)}
-              style={styles.wide}
+              style={styles.main}
             />
           ) : null}
           <View style={styles.actionRow}>
             {watchVideoId !== null && resumeAt !== undefined ? (
-              <Button label={t('details.startOver')} onPress={() => play(watchVideoId, 0)} />
+              <ActionTile
+                icon="replay10"
+                label={t('details.startOver')}
+                onPress={() => play(watchVideoId, 0)}
+              />
             ) : null}
-            <Button
+            <ActionTile
               icon={saved ? 'check' : 'plus'}
               label={saved ? t('library.remove') : t('library.add')}
               accessibilityLabel={
@@ -389,10 +413,14 @@ export function TitleScreen({
               onPress={() => void (saved ? library.remove(item.id) : library.add(meta ?? item))}
             />
             {trailer && kidsAllowed ? (
-              <Button label={t('details.trailer')} onPress={() => void playTrailer(trailer)} />
+              <ActionTile
+                icon="movie"
+                label={t('details.trailer')}
+                onPress={() => void playTrailer(trailer)}
+              />
             ) : null}
             {watchVideoId !== null ? (
-              <Button
+              <ActionTile
                 icon="layers"
                 label={t('details.allStreams')}
                 onPress={() =>
@@ -485,39 +513,64 @@ const styles = StyleSheet.create({
   back: {
     position: 'absolute',
     left: space.l,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.scrim,
+    width: touch.min,
+    height: touch.min,
+    borderRadius: touch.min / 2,
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  body: { paddingHorizontal: space.l, gap: space.s, marginTop: -64 },
-  logo: { width: '75%', height: 80 },
+  body: { paddingHorizontal: gutter, paddingTop: 18, gap: space.m },
   name: { ...type.display, color: colors.text },
-  facts: { ...type.small, color: colors.textMuted },
+  factsRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.m },
+  factsLine: { ...type.label, fontWeight: '500', color: colors.textMuted, flexShrink: 1 },
+  certificate: {
+    ...type.small,
+    fontWeight: '700',
+    color: colors.textMuted,
+    borderWidth: 1,
+    borderColor: colors.textSubtle,
+    borderRadius: radius.s,
+    paddingHorizontal: space.s,
+    paddingVertical: 1,
+  },
+  facts: { ...type.meta, color: colors.textMuted },
   notice: { ...type.body, color: colors.text },
-  actions: { gap: space.s, marginTop: space.s },
-  wide: { alignSelf: 'stretch' },
+  actions: { gap: space.s },
+  main: { alignSelf: 'stretch', minHeight: touch.play, borderRadius: 14 },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s },
+  tile: {
+    flexBasis: '31%',
+    flexGrow: 1,
+    height: 64,
+    borderRadius: 12,
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.xs,
+  },
+  tilePressed: { backgroundColor: colors.raised },
+  tileLabel: { ...type.meta, fontWeight: '700', color: colors.text },
   failed: { gap: space.s, alignItems: 'flex-start' },
-  description: { ...type.body, color: colors.textMuted, marginTop: space.s },
+  description: { ...type.body, lineHeight: 23, color: colors.textSoft, marginTop: space.xs },
   seasons: { marginTop: space.l, flexGrow: 0 },
   chip: {
+    minHeight: touch.chip,
+    justifyContent: 'center',
     paddingHorizontal: space.l,
-    paddingVertical: space.s,
     borderRadius: radius.pill,
     backgroundColor: colors.surface2,
     marginRight: space.s,
   },
-  chipOn: { backgroundColor: colors.action },
-  chipText: { ...type.label, color: colors.textMuted },
-  chipTextOn: { color: colors.text },
+  chipOn: { backgroundColor: colors.playFill },
+  chipText: { ...type.meta, fontWeight: '700', color: colors.textSoft },
+  chipTextOn: { color: colors.onPlay, fontWeight: '800' },
   sectionTitle: { ...type.heading, color: colors.text, marginTop: space.l },
   episode: {
     flexDirection: 'row',
     gap: space.m,
-    paddingHorizontal: space.l,
+    paddingHorizontal: gutter,
     paddingVertical: space.s,
   },
   pressed: { backgroundColor: colors.surface1 },

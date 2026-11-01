@@ -33,6 +33,7 @@ import {
 import { autoplaysSinceInput, countAutoplay } from '@tv/player/sleep';
 import { type SubtitleChoice, useSubtitles } from '@tv/screens/player/use-subtitles';
 import { useScrobble } from '@tv/screens/player/use-scrobble';
+import { motion } from '@brand/tokens/design';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -42,6 +43,7 @@ import {
   AppState,
   BackHandler,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -51,25 +53,25 @@ import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/rou
 import { reportScreen } from '../runtime/whereabouts';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
-import { Icon } from '../ui/icons';
-import { Sheet, SheetOption } from '../ui/Sheet';
+import { Icon, OutlineIcon } from '../ui/icons';
 import { StreamList } from '../ui/StreamList';
-import { colors, radius, space, type } from '../ui/theme';
+import { colors, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
 import { holdLandscape } from './orientation';
 import { phonePlayer, pictureShown } from './phone-host';
 import { SeekBar } from './SeekBar';
+import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SubtitleText } from './SubtitleText';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
-const CONTROLS_HIDE_MS = 4000;
+const CONTROLS_HIDE_MS = motion.controlsHide;
 const DOUBLE_TAP_MS = 280;
 const SKIP_S = 10;
 /** The next episode's streams are looked up this long before the end. */
 const PREFETCH_NEXT_S = 120;
 const noop = () => () => undefined;
 
-type Panel = 'tracks' | 'streams' | 'quality' | null;
+type Panel = 'tracks' | 'more' | 'streams' | 'quality' | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -569,11 +571,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <View style={styles.top}>
             <Pressable
               onPress={goBack}
-              hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel={t('phone.leavePlayer')}
+              style={styles.iconButton}
             >
-              <Icon name="back" size={28} />
+              <OutlineIcon name="back" size={22} />
             </Pressable>
             <View style={styles.titles}>
               <Text style={styles.title} numberOfLines={1}>
@@ -586,6 +588,24 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               ) : null}
             </View>
             {state.live ? <Text style={styles.live}>{t('phone.live')}</Text> : null}
+            <Pressable
+              onPress={() => setPanel('tracks')}
+              disabled={waiting}
+              accessibilityRole="button"
+              accessibilityLabel={t('phone.audioAndSubtitles')}
+              accessibilityState={{ disabled: waiting }}
+              style={[styles.iconButton, waiting && styles.disabled]}
+            >
+              <OutlineIcon name="captions" size={22} weight={1.8} />
+            </Pressable>
+            <Pressable
+              onPress={() => setPanel('more')}
+              accessibilityRole="button"
+              accessibilityLabel={t('phone.moreOptions')}
+              style={styles.iconButton}
+            >
+              <Icon name="more" size={22} />
+            </Pressable>
           </View>
 
           {!waiting ? (
@@ -595,40 +615,40 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                   poke();
                   skip(-SKIP_S);
                 }}
-                hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel={t('phone.back10')}
+                style={styles.skipButton}
               >
-                <Icon name="replay10" size={40} />
+                <Icon name="replay10" size={32} />
               </Pressable>
               <Pressable
                 onPress={() => {
                   poke();
                   session?.togglePlay();
                 }}
-                style={styles.playButton}
+                style={({ pressed }) => [styles.playButton, pressed && styles.playPressed]}
                 accessibilityRole="button"
                 accessibilityLabel={t(playing ? 'phone.pauseLabel' : 'phone.playLabel')}
               >
-                <Icon name={playing ? 'pause' : 'play'} size={44} />
+                <Icon name={playing ? 'pause' : 'play'} size={34} />
               </Pressable>
               <Pressable
                 onPress={() => {
                   poke();
                   skip(SKIP_S);
                 }}
-                hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel={t('phone.forward10')}
+                style={styles.skipButton}
               >
-                <Icon name="forward10" size={40} />
+                <Icon name="forward10" size={32} />
               </Pressable>
             </View>
           ) : (
             <View style={styles.middle} pointerEvents="none" />
           )}
 
-          <View style={[styles.bottom, { paddingBottom: Math.max(insets.bottom, space.m) }]}>
+          <View style={[styles.bottom, { paddingBottom: Math.max(insets.bottom, space.l) }]}>
             {!state.live ? (
               <SeekBar
                 position={state.position}
@@ -638,39 +658,26 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                   session?.seek(seconds);
                 }}
                 onScrubbing={setScrubbing}
+                {...(offersNext && next
+                  ? {
+                      right: (
+                        <Pressable
+                          onPress={() => playEpisode(next)}
+                          accessibilityRole="button"
+                          hitSlop={(touch.min - touch.chip) / 2}
+                          style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
+                        >
+                          <Text style={styles.pillText}>
+                            {counting
+                              ? t('phone.nextIn', { seconds: count })
+                              : t('phone.nextEpisode')}
+                          </Text>
+                        </Pressable>
+                      ),
+                    }
+                  : {})}
               />
             ) : null}
-            <View style={styles.buttons}>
-              <Button
-                kind="quiet"
-                icon="subtitles"
-                label={t('phone.audioAndSubtitles')}
-                onPress={() => setPanel('tracks')}
-                disabled={waiting}
-              />
-              <Button
-                kind="quiet"
-                icon="hd"
-                label={`${t('player.quality')} · ${qualityValue}`}
-                accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
-                onPress={() => setPanel('quality')}
-                disabled={!state.entry}
-              />
-              <Button
-                kind="quiet"
-                icon="layers"
-                label={t('phone.sources')}
-                onPress={() => setPanel('streams')}
-              />
-              {offersNext && next ? (
-                <Button
-                  kind="quiet"
-                  icon="next"
-                  label={counting ? t('phone.nextIn', { seconds: count }) : t('phone.nextEpisode')}
-                  onPress={() => playEpisode(next)}
-                />
-              ) : null}
-            </View>
           </View>
         </View>
       ) : null}
@@ -721,114 +728,138 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      <Sheet
+      <SidePanel
         visible={panel === 'tracks'}
         title={t('phone.audioAndSubtitles')}
         onClose={() => setPanel(null)}
       >
-        {state.audio.length > 0 ? (
-          <Text style={styles.sheetHeading}>{t('phone.audio')}</Text>
-        ) : null}
-        {state.audio.map((track) => {
-          const detail = audioDetail(track);
-          return (
-            <SheetOption
-              key={track.id}
-              label={audioSummary(track)}
-              {...(detail ? { detail } : {})}
-              selected={track.active}
-              onPress={() => {
-                session?.selectAudio(track.id);
-                if (track.lang) chooseAudioLanguage(metaId, track.lang);
-                setPanel(null);
-              }}
-            />
-          );
-        })}
-        <Text style={styles.sheetHeading}>{t('phone.subtitles')}</Text>
-        <SheetOption
-          label={t('phone.subtitlesOff')}
-          selected={subtitles.choice === null}
-          onPress={() => chooseSubtitle(null)}
-        />
-        {subtitles.tracks.map((track) => (
-          <SheetOption
-            key={`track-${track.id}`}
-            label={languageName(track.lang) || track.label || t('common.unknown')}
-            detail={t('phone.embeddedSubtitles')}
-            selected={subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id}
-            onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
-          />
-        ))}
-        {subtitles.options.map((option) => {
-          const status = subtitles.statusOf({ kind: 'file', key: option.key });
-          return (
-            <SheetOption
-              key={`file-${option.key}`}
-              label={languageName(option.lang) || option.lang}
-              detail={[
-                t('phone.fromAddon', { addon: option.source }),
-                status === 'loading' ? t('common.loading') : '',
-                status === 'failed' ? t('player.subtitlesFailed') : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-              selected={subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key}
-              onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
-            />
-          );
-        })}
-        {subtitles.pending > 0 ? <Text style={styles.sheetNote}>{t('common.loading')}</Text> : null}
-      </Sheet>
+        <View style={styles.columns}>
+          {state.audio.length > 0 ? (
+            <PanelColumn title={t('phone.audio')}>
+              <ScrollView>
+                {state.audio.map((track) => {
+                  const detail = audioDetail(track);
+                  return (
+                    <PanelOption
+                      key={track.id}
+                      label={audioSummary(track)}
+                      {...(detail ? { detail } : {})}
+                      selected={track.active}
+                      onPress={() => {
+                        session?.selectAudio(track.id);
+                        if (track.lang) chooseAudioLanguage(metaId, track.lang);
+                        setPanel(null);
+                      }}
+                    />
+                  );
+                })}
+              </ScrollView>
+            </PanelColumn>
+          ) : null}
+          <PanelColumn title={t('phone.subtitles')}>
+            <ScrollView>
+              <PanelOption
+                label={t('phone.subtitlesOff')}
+                selected={subtitles.choice === null}
+                onPress={() => chooseSubtitle(null)}
+              />
+              {subtitles.tracks.map((track) => (
+                <PanelOption
+                  key={`track-${track.id}`}
+                  label={languageName(track.lang) || track.label || t('common.unknown')}
+                  detail={t('phone.embeddedSubtitles')}
+                  selected={subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id}
+                  onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
+                />
+              ))}
+              {subtitles.options.map((option) => {
+                const status = subtitles.statusOf({ kind: 'file', key: option.key });
+                return (
+                  <PanelOption
+                    key={`file-${option.key}`}
+                    label={languageName(option.lang) || option.lang}
+                    detail={[
+                      t('phone.fromAddon', { addon: option.source }),
+                      status === 'loading' ? t('common.loading') : '',
+                      status === 'failed' ? t('player.subtitlesFailed') : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    selected={
+                      subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key
+                    }
+                    onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
+                  />
+                );
+              })}
+              {subtitles.pending > 0 ? (
+                <Text style={styles.sheetNote}>{t('common.loading')}</Text>
+              ) : null}
+            </ScrollView>
+          </PanelColumn>
+        </View>
+      </SidePanel>
 
-      <Sheet
+      <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
+        <PanelColumn>
+          <PanelOption
+            label={t('player.quality')}
+            detail={qualityValue}
+            accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+            disabled={!state.entry}
+            onPress={() => setPanel('quality')}
+          />
+          <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
+        </PanelColumn>
+      </SidePanel>
+
+      <SidePanel
         visible={panel === 'quality'}
         title={t('player.quality')}
         onClose={() => setPanel(null)}
       >
-        {choices.length <= 1 ? (
-          <Text style={styles.sheetNote}>
-            {choices.length === 1
-              ? t('player.onlyQuality', {
-                  quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
-                })
-              : t('player.noOtherQuality')}
-          </Text>
-        ) : null}
-        {choices.map((choice) => {
-          const value = choice.resolution ?? 'other';
-          return (
-            <SheetOption
-              key={value}
-              label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
-              {...(choice.otherLanguages
-                ? {
-                    detail: t('player.otherAudio', {
-                      languages: choice.otherLanguages.map(languageName).join(', '),
-                    }),
-                  }
-                : {})}
-              selected={value === currentQuality}
-              onPress={() => pickQuality(value)}
-            />
-          );
-        })}
-      </Sheet>
+        <ScrollView>
+          {choices.length <= 1 ? (
+            <Text style={styles.sheetNote}>
+              {choices.length === 1
+                ? t('player.onlyQuality', {
+                    quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
+                  })
+                : t('player.noOtherQuality')}
+            </Text>
+          ) : null}
+          {choices.map((choice) => {
+            const value = choice.resolution ?? 'other';
+            return (
+              <PanelOption
+                key={value}
+                label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
+                {...(choice.otherLanguages
+                  ? {
+                      detail: t('player.otherAudio', {
+                        languages: choice.otherLanguages.map(languageName).join(', '),
+                      }),
+                    }
+                  : {})}
+                selected={value === currentQuality}
+                onPress={() => pickQuality(value)}
+              />
+            );
+          })}
+        </ScrollView>
+      </SidePanel>
 
-      <Sheet
+      <SidePanel
         visible={panel === 'streams'}
         title={t('phone.sources')}
         onClose={() => setPanel(null)}
-        scroll={false}
       >
-        <View style={styles.streams}>
-          <StreamList
-            finder={finder}
-            {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
-            onPick={pickStream}
-          />
-        </View>
-      </Sheet>
+        <StreamList
+          finder={finder}
+          {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
+          onPick={pickStream}
+        />
+      </SidePanel>
     </View>
   );
 }
@@ -836,7 +867,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 const styles = StyleSheet.create({
   // Sized as well as placed: the web build draws a <video>, which keeps its own size otherwise.
   video: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
-  screen: { flex: 1, backgroundColor: '#000' },
+  screen: { flex: 1, backgroundColor: colors.playerBg },
   dim: { backgroundColor: 'rgba(0,0,0,0.6)' },
   centre: {
     position: 'absolute',
@@ -861,10 +892,18 @@ const styles = StyleSheet.create({
   problemTitle: { ...type.title, color: colors.text },
   problemText: { ...type.body, color: colors.textMuted },
   problemButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s, marginTop: space.s },
-  controls: { backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'space-between' },
-  top: { flexDirection: 'row', alignItems: 'center', gap: space.l, paddingTop: space.l },
-  titles: { flex: 1 },
-  title: { ...type.heading, color: colors.text },
+  controls: { backgroundColor: colors.playerDim, justifyContent: 'space-between' },
+  top: { flexDirection: 'row', alignItems: 'center', gap: space.s, paddingTop: space.m },
+  iconButton: {
+    width: touch.min,
+    height: touch.min,
+    borderRadius: touch.min / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disabled: { opacity: 0.45 },
+  titles: { flex: 1, marginLeft: space.xs },
+  title: { ...type.body, fontSize: 16, fontWeight: '700', color: colors.text },
   subtitle: { ...type.small, color: colors.textMuted },
   live: {
     ...type.label,
@@ -874,17 +913,36 @@ const styles = StyleSheet.create({
     borderRadius: radius.s,
     overflow: 'hidden',
   },
-  middle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 56 },
-  playButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(106,59,240,0.85)',
+  // Calm controls: line glyphs, no fills, and one soft circle behind Play.
+  middle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 88 },
+  skipButton: {
+    width: touch.skip,
+    height: touch.skip,
+    borderRadius: touch.skip / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  playButton: {
+    width: touch.playBig,
+    height: touch.playBig,
+    borderRadius: touch.playBig / 2,
+    backgroundColor: colors.controlPress,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playPressed: { backgroundColor: colors.barBuffer },
   bottom: { gap: space.xs },
-  buttons: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.s },
+  pill: {
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.barBuffer,
+  },
+  pillPressed: { backgroundColor: colors.controlPress },
+  pillText: { ...type.meta, fontWeight: '700', color: colors.text },
+  columns: { flex: 1, flexDirection: 'row', gap: 18 },
   upNext: {
     position: 'absolute',
     bottom: space.xl,
@@ -907,13 +965,5 @@ const styles = StyleSheet.create({
     paddingVertical: space.s,
   },
   toastText: { ...type.label, color: colors.text },
-  sheetHeading: {
-    ...type.label,
-    color: colors.accent,
-    paddingHorizontal: space.l,
-    paddingTop: space.m,
-    paddingBottom: space.xs,
-  },
-  sheetNote: { ...type.small, color: colors.textMuted, padding: space.l },
-  streams: { height: 420 },
+  sheetNote: { ...type.small, color: colors.textMuted, padding: space.m },
 });

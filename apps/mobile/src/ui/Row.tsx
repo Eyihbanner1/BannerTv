@@ -2,7 +2,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import type { ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { type TileShape, LANDSCAPE, POSTER, Tile } from './Tile';
-import { colors, radius, space, type } from './theme';
+import { colors, gutter, radius, space, type } from './theme';
 
 export interface RowItem {
   item: MetaPreview;
@@ -46,7 +46,7 @@ export function Row({
         ) : null}
         <View style={styles.spacer} />
         {onSeeAll && seeAllLabel ? (
-          <Pressable onPress={onSeeAll} accessibilityRole="button" hitSlop={12}>
+          <Pressable onPress={onSeeAll} accessibilityRole="button" hitSlop={14}>
             <Text style={styles.seeAll}>{seeAllLabel}</Text>
           </Pressable>
         ) : null}
@@ -90,19 +90,19 @@ function Separator() {
 }
 
 const styles = StyleSheet.create({
-  row: { paddingTop: space.l, gap: space.s },
+  row: { paddingTop: 22, gap: 10 },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    paddingHorizontal: space.l,
+    paddingHorizontal: gutter,
     gap: space.s,
   },
   title: { ...type.heading, color: colors.text, flexShrink: 1 },
   tag: { ...type.small, color: colors.textSubtle, flexShrink: 1 },
   spacer: { flex: 1 },
-  seeAll: { ...type.label, color: colors.accent },
-  list: { paddingHorizontal: space.l },
-  separator: { width: space.m },
-  placeholders: { flexDirection: 'row', gap: space.m, paddingHorizontal: space.l },
+  seeAll: { ...type.label, color: colors.accent, paddingVertical: space.s },
+  list: { paddingHorizontal: gutter },
+  separator: { width: 10 },
+  placeholders: { flexDirection: 'row', gap: 10, paddingHorizontal: gutter },
   placeholder: { backgroundColor: colors.surface2, borderRadius: radius.m },
 });

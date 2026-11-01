@@ -4,12 +4,13 @@ import { playedVideos, progress } from '@tv/data/playback';
 import { isKidsProfile } from '@tv/data/profiles';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openTitle } from '../nav/routes';
+import { Chip } from '../ui/Chip';
 import { Grid } from '../ui/Grid';
 import { Message } from '../ui/Message';
-import { colors, radius, space, type } from '../ui/theme';
+import { colors, gutter, space, type } from '../ui/theme';
 
 type Show = 'list' | 'history';
 
@@ -22,19 +23,6 @@ const subscribeAll = (listener: () => void) => {
   return () => undo.forEach((stop) => stop());
 };
 const versions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
-
-function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: on }}
-      style={[styles.chip, on && styles.chipOn]}
-    >
-      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
-    </Pressable>
-  );
-}
 
 export function LibraryScreen() {
   const { t } = useTranslation();
@@ -62,6 +50,9 @@ export function LibraryScreen() {
 
   const header = (
     <View style={[styles.header, { paddingTop: insets.top + space.m }]}>
+      <Text style={styles.title} accessibilityRole="header">
+        {t('phone.tabs.library')}
+      </Text>
       <View style={styles.chips}>
         <Chip label={t('library.myList')} on={show === 'list'} onPress={() => setShow('list')} />
         <Chip
@@ -70,7 +61,12 @@ export function LibraryScreen() {
           onPress={() => setShow('history')}
         />
       </View>
-      <View style={styles.chips}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.kinds}
+        contentContainerStyle={styles.chips}
+      >
         <Chip label={t('library.all')} on={kind === 'all'} onPress={() => setKind('all')} />
         <Chip label={t('library.films')} on={kind === 'movie'} onPress={() => setKind('movie')} />
         <Chip
@@ -78,7 +74,7 @@ export function LibraryScreen() {
           on={kind === 'series'}
           onPress={() => setKind('series')}
         />
-      </View>
+      </ScrollView>
       {loaded && items.length === 0 ? (
         <Message lead={show === 'list' ? t('library.emptyList') : t('library.emptyHistory')} />
       ) : null}
@@ -94,15 +90,8 @@ export function LibraryScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingBottom: space.m, gap: space.s },
-  chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: space.l },
-  chip: {
-    paddingHorizontal: space.l,
-    paddingVertical: space.s,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface2,
-  },
-  chipOn: { backgroundColor: colors.action },
-  chipText: { ...type.label, color: colors.textMuted },
-  chipTextOn: { color: colors.text },
+  header: { paddingBottom: space.m, gap: space.m },
+  title: { ...type.display, color: colors.text, paddingHorizontal: gutter },
+  chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: gutter },
+  kinds: { flexGrow: 0 },
 });
