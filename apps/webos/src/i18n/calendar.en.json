@@ -1,0 +1,18 @@
+{
+  "show": "Calendar",
+  "today": "Today",
+  "tomorrow": "Tomorrow",
+  "yesterday": "Yesterday",
+  "season": "S{{season}}",
+  "episode": "E{{episode}}",
+  "episodes": "E{{first}}–{{last}}",
+  "count": "{{number}} episodes",
+  "film": "Film release",
+  "seriesPremiere": "Series premiere",
+  "seasonPremiere": "Season premiere",
+  "new": "New",
+  "watched": "Watched",
+  "loading": "Checking your addons for dates…",
+  "empty": "Nothing coming up in the next two months. Series you watch, and series and films on My List, show their next dates here.",
+  "lead": "New episodes of the series you watch, and releases on My List, from your addons’ dates."
+}
