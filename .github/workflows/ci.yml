@@ -195,9 +195,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The root package.json names pnpm, which setup-node would otherwise try to cache.
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
 
       # Its direct dependencies are pinned exactly; it keeps no lockfile of its own.
       - name: Install
