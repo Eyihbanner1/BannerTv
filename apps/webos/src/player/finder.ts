@@ -17,6 +17,7 @@ import {
   type QueryState,
   type StreamEntry,
   type StreamOrder,
+  streamRequestHeaders,
   type TvCapabilities,
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
@@ -27,6 +28,7 @@ import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
+import { noteRequestHeaders } from './request-headers';
 
 /** Once one stream could play, slower addons get this much longer to offer a better one. */
 export const SETTLE_AFTER_FIRST_MS = 2000;
@@ -143,6 +145,8 @@ function buildEntries(
           },
         };
         described.set(stream, known);
+        // Android's player sends them when it opens the link.
+        noteRequestHeaders(stream);
       }
       entries.push({ ...known.entry, addonRank });
     });
@@ -219,9 +223,12 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     probing = true;
     try {
       for (let tested = 0; tested < PROBE_LIMIT;) {
+        // The test's hidden <video> cannot send an addon's request headers: those links go untested.
         const candidate = state
           .get()
-          .candidates.find((entry) => probes[entryKey(entry)] === undefined);
+          .candidates.find(
+            (entry) => probes[entryKey(entry)] === undefined && !streamRequestHeaders(entry.stream),
+          );
         if (!candidate || candidate.stream.source.kind !== 'url') return;
         if (state.get().candidates.some((entry) => probes[entryKey(entry)] === 'works')) return;
         const key = entryKey(candidate);
