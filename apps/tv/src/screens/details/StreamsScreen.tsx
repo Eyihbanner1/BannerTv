@@ -98,7 +98,13 @@ const styles = StyleSheet.create({
     marginVertical: spacing.lg,
   },
   statusText: { ...type.meta, color: color.textMuted },
-  list: { paddingHorizontal: layout.heroLeft, paddingBottom: px(200), gap: spacing.md },
+  // Top room for the first row's focus ring.
+  list: {
+    paddingHorizontal: layout.heroLeft,
+    paddingTop: spacing.md,
+    paddingBottom: px(200),
+    gap: spacing.md,
+  },
   rowBox: { width: px(1400) },
   row: {
     padding: spacing.lg,

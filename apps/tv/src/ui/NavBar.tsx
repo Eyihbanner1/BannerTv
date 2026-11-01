@@ -77,6 +77,8 @@ export function NavBar({
       <View style={styles.end}>
         <Focusable
           radius={px(32)}
+          // A fixed box, so the ring hugs the round button rather than the bar's height.
+          style={styles.roundBox}
           onPress={() => {
             onLeave?.('settings');
             open({ name: 'settings' });
@@ -97,6 +99,7 @@ export function NavBar({
         {profile ? (
           <Focusable
             radius={px(32)}
+            style={styles.roundBox}
             onPress={() => {
               onLeave?.('profile');
               open({ name: 'profiles' });
@@ -135,6 +138,7 @@ const styles = StyleSheet.create({
   currentLabel: { color: color.text },
   focusedLabel: { color: color.onFocus },
   end: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  roundBox: { width: px(64), height: px(64) },
   round: {
     width: px(64),
     height: px(64),

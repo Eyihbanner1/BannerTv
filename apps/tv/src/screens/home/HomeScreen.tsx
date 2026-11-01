@@ -93,11 +93,14 @@ const HomeRow = memo(function HomeRow({
   onFirst,
   onEmpty,
   onFocusTitle,
+  onRowFocus,
   preferredKey,
   onOpen,
 }: {
   row: BoardRow;
   enabled: boolean;
+  /** A tile on this row took focus: Home scrolls the row up under the hero. */
+  onRowFocus: () => void;
   preferredKey: string | null;
   onOpen: (row: string, key: string) => void;
   onFirst: (key: string, item: MetaPreview) => void;
@@ -161,7 +164,10 @@ const HomeRow = memo(function HomeRow({
         onOpen(row.key, entry.key);
         openTitle(entry.item);
       }}
-      onItemFocus={(entry) => onFocusTitle(titleHero(t, entry.item, row.name))}
+      onItemFocus={(entry) => {
+        onRowFocus();
+        onFocusTitle(titleHero(t, entry.item, row.name));
+      }}
     />
   );
 });
@@ -196,6 +202,8 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
   const [firsts, setFirsts] = useState<Readonly<Record<string, MetaPreview>>>({});
   const [loadUpTo, setLoadUpTo] = useState(LOAD_AHEAD);
   const [focusedHero, setFocusedHero] = useState<HeroTitle | null>(null);
+  // While the remote is on the rows, the hero drops its description to give them room.
+  const [inRows, setInRows] = useState(false);
   const list = useRef<FlatList<HomeEntry>>(null);
   const heroTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(heroTimer.current), []);
@@ -239,7 +247,10 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
       : null;
   const hero = focusedHero ?? startHero;
 
+  // Called from the tile's own focus, which Android always reports, so the focused row is
+  // brought to the top of the list rather than left where Android's minimal scroll puts it.
   const focusRow = useCallback((index: number) => {
+    setInRows(true);
     setLoadUpTo((before) => Math.max(before, index + LOAD_AHEAD));
     list.current?.scrollToIndex({ index, viewPosition: 0, animated: true });
   }, []);
@@ -255,7 +266,7 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
   const renderEntry = ({ item: entry, index }: { item: HomeEntry; index: number }) => {
     if (!('row' in entry)) {
       return (
-        <TVFocusGuideView autoFocus onFocusEnter={() => focusRow(index)}>
+        <TVFocusGuideView autoFocus>
           <Row
             title={t('home.continueWatching')}
             shape="landscape"
@@ -276,6 +287,7 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
               playContinue(item);
             }}
             onItemFocus={(rowEntry) => {
+              focusRow(index);
               const item = continueRow.find((candidate) => candidate.videoId === rowEntry.key);
               if (!item) return;
               onFocusTitle({
@@ -290,13 +302,14 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
       );
     }
     return (
-      <TVFocusGuideView autoFocus onFocusEnter={() => focusRow(index)}>
+      <TVFocusGuideView autoFocus>
         <HomeRow
           row={entry.row}
           enabled={index <= loadUpTo}
           onFirst={onFirst}
           onEmpty={onEmpty}
           onFocusTitle={onFocusTitle}
+          onRowFocus={() => focusRow(index)}
           preferredKey={preferredIn(entry.row.key)}
           onOpen={onOpen}
         />
@@ -317,8 +330,12 @@ export function HomeScreen({ active, fromNav }: { active: boolean; fromNav: bool
         <HeroText
           hero={hero}
           preferred={active && back.kind === 'hero'}
+          compact={inRows}
           onPlay={() => setBack({ kind: 'hero' })}
-          onButtonFocus={() => list.current?.scrollToOffset({ offset: 0, animated: true })}
+          onButtonFocus={() => {
+            setInRows(false);
+            list.current?.scrollToOffset({ offset: 0, animated: true });
+          }}
         />
       </View>
       {noRows ? (

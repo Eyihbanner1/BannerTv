@@ -55,12 +55,15 @@ export function HeroText({
   hero,
   onButtonFocus,
   preferred = false,
+  compact = false,
   onPlay,
 }: {
   hero: HeroTitle | null;
   onButtonFocus: () => void;
   /** The first button takes focus, as when Home opens or is on top again. */
   preferred?: boolean;
+  /** The remote is on the rows below: the description goes, to give them room. */
+  compact?: boolean;
   /** Called before the first button's action, so Home knows to come back to it. */
   onPlay?: () => void;
 }) {
@@ -77,12 +80,13 @@ export function HeroText({
       useNativeDriver: true,
     }).start();
   }, [id, fade]);
-  if (!hero) return <View style={styles.text} />;
+  const box = compact ? styles.textCompact : styles.text;
+  if (!hero) return <View style={box} />;
   const { item } = hero;
   const facts = metaFacts(t, item).join(' · ');
   const saved = library.has(item.id);
   return (
-    <View style={styles.text}>
+    <View style={box}>
       <Animated.View style={[styles.words, { opacity: fade }]}>
         <Text style={styles.eyebrow} numberOfLines={1}>
           {hero.eyebrow}
@@ -95,7 +99,7 @@ export function HeroText({
             {facts}
           </Text>
         ) : null}
-        {item.description ? (
+        {item.description && !compact ? (
           <Text style={styles.description} numberOfLines={3}>
             {item.description}
           </Text>
@@ -130,6 +134,12 @@ const styles = StyleSheet.create({
     marginLeft: layout.heroLeft,
     width: layout.heroWidth,
     minHeight: px(470),
+    justifyContent: 'flex-end',
+    gap: spacing.xl,
+  },
+  textCompact: {
+    marginLeft: layout.heroLeft,
+    width: layout.heroWidth,
     justifyContent: 'flex-end',
     gap: spacing.xl,
   },
