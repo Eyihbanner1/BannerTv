@@ -182,3 +182,51 @@ jobs:
           name: android-reports
           path: apps/androidtv/app/build/reports/
           if-no-files-found: ignore
+
+  # A throwaway app for the LG, outside the pnpm workspace:
+  # Home drawn by a WebGL renderer against HTML, with the same motion. See trials/motion-home.
+  motion-trial:
+    name: Motion trial .ipk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: trials/motion-home
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # Its direct dependencies are pinned exactly; it keeps no lockfile of its own.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the build for webOS 5.0
+        run: npm run check:bundle
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Walk every mode in Chromium
+        run: npm run e2e
+
+      - name: Package .ipk
+        run: npm run package
+
+      - name: Upload .ipk
+        uses: actions/upload-artifact@v4
+        with:
+          name: motion-trial-ipk
+          path: trials/motion-home/out/*.ipk
+          if-no-files-found: error
