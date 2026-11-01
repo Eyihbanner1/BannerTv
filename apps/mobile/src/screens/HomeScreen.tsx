@@ -17,8 +17,9 @@ import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { Hero } from '../ui/Hero';
 import { Message } from '../ui/Message';
+import { PrismMark } from '../ui/PrismMark';
 import { Row, type RowItem } from '../ui/Row';
-import { colors, space, type } from '../ui/theme';
+import { colors, gutter, space, touch, type } from '../ui/theme';
 import { router } from 'expo-router';
 
 const MAX_ROW_ITEMS = 40;
@@ -192,6 +193,23 @@ export function HomeScreen() {
 
   const header = (
     <View>
+      <View style={[styles.topBar, { paddingTop: insets.top + space.m }]}>
+        <PrismMark size={28} />
+        <Text style={styles.wordmark} accessibilityRole="header">
+          {t('phone.appName')}
+        </Text>
+        <View style={styles.spacer} />
+        {profile ? (
+          <Pressable
+            onPress={() => router.push('/profiles')}
+            accessibilityRole="button"
+            accessibilityLabel={t('phone.switchProfile')}
+            style={styles.profile}
+          >
+            <Avatar profile={profile} size={40} round />
+          </Pressable>
+        ) : null}
+      </View>
       <Hero
         item={noRows ? null : heroItem}
         {...(heroContinue && heroItem === heroContinue.preview
@@ -202,19 +220,6 @@ export function HomeScreen() {
           : {})}
         onDetails={openTitle}
       />
-      <View style={[styles.topBar, { top: insets.top + space.s }]}>
-        <Text style={styles.wordmark}>{t('phone.appName')}</Text>
-        {profile ? (
-          <Pressable
-            onPress={() => router.push('/profiles')}
-            accessibilityRole="button"
-            accessibilityLabel={t('phone.switchProfile')}
-            hitSlop={8}
-          >
-            <Avatar profile={profile} size={32} />
-          </Pressable>
-        ) : null}
-      </View>
       {continueRow.length > 0 ? (
         <Row
           title={t('home.continueWatching')}
@@ -274,6 +279,7 @@ export function HomeScreen() {
       onViewableItemsChanged={onViewable}
       viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
       contentContainerStyle={{ paddingBottom: space.xxl }}
+      removeClippedSubviews
       initialNumToRender={4}
       windowSize={7}
     />
@@ -283,14 +289,20 @@ export function HomeScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   topBar: {
-    position: 'absolute',
-    left: space.l,
-    right: space.l,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: gutter,
+    paddingBottom: space.s,
   },
-  wordmark: { ...type.title, color: colors.text, letterSpacing: 0.5 },
-  rowError: { paddingHorizontal: space.l, gap: space.s, alignItems: 'flex-start' },
+  wordmark: { ...type.title, fontSize: 22, lineHeight: 28, color: colors.text },
+  spacer: { flex: 1 },
+  profile: {
+    width: touch.min,
+    height: touch.min,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowError: { paddingHorizontal: gutter, gap: space.s, alignItems: 'flex-start' },
   rowErrorText: { ...type.body, color: colors.textMuted },
 });
