@@ -351,5 +351,19 @@ export {
 export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
 export {
   createTraktSync,
-  TRAKT_REFRESH_BEFORE_MS as _unused,
+  TRAKT_RECENT_SHOW_MS,
+  type TraktSync,
+  type TraktSyncOptions,
+  type TraktSyncResult,
 } from './integrations/trakt/sync';
+export {
+  readTraktAnswer,
+  TraktError,
+  type TraktErrorKind,
+  type TraktMethod,
+  type TraktRequest,
+  type TraktResponse,
+  type TraktSend,
+  type TraktTimers,
+} from './integrations/trakt/transport';
+export type { Timers } from './timers';
