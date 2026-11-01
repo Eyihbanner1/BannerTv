@@ -17,6 +17,7 @@ import { initNavigation } from './navigation/spatial';
 import { initAndroid } from './platform/android';
 import { bootInfo } from './platform/boot';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
+import { startFrameMeter } from './platform/frame-meter';
 import { initInputMode } from './platform/input-mode';
 import { applyTuning, changedTuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
@@ -49,6 +50,7 @@ function start() {
     document.documentElement.classList.add('low-power');
   }
   applyTuning(document.documentElement);
+  startFrameMeter();
   if (!isWebOS()) {
     fitToWindow(root);
     window.addEventListener('resize', () => fitToWindow(root));

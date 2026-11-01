@@ -14,11 +14,21 @@
  * dropped the hero's fade (`"heroFade":true` before): the pauses of 1-1.5 s
  * moving along a row went to at most 50 ms. That of 30 October turned decoding
  * ahead on (`"decodeAhead":false` before): the first walk down Home had a p95
- * frame gap of 50-100 ms with it, against 83-167 ms without.
+ * frame gap of 50-100 ms with it, against 83-167 ms without. On 1 November
+ * every other screen took Home's lesson (`"screenMotion":"slide"` before):
+ * their lists, grids, buttons and the rail move at once instead of sliding.
  */
 export interface Tuning {
   /** Home's rows and each row's tiles slide, slide on a layer kept between presses, or jump. */
   motion: 'slide' | 'layer' | 'jump';
+  /**
+   * Every other screen's lists and grids (Search, Discover, Library,
+   * Details, All streams, Settings, Add-ons, profiles), its buttons and
+   * dialogs, and the rail's opening, slide over the motion time or jump.
+   * Home's rows, Sports' rows and tiles keep their own switches, and the
+   * player keeps its fades, so this changes nothing there.
+   */
+  screenMotion: 'slide' | 'jump';
   /** The focused tile grows over the motion time, at once, or not at all. */
   zoom: 'animate' | 'instant' | 'off';
   /** How long focus rests on a title before the hero shows it. */
@@ -66,12 +76,19 @@ export interface Tuning {
    * in, hero changes and decoding ahead (performance.getEntriesByType('mark')).
    */
   marks: boolean;
+  /**
+   * Counts frame gaps while the remote is in use, per screen, for a TV
+   * round: read `window.__bannertvFrames()` from the web inspector, and
+   * `window.__bannertvFrames(true)` reads and starts again.
+   */
+  meter: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
 
 export const TUNING_DEFAULTS: Readonly<Tuning> = {
   motion: 'jump',
+  screenMotion: 'jump',
   zoom: 'instant',
   heroDelayMs: 250,
   heroBusyMs: 800,
@@ -86,6 +103,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   decodeAhead: true,
   heroFade: false,
   marks: false,
+  meter: false,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -112,6 +130,7 @@ export function parseTuning(raw: string | null): Tuning {
   const d = TUNING_DEFAULTS;
   return {
     motion: oneOf(stored.motion, ['slide', 'layer', 'jump'], d.motion),
+    screenMotion: oneOf(stored.screenMotion, ['slide', 'jump'], d.screenMotion),
     zoom: oneOf(stored.zoom, ['animate', 'instant', 'off'], d.zoom),
     heroDelayMs: count(stored.heroDelayMs, 0, 5000, d.heroDelayMs),
     heroBusyMs: count(stored.heroBusyMs, 0, 5000, d.heroBusyMs),
@@ -126,6 +145,7 @@ export function parseTuning(raw: string | null): Tuning {
     decodeAhead: flag(stored.decodeAhead, d.decodeAhead),
     heroFade: flag(stored.heroFade, d.heroFade),
     marks: flag(stored.marks, d.marks),
+    meter: flag(stored.meter, d.meter),
   };
 }
 
@@ -151,12 +171,13 @@ export function changedTuning(value: Tuning = tuning): Partial<Tuning> {
 
 /**
  * The switches that work through CSS become classes on the root element. The
- * stylesheets draw rows sliding, tiles zooming over the motion time, the hero
+ * stylesheets draw rows and lists sliding, tiles zooming over the motion time, the hero
  * panning and fading, tile art with mipmaps, and Home's rows box without a
  * layer of its own; each class changes one of those.
  */
 export function applyTuning(root: HTMLElement, value: Tuning = tuning): void {
   if (value.motion !== 'slide') root.classList.add(`tune-motion-${value.motion}`);
+  if (value.screenMotion === 'jump') root.classList.add('tune-screens-jump');
   if (value.zoom !== 'animate') root.classList.add(`tune-zoom-${value.zoom}`);
   if (!value.heroPan) root.classList.add('tune-no-pan');
   if (!value.mips) root.classList.add('tune-no-mips');

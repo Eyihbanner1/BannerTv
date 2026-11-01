@@ -5,6 +5,7 @@ describe('TUNING_DEFAULTS', () => {
   it('are the lightest set the TV comparison chose', () => {
     expect(TUNING_DEFAULTS).toEqual({
       motion: 'jump',
+      screenMotion: 'jump',
       zoom: 'instant',
       heroDelayMs: 250,
       heroBusyMs: 800,
@@ -19,6 +20,7 @@ describe('TUNING_DEFAULTS', () => {
       decodeAhead: true,
       heroFade: false,
       marks: false,
+      meter: false,
     });
   });
 });
@@ -33,11 +35,12 @@ describe('parseTuning', () => {
   it('takes valid switches and keeps the default for the rest', () => {
     expect(
       parseTuning(
-        '{"motion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","wideArt":"small","heroPan":true,"decoding":"async","mips":true,"homeLayer":true,"decodeAhead":false,"heroFade":true,"marks":true}',
+        '{"motion":"slide","screenMotion":"slide","heroDelayMs":600,"heroBusyMs":250,"heroArt":"large","wideArt":"small","heroPan":true,"decoding":"async","mips":true,"homeLayer":true,"decodeAhead":false,"heroFade":true,"marks":true,"meter":true}',
       ),
     ).toEqual({
       ...TUNING_DEFAULTS,
       motion: 'slide',
+      screenMotion: 'slide',
       heroDelayMs: 600,
       heroBusyMs: 250,
       heroArt: 'large',
@@ -49,12 +52,13 @@ describe('parseTuning', () => {
       decodeAhead: false,
       heroFade: true,
       marks: true,
+      meter: true,
     });
   });
 
   it('ignores values out of range or of the wrong kind', () => {
     const value = parseTuning(
-      '{"motion":"fly","zoom":1,"heroDelayMs":-5,"heroBusyMs":9999,"heroArt":"small","wideArt":"large","rowsAround":"3","overscan":99,"heroPan":"no","decoding":"sync","mips":0,"homeLayer":1,"decodeAhead":"yes","heroFade":null,"marks":[]}',
+      '{"motion":"fly","screenMotion":"layer","zoom":1,"heroDelayMs":-5,"heroBusyMs":9999,"heroArt":"small","wideArt":"large","rowsAround":"3","overscan":99,"heroPan":"no","decoding":"sync","mips":0,"homeLayer":1,"decodeAhead":"yes","heroFade":null,"marks":[],"meter":"on"}',
     );
     expect(value).toEqual(TUNING_DEFAULTS);
     // Every row and tile beside focus is always drawn, so 0 would mean nothing.
@@ -85,6 +89,7 @@ describe('applyTuning', () => {
   it('adds a class for each CSS switch away from what the stylesheets draw', () => {
     expect(classesFor({ ...TUNING_DEFAULTS })).toEqual([
       'tune-motion-jump',
+      'tune-screens-jump',
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
@@ -92,6 +97,7 @@ describe('applyTuning', () => {
     ]);
     expect(classesFor({ ...TUNING_DEFAULTS, motion: 'layer', zoom: 'off' })).toEqual([
       'tune-motion-layer',
+      'tune-screens-jump',
       'tune-zoom-off',
       'tune-no-pan',
       'tune-no-mips',
@@ -99,19 +105,21 @@ describe('applyTuning', () => {
     ]);
     expect(classesFor({ ...TUNING_DEFAULTS, homeLayer: true, heroFade: true })).toEqual([
       'tune-motion-jump',
+      'tune-screens-jump',
       'tune-zoom-instant',
       'tune-no-pan',
       'tune-no-mips',
       'tune-home-layer',
     ]);
     // Switches that work in code add no class.
-    expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
-      classesFor({ ...TUNING_DEFAULTS }),
-    );
+    expect(
+      classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true, meter: true }),
+    ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
     expect(
       classesFor({
         ...TUNING_DEFAULTS,
         motion: 'slide',
+        screenMotion: 'slide',
         zoom: 'animate',
         heroPan: true,
         mips: true,
