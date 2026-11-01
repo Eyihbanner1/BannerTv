@@ -16,6 +16,10 @@ declare global {
 /** hls.js's advice: rebuild the media pipeline after a decode failure, but not in a loop. */
 const MEDIA_RECOVERIES = 2;
 const MEDIA_RECOVERY_GAP_MS = 5000;
+/** Live: this many segments behind, hls.js jumps back to where it sits. */
+export const LIVE_MAX_SEGMENTS = 6;
+/** Live: how much faster hls.js may play to win back a wait. */
+export const LIVE_CATCH_UP_RATE = 1.05;
 /**
  * Failures that mean the TV cannot take the content, so rebuilding the
  * pipeline would only fail again. hls.js reports E-AC-3 in MPEG-TS as a frag
@@ -113,6 +117,10 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
       maxBufferLength: 15,
       maxMaxBufferLength: 30,
       backBufferLength: 10,
+      // Live: after a wait, catch up by playing up to 5% faster, and if it
+      // still ends up six segments behind (three is where it sits), jump back.
+      liveMaxLatencyDurationCount: LIVE_MAX_SEGMENTS,
+      maxLiveSyncPlaybackRate: LIVE_CATCH_UP_RATE,
     });
     hls = instance;
     let recoveries = 0;
