@@ -162,6 +162,18 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  readSkipSegments,
+  SKIP_CARD_S,
+  SKIP_REARM_S,
+  SKIP_TAIL_S,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  type SkipKind,
+  skipRearms,
+  type SkipSegment,
+} from './playback/skips';
+export {
   type EndAction,
   endAction,
   type EndState,
@@ -307,6 +319,15 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export {
+  createIntroDbClient,
+  episodeOf,
+  INTRODB_POLICY,
+  INTRODB_TIMEOUT_MS,
+  INTRODB_URL,
+  type IntroDbClient,
+  type IntroDbClientOptions,
+} from './integrations/introdb/client';
 export {
   createTraktAccount,
   TRAKT_REFRESH_BEFORE_MS,
