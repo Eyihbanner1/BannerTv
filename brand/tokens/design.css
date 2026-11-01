@@ -1,0 +1,97 @@
+/* Built from brand/tokens/design.json by tools/scripts/build-tokens.mjs. Do not edit. */
+:root {
+  /* color */
+  --bt-color-bg: #0B0815;
+  --bt-color-rail: #110C1F;
+  --bt-color-surface: #1B1430;
+  --bt-color-raised: #2A2050;
+  --bt-color-sheet: #140F26;
+  --bt-color-track: #3A3160;
+  --bt-color-text: #F1EDFF;
+  --bt-color-text-soft: #D9D2F2;
+  --bt-color-text-muted: #B8AEDB;
+  --bt-color-text-faint: #8E82B8;
+  --bt-color-accent: #A98BFF;
+  --bt-color-focus: #C9B5FF;
+  --bt-color-focus-glow: rgba(201, 181, 255, 0.55);
+  --bt-color-focus-fill: #F1EDFF;
+  --bt-color-on-focus: #0B0815;
+  --bt-color-brand: #6A3BF0;
+  --bt-color-brand-deep: #4B23C8;
+  --bt-color-brand-bright: #7B4DFF;
+  --bt-color-player-bg: #05030A;
+  --bt-color-player-scrim: rgba(5, 3, 10, 0.62);
+  --bt-color-control-idle: rgba(241, 237, 255, 0.10);
+  --bt-color-bar-track: rgba(241, 237, 255, 0.22);
+  --bt-color-bar-buffer: rgba(241, 237, 255, 0.32);
+  --bt-color-kids-bg: #1F3A2E;
+  --bt-color-kids-text: #BFEBD6;
+  /* font */
+  --bt-font-family: "Urbanist", system-ui, sans-serif;
+  --bt-font-weight-medium: 500;
+  --bt-font-weight-semibold: 600;
+  --bt-font-weight-bold: 700;
+  --bt-font-weight-heavy: 800;
+  /* tv-type */
+  --bt-tv-type-hero-title: 84px;
+  --bt-tv-type-details-title: 80px;
+  --bt-tv-type-heading: 40px;
+  --bt-tv-type-row-title: 32px;
+  --bt-tv-type-body: 28px;
+  --bt-tv-type-label: 26px;
+  --bt-tv-type-meta: 24px;
+  --bt-tv-type-small: 22px;
+  /* space */
+  --bt-space-xs: 8px;
+  --bt-space-sm: 12px;
+  --bt-space-md: 16px;
+  --bt-space-lg: 24px;
+  --bt-space-xl: 32px;
+  --bt-space-xxl: 48px;
+  --bt-space-tv-safe: 96px;
+  /* radius */
+  --bt-radius-sm: 8px;
+  --bt-radius-md: 14px;
+  --bt-radius-lg: 16px;
+  --bt-radius-sheet: 32px;
+  --bt-radius-pill: 999px;
+  /* focused */
+  --bt-focused-ring-width: 5px;
+  --bt-focused-glow-width: 4px;
+  --bt-focused-tile-scale: 1.08;
+  /* motion */
+  --bt-motion-fast: 120ms;
+  --bt-motion-base: 200ms;
+  --bt-motion-slide: 240ms;
+  --bt-motion-hero-fade: 320ms;
+  --bt-motion-hero-delay: 250ms;
+  --bt-motion-controls-hide: 4000ms;
+  /* ease */
+  --bt-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --bt-ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --bt-ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+  /* tv */
+  --bt-tv-nav-height: 120px;
+  --bt-tv-hero-left: 96px;
+  --bt-tv-hero-top: 210px;
+  --bt-tv-hero-width: 820px;
+  --bt-tv-tile-wide-w: 360px;
+  --bt-tv-tile-wide-h: 202px;
+  --bt-tv-tile-wide-focused-w: 400px;
+  --bt-tv-tile-wide-focused-h: 225px;
+  --bt-tv-tile-poster-w: 200px;
+  --bt-tv-tile-poster-h: 300px;
+  --bt-tv-row-gap: 24px;
+  --bt-tv-settings-rail: 600px;
+  --bt-tv-settings-row-h: 96px;
+  --bt-tv-toggle-w: 84px;
+  --bt-tv-toggle-h: 46px;
+  --bt-tv-details-resume-w: 520px;
+  --bt-tv-avatar: 220px;
+  --bt-tv-sheet-h: 560px;
+  /* player */
+  --bt-player-button: 76px;
+  --bt-player-bar: 6px;
+  --bt-player-scrim: 300px;
+  --bt-player-seek-step: 10;
+}
