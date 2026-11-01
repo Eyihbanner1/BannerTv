@@ -12,6 +12,10 @@ import {
   type QualityReference,
   rearms,
   secondsToEnd,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  skipRearms,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
 } from '@bannertv/core';
@@ -19,6 +23,7 @@ import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
 import { playedVideos, progress } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
+import { useSkipSegments } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
@@ -69,6 +74,9 @@ const DOUBLE_TAP_MS = 280;
 const SKIP_S = 10;
 /** The next episode's streams are looked up this long before the end. */
 const PREFETCH_NEXT_S = 120;
+/** The Skip intro pill's height, and how far up it sits while the controls show the seek bar. */
+const SKIP_PILL_H = 40;
+const SKIP_RAISED = 112;
 const noop = () => () => undefined;
 
 type Panel = 'tracks' | 'more' | 'streams' | 'quality' | null;
@@ -366,6 +374,32 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     tapTimer.current = setTimeout(() => setControls((shownNow) => !shownNow), DOUBLE_TAP_MS);
   };
   const surfaceWidth = useRef(1);
+
+  // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
+  // few seconds as the intro or recap starts, and again whenever the controls are up during it.
+  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
+  const skips = useSkipSegments(titleType, videoId, !sportsEvent);
+  const skipping =
+    state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
+  // The intro or recap the pill was for, and where it first showed.
+  const [skipShown, setSkipShown] = useState<{ key: string; at: number } | null>(null);
+  if (skipping && !waiting) {
+    const key = skipKey(skipping);
+    if (!skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position)) {
+      setSkipShown({ key, at: state.position });
+    }
+  }
+  const skipFresh =
+    !!skipping &&
+    skipShown?.key === skipKey(skipping) &&
+    !skipCardDone(skipShown.at, state.position, state.rate);
+  const skipUp =
+    !!skipping && !waiting && !problem && panel === null && !scrubbing && (controls || skipFresh);
+  const skipSegment = () => {
+    if (!session || !skipping) return;
+    noteInput();
+    session.seek(skipping.end);
+  };
 
   // Quality, as on the TV: at each resolution, the stream closest to what plays, in the
   // language heard and at its length, never a clip.
@@ -682,6 +716,27 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
+      {skipUp && skipping ? (
+        <Pressable
+          onPress={skipSegment}
+          accessibilityRole="button"
+          hitSlop={(touch.min - SKIP_PILL_H) / 2}
+          style={({ pressed }) => [
+            styles.skipPill,
+            {
+              right: Math.max(insets.right, space.xl),
+              // Over the seek bar while the controls are up.
+              bottom: controls ? SKIP_RAISED + insets.bottom : Math.max(insets.bottom, space.xl),
+            },
+            pressed && styles.skipPillPressed,
+          ]}
+        >
+          <Text style={styles.skipPillText}>
+            {t(skipping.kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap')}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {!controls &&
       !problem &&
       ((counting && playing) || (ended && decision === 'hold')) &&
@@ -941,6 +996,19 @@ const styles = StyleSheet.create({
     borderColor: colors.barBuffer,
   },
   pillPressed: { backgroundColor: colors.controlPress },
+  // Skip intro: quiet, as the controls are: a dark pill with a fine edge, no fill colour.
+  skipPill: {
+    position: 'absolute',
+    height: SKIP_PILL_H,
+    justifyContent: 'center',
+    paddingHorizontal: space.l,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.barBuffer,
+    backgroundColor: colors.scrim,
+  },
+  skipPillPressed: { backgroundColor: colors.controlPress },
+  skipPillText: { ...type.label, color: colors.text },
   pillText: { ...type.meta, fontWeight: '700', color: colors.text },
   columns: { flex: 1, flexDirection: 'row', gap: 18 },
   upNext: {
