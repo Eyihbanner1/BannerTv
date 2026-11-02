@@ -367,6 +367,7 @@ test('Home still works with every tuning switch at its leanest', async ({ page }
 test('the earlier sliding look still works from tuning', async ({ page }) => {
   const earlier = {
     motion: 'slide',
+    screenMotion: 'slide',
     zoom: 'animate',
     heroBusyMs: 250,
     heroArt: 'large',
