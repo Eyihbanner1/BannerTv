@@ -233,7 +233,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   };
 
   const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
-  useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
+  useScrobble(
+    session,
+    state,
+    { type: titleType, metaId, videoId },
+    finder.runtimeSeconds,
+    finder.knownRuntimeSeconds,
+  );
 
   // The language the viewer chose before, once per stream and engine.
   const audioDecided = useRef('');
@@ -413,8 +419,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [barFrom, setBarFrom] = useState(0);
   // Where the finger went down, in the page.
   const touchStart = useRef({ x: 0, y: 0 });
-  const swipeAllowed =
-    !!session && !waiting && !problem && !pip && !state.live && panel === null;
+  const swipeAllowed = !!session && !waiting && !problem && !pip && !state.live && panel === null;
   const swipeLands = (origin: number, pageX: number) =>
     swipeTarget(origin, pageX - touchStart.current.x, surfaceWidth.current, state.duration);
   const endSwipe = (pageX: number | null) => {
