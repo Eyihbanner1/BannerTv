@@ -39,6 +39,7 @@ import { autoplaysSinceInput, countAutoplay } from '@tv/player/sleep';
 import { type SubtitleChoice, useSubtitles } from '@tv/screens/player/use-subtitles';
 import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { motion } from '@brand/tokens/design';
+import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -47,6 +48,7 @@ import {
   ActivityIndicator,
   AppState,
   BackHandler,
+  type GestureResponderEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -69,10 +71,12 @@ import {
   pictureInPicture,
   pictureShown,
 } from './phone-host';
+import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SubtitleStyleChoices } from './SubtitleStyle';
 import { SubtitleText } from './SubtitleText';
+import { isSwipe, startsAtEdge, swipeMoves, swipeTarget } from './swipe-seek';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
 const CONTROLS_HIDE_MS = motion.controlsHide;
@@ -397,6 +401,70 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   };
   const surfaceWidth = useRef(1);
 
+  // Swipe to seek: a finger dragged sideways across the picture moves where to play from, with
+  // a still of that scene, and the player goes there as it lifts. Taps and double taps work as
+  // before; a touch only becomes a swipe once it has moved sideways, and one starting at the
+  // screen's edge is left to Android's back gesture. Not on a broadcast, while a stream opens or
+  // fails, with a panel open, or in picture-in-picture.
+  const [swipe, setSwipe] = useState<{ origin: number; target: number } | null>(null);
+  // Where a finger on the seek bar is, and where the video was as it went down, for the same
+  // scene preview.
+  const [barAt, setBarAt] = useState<number | null>(null);
+  const [barFrom, setBarFrom] = useState(0);
+  // Where the finger went down, in the page.
+  const touchStart = useRef({ x: 0, y: 0 });
+  const swipeAllowed =
+    !!session && !waiting && !problem && !pip && !state.live && panel === null;
+  const swipeLands = (origin: number, pageX: number) =>
+    swipeTarget(origin, pageX - touchStart.current.x, surfaceWidth.current, state.duration);
+  const endSwipe = (pageX: number | null) => {
+    const from = swipe;
+    setSwipe(null);
+    setScrubbing(false);
+    if (!from || pageX === null || !session) return;
+    const target = swipeLands(from.origin, pageX);
+    if (!swipeMoves(from.origin, target)) return;
+    session.seek(target);
+    Haptics.selectionAsync().catch(() => undefined);
+  };
+  const swipeHandlers = {
+    onStartShouldSetResponderCapture: (event: GestureResponderEvent) => {
+      touchStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      // The tap below still takes the touch; it only becomes a swipe once it moves sideways.
+      return false;
+    },
+    onMoveShouldSetResponderCapture: (event: GestureResponderEvent) => {
+      if (!swipeAllowed || swipe) return false;
+      const start = touchStart.current;
+      return (
+        !startsAtEdge(start.x, surfaceWidth.current) &&
+        isSwipe(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y)
+      );
+    },
+    onResponderGrant: () => {
+      if (!session) return;
+      const origin = session.trustedPosition() ?? session.get().position;
+      noteInput();
+      clearTimeout(tapTimer.current);
+      lastTap.current = null;
+      setScrubbing(true);
+      setControls(false);
+      setSwipe({ origin, target: origin });
+    },
+    onResponderMove: (event: GestureResponderEvent) => {
+      if (!swipe) return;
+      const target = swipeLands(swipe.origin, event.nativeEvent.pageX);
+      if (target !== swipe.target) setSwipe({ origin: swipe.origin, target });
+    },
+    onResponderRelease: (event: GestureResponderEvent) => endSwipe(event.nativeEvent.pageX),
+    onResponderTerminate: () => endSwipe(null),
+    onResponderTerminationRequest: () => false,
+  };
+  // Frames for the scene preview come from the stream playing; another stream starts over.
+  const frameKey =
+    shown && state.entry && !state.live ? `${entryKey(state.entry)}|${state.engine ?? ''}` : null;
+  useEffect(() => sceneFrames.reset(frameKey), [frameKey]);
+
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.
   // It only offers; it never skips by itself. Never over a clip, a broadcast or sports, and never
@@ -429,6 +497,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     noteInput();
     session.seek(skipping.end);
   };
+
+  // The scene preview, for a swipe or a finger on the bar, names the intro or recap it lands in.
+  const previewAt = swipe ? swipe.target : barAt;
+  const previewIn =
+    previewAt === null
+      ? undefined
+      : skips.find((segment) => previewAt >= segment.start && previewAt < segment.end);
+  const previewTag = previewIn
+    ? t(previewIn.kind === 'intro' ? 'phone.sceneIntro' : 'phone.sceneRecap')
+    : undefined;
 
   // Quality, as on the TV: at each resolution, the stream closest to what plays, in the
   // language heard and at its length, never a clip.
@@ -561,11 +639,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         />
       ) : null}
 
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={(event) => onSurfaceTap(event.nativeEvent.locationX, surfaceWidth.current)}
-        accessibilityLabel={controls ? undefined : t('phone.playLabel')}
-      />
+      <View style={StyleSheet.absoluteFill} {...swipeHandlers}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={(event) => onSurfaceTap(event.nativeEvent.locationX, surfaceWidth.current)}
+          accessibilityLabel={controls ? undefined : t('phone.playLabel')}
+        />
+      </View>
 
       <SubtitleText
         cues={subtitles.cues}
@@ -687,7 +767,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             </Pressable>
           </View>
 
-          {!waiting ? (
+          {/* The scene preview takes the middle while a finger is on the bar. */}
+          {!waiting && barAt === null ? (
             <View style={styles.middle} pointerEvents="box-none">
               <Pressable
                 onPress={() => {
@@ -737,6 +818,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                   session?.seek(seconds);
                 }}
                 onScrubbing={setScrubbing}
+                onScrubAt={(seconds) => {
+                  if (seconds !== null && barAt === null) setBarFrom(state.position);
+                  setBarAt(seconds);
+                }}
                 {...(offersNext && next
                   ? {
                       right: (
@@ -759,6 +844,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             ) : null}
           </View>
         </View>
+      ) : null}
+
+      {previewAt !== null && !problem && !pip ? (
+        <ScenePreview
+          at={previewAt}
+          origin={swipe ? swipe.origin : barFrom}
+          duration={state.duration}
+          swiping={swipe !== null}
+          {...(previewTag ? { tag: previewTag } : {})}
+        />
       ) : null}
 
       {skipUp && skipping ? (
