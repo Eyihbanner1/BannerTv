@@ -53,34 +53,6 @@ export function needsHlsJs(playlist: string): boolean {
   return languageCount > 1;
 }
 
-/**
- * For a media playlist, whether it is a broadcast: segments and no end. For
- * a multivariant playlist, null, with the address of its first variant to
- * read instead.
- */
-export function readLive(playlist: string, url: string): boolean | { variant: string } | null {
-  const lines = playlist.split(/\r?\n/).map((line) => line.trim());
-  if (lines.some((line) => line.indexOf('#EXTINF') === 0)) {
-    return lines.indexOf('#EXT-X-ENDLIST') === -1;
-  }
-  const at = lines.findIndex((line) => line.indexOf('#EXT-X-STREAM-INF') === 0);
-  const variant =
-    at === -1 ? undefined : lines.slice(at + 1).find((line) => line && line[0] !== '#');
-  if (!variant) return null;
-  try {
-    return { variant: new URL(variant, url).href };
-  } catch {
-    return null;
-  }
-}
-
-async function isBroadcast(url: string, playlist: string): Promise<boolean> {
-  const read = readLive(playlist, url);
-  if (read === null || typeof read === 'boolean') return read === true;
-  const variant = await fetchPlaylist(read.variant);
-  return variant !== null && readLive(variant, read.variant) === true;
-}
-
 function canUseMse(): boolean {
   return typeof MediaSource !== 'undefined' && typeof MediaSource.isTypeSupported === 'function';
 }
@@ -101,10 +73,9 @@ async function fetchPlaylist(url: string): Promise<string | null> {
 /**
  * Picks the engine for a link. The TV's own player comes first: it is the only
  * one with full hardware decoding, HDR and Dolby audio. DASH goes to Shaka,
- * and HLS with alternate audio or subtitles, or live, to hls.js. hls.js and
- * Shaka fetch every segment themselves, so the stream's host must allow it
- * (CORS); when even the playlist cannot be read that way, the TV's player
- * gets the link.
+ * and HLS with alternate audio or subtitles to hls.js. hls.js and Shaka fetch
+ * every segment themselves, so the stream's host must allow it (CORS); when
+ * even the playlist cannot be read that way, the TV's player gets the link.
  */
 export async function chooseEngine(url: string): Promise<EngineName> {
   // Android's player opens files, HLS and DASH alike, and lists their tracks itself.
@@ -116,11 +87,7 @@ export async function chooseEngine(url: string): Promise<EngineName> {
   if (mime === 'application/dash+xml') return canUseMse() ? 'shaka' : 'native';
   if (mime !== 'application/vnd.apple.mpegurl' || !canUseMse()) return 'native';
   const playlist = await fetchPlaylist(url);
-  if (playlist === null) return 'native';
-  if (needsHlsJs(playlist)) return 'hls.js';
-  // A broadcast too: hls.js plays it nearer live and wins back a wait, which
-  // the TV's player can't be told to do. If hls.js can't, the TV's takes over.
-  return (await isBroadcast(url, playlist)) ? 'hls.js' : 'native';
+  return playlist !== null && needsHlsJs(playlist) ? 'hls.js' : 'native';
 }
 
 /**
