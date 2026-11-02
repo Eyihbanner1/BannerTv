@@ -46,7 +46,7 @@ const config: ExpoConfig = {
       { backgroundColor: BACKGROUND, image: './assets/images/splash-icon.png', imageWidth: 96 },
     ],
     'expo-sqlite',
-    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: false }],
+    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: true }],
     [
       'expo-font',
       {
