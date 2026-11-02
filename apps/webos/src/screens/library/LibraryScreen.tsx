@@ -11,14 +11,16 @@ import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
+import { useCalendar } from '../../data/calendar';
 import { library } from '../../data/library';
 import { playedVideos, progress } from '../../data/playback';
 import { isKidsProfile } from '../../data/profiles';
 import { PosterGrid } from '../discover/PosterGrid';
 import { openDetails } from '../home/Hero';
+import { CalendarList } from './CalendarList';
 import discover from '../discover/DiscoverScreen.module.css';
 
-type LibraryShow = 'list' | 'history';
+type LibraryShow = 'list' | 'history' | 'calendar';
 
 interface LibraryChoice {
   show: LibraryShow;
@@ -42,13 +44,16 @@ const versions = () => `${library.version()}:${progress.version()}:${playedVideo
 /**
  * The Library: My List (saved with the button on a title's page, and synced
  * with a Trakt watchlist) and History (everything this profile played), as
- * a grid of posters, by kind, in the chosen order.
+ * a grid of posters, by kind, in the chosen order; and the Calendar, the
+ * next episodes of the series it follows and the films on its list, by day.
  */
 export function LibraryScreen() {
   const { t } = useTranslation();
   const [choice, setChoice] = useState(lastChoice);
   const [loaded, setLoaded] = useState(false);
   const version = useSyncExternalStore(subscribeAll, versions);
+  const showCalendar = choice.show === 'calendar';
+  const calendar = useCalendar(choice.kind, showCalendar);
 
   useEffect(() => {
     let live = true;
@@ -63,6 +68,7 @@ export function LibraryScreen() {
   }, []);
 
   const items = useMemo(() => {
+    if (choice.show === 'calendar') return [];
     const shown =
       choice.show === 'list'
         ? libraryView(library.items(), choice.kind, choice.sort)
@@ -74,9 +80,17 @@ export function LibraryScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choice, version]);
   const state: PagerState = { items, status: 'done' };
+  // The calendar is drawn once every followed title has answered, so its rows
+  // do not move under the remote.
+  const calendarReady = showCalendar && !calendar.loading;
+  const hasRows = showCalendar ? calendarReady && calendar.days.length > 0 : items.length > 0;
   // The grid picks its remembered tile, or the nearest one drawn. A tile
   // remembered from before a title left the list falls back to the grid.
-  useScreenFocus(items.length > 0 ? 'discover-grid' : 'library-show', loaded, true);
+  useScreenFocus(
+    hasRows ? (showCalendar ? 'library-calendar' : 'discover-grid') : 'library-show',
+    loaded && (!showCalendar || calendarReady),
+    true,
+  );
 
   const choose = (change: Partial<LibraryChoice>) => {
     lastChoice = { ...choice, ...change };
@@ -86,6 +100,7 @@ export function LibraryScreen() {
   const showOptions: MenuOption[] = [
     { value: 'list', label: t('library.myList') },
     { value: 'history', label: t('library.history') },
+    { value: 'calendar', label: t('calendar.show') },
   ];
   const kindOptions: MenuOption[] = [
     { value: 'all', label: t('library.all') },
@@ -128,7 +143,21 @@ export function LibraryScreen() {
           )}
         </div>
       </div>
-      {loaded && (
+      {loaded && showCalendar && !calendarReady && (
+        <p className={discover.message}>{t('calendar.loading')}</p>
+      )}
+      {calendarReady && calendar.days.length === 0 && (
+        <p className={discover.message}>{t('calendar.empty')}</p>
+      )}
+      {calendarReady && calendar.days.length > 0 && (
+        <CalendarList
+          key={choice.kind}
+          focusKey="library-calendar"
+          days={calendar.days}
+          onPress={openDetails}
+        />
+      )}
+      {loaded && !showCalendar && (
         <PosterGrid
           key={`${choice.show}|${choice.kind}|${choice.sort}`}
           memoryKey={`library:${choice.show}:${choice.kind}:${choice.sort}`}
