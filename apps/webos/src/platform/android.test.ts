@@ -103,6 +103,7 @@ describe('the Android host', () => {
       av1: null,
       dts: null,
       truehd: null,
+      requestHeaders: true,
     });
   });
 

@@ -112,6 +112,12 @@ function FullSettings() {
           label={t('settings.lab')}
           onPress={() => push({ name: 'lab' })}
         />
+        <Button
+          block
+          focusKey="settings-stream-helper"
+          label={t('settings.streamHelper')}
+          onPress={() => push({ name: 'stream-helper' })}
+        />
       </div>
       <div className={`${styles.column} ${settings.right}`}>
         <h2 className={settings.heading}>{t('settings.people')}</h2>

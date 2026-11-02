@@ -259,7 +259,7 @@ export {
 export * from './sports';
 export { createStore } from './store';
 export * from './sync';
-export { assessStream, SEVERE_WARNINGS } from './streams/assess';
+export { assessStream, SEVERE_WARNINGS, streamRequestHeaders } from './streams/assess';
 export {
   DEFAULT_MAX_BITRATE,
   estimateBitrate,

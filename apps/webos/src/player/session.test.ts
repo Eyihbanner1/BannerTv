@@ -974,7 +974,7 @@ describe('a live stream', () => {
     video.fire('timeupdate');
   }
 
-  it('says how far behind live it is, keeps jumps within what it keeps, and goes back to live', async () => {
+  it('says how far behind live it is, keeps jumps inside what it keeps, and goes back to live', async () => {
     const { video, session } = setup();
     await live(session, video);
     lastEngine().window = { start: 7000, live: 7200, slack: 6 };
@@ -986,9 +986,10 @@ describe('a live stream', () => {
     session.seek(7400);
     expect(video.currentTime).toBe(7200);
     expect(session.get().behind).toBe(0);
+    // A segment in from the oldest kept, which drops out next.
     session.seek(6000);
-    expect(video.currentTime).toBe(7000);
-    expect(session.get().behind).toBe(200);
+    expect(video.currentTime).toBe(7006);
+    expect(session.get().behind).toBe(194);
     session.goToLive();
     expect(video.currentTime).toBe(7200);
     expect(session.get().behind).toBe(0);

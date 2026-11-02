@@ -6,6 +6,7 @@ import './styles/base.css';
 import { App } from './app/App';
 import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
+import { startStreamHelper } from './data/helper';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
@@ -59,6 +60,7 @@ function start() {
   initInputMode();
   initLifecycle(askAgainOnRelaunch);
   initAndroid({ onRelaunch: askAgainOnRelaunch });
+  startStreamHelper();
   startAddons();
   startPlaybackData();
   startLibraryData();

@@ -87,6 +87,11 @@ export interface TvCapabilities {
   dts: boolean | null;
   /** Dolby TrueHD audio. In none of LG's format tables, so false unless the TV says otherwise. */
   truehd: boolean | null;
+  /**
+   * The player can send an addon's request headers with the link (Android's
+   * player). Left out where it cannot: webOS's `<video>` sends none of its own.
+   */
+  requestHeaders?: boolean;
 }
 
 /** Why a stream may not play well on this TV. Each becomes one plain sentence in the picker. */
@@ -116,7 +121,7 @@ export type StreamAction =
   | { kind: 'external' }
   | {
       kind: 'unavailable';
-      /** torrent: needs a streaming server. proxy-headers: needs headers <video> cannot send. */
+      /** torrent: needs a streaming server. proxy-headers: needs headers the player can't send. */
       reason: 'torrent' | 'proxy-headers';
     };
 
