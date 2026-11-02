@@ -399,7 +399,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.
-  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
+  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports, and never
+  // in picture-in-picture, where the window is too small to tap it.
   const skips = useSkipSegments(titleType, videoId, !sportsEvent);
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
@@ -416,7 +417,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     skipShown?.key === skipKey(skipping) &&
     !skipCardDone(skipShown.at, state.position, state.rate);
   const skipUp =
-    !!skipping && !waiting && !problem && panel === null && !scrubbing && (controls || skipFresh);
+    !!skipping &&
+    !waiting &&
+    !problem &&
+    !pip &&
+    panel === null &&
+    !scrubbing &&
+    (controls || skipFresh);
   const skipSegment = () => {
     if (!session || !skipping) return;
     noteInput();
