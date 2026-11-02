@@ -17,7 +17,8 @@ const NOT_FOR_CHILDREN = ['horror', 'thriller', 'crime', 'war', 'adult', 'erotic
  * Whether a kids profile may see a title, from what catalogs say about it.
  * Its genres must name it as for families or children and nothing that is
  * not. A title with no genres is left out: the filter fails closed. Titles
- * from a catalog already asked for Family titles (kids Home rows) need only
+ * from a catalog already asked for Family titles (kids Home rows), or that
+ * a UK rating within the profile's already clears (Details), need only
  * avoid the genres that are not for children, since catalog pages often
  * leave genres out.
  */
@@ -34,7 +35,10 @@ export function kidsTitleAllowed(
 /** BBFC ratings, lowest first. 12 and 12A count the same. */
 const UK_ORDER = ['U', 'PG', '12', '15', '18', 'R18'];
 
-/** US film and TV ratings as the nearest UK rating, rounded up where they differ. */
+/**
+ * US film and TV ratings as the nearest UK rating, rounded up where they
+ * differ (PG-13's UK counterpart is 12A). TV-Y7 is for 7 and up, older than U.
+ */
 const FROM_US: Record<string, string> = {
   G: 'U',
   PG: 'PG',
@@ -42,8 +46,8 @@ const FROM_US: Record<string, string> = {
   R: '15',
   'NC-17': '18',
   'TV-Y': 'U',
-  'TV-Y7': 'U',
-  'TV-Y7-FV': 'U',
+  'TV-Y7': 'PG',
+  'TV-Y7-FV': 'PG',
   'TV-G': 'U',
   'TV-PG': 'PG',
   'TV-14': '15',
@@ -60,6 +64,11 @@ export function ukRating(certificate: string, country: 'GB' | 'US'): string | un
   if (country === 'US') return FROM_US[value];
   const uk = value === '12A' ? '12' : value;
   return UK_ORDER.indexOf(uk) !== -1 ? uk : undefined;
+}
+
+/** The stricter of two UK ratings. */
+export function stricterRating(a: string, b: string): string {
+  return UK_ORDER.indexOf(b) > UK_ORDER.indexOf(a) ? b : a;
 }
 
 /** Whether a title rated `rating` (a UK rating) may play in a kids profile allowing `max`. */
