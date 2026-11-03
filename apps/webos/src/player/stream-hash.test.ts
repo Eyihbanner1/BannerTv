@@ -146,7 +146,7 @@ describe('reading the hash of a stream', () => {
     await expect(slow).resolves.toBeUndefined();
   });
 
-  it('leaves playlists and helper streams alone', () => {
+  it('leaves playlists alone', () => {
     expect(canHash(url)).toBe(true);
     expect(canHash('https://live.example.com/match/master.m3u8')).toBe(false);
     expect(canHash('https://cdn.example.com/film/manifest.mpd')).toBe(false);

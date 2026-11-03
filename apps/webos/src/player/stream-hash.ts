@@ -1,4 +1,3 @@
-import { requestHeadersFor } from './request-headers';
 import { guessMimeType } from './media';
 
 /**
@@ -52,9 +51,12 @@ export function openSubtitlesHash(
   return pieces.reverse().join('');
 }
 
-/** Whether a link is one file the hash can be read from: not a playlist, nor a helper stream. */
+/**
+ * Whether a link is one file the hash can be read from: not a playlist. A
+ * link that needs an addon's headers fails the read, and is asked without.
+ */
 export function canHash(url: string): boolean {
-  if (!/^https?:\/\//i.test(url) || requestHeadersFor(url)) return false;
+  if (!/^https?:\/\//i.test(url)) return false;
   const mime = guessMimeType(url);
   return mime !== 'application/vnd.apple.mpegurl' && mime !== 'application/dash+xml';
 }
