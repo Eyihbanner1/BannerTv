@@ -1134,6 +1134,124 @@ describe('a store behind the account', () => {
   });
 });
 
+describe('changes made while the engine was not running', () => {
+  const ONE = { u: 'https://one.example/manifest.json' };
+  const TWO = { u: 'https://two.example/manifest.json' };
+
+  /** A copy of a screen's addons that its engine does not watch, as after the TV went off. */
+  function offline(from: ReturnType<typeof memoryPart>) {
+    const copy = memoryPart('addons', ['a/', 'order']);
+    for (const key of from.keys()) copy.set(key, from.get(key)!.v, from.get(key)!.t);
+    return copy;
+  }
+
+  /** A has an account with addon `one`; B joined it and went off. */
+  async function joinedThenOff() {
+    const w = world();
+    const { a, code } = await created(w, async (s) => {
+      s.addons.set('a/one', ONE);
+      s.addons.set('order', ['one']);
+    });
+    const storage = memoryKeyValueStore();
+    const b = screen(w, { storage });
+    await b.start();
+    await b.engine.join(code, 'use');
+    await b.engine.syncNow();
+    b.engine.hide();
+    await settled(b.engine);
+    return { w, a, b, code, storage };
+  }
+
+  /** B launches again on `addons` and syncs. */
+  async function relaunch(
+    setUp: Awaited<ReturnType<typeof joinedThenOff>>,
+    addons: ReturnType<typeof memoryPart>,
+  ) {
+    const again = screen(setUp.w, { storage: setUp.storage, addons });
+    await again.start();
+    await setUp.w.time.advance(2000);
+    await settled(again.engine);
+    await setUp.a.engine.syncNow();
+    return again;
+  }
+
+  it('sends an addon installed meanwhile, and another screen gets it', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    addons.set('a/two', TWO);
+    addons.set('order', ['one', 'two']);
+    const again = await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/two']).toMatchObject({ v: TWO });
+    expect(setUp.a.addons.get('a/two')?.v).toEqual(TWO);
+    expect(setUp.a.addons.get('order')?.v).toEqual(['one', 'two']);
+    expect(again.engine.status().state).toBe('idle');
+  });
+
+  it('sends an addon set up again meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    const configured = { u: 'https://one.example/new-settings/manifest.json' };
+    addons.set('a/one', configured);
+    await relaunch(setUp, addons);
+    expect(setUp.a.addons.get('a/one')?.v).toEqual(configured);
+  });
+
+  it('sends an addon removed meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    addons.delete('a/one');
+    addons.set('order', []);
+    await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/one']).toMatchObject({ x: 1 });
+    expect(setUp.a.addons.get('a/one')).toBeUndefined();
+  });
+
+  it("takes the account's newer change rather than sending what the store had before it", async () => {
+    const setUp = await joinedThenOff();
+    const { w, a, b, code } = setUp;
+    b.engine.show();
+    await w.time.advance(1000);
+    a.addons.set('a/one', TWO);
+    await a.engine.flush();
+    // B pulls A's change but its store cannot take it before the TV goes off.
+    b.addons.failAdopts(true);
+    await b.engine.syncNow();
+    b.engine.hide();
+    await settled(b.engine);
+    expect(b.addons.get('a/one')?.v).toEqual(ONE);
+
+    const addons = offline(b.addons);
+    await relaunch(setUp, addons);
+    expect((await accountItems(w, code, 'addons'))!['a/one']).toMatchObject({ v: TWO });
+    expect(addons.get('a/one')?.v).toEqual(TWO);
+    expect(a.addons.get('a/one')?.v).toEqual(TWO);
+  });
+
+  it('sends a title added to My List meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const stores = setUp.b.storesOf('main');
+    await stores.library.load();
+    await setUp.w.time.advance(1000);
+    await stores.library.add(preview('later'));
+    await relaunch(setUp, offline(setUp.b.addons));
+    expect(Object.keys((await accountItems(setUp.w, setUp.code, 'p/main/list'))!)).toEqual([
+      'later',
+    ]);
+    expect(titles(setUp.a)).toEqual(['later']);
+  });
+
+  it('sends nothing on a screen without an account', async () => {
+    const w = world();
+    const addons = memoryPart('addons', ['a/', 'order']);
+    addons.set('a/one', ONE);
+    const a = screen(w, { addons });
+    await a.start();
+    await w.time.advance(DAY);
+    expect(a.engine.status()).toEqual({ state: 'off' });
+    expect(w.service.requests).toEqual([]);
+  });
+});
+
 describe('a push the service or the size refuses', () => {
   it('keeps pulling past a document too big to send, and seals it again only once it changes', async () => {
     const w = world();
