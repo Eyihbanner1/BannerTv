@@ -625,6 +625,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     // documents exist from its create on, so are left; a profile's may never have been sent.
     const unknown = doc.base.ver === 0;
     if (unknown && documentProfile(doc.name) === undefined) return;
+    // Only the default addons is what a collection that could not be read falls back to: the
+    // account's addons, order and removed defaults are then brought back, not sent over.
+    if (doc.name === 'addons' && part.ownData && !part.ownData()) return;
     const view = mergeItems(doc.name, doc.base.items, doc.pend);
     const taken = !unapplied(doc);
     const here = watch.seen;

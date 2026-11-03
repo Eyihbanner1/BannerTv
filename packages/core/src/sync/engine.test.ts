@@ -1240,6 +1240,24 @@ describe('changes made while the engine was not running', () => {
     expect(titles(setUp.a)).toEqual(['later']);
   });
 
+  it('brings the addons back when the collection fell back to the defaults', async () => {
+    const setUp = await joinedThenOff();
+    // The saved collection could not be read at launch: only the defaults are there.
+    const addons = memoryPart('addons', ['a/', 'order'], { ownData: () => false });
+    addons.set('a/default', { u: 'https://default.example/manifest.json' });
+    addons.set('order', ['default']);
+    const pushes = setUp.w.service.count('/v1/push');
+    await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/one']).toMatchObject({
+      v: ONE,
+    });
+    expect(addons.get('a/one')?.v).toEqual(ONE);
+    expect(addons.get('order')?.v).toEqual(['one']);
+    expect(setUp.a.addons.get('a/one')?.v).toEqual(ONE);
+    // A's Sync now is the only push since: B sent nothing.
+    expect(setUp.w.service.count('/v1/push')).toBe(pushes);
+  });
+
   it('sends nothing on a screen without an account', async () => {
     const w = world();
     const addons = memoryPart('addons', ['a/', 'order']);
