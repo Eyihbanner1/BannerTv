@@ -132,17 +132,24 @@ function scorer(options: OrderOptions): (addonId: string) => number {
   };
 }
 
+/** The bitrate limit a stream is judged by: its debrid service's own when known. */
+function limitFor(entry: StreamEntry, options: OrderOptions): number | undefined {
+  const own = options.maxBitrateFor?.(entry.facts.service);
+  return typeof own === 'number' && own > 0 ? own : options.maxBitrate;
+}
+
 /**
  * Above 0 for a stream estimated to need more data than the connection is
  * expected to give, so it would keep stopping to buffer: 1 up to twice the
  * limit, 2 up to four times, and so on. 0 otherwise or when unknown.
  */
 function heavy(entry: StreamEntry, options: OrderOptions): number {
-  if (options.maxBitrate === undefined) return 0;
+  const limit = limitFor(entry, options);
+  if (limit === undefined) return 0;
   const bitrate = estimateBitrate(entry.facts, options.runtimeSeconds);
-  if (bitrate === undefined || bitrate <= options.maxBitrate) return 0;
+  if (bitrate === undefined || bitrate <= limit) return 0;
   // Graded by how far over, so when every stream is too heavy the lightest still comes first.
-  return 1 + Math.floor(Math.log2(bitrate / options.maxBitrate));
+  return 1 + Math.floor(Math.log2(bitrate / limit));
 }
 
 /** Sort keys, compared left to right, lowest first. */

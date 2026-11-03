@@ -116,6 +116,9 @@ export function entryKey(entry: StreamEntry): string {
   return `${entry.addonRank}:${entry.addonId}#${entry.rank}`;
 }
 
+/** Each debrid service's links are judged by the limit learnt for that service (TorBox, RD …). */
+const serviceLimit = (service: string | undefined) => bandwidth.maxBitrate(service);
+
 // Reading a stream's text is the costly part, and lists are rebuilt as each
 // addon answers, so each stream object is read once.
 const described = new WeakMap<
@@ -183,6 +186,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     return {
       addonScore: (id) => memory.score(id),
       maxBitrate: bandwidth.maxBitrate(),
+      maxBitrateFor: serviceLimit,
       runtimeSeconds: runtimeSeconds(),
     };
   }
@@ -434,7 +438,7 @@ export function holdProbing(): () => void {
 /** Whether a stream needs more data than this TV's connection is expected to keep up with. */
 export function isHeavy(entry: StreamEntry, runtimeSeconds: number): boolean {
   const bitrate = estimateBitrate(entry.facts, runtimeSeconds);
-  return bitrate !== undefined && bitrate > bandwidth.maxBitrate();
+  return bitrate !== undefined && bitrate > serviceLimit(entry.facts.service);
 }
 
 /** All streams, in the order the viewer picked for that list. */
@@ -446,6 +450,7 @@ export function listOrder(
   return orderStreams(entries, order, knownCapabilities(), {
     addonScore: (id) => sourceMemory.score(id),
     maxBitrate: bandwidth.maxBitrate(),
+    maxBitrateFor: serviceLimit,
     runtimeSeconds,
   });
 }

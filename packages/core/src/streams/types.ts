@@ -159,6 +159,12 @@ export interface OrderOptions {
    * stream within it, in the quality and fast orders. No limit when unset.
    */
   maxBitrate?: number;
+  /**
+   * The limit for links through one debrid service (`facts.service`, such as
+   * "RD" or "TB"), or undefined for none: each service's servers keep up with
+   * their own rates. Takes the place of `maxBitrate` where it gives a rate.
+   */
+  maxBitrateFor?: (service: string | undefined) => number | undefined;
   /** The video's running time in seconds, for estimating bitrates from file sizes. */
   runtimeSeconds?: number;
 }
