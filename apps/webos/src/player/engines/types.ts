@@ -38,8 +38,11 @@ export class PlaybackError extends Error {
 export interface EngineListener {
   /** The audio or subtitle track list, or the active track, changed. */
   tracks(): void;
-  /** Cues of the stream's own subtitle track `trackId`, as they arrive. */
-  cues(trackId: string, cues: Cue[]): void;
+  /**
+   * Cues of the stream's own subtitle track `trackId`, as they arrive. replace: `cues` is all
+   * the track has now, not more of it (Android's, whose last line stays open until the next).
+   */
+  cues(trackId: string, cues: Cue[], replace?: boolean): void;
   /** A failure the engine could not recover from. The player fails over or explains. */
   fatal(error: PlaybackError): void;
 }

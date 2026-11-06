@@ -1,6 +1,7 @@
+import { type Cue, parseCueMarkup } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AndroidPlayerCommand, AndroidPlayerEvent } from '../../platform/android';
-import { createAndroidEngine, toEngineTrack } from './android';
+import type { AndroidCue, AndroidPlayerCommand, AndroidPlayerEvent } from '../../platform/android';
+import { createAndroidEngine, followCues, MAX_CUES, toEngineTrack } from './android';
 import type { PlaybackError } from './types';
 
 const bridge = vi.hoisted(() => ({
@@ -65,14 +66,48 @@ function open(url = 'https://media.example.com/film.mkv', startAt = 0) {
   }
   const fatal = vi.fn<(error: PlaybackError) => void>();
   const tracks = vi.fn();
+  const cues = vi.fn<(trackId: string, cues: Cue[], replace?: boolean) => void>();
   const engine = createAndroidEngine(video as unknown as HTMLVideoElement, {
     tracks,
-    cues: () => undefined,
+    cues,
     fatal,
   });
   void engine.load(url, startAt);
   const element = video as unknown as HTMLVideoElement;
-  return { video, element, engine, events, fatal, tracks };
+  return { video, element, engine, events, fatal, tracks, cues };
+}
+
+/** Android hands over the lines that show from `at` on subtitle track `track`. */
+function cuesAt(at: number, lines: AndroidCue[], track = '2:0') {
+  send({ type: 'player', event: 'cues', track, at, cues: lines });
+}
+
+/** A line as the page draws it: open until the next group closes it. */
+function line(start: number, end: number, text: string, top?: true): Cue {
+  return { start, end, lines: parseCueMarkup(text), ...(top ? { top } : {}) };
+}
+
+/** Opens a film whose English subtitles inside the file are chosen. */
+function withSubtitles() {
+  const opened = open();
+  send({
+    type: 'player',
+    event: 'tracks',
+    audio: [],
+    text: [
+      {
+        id: '2:0',
+        lang: 'en',
+        label: '',
+        active: false,
+        supported: true,
+        mime: 'application/x-subrip',
+      },
+      { id: '2:1', lang: 'fr', label: '', active: false, supported: true, mime: 'text/vtt' },
+    ],
+  });
+  opened.engine.selectText('2:0');
+  return opened;
 }
 
 beforeEach(() => {
@@ -316,14 +351,15 @@ describe("Android's engine", () => {
 
     engine.selectAudio('1:1');
     engine.selectText('2:0');
+    // The page draws the subtitles inside the file: Android hands their lines over.
     expect(bridge.commands.slice(-2)).toEqual([
       { op: 'audio', id: '1:1' },
-      { op: 'text', id: '2:0' },
+      { op: 'text', id: '2:0', cues: true },
     ]);
     expect(engine.audioTracks().find((track) => track.active)?.id).toBe('1:1');
     expect(engine.textTracks()[0]?.active).toBe(true);
     engine.selectText(null);
-    expect(lastCommand()).toEqual({ op: 'text', id: null });
+    expect(lastCommand()).toEqual({ op: 'text', id: null, cues: true });
   });
 
   it('names Atmos and keeps every track when Android can play none of them', () => {
@@ -359,6 +395,109 @@ describe("Android's engine", () => {
     expect(fatal).toHaveBeenCalledTimes(1);
     expect(fatal.mock.calls[0]![0].kind).toBe('format');
     expect(fatal.mock.calls[0]![0].detail).toBe('ERROR_CODE_DECODING_FORMAT_UNSUPPORTED (4005)');
+  });
+
+  it('draws the lines inside the file as Android hands them over, each until the next', () => {
+    const { cues } = withSubtitles();
+    cuesAt(1, [{ text: '<i>Hello</i>' }]);
+    expect(parseCueMarkup('<i>Hello</i>')).toEqual([[{ text: 'Hello', italic: true }]]);
+    expect(cues).toHaveBeenLastCalledWith('2:0', [line(1, Infinity, '<i>Hello</i>')], true);
+    // An empty group ends the line.
+    cuesAt(3, []);
+    expect(cues).toHaveBeenLastCalledWith('2:0', [line(1, 3, '<i>Hello</i>')], true);
+    // Two lines at once, one at the top; text Android escaped reads as text.
+    cuesAt(4, [{ text: 'Tom &amp; Jerry &lt;3\nsecond line' }, { text: 'SIGN', top: true }]);
+    const shown = cues.mock.lastCall![1];
+    expect(shown).toEqual([
+      line(1, 3, '<i>Hello</i>'),
+      line(4, Infinity, 'Tom &amp; Jerry &lt;3\nsecond line'),
+      line(4, Infinity, 'SIGN', true),
+    ]);
+    expect(shown[1]!.lines.map((spans) => spans.map((span) => span.text).join(''))).toEqual([
+      'Tom & Jerry <3',
+      'second line',
+    ]);
+    // The next group closes both, and a line that changes at once replaces the one before.
+    cuesAt(6, [{ text: 'Next' }]);
+    cuesAt(6, [{ text: 'Next, fixed' }]);
+    expect(cues.mock.lastCall![1]).toEqual([
+      line(1, 3, '<i>Hello</i>'),
+      line(4, 6, 'Tom &amp; Jerry &lt;3\nsecond line'),
+      line(4, 6, 'SIGN', true),
+      line(6, Infinity, 'Next, fixed'),
+    ]);
+  });
+
+  it("ignores lines for a track that is not the one chosen, and forgets the last one's", () => {
+    const { engine, cues } = withSubtitles();
+    cuesAt(1, [{ text: 'French' }], '2:1');
+    expect(cues).not.toHaveBeenCalled();
+    cuesAt(1, [{ text: 'English' }]);
+    expect(cues).toHaveBeenCalledTimes(1);
+
+    // Another track: the English lines go, and its own come in.
+    engine.selectText('2:1');
+    expect(cues).toHaveBeenLastCalledWith('2:0', [], true);
+    cuesAt(2, [{ text: 'English, sent late' }]);
+    cuesAt(2, [{ text: 'Français' }], '2:1');
+    expect(cues).toHaveBeenLastCalledWith('2:1', [line(2, Infinity, 'Français')], true);
+    // Choosing it again changes nothing.
+    const calls = cues.mock.calls.length;
+    engine.selectText('2:1');
+    expect(cues).toHaveBeenCalledTimes(calls);
+    // Subtitles off: nothing more is drawn.
+    engine.selectText(null);
+    expect(cues).toHaveBeenLastCalledWith('2:1', [], true);
+    cuesAt(3, [{ text: 'Français encore' }], '2:1');
+    expect(cues).toHaveBeenLastCalledWith('2:1', [], true);
+  });
+
+  it('starts the lines again after a jump, from the viewer or from Android', () => {
+    const { element, cues } = withSubtitles();
+    cuesAt(10, [{ text: 'Before the jump' }]);
+    element.currentTime = 600;
+    expect(cues).toHaveBeenLastCalledWith('2:0', [], true);
+    cuesAt(600.5, [{ text: 'After it' }]);
+    send({ type: 'player', event: 'seeked', position: 600 });
+    expect(cues).toHaveBeenLastCalledWith('2:0', [], true);
+
+    // A group timed before the last means the clock went back.
+    cuesAt(601, [{ text: 'Later' }]);
+    cuesAt(20, [{ text: 'Back again' }]);
+    expect(cues).toHaveBeenLastCalledWith('2:0', [line(20, Infinity, 'Back again')], true);
+  });
+
+  it('takes no lines for a new stream until subtitles are chosen for it', () => {
+    const { engine, cues } = withSubtitles();
+    void engine.load('https://media.example.com/other.mkv', 0);
+    cuesAt(1, [{ text: 'From the last film' }]);
+    expect(cues).not.toHaveBeenCalled();
+    engine.selectText('2:0');
+    cuesAt(1, [{ text: 'This film' }]);
+    expect(cues).toHaveBeenLastCalledWith('2:0', [line(1, Infinity, 'This film')], true);
+  });
+
+  it('keeps the last lines only, and skips groups it cannot read', () => {
+    let history: Cue[] = [];
+    for (let i = 0; i < MAX_CUES + 10; i++)
+      history = followCues(history, i, [{ text: `Line ${i}` }]);
+    expect(history).toHaveLength(MAX_CUES);
+    expect(history[0]!.start).toBe(10);
+    expect(history[history.length - 1]).toEqual(
+      line(MAX_CUES + 9, Infinity, `Line ${MAX_CUES + 9}`),
+    );
+
+    const { cues } = withSubtitles();
+    send({ type: 'player', event: 'cues', track: '2:0', at: NaN, cues: [{ text: 'x' }] });
+    send({
+      type: 'player',
+      event: 'cues',
+      track: '2:0',
+      at: 1,
+      cues: [{ text: '' }, { text: 5 } as unknown as AndroidCue, { text: 'Kept' }],
+    });
+    expect(cues).toHaveBeenCalledTimes(1);
+    expect(cues).toHaveBeenLastCalledWith('2:0', [line(1, Infinity, 'Kept')], true);
   });
 
   it('gives the element back as it was, and lets Android free the decoder', () => {

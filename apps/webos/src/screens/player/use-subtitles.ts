@@ -42,6 +42,11 @@ export interface Subtitles {
   offset: number;
   /** The drift fix for a file timed for another frame rate, or null. Kept for each file. */
   drift: SubtitleDrift | null;
+  /**
+   * Whether a drift fix applies. Not to a track Android hands over line by line as the video
+   * plays: it is in step with the video, and its last line has no end to stretch yet.
+   */
+  canFixDrift: boolean;
   /** The viewer chose; their choice becomes the language picked next time. */
   choose(choice: SubtitleChoice): void;
   /** Moves the subtitles showing later or earlier, remembered for that file. */
@@ -295,9 +300,11 @@ export function useSubtitles(
   const offset = useSyncExternalStore(subtitleOffsets.subscribe, () =>
     offsetKey === null ? 0 : (subtitleOffsets.get(offsetKey) ?? 0),
   );
-  const drift = useSyncExternalStore(subtitleDrifts.subscribe, () =>
+  const keptDrift = useSyncExternalStore(subtitleDrifts.subscribe, () =>
     offsetKey === null ? null : (subtitleDrifts.get(offsetKey) ?? null),
   );
+  const canFixDrift = !(trackId !== null && state.engine === 'android');
+  const drift = canFixDrift ? keptDrift : null;
 
   const rawCues = trackId === null ? (fileFailed ? null : fileCues) : trackCues;
   // Stretched once per file and fix, so the subtitle layer's index is built once too.
@@ -316,13 +323,15 @@ export function useSubtitles(
     failed: fileFailed,
     offset,
     drift,
+    canFixDrift,
     statusOf(version) {
       const showing =
         version.kind === 'file'
           ? choice?.kind === 'file' && choice.key === version.key
           : choice?.kind === 'track' && choice.id === version.id;
       if (version.kind === 'track') {
-        // Until the stream hands over its first line. Android draws its own and hands over none.
+        // Until the stream hands over its first line. Android hands each line over as it shows
+        // (or draws picture subtitles itself), so a quiet stretch is not loading.
         const drawnByPlayer = state.engine === 'android';
         return showing && !drawnByPlayer && state.streamCues[version.id] === undefined
           ? 'loading'
