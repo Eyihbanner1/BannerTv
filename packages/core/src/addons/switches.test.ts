@@ -167,6 +167,19 @@ describe('switchedOnOnly', () => {
     expect(view.get()).toBe(collection.get());
   });
 
+  it('leaves a default addon switched off installed, as the account sees the collection', async () => {
+    const { collection, switches, view, idOf } = setup();
+    await view.load();
+    switches.set(idOf(CINEMETA_URL), true);
+    await settle();
+    // Given the whole collection, as the app gives it, the account's part keeps Cinemeta:
+    // neither removed nor taken for this screen's own data.
+    const part = collectionPart(collection);
+    expect(part.removedDefaults!()).toEqual([]);
+    expect(part.ownData!()).toBe(false);
+    expect(part.snapshot().get(`a/${idOf(CINEMETA_URL)}`)).toBeDefined();
+  });
+
   it('is not ready until the switches have been read, so an addon off is never asked first', async () => {
     const storage = memoryKeyValueStore();
     await storage.set('addons.off', ['nothing-here']);
