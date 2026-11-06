@@ -1,0 +1,231 @@
+import { type MetaPreview, parseManifest } from '@bannertv/protocol';
+import { describe, expect, it } from 'vitest';
+import type { InstalledAddon } from '../addons/collection';
+import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from '../addons/defaults';
+import { discoverSources } from '../addons/sources';
+import { addonPhrases, planSearch } from './plan';
+import { topResults } from './rank';
+import { didYouMean, genreChips } from './suggest';
+import { understand } from './understand';
+
+function installed(manifest: unknown, transportUrl: string): InstalledAddon {
+  return { transportUrl, manifest: parseManifest(manifest), official: false, fetchedAt: 0 };
+}
+
+const cinemeta = DEFAULT_ADDONS.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL).map((a) =>
+  installed(a.manifest, a.transportUrl),
+);
+
+const anime = installed(
+  {
+    id: 'org.anime',
+    version: '1.0.0',
+    name: 'Anime Hub',
+    types: ['anime', 'series'],
+    resources: ['catalog'],
+    catalogs: [
+      {
+        type: 'anime',
+        id: 'trending',
+        name: 'Anime Trending',
+        extra: [{ name: 'genre', options: ['Mecha', 'Comedy'] }],
+      },
+      { type: 'series', id: 'top', name: 'Popular', extra: [] },
+    ],
+  },
+  'https://anime.example/manifest.json',
+);
+
+const adult = installed(
+  {
+    id: 'org.late',
+    version: '1.0.0',
+    name: 'Late',
+    types: ['movie'],
+    resources: ['catalog'],
+    behaviorHints: { adult: true },
+    catalogs: [
+      {
+        type: 'movie',
+        id: 'late',
+        name: 'Late films',
+        extra: [{ name: 'genre', options: ['Comedy'] }],
+      },
+    ],
+  },
+  'https://late.example/manifest.json',
+);
+
+const plan = (text: string, addons = cinemeta, kids = false) => {
+  const sources = discoverSources(addons);
+  return planSearch(understand(text, addonPhrases(sources)), sources, { kids });
+};
+const rows = (text: string, addons = cinemeta, kids = false) =>
+  plan(text, addons, kids).map((row) => [row.kind, row.label, row.type, row.extra[0]?.[1] ?? '']);
+
+describe('planSearch', () => {
+  it("asks Cinemeta's Popular catalogs for a genre, films first", () => {
+    expect(rows('comedy')).toEqual([
+      ['genre', 'Comedy', 'movie', 'Comedy'],
+      ['genre', 'Comedy', 'series', 'Comedy'],
+    ]);
+    expect(plan('comedy')[0]).toMatchObject({
+      key: '0-movie-top-genre-comedy',
+      source: { catalog: { id: 'top', name: 'Popular' } },
+      family: false,
+    });
+  });
+
+  it('keeps to the type the words name, and to the types a genre has', () => {
+    expect(rows('scary movies')).toEqual([['genre', 'Horror', 'movie', 'Horror']]);
+    expect(rows('sci fi series')).toEqual([['genre', 'Sci-fi', 'series', 'Sci-Fi']]);
+    expect(rows('reality')).toEqual([['genre', 'Reality TV', 'series', 'Reality-TV']]);
+  });
+
+  it('gives stand-up and other moods their nearest genre until Search may ask TMDB', () => {
+    expect(rows('stand-up')).toEqual([
+      ['genre', 'Comedy', 'movie', 'Comedy'],
+      ['genre', 'Comedy', 'series', 'Comedy'],
+    ]);
+    expect(rows('true crime')).toEqual([
+      ['genre', 'Documentary', 'movie', 'Documentary'],
+      ['genre', 'Documentary', 'series', 'Documentary'],
+      ['genre', 'Crime', 'movie', 'Crime'],
+      ['genre', 'Crime', 'series', 'Crime'],
+    ]);
+    // Languages and decades need TMDB: no rows yet, and none made up.
+    expect(rows('korean')).toEqual([]);
+    expect(rows('90s')).toEqual([]);
+    expect(rows('90s action')).toEqual([
+      ['genre', 'Action', 'movie', 'Action'],
+      ['genre', 'Action', 'series', 'Action'],
+    ]);
+  });
+
+  it("uses Cinemeta's New catalog for a typed year and for new titles", () => {
+    expect(rows('2024 films')).toEqual([['year', '2024', 'movie', '2024']]);
+    expect(rows('new series')).toEqual([['new', '2026', 'series', '2026']]);
+    // A year no catalog lists adds nothing.
+    expect(rows('1901')).toEqual([]);
+  });
+
+  it('adds nothing for titles, or words it cannot read', () => {
+    expect(rows('star wars')).toEqual([]);
+    expect(rows('sintel')).toEqual([]);
+  });
+
+  it("finds an installed addon's own genres and catalogs by name", () => {
+    expect(rows('mecha', [anime].concat(cinemeta))).toEqual([['genre', 'Mecha', 'anime', 'Mecha']]);
+    expect(rows('anime trending', [anime].concat(cinemeta))).toEqual([
+      ['catalog', 'Anime Trending', 'anime', ''],
+    ]);
+    // "Popular" names nothing on its own.
+    expect(rows('popular', [anime].concat(cinemeta))).toEqual([]);
+    // The first addon that filters by a genre answers for it.
+    expect(rows('comedy films', [anime, adult].concat(cinemeta))[0]?.[1]).toBe('Comedy');
+    expect(plan('comedy films', [adult].concat(cinemeta))[0]?.source.addon.manifest.name).toBe(
+      'Late',
+    );
+  });
+
+  it('keeps a kids profile to films and series from addons not marked adult', () => {
+    const kids = plan('comedy films', [adult].concat(cinemeta), true);
+    expect(kids.map((row) => row.source.addon.manifest.name)).toEqual(['Cinemeta']);
+    expect(rows('mecha', [anime].concat(cinemeta), true)).toEqual([]);
+    const family = plan('for kids', cinemeta, true);
+    expect(family.map((row) => [row.label, row.family])).toEqual([
+      ['Family', true],
+      ['Family', true],
+    ]);
+  });
+
+  it('caps the rows and never repeats one', () => {
+    const many = plan('comedy horror action drama war western');
+    expect(many).toHaveLength(6);
+    expect(new Set(many.map((row) => row.key)).size).toBe(6);
+    expect(rows('comedy comedy')).toHaveLength(2);
+  });
+});
+
+const meta = (id: string, name: string, releaseInfo?: string, type = 'movie'): MetaPreview => ({
+  id,
+  type,
+  name,
+  posterShape: 'poster',
+  genres: [],
+  trailers: [],
+  ...(releaseInfo ? { releaseInfo } : {}),
+});
+
+describe('topResults', () => {
+  const names = (text: string, groups: MetaPreview[][], context = {}) =>
+    topResults(understand(text), groups, context).map((item) => item.name);
+
+  it('puts the exact title first, then titles that start with the words', () => {
+    expect(
+      names('stand up', [
+        [meta('a', 'Stand Up Guys'), meta('b', 'Stand Up'), meta('c', 'The Stand')],
+        [meta('d', 'Stand Up and Cheer!')],
+      ]),
+    ).toEqual(['Stand Up', 'Stand Up Guys', 'Stand Up and Cheer!', 'The Stand']);
+  });
+
+  it('shows each title once, from the first addon that has it', () => {
+    const first = meta('tt1', 'Sintel', '2010');
+    const again = { ...meta('tt1', 'Sintel (copy)'), poster: 'x' };
+    expect(topResults(understand('sintel'), [[first], [again]])).toEqual([first]);
+  });
+
+  it('lifts the typed year, and titles in My List or Continue Watching', () => {
+    const groups = [[meta('a', 'Dune', '1984'), meta('b', 'Dune', '2021')]];
+    expect(topResults(understand('dune 2021'), groups).map((item) => item.id)).toEqual(['b', 'a']);
+    expect(
+      topResults(understand('dune'), groups, { saved: (id) => id === 'b' }).map((item) => item.id),
+    ).toEqual(['b', 'a']);
+  });
+
+  it('keeps to the type the words ask for', () => {
+    const groups = [[meta('a', 'Scary Movie'), meta('b', 'Scary Stories', '2019', 'series')]];
+    expect(names('scary films', groups)).toEqual(['Scary Movie']);
+    expect(names('scary', groups)).toEqual(['Scary Movie', 'Scary Stories']);
+  });
+
+  it('forgives a typo in the name', () => {
+    expect(names('breking bad', [[meta('a', 'Bad Boys'), meta('b', 'Breaking Bad')]])).toEqual([
+      'Breaking Bad',
+      'Bad Boys',
+    ]);
+  });
+});
+
+describe('suggestions', () => {
+  it('offers the title or phrase a typo away', () => {
+    expect(didYouMean('breking bad', ['Better Call Saul', 'Breaking Bad'])).toBe('Breaking Bad');
+    expect(didYouMean('stranger thinsg', ['Stranger Things'])).toBe('Stranger Things');
+    expect(didYouMean('documentaryy', [])).toBe('documentary');
+    expect(didYouMean('sintel', ['Sintel'])).toBeUndefined();
+    expect(didYouMean('zzz', ['Sintel'])).toBeUndefined();
+  });
+
+  it('offers genres the installed catalogs have, the closest first', () => {
+    const sources = discoverSources(cinemeta);
+    expect(genreChips('zzz', sources).map((chip) => chip.label)).toEqual([
+      'Comedy',
+      'Action',
+      'Drama',
+      'Horror',
+      'Sci-fi',
+    ]);
+    // Two typos from Horror: too far for Search to read it, close enough to offer it.
+    expect(understand('hurrer').intents).toEqual([]);
+    expect(genreChips('hurrer', sources)[0]?.label).toBe('Horror');
+    expect(genreChips('zzz', sources, { kids: true }).map((chip) => chip.label)).toEqual([
+      'Family',
+      'Animation',
+      'Comedy',
+      'Adventure',
+      'Fantasy',
+    ]);
+    expect(genreChips('zzz', [])).toEqual([]);
+  });
+});

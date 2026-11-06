@@ -258,6 +258,7 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './search';
 export * from './sports';
 export { createStore } from './store';
 export * from './sync';
