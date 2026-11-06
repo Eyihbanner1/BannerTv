@@ -75,11 +75,6 @@ async function routeDemoFilms(page: Page) {
 async function openMovie(page: Page) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  // OK on a tile still loading opens nothing: on a slow machine the row can come a moment after focus.
-  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"]`)).not.toHaveAttribute(
-    'aria-label',
-    'Loading',
-  );
   await press(page, 'Enter', 'details-watch');
   await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
 }
