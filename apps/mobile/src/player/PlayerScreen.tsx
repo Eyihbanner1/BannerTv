@@ -27,7 +27,7 @@ import { useSkipSegments } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
-import { audioDetail, audioSummary, pickAudio } from '@tv/player/audio';
+import { audioDetail, audioSummary, audioSwitch, pickAudio } from '@tv/player/audio';
 import { problemText, resolutionLabel } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
 import { playProblem } from '@tv/player/problem';
@@ -92,7 +92,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const { type: titleType, metaId, videoId } = route;
   // A sports event: streams from the addons that listed it only, and no Continue Watching card.
   const sportsEvent = route.event;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
   const element = useMemo(() => new PhoneVideoElement(), []);
   const finder = useMemo(
@@ -453,6 +453,32 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setSwitching(label ? { entry: choice.entry, label } : { entry: choice.entry });
   };
 
+  // "English audio: switch stream", as on the TV: audio in the language wanted (the app's own
+  // when none was chosen) from another stream, when this one has no track in it.
+  const switchLanguage = wantedAudio(metaId) || i18n.language;
+  const switchTo = useMemo(
+    () =>
+      reference
+        ? audioSwitch(
+            state.audio,
+            reference,
+            finderState.candidates,
+            switchLanguage,
+            finder.orderOptions(),
+          )
+        : undefined,
+    [state.audio, reference, finderState.candidates, switchLanguage, finder],
+  );
+  const switchDetail = switchTo && resolutionLabel(switchTo.facts.resolution);
+  /** Plays the other stream from where the film is, and keeps the language for the title. */
+  const switchForAudio = (entry: StreamEntry, language: string) => {
+    setPanel(null);
+    if (!session) return;
+    chooseAudioLanguage(metaId, language);
+    session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
+    setSwitching({ entry });
+  };
+
   const clock = useCallback(() => element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
@@ -797,27 +823,37 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <TracksPanel
             subtitles={subtitles}
             entry={state.entry}
-            tracksDrawnByPlayer={state.engine === 'android'}
             onChoose={chooseSubtitle}
             audioRows={
-              // The Audio tab: the stream's audio tracks.
-              state.audio.length > 0
-                ? state.audio.map((track) => {
-                    const detail = audioDetail(track);
-                    return (
+              // The Audio tab: the stream's audio tracks, then another stream in the language
+              // wanted when this one has none in it.
+              state.audio.length > 0 || switchTo
+                ? [
+                    ...state.audio.map((track) => {
+                      const detail = audioDetail(track);
+                      return (
+                        <PanelOption
+                          key={track.id}
+                          label={audioSummary(track)}
+                          {...(detail ? { detail } : {})}
+                          selected={track.active}
+                          onPress={() => {
+                            session?.selectAudio(track.id);
+                            if (track.lang) chooseAudioLanguage(metaId, track.lang);
+                            setPanel(null);
+                          }}
+                        />
+                      );
+                    }),
+                    switchTo ? (
                       <PanelOption
-                        key={track.id}
-                        label={audioSummary(track)}
-                        {...(detail ? { detail } : {})}
-                        selected={track.active}
-                        onPress={() => {
-                          session?.selectAudio(track.id);
-                          if (track.lang) chooseAudioLanguage(metaId, track.lang);
-                          setPanel(null);
-                        }}
+                        key="audio-switch"
+                        label={t('player.audioSwitch', { language: languageName(switchLanguage) })}
+                        {...(switchDetail ? { detail: switchDetail } : {})}
+                        onPress={() => switchForAudio(switchTo, switchLanguage)}
                       />
-                    );
-                  })
+                    ) : null,
+                  ]
                 : null
             }
           />

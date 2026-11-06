@@ -41,7 +41,6 @@ export interface TracksPanelProps {
    * The player draws the stream's own subtitle tracks itself (Android), and no lines of them
    * reach the page, so timing and the drift fix cannot move them.
    */
-  tracksDrawnByPlayer: boolean;
   /** Off or a version was picked: the panel closes. */
   onChoose: (choice: SubtitleChoice) => void;
   /**
@@ -60,7 +59,7 @@ export interface TracksPanelProps {
  * each opening starts afresh, as the TV's sheet does.
  */
 export function TracksPanel(props: TracksPanelProps) {
-  const { subtitles, tracksDrawnByPlayer } = props;
+  const { subtitles } = props;
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('subtitles');
   // The language last chosen comes first, as it was when the panel opened.
@@ -71,8 +70,7 @@ export function TracksPanel(props: TracksPanelProps) {
   const [open, setOpen] = useState<string | null>(null);
 
   const { choice, offset, drift } = subtitles;
-  const drawnByPlayer = tracksDrawnByPlayer && choice?.kind === 'track';
-  const moved = choice !== null && !drawnByPlayer && (offset !== 0 || drift !== null);
+  const moved = choice !== null && (offset !== 0 || drift !== null);
   const timingName = moved
     ? `${t('player.timing')} ${formatOffset(offset)}${drift ? ` · ${t('player.driftFixed')}` : ''}`
     : t('player.timing');
@@ -102,7 +100,7 @@ export function TracksPanel(props: TracksPanelProps) {
         ) : tab === 'audio' ? (
           <AudioChoices rows={props.audioRows} />
         ) : (
-          <TimingChoices subtitles={subtitles} drawnByPlayer={drawnByPlayer} />
+          <TimingChoices subtitles={subtitles} />
         )}
       </View>
     </View>
@@ -245,16 +243,9 @@ function Step({
  * and of 5 s either way, Reset, and the drift fix for a file timed for another frame rate.
  * Both are kept for the file. Not for subtitles off, nor for tracks the player draws itself.
  */
-function TimingChoices({
-  subtitles,
-  drawnByPlayer,
-}: {
-  subtitles: Subtitles;
-  drawnByPlayer: boolean;
-}) {
+function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
   const { t } = useTranslation();
   if (subtitles.choice === null) return <Text style={styles.note}>{t('player.timingOff')}</Text>;
-  if (drawnByPlayer) return <Text style={styles.note}>{t('phone.timingInVideo')}</Text>;
 
   const { offset } = subtitles;
   const { way, amount } = offsetWay(offset);
@@ -287,19 +278,26 @@ function TimingChoices({
           onPress={() => subtitles.setOffset(0)}
         />
       </View>
-      {/* For a file timed for another frame rate, which slides further out as the film goes on. */}
-      <Text style={styles.rowLabel}>{t('player.drift')}</Text>
-      <View style={styles.drifts}>
-        {DRIFT_CHOICES.map(({ name, drift, label }) => (
-          <Chip
-            key={name}
-            label={t(label)}
-            on={subtitles.drift === drift}
-            onPress={() => subtitles.setDrift(drift)}
-          />
-        ))}
-      </View>
-      <Text style={styles.note}>{`${t('player.driftHint')} ${t('player.timingKept')}`}</Text>
+      {/* For a file timed for another frame rate, which slides further out as the film goes on.
+          Not for a track inside the file, whose lines Android shows and clears itself. */}
+      {subtitles.canFixDrift ? (
+        <>
+          <Text style={styles.rowLabel}>{t('player.drift')}</Text>
+          <View style={styles.drifts}>
+            {DRIFT_CHOICES.map(({ name, drift, label }) => (
+              <Chip
+                key={name}
+                label={t(label)}
+                on={subtitles.drift === drift}
+                onPress={() => subtitles.setDrift(drift)}
+              />
+            ))}
+          </View>
+          <Text style={styles.note}>{`${t('player.driftHint')} ${t('player.timingKept')}`}</Text>
+        </>
+      ) : (
+        <Text style={styles.note}>{t('player.timingKept')}</Text>
+      )}
     </ScrollView>
   );
 }

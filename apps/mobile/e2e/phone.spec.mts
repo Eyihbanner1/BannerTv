@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mockAddons } from '../../webos/e2e/addons.ts';
-import { mockPlayback, seedStreamAddon, STREAM_ADDON_URL } from '../../webos/e2e/play.ts';
+import { mockPlayback, readKv, seedStreamAddon, STREAM_ADDON_URL } from '../../webos/e2e/play.ts';
 
 /*
  * The phone app's web build, held like a phone, against the TV journeys' fake addons. On the
@@ -331,5 +331,59 @@ test('subtitles by language with numbered versions, the match note, and Timing k
     /Matches your video/,
   );
   await expect(timingTab).toHaveText('Timing +5.5 s · drift fixed');
+  expect(errors).toEqual([]);
+});
+
+test('on a dub picked by hand, Audio offers the language wanted from another stream', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const playback = await mockPlayback(page, {
+    streams: {
+      tt2285752: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p BluRay REMUX 🇪🇸\n💾 9 GB ⚡ Cached',
+          path: '/movie-1080p-castellano.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL\n💾 2 GB ⚡ Cached',
+          path: '/movie-720p.webm',
+        },
+      ],
+    },
+  });
+  await openApp(page);
+  await addStreamAddon(page);
+
+  await page
+    .getByLabel(/Tears of Steel/)
+    .last()
+    .click();
+  await page.getByRole('button', { name: /All streams/ }).click();
+  await page
+    .getByText(/Open Movie 1080p BluRay/)
+    .first()
+    .click();
+  const pause = page.getByLabel('Pause', { exact: true }).first();
+  await expect(pause).toBeVisible();
+  await expect.poll(() => playback.media).toContain('/movie-1080p-castellano.webm');
+
+  const panelButton = page.getByRole('button', { name: 'Audio and subtitles' });
+  // The controls hide while the film plays: a tap brings them.
+  if (!(await panelButton.isVisible())) await page.mouse.click(120, 160);
+  await panelButton.click();
+  await page.getByRole('button', { name: 'Audio', exact: true }).click();
+  const offer = page.getByRole('button', { name: /^English audio: switch stream/ });
+  await expect(offer).toBeVisible();
+  await expect(offer).toContainText('720p');
+  await offer.click();
+  await expect.poll(() => playback.media).toContain('/movie-720p.webm');
+  // The language is kept for the title, which the next stream starts in.
+  await expect
+    .poll(async () => JSON.stringify(await readKv(page, 'trackChoices')))
+    .toContain('"audio":"en"');
   expect(errors).toEqual([]);
 });
