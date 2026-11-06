@@ -7,13 +7,7 @@ import {
   type ViewOptions,
 } from '@bannertv/core';
 import { isKidsProfile } from '@tv/data/profiles';
-import {
-  sportsFeed,
-  sportsFollows,
-  sportsMatcher,
-  sportsState,
-  wantSports,
-} from '@tv/data/sports';
+import { sportsFeed, sportsFollows, sportsMatcher, sportsState, wantSports } from '@tv/data/sports';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
