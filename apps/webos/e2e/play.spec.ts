@@ -1450,7 +1450,7 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await press(page, 'ArrowRight', 'player-back10');
   const live = (await video(page)).time;
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(1);
+  await expectSeekAtOnce(seeks, 1, OK);
   await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 5);
   await press(page, 'ArrowRight', 'player-play');
   await press(page, 'ArrowRight', 'player-fwd10');
@@ -1460,7 +1460,7 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   );
   const behind = (await video(page)).time;
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expectSeekAtOnce(seeks, 2, OK);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 5);
   // Never past live: playing live, it has nowhere further to go.
   await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
@@ -1509,7 +1509,7 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   const seeks = await countSeeks(page);
   await press(page, 'ArrowLeft', 'player-back10');
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(1);
+  await expectSeekAtOnce(seeks, 1, OK);
   await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
   await expect(behindTime).toHaveText(/^−0:0\d$/);
   await expect(page.locator('[class*="liveBehind"]')).toHaveText('LIVE');
@@ -1522,7 +1522,7 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await press(page, 'ArrowRight', 'player-live');
   const behind = (await video(page)).time;
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expectSeekAtOnce(seeks, 2, OK);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 3);
   await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
   await expect(behindTime).toHaveText('');
@@ -1542,11 +1542,11 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await expectFocus(page, 'player-seek');
   await expect(bar.getByText(/^−0:0\d$/)).toBeVisible();
   await page.mouse.click(box.x + 4, box.y + box.height / 2);
-  await expect.poll(seeks, { timeout: 500 }).toBe(3);
+  await expectSeekAtOnce(seeks, 3, 'click');
   await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
   // The right end is live: a click there goes to live, and playing live does nothing.
   await page.mouse.click(box.x + box.width, box.y + box.height / 2);
-  await expect.poll(seeks, { timeout: 500 }).toBe(4);
+  await expectSeekAtOnce(seeks, 4, 'click');
   await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
   await page.waitForTimeout(1000);
   await page.mouse.click(box.x + box.width, box.y + box.height / 2);
@@ -1627,19 +1627,71 @@ async function expectControlsHidden(page: Page) {
 const FAST_FORWARD = 417;
 const REWIND = 412;
 const BLUE = 406;
+const OK = 13;
 
-/** Counts the player's seeks from now on. */
-async function countSeeks(page: Page): Promise<() => Promise<number>> {
-  await page.locator('video:not([aria-hidden])').evaluate((element: HTMLVideoElement) => {
+/** A skip lands by itself this long after its last press: SCRUB_COMMIT_MS in PlayerScreen.tsx. */
+const SKIP_LANDS_MS = 800;
+
+/** A remote key by its keyCode, or 'click' for the pointer going down. */
+type Input = number | 'click';
+type SeekWindow = Window & { seekInputs?: Array<[Input, number]> };
+type SeekVideo = HTMLVideoElement & { seekTimes?: number[] };
+
+/** The player's seeks since countSeeks. */
+interface Seeks {
+  /** How many have begun. */
+  (): Promise<number>;
+  /** How long the `nth` began after the last `input` before it, in ms by the page's clock. */
+  after(nth: number, input: Input): Promise<number>;
+}
+
+/** Counts the player's seeks from now on, and keeps when each began and each key or click went down. */
+async function countSeeks(page: Page): Promise<Seeks> {
+  const video = page.locator('video:not([aria-hidden])');
+  await video.evaluate((element: SeekVideo) => {
+    const w = window as SeekWindow;
+    if (!w.seekInputs) {
+      const inputs: Array<[Input, number]> = (w.seekInputs = []);
+      // On the window, capturing: it hears each key and click before the app can stop it.
+      window.addEventListener(
+        'keydown',
+        (event) => inputs.push([event.keyCode, performance.now()]),
+        true,
+      );
+      window.addEventListener('pointerdown', () => inputs.push(['click', performance.now()]), true);
+    }
+    const times: number[] = (element.seekTimes = []);
     element.dataset.seeks = '0';
     element.addEventListener('seeking', () => {
+      times.push(performance.now());
       element.dataset.seeks = String(Number(element.dataset.seeks) + 1);
     });
   });
-  return () =>
-    page
-      .locator('video:not([aria-hidden])')
-      .evaluate((element: HTMLVideoElement) => Number(element.dataset.seeks));
+  const seeks = (() =>
+    video.evaluate((element: HTMLVideoElement) => Number(element.dataset.seeks))) as Seeks;
+  seeks.after = (nth, input) =>
+    video.evaluate(
+      (element: SeekVideo, [index, wanted]) => {
+        const began = element.seekTimes?.[index] ?? NaN;
+        const before = ((window as SeekWindow).seekInputs ?? []).filter(
+          ([what, at]) => what === wanted && at <= began,
+        );
+        return began - (before[before.length - 1]?.[1] ?? NaN);
+      },
+      [nth - 1, input] as const,
+    );
+  return seeks;
+}
+
+/**
+ * Waits for the player's `nth` seek, and checks it began at once after `since`, the press that
+ * asked for it: sooner than a skip lands by itself. Timed in the page, so slow round trips on
+ * a busy runner cannot fail a seek that came at once, and one that waited for the skip delay
+ * still fails.
+ */
+async function expectSeekAtOnce(seeks: Seeks, nth: number, since: Input): Promise<void> {
+  await expect.poll(seeks).toBe(nth);
+  expect(await seeks.after(nth, since)).toBeLessThan(SKIP_LANDS_MS);
 }
 
 async function playMovie(page: Page) {
@@ -1679,7 +1731,7 @@ test('every way of skipping adds 10 s a press and lands once, with a note while 
   // OK lands a skip there and then, well before it would land by itself, and leaves the film playing.
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 400 }).toBe(3);
+  await expectSeekAtOnce(seeks, 3, FAST_FORWARD);
   await page.waitForTimeout(1000);
   expect(await seeks()).toBe(3);
   expect((await video(page)).playing).toBe(true);
@@ -2847,7 +2899,7 @@ test('a click on the picture hides the controls and another brings them back; th
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
   await page.mouse.click(960, 420);
-  await expect.poll(seeks, { timeout: 400 }).toBe(2);
+  await expectSeekAtOnce(seeks, 2, FAST_FORWARD);
   await expectFocus(page, 'player-streams-button');
   await expect(play).toBeVisible();
 
