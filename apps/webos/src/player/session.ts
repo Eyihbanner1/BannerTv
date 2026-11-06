@@ -16,6 +16,7 @@ import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
+import { rewindWindow, shouldReturnToLive } from './live';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
 export const STALL_MS = 20000;
@@ -230,6 +231,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let live = false;
   // Whether the broadcast was last judged behind live, so a wobble at the boundary does not flicker.
   let wasBehind = false;
+  // The viewer moved back in the broadcast or paused it, so a stall does not take them to live.
+  let viewerBehind = false;
+  // When a stall last took the broadcast back to live by itself.
+  let autoLiveAt = -Infinity;
   let liveTimer: number | undefined;
   let firstTrusted: number | undefined;
   // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
@@ -550,6 +555,19 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         const buffered = endBuffering();
         patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
         if (buffered) judgeBuffering(attempt);
+        // A stall left the broadcast well behind: back to live, as a TV channel would be.
+        const kept = buffered && current === attempt ? liveWindow() : null;
+        if (
+          kept &&
+          shouldReturnToLive(kept, video.currentTime, {
+            viewerBehind,
+            lastAt: autoLiveAt,
+            now: Date.now(),
+          })
+        ) {
+          autoLiveAt = Date.now();
+          session.goToLive();
+        }
       },
     ],
     [
@@ -728,6 +746,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       limitBefore = undefined;
       live = false;
       wasBehind = false;
+      viewerBehind = false;
+      autoLiveAt = -Infinity;
       clearInterval(liveTimer);
       firstTrusted = undefined;
       patch({
@@ -846,6 +866,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         startTimer = undefined;
       }
       pausedByViewer = true;
+      if (live) viewerBehind = true;
       video.pause();
     },
 
@@ -861,11 +882,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     seek(position) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
-      const wanted = kept ? clampToWindow(kept, position) : position;
+      const wanted = kept ? clampToWindow(rewindWindow(kept), position) : position;
       // A jump forward never lands behind where it started, as one past a
       // live point read a moment late would.
       if (kept && wanted < video.currentTime && position > video.currentTime) return;
       const target = Math.max(0, Math.min(wanted, duration - 1));
+      // Back in a broadcast on purpose; forward to live again, not.
+      if (kept) viewerBehind = target < kept.live - kept.slack;
       endBuffering();
       clearTimeout(judgeTimer);
       judgeTimer = undefined;
