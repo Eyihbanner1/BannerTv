@@ -29,6 +29,7 @@ describe('TUNING_DEFAULTS', () => {
       metadataTimeoutMs: 0,
       aheadMode: 'decode',
       aheadOversize: 1.5,
+      gridAhead: false,
     });
   });
 });
@@ -82,10 +83,11 @@ describe('parseTuning', () => {
     expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
   it('takes the second round of decoding-ahead switches', () => {
-    expect(parseTuning('{"aheadMode":"raster","aheadOversize":2}')).toEqual({
+    expect(parseTuning('{"aheadMode":"raster","aheadOversize":2,"gridAhead":true}')).toEqual({
       ...TUNING_DEFAULTS,
       aheadMode: 'raster',
       aheadOversize: 2,
+      gridAhead: true,
     });
     expect(parseTuning('{"aheadOversize":1.5}')).toEqual(TUNING_DEFAULTS);
     // Stored before these switches came, decodeAhead keeps its meaning.
@@ -107,6 +109,7 @@ describe('parseTuning', () => {
     // Only the two rules there are: 1.5 times the width, or the browser's.
     expect(parseTuning('{"aheadOversize":3}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"aheadOversize":"2"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"gridAhead":"yes"}')).toEqual(TUNING_DEFAULTS);
   });
 });
 
@@ -167,9 +170,9 @@ describe('applyTuning', () => {
     expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
       classesFor({ ...TUNING_DEFAULTS }),
     );
-    expect(classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster', aheadOversize: 2 })).toEqual(
-      classesFor({ ...TUNING_DEFAULTS }),
-    );
+    expect(
+      classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster', aheadOversize: 2, gridAhead: true }),
+    ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
     expect(
       classesFor({
         ...TUNING_DEFAULTS,

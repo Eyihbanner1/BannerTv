@@ -1,9 +1,10 @@
 import type { PagerState } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
+import { decodeAheadOfTiles, GRID_AHEAD, leaveGrid } from '../../components/decode-ahead';
 import { Tile } from '../../components/Tile';
 import {
   recallFocus,
@@ -29,6 +30,12 @@ const ROWS_BEFORE = 1;
 const ROWS_AFTER = 3;
 /** The next page is asked for when focus gets this many rows from the end. */
 const ROWS_BEFORE_END = 2;
+/**
+ * The row the next Down brings into view, counted from the top one: the
+ * grid shows two rows and the top of a third. It is drawn already (it is
+ * within ROWS_AFTER), but clipped, so its posters are not decoded yet.
+ */
+const SHOWN_BY_DOWN = 3;
 
 interface PosterGridProps {
   /** Where the grid keeps its scroll and last tile, per catalog and genre. */
@@ -97,6 +104,35 @@ export function PosterGrid(props: PosterGridProps) {
     if (item) current.onPress(item);
   }, []);
 
+  // With the gridAhead tuning switch, decoding ahead gets the posters of the
+  // row the next Down shows ready, and after an Up those of the row above
+  // too. Again when a page of titles arrives, which fills tiles in.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const ahead = useRef({ anchorRow, movedUp: false, track: null as HTMLElement | null });
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!GRID_AHEAD || !track) return;
+    const last = ahead.current;
+    if (anchorRow !== last.anchorRow) {
+      last.movedUp = anchorRow < last.anchorRow;
+      last.anchorRow = anchorRow;
+    }
+    last.track = track;
+    const rows = last.movedUp
+      ? [anchorRow - 1, anchorRow + SHOWN_BY_DOWN]
+      : [anchorRow + SHOWN_BY_DOWN];
+    const tiles: HTMLElement[] = [];
+    for (const row of rows) {
+      if (row < 0) continue;
+      for (let index = row * GRID_COLUMNS; index < (row + 1) * GRID_COLUMNS; index++) {
+        const tile = track.querySelector<HTMLElement>(`[data-focus-key="${gridTileKey(index)}"]`);
+        if (tile) tiles.push(tile);
+      }
+    }
+    decodeAheadOfTiles(track, `grid-${anchorRow}`, tiles);
+  }, [anchorRow, count]);
+  useEffect(() => () => leaveGrid(ahead.current.track), []);
+
   if (items.length === 0 && (status === 'error' || status === 'done')) {
     return (
       <FocusContext.Provider value={focusKey}>
@@ -133,6 +169,7 @@ export function PosterGrid(props: PosterGridProps) {
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className={styles.grid} data-index-nav={byIndex ? '' : undefined}>
         <div
+          ref={trackRef}
           className={styles.track}
           style={{ transform: `translateY(${-anchorRow * ROW_STEP}px)` }}
         >

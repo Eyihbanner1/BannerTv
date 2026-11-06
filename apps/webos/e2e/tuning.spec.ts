@@ -8,7 +8,8 @@ import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
  * src/platform/tuning.ts): decoding ahead, Home's rows box on its own layer,
  * the hero without its fade, small wide art, and timing marks. Decoding
  * ahead and the hero without its fade are the defaults. Then the second
- * round's: getting art ready by drawing it under the rail.
+ * round's: getting art ready by drawing it under the rail, the browser's
+ * own rule for which art is too big to decode ahead, and poster grids.
  */
 
 /** Home's first rows from the mock Cinemeta, top to bottom. Featured rows have wide tiles. */
@@ -54,14 +55,18 @@ async function recordDecodes(page: Page): Promise<void> {
     (window as unknown as { decodes: Decodes }).decodes = record;
     const original = HTMLImageElement.prototype.decode;
     HTMLImageElement.prototype.decode = function decode(this: HTMLImageElement) {
-      const row = this.closest('[data-row-key]');
       const tile = this.closest('[data-focus-key]');
+      const tileKey = tile ? tile.getAttribute('data-focus-key')! : '';
+      // A poster grid's tiles have no row of their own: they count as the row "grid".
+      const row = /^discover-tile-/.test(tileKey)
+        ? 'grid'
+        : this.closest('[data-row-key]')?.getAttribute('data-row-key');
       // Artwork itself decodes an image that finished with no size, to tell an SVG from a failure.
       if (!row || !tile || this.naturalWidth === 0) return original.call(this);
       const src = this.getAttribute('src')!;
       record.calls.push({
-        row: row.getAttribute('data-row-key')!,
-        tile: tile.getAttribute('data-focus-key')!,
+        row,
+        tile: tileKey,
         src,
         at: performance.now(),
         again: seen.has(src),
@@ -116,7 +121,7 @@ const warmArt = (page: Page) =>
   );
 
 /** The same for the art of some tiles of a row, tile by tile. */
-const tileArt = (page: Page, row: string, tiles: number[]) =>
+const drawnTileArt = (page: Page, row: string, tiles: number[]) =>
   page.evaluate(
     ({ row, tiles }) =>
       tiles.flatMap((n) =>
@@ -131,6 +136,18 @@ const tileArt = (page: Page, row: string, tiles: number[]) =>
       ),
     { row, tiles },
   );
+
+/** The art of those tiles once all `count` images have loaded, so each has its drawn size. */
+async function tileArt(page: Page, row: string, tiles: number[], count: number) {
+  let art: DrawnArt[] = [];
+  await expect
+    .poll(async () => {
+      art = await drawnTileArt(page, row, tiles);
+      return art.length === count && art.every((drawn) => drawn.size[0] > 0);
+    })
+    .toBe(true);
+  return art;
+}
 
 /** Presses a key and waits for focus to land anywhere in `row`. */
 async function pressToRow(page: Page, key: string, row: string): Promise<void> {
@@ -227,8 +244,7 @@ test.describe('on a 4K TV', () => {
     // From the first row, the Featured row's wide art and logos across the
     // screen, each at the size its tile draws it, and none of it decoded.
     const across = [0, 1, 2, 3, 4];
-    await expect.poll(async () => (await tileArt(page, FEATURED_MOVIES, across)).length).toBe(10);
-    const featured = await tileArt(page, FEATURED_MOVIES, across);
+    const featured = await tileArt(page, FEATURED_MOVIES, across, 10);
     expect(featured.map((drawn) => drawn.size[0])).toContain(384);
     await expect.poll(() => warmArt(page)).toEqual(featured);
     expect(await allDecodes(page)).toEqual([]);
@@ -254,14 +270,12 @@ test.describe('on a 4K TV', () => {
 
     // Moving on, at most ten are kept drawn, and the newest are the next row's.
     await pressToRow(page, 'ArrowDown', SERIES_ROW);
-    await expect.poll(async () => (await tileArt(page, FEATURED_SERIES, across)).length).toBe(10);
-    const seriesFeatured = await tileArt(page, FEATURED_SERIES, across);
+    const seriesFeatured = await tileArt(page, FEATURED_SERIES, across, 10);
     await expect.poll(async () => (await warmArt(page)).slice(-10)).toEqual(seriesFeatured);
     expect(await warmArt(page)).toHaveLength(10);
     await pressToRow(page, 'ArrowDown', FEATURED_MOVIES);
     const posters = [0, 1, 2, 3, 4, 5, 6];
-    await expect.poll(async () => (await tileArt(page, ACTION, posters)).length).toBe(7);
-    const action = await tileArt(page, ACTION, posters);
+    const action = await tileArt(page, ACTION, posters, 7);
     await expect.poll(async () => (await warmArt(page)).slice(-7)).toEqual(action);
     expect((await warmArt(page)).length).toBeLessThanOrEqual(10);
     expect(await allDecodes(page)).toEqual([]);
@@ -667,6 +681,79 @@ test('by default art is decoded ahead, nothing is marked, the rows box has no la
     'will-change',
     'auto',
   );
+});
+
+const GRID_ROW = (row: number) => Array.from({ length: 7 }, (_, n) => row * 7 + n);
+
+test('gridAhead decodes ahead the posters of the grid row the next press shows, down and up', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true, marks: true });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  // The grid shows rows 0 and 1 and the top of row 2: Down brings row 3 in.
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual(GRID_ROW(3));
+  // Row 4 has no titles until the next page comes, at row 2.
+  await press(page, 'ArrowDown', 'discover-tile-7');
+  await press(page, 'ArrowDown', 'discover-tile-14');
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual([...GRID_ROW(3), ...GRID_ROW(5)]);
+  // After an Up, the row above too: row 0, and row 4 below.
+  await press(page, 'ArrowUp', 'discover-tile-7');
+  await expect
+    .poll(() => decodedTiles(page, 'grid'))
+    .toEqual([...GRID_ROW(0), ...GRID_ROW(3), ...GRID_ROW(4), ...GRID_ROW(5)]);
+  const record = await decodes(page);
+  expect(record.calls.filter((call) => call.again)).toEqual([]);
+  expect(record.mostPending).toBe(1);
+  // Marks say where the grid is, never an address.
+  expect(await markNames(page)).toContain('ahead:grid-1');
+});
+
+test('gridAhead works in See all over Home, and Home takes over again once it closes', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (let n = 1; n <= 14; n++) await press(page, 'ArrowRight', `${FIRST_ROW}-tile-${n}`);
+  await press(page, 'Enter', 'discover-tile-0');
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual(GRID_ROW(3));
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-14`);
+  await pressToRow(page, 'ArrowDown', SERIES_ROW);
+  await expect.poll(() => decodedTiles(page, FEATURED_SERIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('gridAhead with aheadMode raster draws the grid row the next press shows under the rail', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true, aheadMode: 'raster' });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  // Grid tiles are discover-tile-N, as a row's are <row>-tile-N.
+  const next = await tileArt(page, 'discover', GRID_ROW(3), 7);
+  expect(next[0]!.size).toEqual([220, 330]);
+  await expect.poll(async () => (await warmArt(page)).slice(-7)).toEqual(next);
+  expect(await allDecodes(page)).toEqual([]);
+});
+
+test('without gridAhead, the poster grid decodes nothing ahead', async ({ page }) => {
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  await press(page, 'ArrowDown', 'discover-tile-7');
+  await press(page, 'ArrowDown', 'discover-tile-14');
+  await page.waitForTimeout(500);
+  expect(await decodedTiles(page, 'grid')).toEqual([]);
 });
 
 test('decodeAhead false decodes nothing ahead', async ({ page }) => {

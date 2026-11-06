@@ -36,6 +36,14 @@ const watched = new WeakSet<HTMLElement>();
  */
 let currentKey: string | null = null;
 let movedUp = false;
+/**
+ * With `gridAhead`, the tiles of a poster grid that its next press brings
+ * into view, nearest first, standing in for the rows after the current one.
+ * The grid hands them over each time it moves and lets go when it closes;
+ * a stack of rows that slides again takes over from them, as Home does when
+ * See all closes over it.
+ */
+let grid: { track: HTMLElement; key: string; tiles: HTMLElement[] } | null = null;
 let decoding = false;
 let frame = 0;
 let lastFrameAt = 0;
@@ -100,6 +108,15 @@ function whole(size: Size): Size {
 
 /** Art is got ready by drawing it under the rail, which App then draws a box for. */
 export const RASTER_AHEAD = tuning.decodeAhead && tuning.aheadMode === 'raster';
+/** Poster grids hand over the tiles their next press shows. */
+export const GRID_AHEAD = tuning.decodeAhead && tuning.gridAhead;
+
+/** Decoding ahead is on, and this browser can do it the way asked. */
+function canGetReady(): boolean {
+  return (
+    tuning.decodeAhead && (RASTER_AHEAD || typeof HTMLImageElement.prototype.decode === 'function')
+  );
+}
 
 function isRow(element: Element | null | undefined): element is HTMLElement {
   return element instanceof HTMLElement && element.hasAttribute('data-row-key');
@@ -116,6 +133,7 @@ function rowElement(key: string | null): Element | null {
  * drawing it puts a new element in its place.
  */
 function targets(): HTMLElement[] {
+  if (grid) return grid.tiles;
   const current = rowElement(currentKey);
   if (!current) return [];
   const next = current.nextElementSibling;
@@ -163,13 +181,15 @@ interface Next {
   key: string | null;
 }
 
-/** The first art across the screen, left to right, of the first target row that has some. */
+/** The first art across the screen, left to right, of the first target row (or tile) that has some. */
 function nextImage(now: number): Next | null {
   for (const row of targets()) {
     const found = row.getElementsByTagName('img');
     for (let i = 0; i < found.length; i++) {
       const box = drawnBox(found[i]!, now);
-      if (box) return { image: found[i]!, box, key: row.getAttribute('data-row-key') };
+      if (box) {
+        return { image: found[i]!, box, key: grid ? grid.key : row.getAttribute('data-row-key') };
+      }
     }
   }
   return null;
@@ -262,6 +282,13 @@ function onLoad(event: Event): void {
   if (targets().some((row) => row.contains(image))) schedule();
 }
 
+function watch(track: HTMLElement): void {
+  if (watched.has(track)) return;
+  watched.add(track);
+  // Load events do not bubble, but they can be caught on the way down.
+  track.addEventListener('load', onLoad, true);
+}
+
 /**
  * The ref of the box raster mode draws art in: 1 px, drawn just before the
  * rail, whose opaque backdrop covers it, and only while the rail is drawn.
@@ -288,8 +315,8 @@ export function warmBoxRef(element: HTMLElement | null): void {
  * decodes nothing until it is let go.
  */
 export function decodeAheadOf(track: HTMLElement, row: HTMLElement | null): void {
-  if (!tuning.decodeAhead) return;
-  if (!RASTER_AHEAD && typeof HTMLImageElement.prototype.decode !== 'function') return;
+  if (!canGetReady()) return;
+  grid = null;
   const key = row ? row.getAttribute('data-row-key') : null;
   if (key !== currentKey) {
     const before = rowElement(currentKey);
@@ -302,10 +329,27 @@ export function decodeAheadOf(track: HTMLElement, row: HTMLElement | null): void
     slid();
   }
   if (!currentKey) return;
-  if (!watched.has(track)) {
-    watched.add(track);
-    // Load events do not bubble, but they can be caught on the way down.
-    track.addEventListener('load', onLoad, true);
-  }
+  watch(track);
   schedule();
+}
+
+/**
+ * With `gridAhead` too, the same for a poster grid, which slides its own
+ * track and has no rows of its own: `tiles` are those its next press brings
+ * into view, nearest first, and `key` says where the grid is, for marks. A
+ * new key is a move, as a new row is for a stack.
+ */
+export function decodeAheadOfTiles(track: HTMLElement, key: string, tiles: HTMLElement[]): void {
+  if (!GRID_AHEAD || !canGetReady()) return;
+  if (!grid || grid.track !== track || grid.key !== key) slid();
+  grid = { track, key, tiles };
+  watch(track);
+  schedule();
+}
+
+/** A grid that closes lets go of its tiles; leaving it moves the view on, as a slide does. */
+export function leaveGrid(track: HTMLElement | null): void {
+  if (!grid || grid.track !== track) return;
+  grid = null;
+  slid();
 }

@@ -478,3 +478,117 @@ describe('aheadOversize', () => {
     }
   });
 });
+
+describe('gridAhead', () => {
+  /** A poster grid's track, seven across, with `rows` rows of tiles. */
+  function posterGrid(rows: number): { track: FakeElement; row: (n: number) => FakeElement[] } {
+    const track = root.appendChild(new FakeElement());
+    const tiles: FakeElement[] = [];
+    for (let index = 0; index < rows * 7; index++) {
+      const tile = track.appendChild(
+        new FakeElement({ 'data-focus-key': `discover-tile-${index}` }),
+      );
+      tile.appendChild(
+        image({
+          src: `https://art/poster/grid/${index}`,
+          natural: [500, 750],
+          drawn: [184 + (index % 7) * 244, 220, 330],
+        }),
+      );
+      tiles.push(tile);
+    }
+    return { track, row: (n) => tiles.slice(n * 7, n * 7 + 7) };
+  }
+
+  const handOver = (module: Module, track: FakeElement, key: string, tiles: FakeElement[]) =>
+    module.decodeAheadOfTiles(
+      track as unknown as HTMLElement,
+      key,
+      tiles as unknown as HTMLElement[],
+    );
+
+  /** Settles each decode as it is asked, until none is left to ask. */
+  async function decodeAll(): Promise<void> {
+    for (let n = 0; n < 20; n++) {
+      runFrames(3);
+      await settleDecodes();
+    }
+  }
+
+  it('is off by default: a grid hands its tiles over for nothing', async () => {
+    const ahead = await load();
+    expect(ahead.GRID_AHEAD).toBe(false);
+    const { track, row } = posterGrid(4);
+    handOver(ahead, track, 'grid-0', row(3));
+    runFrames(5);
+    expect(FakeImage.decodes).toEqual([]);
+    expect(track.listeners).toEqual([]);
+  });
+
+  it('needs decodeAhead too', async () => {
+    const ahead = await load({ gridAhead: true, decodeAhead: false });
+    expect(ahead.GRID_AHEAD).toBe(false);
+  });
+
+  it('decodes the tiles a grid hands over, in their order, one at a time', async () => {
+    const ahead = await load({ gridAhead: true, marks: true });
+    const { track, row } = posterGrid(5);
+    handOver(ahead, track, 'grid-1', [...row(0), ...row(4)]);
+    expect(track.listeners).toEqual(['load']);
+    runFrames(3);
+    expect(decodedSrcs()).toEqual(['https://art/poster/grid/0']);
+    await decodeAll();
+    expect(page.marks.filter((name) => name === 'ahead:grid-1')).toHaveLength(14);
+    // Only ever the tiles handed over.
+    expect(page.marks.filter((name) => !/^ahead(-done)?:grid-1$/.test(name))).toEqual([]);
+  });
+
+  it('gives way to a stack of rows that slides again, as Home does under See all', async () => {
+    const ahead = await load({ gridAhead: true, marks: true });
+    const home = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    slide(ahead, home.track, home.rows[0]!);
+    const { track, row } = posterGrid(4);
+    handOver(ahead, track, 'grid-0', row(3));
+    runFrames(3);
+    // The grid's tiles, not Home's row after next.
+    expect(decodedSrcs()).toEqual(['https://art/poster/grid/21']);
+    await settleDecodes();
+    slide(ahead, home.track, home.rows[0]!);
+    runFrames(3);
+    expect(decodedSrcs()).toEqual(['https://art/poster/c/0']);
+  });
+
+  it('lets go of the tiles of a grid that closes, and only of that grid', async () => {
+    const ahead = await load({ gridAhead: true });
+    const first = posterGrid(4);
+    const second = posterGrid(4);
+    handOver(ahead, second.track, 'grid-0', second.row(3));
+    ahead.leaveGrid(first.track as unknown as HTMLElement);
+    runFrames(3);
+    expect(decodedSrcs()).toEqual(['https://art/poster/grid/21']);
+    await settleDecodes();
+    ahead.leaveGrid(second.track as unknown as HTMLElement);
+    runFrames(10);
+    expect(FakeImage.decodes).toEqual([]);
+  });
+
+  it('with aheadMode raster, draws the tiles under the rail; a new key is a move', async () => {
+    const ahead = await load({ gridAhead: true, aheadMode: 'raster' });
+    const box = new FakeElement();
+    ahead.warmBoxRef(box as unknown as HTMLElement);
+    const { track, row } = posterGrid(6);
+    handOver(ahead, track, 'grid-0', row(3).slice(0, 2));
+    runFrames(10);
+    expect(srcs(box)).toEqual(['https://art/poster/grid/21', 'https://art/poster/grid/22']);
+    // The same place again, as a page of titles arrives: still the same move.
+    handOver(ahead, track, 'grid-0', row(3).slice(0, 3));
+    runFrames(10);
+    expect(box.children).toHaveLength(3);
+    handOver(ahead, track, 'grid-1', row(4).slice(0, 1));
+    runFrames(10);
+    handOver(ahead, track, 'grid-2', row(5).slice(0, 1));
+    // Row 3's posters were drawn for the move before last: they go.
+    expect(srcs(box)).toEqual(['https://art/poster/grid/28']);
+    expect(FakeImage.decodes).toEqual([]);
+  });
+});

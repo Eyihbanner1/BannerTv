@@ -141,6 +141,13 @@ export interface Tuning {
    * neither: drawing picks its copy itself.
    */
   aheadOversize: 1.5 | 2;
+  /**
+   * The poster grids of Discover, See all and Library get decoding ahead
+   * too, in either `aheadMode`: the row the next Down brings into view, and
+   * after an Up the row above too. Without it each move down the grid
+   * decodes a new row of posters in the frame that shows it.
+   */
+  gridAhead: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -175,6 +182,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   // Decoding ahead, second round.
   aheadMode: 'decode',
   aheadOversize: 1.5,
+  gridAhead: false,
 };
 
 function oneOf<T extends string | number>(value: unknown, options: readonly T[], fallback: T): T {
@@ -229,6 +237,7 @@ export function parseTuning(raw: string | null): Tuning {
     // Decoding ahead, second round.
     aheadMode: oneOf(stored.aheadMode, ['decode', 'raster'], d.aheadMode),
     aheadOversize: oneOf(stored.aheadOversize, [1.5, 2], d.aheadOversize),
+    gridAhead: flag(stored.gridAhead, d.gridAhead),
   };
 }
 
