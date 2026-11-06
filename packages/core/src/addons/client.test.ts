@@ -134,6 +134,95 @@ describe('createAddonClient', () => {
     }
   });
 
+  it('keeps the details shown when they come back the same, and Home rows keep their items', async () => {
+    const metaUrl = 'https://v3-cinemeta.strem.io/meta/series/tt0944947.json';
+    const rowUrl = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
+    const otherUrl = 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Drama.json';
+    let name = 'Game of Thrones';
+    const list = () => ({
+      metas: [
+        { id: 'tt1', type: 'movie', name: 'One' },
+        { id: 'tt2', type: 'movie', name: 'Two' },
+      ],
+    });
+    const { client, collection } = await setup({
+      [metaUrl]: () =>
+        Promise.resolve({
+          meta: {
+            id: 'tt0944947',
+            type: 'series',
+            name,
+            videos: [{ id: 'tt0944947:1:1', name: 'Winter Is Coming', season: 1, episode: 1 }],
+          },
+        }),
+      [rowUrl]: () => Promise.resolve(list()),
+      [otherUrl]: () => Promise.resolve(list()),
+    });
+
+    // Try again on a fresh copy asks again, as a refresh would.
+    const meta = client.meta('series', 'tt0944947');
+    meta.load();
+    await flush();
+    const first = meta.get().data!;
+    meta.retry();
+    await flush();
+    expect(meta.get().data).toBe(first);
+    name = 'A Game of Thrones';
+    meta.retry();
+    await flush();
+    expect(meta.get().data?.name).toBe('A Game of Thrones');
+    expect(meta.get().data?.videos).toBe(first.videos);
+
+    const cinemeta = collection.get().addons.find((a) => a.transportUrl === CINEMETA_URL)!;
+    const row = client.catalog(cinemeta, 'movie', 'top', [], { keepEqual: true });
+    const other = client.catalog(cinemeta, 'movie', 'top', [['genre', 'Drama']]);
+    for (const query of [row, other]) {
+      query.load();
+      await flush();
+      const items = query.get().data!;
+      query.retry();
+      await flush();
+      expect(query.get().data).toEqual(items);
+      // Only the row that asked keeps its items; other readers get new ones, as before.
+      expect(query.get().data === items).toBe(query === row);
+    }
+  });
+
+  it('never keeps the items of a catalog the sports readings may read', async () => {
+    const sportsUrl = 'https://sport.example/manifest.json';
+    const manifest = {
+      id: 'org.sport',
+      version: '1.0.0',
+      name: 'Sport',
+      types: ['movie', 'tv'],
+      resources: ['catalog'],
+      catalogs: [
+        { type: 'movie', id: 'football', name: 'Football' },
+        { type: 'tv', id: 'top', name: 'Popular' },
+      ],
+    };
+    const list = () => Promise.resolve({ metas: [{ id: 'tt1', type: 'movie', name: 'One' }] });
+    const { client, collection } = await setup({
+      [sportsUrl]: () => Promise.resolve(manifest),
+      'https://sport.example/catalog/movie/football.json': list,
+      'https://sport.example/catalog/tv/top.json': list,
+    });
+    const addon = await collection.install(sportsUrl);
+    for (const [type, id] of [
+      ['movie', 'football'],
+      ['tv', 'top'],
+    ] as const) {
+      const query = client.catalog(addon, type, id, [], { keepEqual: true });
+      query.load();
+      await flush();
+      const items = query.get().data!;
+      expect(items).toHaveLength(1);
+      query.retry();
+      await flush();
+      expect(query.get().data).not.toBe(items);
+    }
+  });
+
   it('reports the network failure when no addon answered', async () => {
     const { client } = await setup({
       'https://v3-cinemeta.strem.io/meta/movie/tt1.json': () =>

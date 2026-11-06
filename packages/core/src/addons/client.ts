@@ -15,6 +15,7 @@ import {
 import type { FetchJson } from '../http';
 import type { Limiter } from '../limiter';
 import type { CachePolicy, Query, QueryCache } from '../query';
+import { neverSports } from '../sports/detect';
 import type { AddonCollection, InstalledAddon } from './collection';
 
 /** Catalog and meta requests give up after this long. */
@@ -109,6 +110,14 @@ export interface CatalogOptions {
    * so its policy and limit always apply.
    */
   lane?: Limiter;
+  /**
+   * A refreshed answer keeps the objects of the copy on screen it equals
+   * (QueryOptions.keepEqual), for Home's rows. Like the policy, it is set by
+   * the first screen to ask for this catalog. Only a catalog that can never
+   * be read as sports (neverSports) takes it: the sports readings take a new
+   * list as a new answer, and read its kick-offs again.
+   */
+  keepEqual?: boolean;
 }
 
 /** One item as one addon listed it, for requests that must go to that addon only. */
@@ -211,6 +220,11 @@ export function createAddonClient(options: {
       return queries.query(lane ? `lane:${url}` : url, {
         policy: options.policy ?? CATALOG_POLICY,
         persist: options.persist !== false,
+        keepEqual:
+          options.keepEqual === true &&
+          addon.manifest.catalogs.some(
+            (catalog) => catalog.type === type && catalog.id === catalogId && neverSports(catalog),
+          ),
         fetch: async () => {
           const json = lane ? await lane.run(() => get(url)) : await get(url);
           const response = parseCatalogResponse(json, type);
@@ -223,6 +237,8 @@ export function createAddonClient(options: {
       return queries.query(`${kidsOnly() ? 'kids:' : ''}meta:${type}:${id}`, {
         policy: META_POLICY,
         persist: true,
+        // Its readers (Details, the player, Continue Watching) go by what it holds, not the object.
+        keepEqual: true,
         fetch: async () => {
           const addons = usable().filter((addon) =>
             supportsResource(addon.manifest, 'meta', type, id),

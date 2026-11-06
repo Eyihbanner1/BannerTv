@@ -105,6 +105,15 @@ export function needsEvidence(catalog: ManifestCatalog): boolean {
 }
 
 /**
+ * Whether no "Show in Sports" setting and no first page can make this a
+ * sports catalog (isSportsCatalog): one of movies or series that names
+ * neither a sport nor a sports view.
+ */
+export function neverSports(catalog: ManifestCatalog): boolean {
+  return TITLE_TYPES.indexOf(catalog.type) !== -1 && !needsEvidence(catalog);
+}
+
+/**
  * Whether a first page reads as sport: at least 3 items, and most of them
  * matches (`A vs B`, `A at B`) or live-labelled. Channels and placeholders
  * count against it, and so do dash names: "Artist - Title" and "UK - BBC One"
