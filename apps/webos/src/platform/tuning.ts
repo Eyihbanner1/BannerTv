@@ -66,6 +66,18 @@ export interface Tuning {
    * in, hero changes and decoding ahead (performance.getEntriesByType('mark')).
    */
   marks: boolean;
+
+  // Launch switches (speed pass, U2). Each defaults to what shipped before
+  // it, so one install can compare them. With `marks` on, the launch is
+  // marked too: read window.__bannertvBoot() from the web inspector.
+
+  /**
+   * When the launch trims the cache of addon answers to MAX_CACHE_ENTRIES:
+   * as the database opens, ahead of the launch's reads (`open`), or once the
+   * launch has settled, Home focused and the remote still (`later`). The
+   * trim every 50 writes is the same either way.
+   */
+  idbPrune: 'open' | 'later';
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -86,6 +98,8 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   decodeAhead: true,
   heroFade: false,
   marks: false,
+  // Launch switches (speed pass, U2): what shipped before them.
+  idbPrune: 'open',
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -126,6 +140,8 @@ export function parseTuning(raw: string | null): Tuning {
     decodeAhead: flag(stored.decodeAhead, d.decodeAhead),
     heroFade: flag(stored.heroFade, d.heroFade),
     marks: flag(stored.marks, d.marks),
+    // Launch switches (speed pass, U2).
+    idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
   };
 }
 

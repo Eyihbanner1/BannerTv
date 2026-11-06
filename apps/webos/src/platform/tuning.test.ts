@@ -19,6 +19,7 @@ describe('TUNING_DEFAULTS', () => {
       decodeAhead: true,
       heroFade: false,
       marks: false,
+      idbPrune: 'open',
     });
   });
 });
@@ -118,5 +119,22 @@ describe('applyTuning', () => {
         heroFade: true,
       }),
     ).toEqual([]);
+  });
+});
+
+// Launch switches (speed pass, U2), kept apart so they merge cleanly with other switches.
+describe('the launch switches', () => {
+  it('default to what shipped before them', () => {
+    expect(TUNING_DEFAULTS.idbPrune).toBe('open');
+  });
+
+  it('take valid values and keep the default for the rest', () => {
+    expect(parseTuning('{"idbPrune":"later"}')).toEqual({ ...TUNING_DEFAULTS, idbPrune: 'later' });
+    expect(parseTuning('{"idbPrune":"never"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"idbPrune":true}')).toEqual(TUNING_DEFAULTS);
+  });
+
+  it('are listed when changed', () => {
+    expect(changedTuning({ ...TUNING_DEFAULTS, idbPrune: 'later' })).toEqual({ idbPrune: 'later' });
   });
 });

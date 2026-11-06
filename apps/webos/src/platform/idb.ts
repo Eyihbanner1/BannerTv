@@ -5,7 +5,9 @@ import {
   memoryCacheStore,
   memoryKeyValueStore,
 } from '@bannertv/core';
+import { afterLaunch } from './launch';
 import { bootMark } from './marks';
+import { tuning } from './tuning';
 
 const DB_NAME = 'bannertv';
 const DB_VERSION = 1;
@@ -95,7 +97,13 @@ export function createStorage(): Storage {
   void db.then((database) => {
     if (!database) return;
     bootMark('boot:idb-open');
-    prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
+    const trim = () => {
+      prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
+    };
+    // Counting the cache reads through it, and holds it for writing, as the
+    // launch reads the collection and Home's rows: `later` waits for Home.
+    if (tuning.idbPrune === 'later') afterLaunch(trim);
+    else trim();
   });
 
   return {
