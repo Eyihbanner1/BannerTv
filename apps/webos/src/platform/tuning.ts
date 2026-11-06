@@ -121,6 +121,16 @@ export interface Tuning {
    * its end, on a slow debrid host, can rightly take over 12 s.
    */
   metadataTimeoutMs: number;
+  // Decoding ahead, second round. Kept together and last, so other changes to
+  // this file merge cleanly; each default is what shipped before it came.
+  /**
+   * How `decodeAhead` gets art ready. `decode` asks the browser to decode it,
+   * which it does at full size, leaving the upload to the press. `raster`
+   * draws it once at its tile's size in a 1 px box under the rail instead, so
+   * the browser decodes and uploads the very copy the tile will draw, wide art
+   * included, between presses. At most 10 are kept drawn there.
+   */
+  aheadMode: 'decode' | 'raster';
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -151,6 +161,9 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   settleAfterFirstMs: 2000,
   playFirst: false,
   metadataTimeoutMs: 0,
+
+  // Decoding ahead, second round.
+  aheadMode: 'decode',
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -201,6 +214,9 @@ export function parseTuning(raw: string | null): Tuning {
     settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
     playFirst: flag(stored.playFirst, d.playFirst),
     metadataTimeoutMs: count(stored.metadataTimeoutMs, 0, 30000, d.metadataTimeoutMs),
+
+    // Decoding ahead, second round.
+    aheadMode: oneOf(stored.aheadMode, ['decode', 'raster'], d.aheadMode),
   };
 }
 

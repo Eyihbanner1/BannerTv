@@ -1,0 +1,410 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
+
+/**
+ * Decoding ahead against a small stand-in for the page: a stack of rows of
+ * tiles, frames run by hand, and a remote that has been still for as long
+ * as a test says. The vitest environment has no DOM.
+ */
+
+const page = vi.hoisted(() => ({
+  tuning: {} as Record<string, unknown>,
+  stillFor: 1000,
+  marks: [] as string[],
+}));
+
+vi.mock('../platform/tuning', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  tuning: page.tuning,
+}));
+vi.mock('../navigation/activity', () => ({ sinceActivity: () => page.stillFor }));
+vi.mock('../platform/marks', () => ({ mark: (name: string) => page.marks.push(name) }));
+
+class FakeElement {
+  children: FakeElement[] = [];
+  parentNode: FakeElement | null = null;
+  className = '';
+  style = { cssText: '' };
+  listeners: string[] = [];
+  private attributes = new Map<string, string>();
+
+  constructor(attributes: Record<string, string> = {}) {
+    for (const name of Object.keys(attributes)) this.attributes.set(name, attributes[name]!);
+  }
+  hasAttribute(name: string) {
+    return this.attributes.has(name);
+  }
+  getAttribute(name: string) {
+    return this.attributes.get(name) ?? null;
+  }
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
+  appendChild<T extends FakeElement>(child: T): T {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild<T extends FakeElement>(child: T): T {
+    this.children.splice(this.children.indexOf(child), 1);
+    child.parentNode = null;
+    return child;
+  }
+  get nextElementSibling(): FakeElement | null {
+    const siblings = this.parentNode?.children ?? [];
+    return siblings[siblings.indexOf(this) + 1] ?? null;
+  }
+  get previousElementSibling(): FakeElement | null {
+    const siblings = this.parentNode?.children ?? [];
+    return siblings[siblings.indexOf(this) - 1] ?? null;
+  }
+  /** Rows are siblings: FOLLOWING when `other` comes after this one. */
+  compareDocumentPosition(other: FakeElement) {
+    const siblings = this.parentNode?.children ?? [];
+    return siblings.indexOf(other) > siblings.indexOf(this) ? 4 : 2;
+  }
+  contains(node: FakeElement | null) {
+    for (let at = node; at; at = at.parentNode) if (at === this) return true;
+    return false;
+  }
+  getElementsByTagName() {
+    const found: FakeImage[] = [];
+    const walk = (element: FakeElement) => {
+      for (const child of element.children) {
+        if (child instanceof FakeImage) found.push(child);
+        walk(child);
+      }
+    };
+    walk(this);
+    return found;
+  }
+  querySelector(selector: string): FakeElement | null {
+    const key = /^\[data-row-key="(.*)"\]$/.exec(selector)?.[1];
+    let match: FakeElement | null = null;
+    const walk = (element: FakeElement) => {
+      for (const child of element.children) {
+        if (!match && child.getAttribute('data-row-key') === key) match = child;
+        walk(child);
+      }
+    };
+    walk(this);
+    return match;
+  }
+  addEventListener(type: string) {
+    this.listeners.push(type);
+  }
+}
+
+class FakeImage extends FakeElement {
+  complete = true;
+  naturalWidth = 0;
+  naturalHeight = 0;
+  src = '';
+  alt = 'x';
+  draggable = true;
+  objectFit = 'fill';
+  rect = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+  /** Each decode() asked, settled by the test. */
+  static decodes: { image: FakeImage; settle: () => void }[] = [];
+
+  getBoundingClientRect() {
+    return this.rect;
+  }
+  decode() {
+    return new Promise<void>((resolve) => FakeImage.decodes.push({ image: this, settle: resolve }));
+  }
+}
+
+interface Art {
+  src: string;
+  natural: [number, number];
+  /** Where it is drawn, in CSS px: left, width, height. */
+  drawn: [number, number, number];
+  className?: string;
+  objectFit?: string;
+}
+
+function image({ src, natural, drawn, className = 'image', objectFit = 'cover' }: Art): FakeImage {
+  const element = new FakeImage();
+  element.src = src;
+  element.className = className;
+  element.objectFit = objectFit;
+  [element.naturalWidth, element.naturalHeight] = natural;
+  const [left, width, height] = drawn;
+  element.rect = { left, right: left + width, top: 0, bottom: height, width, height };
+  return element;
+}
+
+/**
+ * A row of posters 500x750 drawn at 220x330: `across` of them on the screen
+ * from x 184, and two more drawn past its right edge.
+ */
+function posterRow(key: string, across = 7): FakeElement {
+  const row = new FakeElement({ 'data-row-key': key });
+  for (let n = 0; n < across + 2; n++) {
+    const left = n < across ? 184 + n * 244 : 1920 + (n - across) * 244;
+    const tile = row.appendChild(new FakeElement());
+    tile.appendChild(
+      image({
+        src: `https://art/poster/${key}/${n}`,
+        natural: [500, 750],
+        drawn: [left, 220, 330],
+      }),
+    );
+  }
+  return row;
+}
+
+/** A Featured row: wide art 1920x1080 at 384x216, and a 500x150 logo at 238x71.4 on each. */
+function featuredRow(key: string, backdrop: [number, number] = [1920, 1080]): FakeElement {
+  const row = new FakeElement({ 'data-row-key': key });
+  for (let n = 0; n < 7; n++) {
+    const left = 184 + n * 408;
+    const tile = row.appendChild(new FakeElement());
+    tile.appendChild(
+      image({
+        src: `https://art/background/${key}/${n}`,
+        natural: backdrop,
+        drawn: [left, 384, 216],
+      }),
+    );
+    tile.appendChild(
+      image({
+        src: `https://art/logo/${key}/${n}`,
+        natural: [500, 150],
+        drawn: [left + 20, 238, 71.4],
+        className: 'logo',
+        objectFit: 'contain',
+      }),
+    );
+  }
+  return row;
+}
+
+let frames: ((time: number) => void)[] = [];
+let time = 1000;
+let root: FakeElement;
+
+/** Runs `count` animation frames, `gap` ms apart. */
+function runFrames(count: number, gap = 16): void {
+  for (let n = 0; n < count; n++) {
+    time += gap;
+    const due = frames;
+    frames = [];
+    for (const callback of due) callback(time);
+  }
+}
+
+async function settleDecodes(): Promise<void> {
+  for (const { settle } of FakeImage.decodes.splice(0)) settle();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+type Module = typeof import('./decode-ahead');
+
+async function load(tuning: Partial<Tuning> = {}): Promise<Module> {
+  for (const key of Object.keys(page.tuning)) delete page.tuning[key];
+  Object.assign(page.tuning, TUNING_DEFAULTS, tuning);
+  vi.resetModules();
+  return import('./decode-ahead');
+}
+
+/** The stack Home slides: rows top down, in a track. */
+function stack(...rows: FakeElement[]): { track: FakeElement; rows: FakeElement[] } {
+  const track = root.appendChild(new FakeElement());
+  for (const row of rows) track.appendChild(row);
+  return { track, rows };
+}
+
+const slide = (module: Module, track: FakeElement, row: FakeElement | null) =>
+  module.decodeAheadOf(track as unknown as HTMLElement, row as unknown as HTMLElement);
+
+const srcs = (element: FakeElement) => element.children.map((child) => (child as FakeImage).src);
+const decodedSrcs = () => FakeImage.decodes.map(({ image }) => image.src);
+
+beforeEach(() => {
+  frames = [];
+  time = 1000;
+  page.stillFor = 1000;
+  page.marks.length = 0;
+  FakeImage.decodes = [];
+  root = new FakeElement();
+  let ids = 0;
+  vi.stubGlobal('HTMLElement', FakeElement);
+  vi.stubGlobal('HTMLImageElement', FakeImage);
+  // A class, as vitest's matchers look for DOM nodes with instanceof.
+  vi.stubGlobal(
+    'Node',
+    class {
+      static DOCUMENT_POSITION_FOLLOWING = 4;
+    },
+  );
+  vi.stubGlobal('window', { innerWidth: 1920, devicePixelRatio: 2 });
+  vi.stubGlobal('getComputedStyle', (element: FakeImage) => ({ objectFit: element.objectFit }));
+  vi.stubGlobal('document', {
+    querySelector: (selector: string) => root.querySelector(selector),
+    createElement: () => new FakeImage(),
+  });
+  vi.stubGlobal('requestAnimationFrame', (callback: (time: number) => void) => {
+    frames.push(callback);
+    return ++ids;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('decoding ahead (aheadMode decode, the default)', () => {
+  it('decodes the row after next one image at a time, leaving out wide art', async () => {
+    const ahead = await load();
+    expect(ahead.RASTER_AHEAD).toBe(false);
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), featuredRow('c'));
+    slide(ahead, track, rows[0]!);
+    expect(track.listeners).toEqual(['load']);
+    runFrames(5);
+    // Only the logos: 1920 art drawn at 768 device px is more than 1.5 times its size.
+    expect(decodedSrcs()).toEqual(['https://art/logo/c/0']);
+    for (let n = 0; n < 6; n++) {
+      await settleDecodes();
+      runFrames(3);
+    }
+    expect(page.marks.filter((name) => name === 'ahead:c')).toHaveLength(5);
+    expect(page.marks.filter((name) => name === 'ahead-done:c')).toHaveLength(5);
+  });
+
+  it('starts nothing while the remote is in use', async () => {
+    const ahead = await load();
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    page.stillFor = 50;
+    slide(ahead, track, rows[0]!);
+    runFrames(10);
+    expect(FakeImage.decodes).toEqual([]);
+    page.stillFor = 1000;
+    runFrames(1);
+    expect(decodedSrcs()).toEqual(['https://art/poster/c/0']);
+  });
+
+  it('never draws under the rail, even given a box', async () => {
+    const ahead = await load();
+    const box = new FakeElement();
+    ahead.warmBoxRef(box as unknown as HTMLElement);
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    slide(ahead, track, rows[0]!);
+    runFrames(5);
+    expect(box.children).toEqual([]);
+    expect(FakeImage.decodes).toHaveLength(1);
+  });
+});
+
+describe('aheadMode raster', () => {
+  async function raster(tuning: Partial<Tuning> = {}) {
+    const ahead = await load({ aheadMode: 'raster', ...tuning });
+    const box = new FakeElement();
+    ahead.warmBoxRef(box as unknown as HTMLElement);
+    return { ahead, box };
+  }
+
+  it('draws each image once under the rail at its drawn size, wide art too, and decodes none', async () => {
+    const { ahead, box } = await raster();
+    expect(ahead.RASTER_AHEAD).toBe(true);
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), featuredRow('c'));
+    slide(ahead, track, rows[0]!);
+    runFrames(3);
+    expect(srcs(box)).toEqual(['https://art/background/c/0']);
+    const [wide] = box.children as FakeImage[];
+    expect(wide!.className).toBe('image');
+    expect(wide!.alt).toBe('');
+    expect(wide!.draggable).toBe(false);
+    expect(wide!.style.cssText).toContain('width:384px;height:216px;');
+    expect(wide!.style.cssText).toContain('max-width:none;max-height:none');
+    runFrames(20);
+    // Five tiles across the screen (the fifth shows a strip), wide art and logo each.
+    const across: string[] = [];
+    for (let n = 0; n < 5; n++) {
+      across.push(`https://art/background/c/${n}`, `https://art/logo/c/${n}`);
+    }
+    expect(srcs(box)).toEqual(across);
+    const logo = box.children[1] as FakeImage;
+    expect(logo.className).toBe('logo');
+    expect(logo.style.cssText).toContain('width:238px;height:71.4px;');
+    expect(FakeImage.decodes).toEqual([]);
+    expect(page.marks.slice(0, 4)).toEqual(['ahead:c', 'ahead-done:c', 'ahead:c', 'ahead-done:c']);
+  });
+
+  it('waits for two flowing frames after each image, and for a still remote', async () => {
+    const { ahead, box } = await raster();
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    slide(ahead, track, rows[0]!);
+    runFrames(3);
+    expect(box.children).toHaveLength(1);
+    runFrames(1);
+    expect(box.children).toHaveLength(1);
+    runFrames(1);
+    expect(box.children).toHaveLength(2);
+    // A long frame: the drawing is not done until two flow after it.
+    runFrames(1, 80);
+    runFrames(1);
+    expect(box.children).toHaveLength(2);
+    runFrames(1);
+    expect(box.children).toHaveLength(3);
+    page.stillFor = 50;
+    runFrames(10);
+    expect(box.children).toHaveLength(3);
+  });
+
+  it('keeps at most ten drawn, the newest', async () => {
+    const { ahead, box } = await raster();
+    const { track, rows } = stack(posterRow('a'), posterRow('b'), posterRow('c'), posterRow('d'));
+    // Down to b, which takes d; then Up to a, which has no row above and takes c.
+    slide(ahead, track, rows[1]!);
+    runFrames(40);
+    expect(srcs(box)).toEqual([0, 1, 2, 3, 4, 5, 6].map((n) => `https://art/poster/d/${n}`));
+    slide(ahead, track, rows[0]!);
+    runFrames(40);
+    expect(box.children).toHaveLength(ahead.MAX_WARM);
+    expect(srcs(box)).toEqual([
+      ...[4, 5, 6].map((n) => `https://art/poster/d/${n}`),
+      ...[0, 1, 2, 3, 4, 5, 6].map((n) => `https://art/poster/c/${n}`),
+    ]);
+  });
+
+  it('lets art go once the view has moved on past the row it was drawn for', async () => {
+    const { ahead, box } = await raster();
+    const { track, rows } = stack(
+      posterRow('a', 2),
+      posterRow('b', 2),
+      posterRow('c', 2),
+      posterRow('d', 2),
+      posterRow('e', 2),
+    );
+    slide(ahead, track, rows[0]!);
+    runFrames(20);
+    expect(srcs(box)).toEqual(['https://art/poster/c/0', 'https://art/poster/c/1']);
+    // The Down that shows c keeps its art drawn...
+    slide(ahead, track, rows[1]!);
+    expect(box.children).toHaveLength(2);
+    runFrames(20);
+    expect(box.children).toHaveLength(4);
+    // ...and the next lets it go.
+    slide(ahead, track, rows[2]!);
+    expect(srcs(box)).toEqual(['https://art/poster/d/0', 'https://art/poster/d/1']);
+  });
+
+  it('draws nothing while the rail, and so the box, is not drawn, and carries on once it is', async () => {
+    const { ahead, box } = await raster();
+    const { track, rows } = stack(posterRow('a', 2), posterRow('b', 2), posterRow('c', 2));
+    slide(ahead, track, rows[0]!);
+    runFrames(3);
+    expect(box.children).toHaveLength(1);
+    // The player opens: React takes the box out of the page with its art.
+    ahead.warmBoxRef(null);
+    runFrames(20);
+    expect(frames).toEqual([]);
+    const again = new FakeElement();
+    ahead.warmBoxRef(again as unknown as HTMLElement);
+    runFrames(5);
+    expect(srcs(again)).toEqual(['https://art/poster/c/1']);
+    expect(box.children).toHaveLength(1);
+  });
+});

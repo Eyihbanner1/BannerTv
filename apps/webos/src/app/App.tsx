@@ -1,5 +1,6 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { memo, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { RASTER_AHEAD, warmBoxRef } from '../components/decode-ahead';
 import { Rail } from '../components/Rail';
 import { activeProfileId, profileSwitcher } from '../data/profiles';
 import { welcomed } from '../data/welcome';
@@ -213,6 +214,10 @@ export function App() {
   const fullScreen = top.name === 'player';
   return (
     <div className={styles.app}>
+      {/* Where art is drawn ahead with the aheadMode tuning switch: under the rail, so with it. */}
+      {!fullScreen && RASTER_AHEAD && (
+        <div ref={warmBoxRef} className={styles.warm} aria-hidden="true" data-warm-ahead="" />
+      )}
       {!fullScreen && <Rail />}
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>

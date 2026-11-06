@@ -1,12 +1,14 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, png, SERIES_ROW } from './addons';
+import { mockPlayback, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
 
 /**
  * The switches the TV comparisons of the first walk down Home tried (see
  * src/platform/tuning.ts): decoding ahead, Home's rows box on its own layer,
  * the hero without its fade, small wide art, and timing marks. Decoding
- * ahead and the hero without its fade are the defaults.
+ * ahead and the hero without its fade are the defaults. Then the second
+ * round's: getting art ready by drawing it under the rail.
  */
 
 /** Home's first rows from the mock Cinemeta, top to bottom. Featured rows have wide tiles. */
@@ -97,6 +99,39 @@ const marks = (page: Page) =>
   );
 const markNames = async (page: Page) => (await marks(page)).map((entry) => entry.name);
 
+interface DrawnArt {
+  src: string;
+  /** Its drawn size in CSS px, to a tenth. */
+  size: [number, number];
+}
+
+/** The art drawn ahead under the rail, with the aheadMode raster switch, oldest first. */
+const warmArt = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-warm-ahead] img'), (image): DrawnArt => {
+      const box = image.getBoundingClientRect();
+      const tenth = (value: number) => Math.round(value * 10) / 10;
+      return { src: image.getAttribute('src')!, size: [tenth(box.width), tenth(box.height)] };
+    }),
+  );
+
+/** The same for the art of some tiles of a row, tile by tile. */
+const tileArt = (page: Page, row: string, tiles: number[]) =>
+  page.evaluate(
+    ({ row, tiles }) =>
+      tiles.flatMap((n) =>
+        Array.from(
+          document.querySelectorAll(`[data-focus-key="${row}-tile-${n}"] img`),
+          (image): DrawnArt => {
+            const box = image.getBoundingClientRect();
+            const tenth = (value: number) => Math.round(value * 10) / 10;
+            return { src: image.getAttribute('src')!, size: [tenth(box.width), tenth(box.height)] };
+          },
+        ),
+      ),
+    { row, tiles },
+  );
+
 /** Presses a key and waits for focus to land anywhere in `row`. */
 async function pressToRow(page: Page, key: string, row: string): Promise<void> {
   await page.keyboard.press(key);
@@ -169,6 +204,79 @@ test.describe('on a 4K TV', () => {
     const record = await decodes(page);
     expect(record.calls.filter((call) => call.again)).toEqual([]);
     expect(record.mostPending).toBe(1);
+  });
+
+  test('aheadMode raster draws the art of the row the next press shows under the rail, wide art too, and goes with the rail', async ({
+    page,
+  }) => {
+    const art = { poster: png(500, 750), logo: png(500, 150), background: png(1920, 1080) };
+    await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+      }),
+    );
+    await seedStreamAddon(page);
+    await mockPlayback(page);
+    await tune(page, { aheadMode: 'raster', marks: true });
+    await recordDecodes(page);
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+    // From the first row, the Featured row's wide art and logos across the
+    // screen, each at the size its tile draws it, and none of it decoded.
+    const across = [0, 1, 2, 3, 4];
+    await expect.poll(async () => (await tileArt(page, FEATURED_MOVIES, across)).length).toBe(10);
+    const featured = await tileArt(page, FEATURED_MOVIES, across);
+    expect(featured.map((drawn) => drawn.size[0])).toContain(384);
+    await expect.poll(() => warmArt(page)).toEqual(featured);
+    expect(await allDecodes(page)).toEqual([]);
+    // Drawn under the rail, which covers it: nothing shows.
+    const covered = await page.evaluate(() => {
+      const box = document.querySelector('[data-warm-ahead]')!;
+      const rect = box.getBoundingClientRect();
+      const top = document.elementFromPoint(rect.left, rect.top);
+      return {
+        rect: [rect.left, rect.top, rect.width, rect.height],
+        byRail: !!top && !!top.closest('nav') && !box.contains(top),
+      };
+    });
+    expect(covered).toEqual({ rect: [0, 1079, 1, 1], byRail: true });
+    // One image at a time, never two drawn in the same frame.
+    const own = (await markNames(page)).filter((name) => /^ahead(-done)?:/.test(name));
+    expect(own.slice(0, 4)).toEqual([
+      `ahead:${FEATURED_MOVIES}`,
+      `ahead-done:${FEATURED_MOVIES}`,
+      `ahead:${FEATURED_MOVIES}`,
+      `ahead-done:${FEATURED_MOVIES}`,
+    ]);
+
+    // Moving on, at most ten are kept drawn, and the newest are the next row's.
+    await pressToRow(page, 'ArrowDown', SERIES_ROW);
+    await expect.poll(async () => (await tileArt(page, FEATURED_SERIES, across)).length).toBe(10);
+    const seriesFeatured = await tileArt(page, FEATURED_SERIES, across);
+    await expect.poll(async () => (await warmArt(page)).slice(-10)).toEqual(seriesFeatured);
+    expect(await warmArt(page)).toHaveLength(10);
+    await pressToRow(page, 'ArrowDown', FEATURED_MOVIES);
+    const posters = [0, 1, 2, 3, 4, 5, 6];
+    await expect.poll(async () => (await tileArt(page, ACTION, posters)).length).toBe(7);
+    const action = await tileArt(page, ACTION, posters);
+    await expect.poll(async () => (await warmArt(page)).slice(-7)).toEqual(action);
+    expect((await warmArt(page)).length).toBeLessThanOrEqual(10);
+    expect(await allDecodes(page)).toEqual([]);
+
+    // The player takes the whole screen, rail and all: the box goes, with its art.
+    await pressToRow(page, 'ArrowUp', SERIES_ROW);
+    await pressToRow(page, 'ArrowUp', FIRST_ROW);
+    await press(page, 'Enter', 'details-watch');
+    await press(page, 'Enter', 'player-surface');
+    await expect(page.locator('[data-warm-ahead]')).toHaveCount(0);
+    await expect(page.locator('nav')).toHaveCount(0);
+    // Back to the title: the rail is back, and the box with it.
+    await pressBack(page);
+    await expectFocus(page, 'details-watch');
+    await expect(page.locator('[data-warm-ahead]')).toHaveCount(1);
   });
 
   test('with small wide art, decoding ahead takes the Featured row’s art too', async ({ page }) => {
@@ -510,6 +618,8 @@ test('by default art is decoded ahead, nothing is marked, the rows box has no la
   await press(page, 'ArrowDown', `${FEATURED_MOVIES}-tile-0`);
   await expect.poll(() => decodedTiles(page, ACTION)).toEqual([0, 1, 2, 3, 4, 5, 6]);
   expect((await decodes(page)).mostPending).toBe(1);
+  // Nothing is drawn under the rail.
+  await expect(page.locator('[data-warm-ahead]')).toHaveCount(0);
   expect(await page.evaluate(() => performance.getEntriesByType('mark').length)).toBe(0);
   await expect(page.locator('[data-row-key]').first().locator('xpath=..')).toHaveCSS(
     'will-change',

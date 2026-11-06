@@ -27,6 +27,7 @@ describe('TUNING_DEFAULTS', () => {
       settleAfterFirstMs: 2000,
       playFirst: false,
       metadataTimeoutMs: 0,
+      aheadMode: 'decode',
     });
   });
 });
@@ -79,6 +80,16 @@ describe('parseTuning', () => {
     expect(parseTuning('{"metadataTimeoutMs":12000}').metadataTimeoutMs).toBe(12000);
     expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
+  it('takes the second round of decoding-ahead switches', () => {
+    expect(parseTuning('{"aheadMode":"raster"}')).toEqual({
+      ...TUNING_DEFAULTS,
+      aheadMode: 'raster',
+    });
+    // Stored before these switches came, decodeAhead keeps its meaning.
+    expect(parseTuning('{"decodeAhead":false}')).toEqual({
+      ...TUNING_DEFAULTS,
+      decodeAhead: false,
+    });
   });
 
   it('ignores values out of range or of the wrong kind', () => {
@@ -88,6 +99,8 @@ describe('parseTuning', () => {
     expect(value).toEqual(TUNING_DEFAULTS);
     // Every row and tile beside focus is always drawn, so 0 would mean nothing.
     expect(parseTuning('{"rowsAround":0,"overscan":0}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadMode":"upload"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadMode":true}')).toEqual(TUNING_DEFAULTS);
   });
 });
 
@@ -145,6 +158,12 @@ describe('applyTuning', () => {
         metadataTimeoutMs: 12000,
       }),
     ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
+    expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
+      classesFor({ ...TUNING_DEFAULTS }),
+    );
+    expect(classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster' })).toEqual(
+      classesFor({ ...TUNING_DEFAULTS }),
+    );
     expect(
       classesFor({
         ...TUNING_DEFAULTS,
