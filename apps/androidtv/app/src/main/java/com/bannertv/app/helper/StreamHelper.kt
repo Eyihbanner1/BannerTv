@@ -4,12 +4,17 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
 import com.bannertv.app.BuildConfig
+import com.bannertv.helper.AddressRules
+import com.bannertv.helper.HelperServer
+import com.bannertv.helper.Pairing
+import com.bannertv.helper.StreamLinks
 import java.net.NetworkInterface
 import org.json.JSONObject
 
 /**
  * The stream helper as the rest of the app sees it: switched on and off from Settings in the
- * web app, run by HelperService so it keeps going with the screen off.
+ * web app, run by HelperService so it keeps going with the screen off. The server and its rules
+ * are in apps/androidtv/helper-core, which the phone app's stream-helper module builds too.
  */
 object StreamHelper {
     private const val PREFS = "stream_helper"

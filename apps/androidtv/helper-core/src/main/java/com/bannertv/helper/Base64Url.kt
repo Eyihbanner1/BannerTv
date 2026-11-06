@@ -1,4 +1,4 @@
-package com.bannertv.app.helper
+package com.bannertv.helper
 
 /**
  * URL-safe base64 without padding (RFC 4648 section 5). java.util.Base64 needs API 26 and

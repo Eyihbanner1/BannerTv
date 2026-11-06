@@ -1,4 +1,4 @@
-package com.bannertv.app.helper
+package com.bannertv.helper
 
 import java.security.SecureRandom
 

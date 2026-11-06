@@ -1,6 +1,5 @@
-package com.bannertv.app.helper
+package com.bannertv.helper
 
-import com.bannertv.app.Protocol
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -163,7 +162,7 @@ class HelperServer(
         val form = request.form()
         val target = webAddress(form["url"]) ?: return respondText(output, 400, "Bad address")
         val asked = form.filterKeys { it.startsWith("h.") }.mapKeys { it.key.removePrefix("h.") }
-        val token = links.add(target, Protocol.requestHeaders(asked))
+        val token = links.add(target, HeaderRules.requestHeaders(asked))
         respondJson(output, 200, """{"link":"${jsonEscape(linkPath(token, target))}"}""")
     }
 
@@ -223,7 +222,7 @@ class HelperServer(
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.requestMethod = if (method == "HEAD") "HEAD" else "GET"
-            connection.setRequestProperty("User-Agent", Protocol.userAgent(headers) ?: userAgent)
+            connection.setRequestProperty("User-Agent", HeaderRules.userAgent(headers) ?: userAgent)
             // Identity, so playlists arrive as text the helper can rewrite.
             connection.setRequestProperty("Accept-Encoding", "identity")
             for ((name, value) in headers) {
