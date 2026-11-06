@@ -741,5 +741,10 @@
     "setupConfirmed": "The account is made. BannerTV is still sending this screen's data, and carries on when it can reach its service.",
     "setupJoining": "Joining the account didn't finish. BannerTV carries on when it can reach its service.",
     "tryNow": "Try now"
+  },
+  "browsing": {
+    "play": "Play",
+    "playEpisode": "Play S{{season}}:E{{episode}}",
+    "outOn": "Not out yet. Out on {{date}}"
   }
 }

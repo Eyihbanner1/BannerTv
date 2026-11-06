@@ -12,6 +12,12 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { library } from '../../data/library';
+import {
+  fillLibraryCards,
+  historyCard,
+  historyCardsVersion,
+  subscribeHistoryCards,
+} from '../../data/library-cards';
 import { playedVideos, progress } from '../../data/playback';
 import { isKidsProfile } from '../../data/profiles';
 import { PosterGrid } from '../discover/PosterGrid';
@@ -34,10 +40,12 @@ const subscribeAll = (listener: () => void) => {
     library.subscribe(listener),
     progress.subscribe(listener),
     playedVideos.subscribe(listener),
+    subscribeHistoryCards(listener),
   ];
   return () => undo.forEach((stop) => stop());
 };
-const versions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
+const versions = () =>
+  `${library.version()}:${progress.version()}:${playedVideos.version()}:${historyCardsVersion()}`;
 
 /**
  * The Library: My List (saved with the button on a title's page, and synced
@@ -62,11 +70,15 @@ export function LibraryScreen() {
     };
   }, []);
 
+  // Titles from Trakt arrive without artwork: it is fetched while they are on show.
+  const show = choice.show;
+  useEffect(() => (loaded ? fillLibraryCards(show) : undefined), [loaded, show]);
+
   const items = useMemo(() => {
     const shown =
       choice.show === 'list'
         ? libraryView(library.items(), choice.kind, choice.sort)
-        : historyView(progress.recent(), playedVideos.get, choice.kind);
+        : historyView(progress.recent(), historyCard, choice.kind);
     // Titles that say they are not for children stay out of a kids profile's
     // Library; the rest open on Details, which checks them.
     return isKidsProfile() ? shown.filter((item) => kidsTitleAllowed(item, true)) : shown;

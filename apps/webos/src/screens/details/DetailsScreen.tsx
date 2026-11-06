@@ -1,6 +1,7 @@
 import { kidsTitleAllowed, ratingAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import type { TFunction } from 'i18next';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
@@ -11,6 +12,7 @@ import { Button } from '../../components/Button';
 import { Pressable } from '../../components/Pressable';
 import { addonClient } from '../../data/addons';
 import { describeAddonError, metaFacts } from '../../data/describe';
+import { watchedSet } from '../../data/library';
 import { progress } from '../../data/playback';
 import { activeProfile, isKidsProfile } from '../../data/profiles';
 import { tmdbClient, useTmdbDetails } from '../../data/tmdb';
@@ -20,7 +22,14 @@ import { formatTime } from '../../player/media';
 import { usePrefetch } from '../../player/prefetch';
 import { EpisodeList } from './EpisodeList';
 import { MyListButton } from './MyListButton';
-import { defaultSeason, groupSeasons, type Season } from './seasons';
+import {
+  groupSeasons,
+  openingEpisode,
+  type Season,
+  type StartPoint,
+  startPoint,
+  type StartReader,
+} from './seasons';
 import styles from './DetailsScreen.module.css';
 
 const MAX_CAST = 4;
@@ -94,21 +103,25 @@ const seasonMemory = new Map<string, number>();
 
 function Episodes({
   meta,
+  seasons,
+  opening,
   tmdb,
   onPress,
   onFocusVideo,
 }: {
   meta: MetaDetail;
+  seasons: readonly Season[];
+  /** Where the viewer is up to: the season shown first, and the episode focus goes to in it. */
+  opening: { season: number; index: number };
   tmdb?: TmdbDetails;
   onPress: (video: Video) => void;
   onFocusVideo: (video: Video) => void;
 }) {
-  const seasons = useMemo(() => groupSeasons(meta.videos), [meta.videos]);
   const [selected, setSelected] = useState(() => {
     const saved = seasonMemory.get(meta.id);
-    return saved !== undefined && saved < seasons.length ? saved : defaultSeason(seasons);
+    return saved !== undefined && saved < seasons.length ? saved : opening.season;
   });
-  const season = seasons[selected]!;
+  const season = seasons[Math.min(selected, seasons.length - 1)]!;
   // TMDB's names, overviews and stills, for episodes the addon describes less.
   const extrasQuery = useMemo(
     () =>
@@ -135,12 +148,29 @@ function Episodes({
         focusKey="details-episodes"
         memoryKey={`details-${meta.id}-${selected}`}
         videos={season.videos}
+        startIndex={selected === opening.season ? opening.index : 0}
         extras={extras}
         onPress={onPress}
         onFocusVideo={onFocusVideo}
       />
     </>
   );
+}
+
+/** The primary button's words for where a series' page sends the viewer. */
+function startLabel(t: TFunction, point: StartPoint): string {
+  const { season, episode } = point.video;
+  const numbered = season !== undefined && episode !== undefined;
+  switch (point.kind) {
+    case 'resume':
+      return numbered
+        ? t('details.resumeEpisode', { season, episode })
+        : t('details.resumeFrom', { time: formatTime(point.at) });
+    case 'next':
+      return numbered ? t('home.nextEpisodeNote', { season, episode }) : t('home.nextNote');
+    default:
+      return numbered ? t('browsing.playEpisode', { season, episode }) : t('browsing.play');
+  }
 }
 
 /**
@@ -179,13 +209,40 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
 
   // Progress decides between Watch and Resume, and marks episodes.
   useSyncExternalStore(progress.subscribe, progress.version);
+  useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
+  // The episodes wait for saved progress and Trakt's ticks, which decide where they open.
+  const [progressReady, setProgressReady] = useState(false);
   useEffect(() => {
-    void progress.load();
+    let live = true;
+    void Promise.all([progress.load(), watchedSet.load()])
+      .catch(() => undefined)
+      .then(() => {
+        if (live) setProgressReady(true);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
+  const [now] = useState(Date.now);
   const resumeAt = watchVideoId === null ? undefined : progress.resumeAt(watchVideoId);
-  const latest = !canWatch && kidsAllowed ? progress.forMeta(id)[0] : undefined;
-  const latestVideo = latest && meta?.videos.find((v) => v.id === latest.videoId);
-  const latestResume = latest && progress.resumeAt(latest.videoId);
+  // A series opens where the viewer is up to: the episode to resume, the next
+  // one after a finished episode, or the first for a series not started.
+  const seasons = useMemo(
+    () => (meta && hasEpisodes ? groupSeasons(meta.videos) : []),
+    [hasEpisodes, meta],
+  );
+  const reader: StartReader | undefined =
+    hasEpisodes && kidsAllowed && progressReady
+      ? {
+          latest: progress.forMeta(id)[0],
+          resumeAt: (videoId) => progress.resumeAt(videoId),
+          ticked: (videoId) => watchedSet.has(videoId),
+        }
+      : undefined;
+  const start = reader && meta ? startPoint(meta, seasons, reader, now) : undefined;
+  // Read by the episodes as they first show only, so the list never jumps
+  // about when progress is saved behind it or a Trakt sync comes in.
+  const opening = reader ? openingEpisode(seasons, start, reader) : null;
 
   // Streams are looked for while focus rests on what would play.
   const [resting, setResting] = useState<string | null>(null);
@@ -199,17 +256,20 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
 
   const defaultFocus = failed
     ? 'details-retry'
-    : latestVideo && latestResume !== undefined
-      ? 'details-resume-episode'
+    : start
+      ? 'details-start'
       : hasEpisodes && kidsAllowed
         ? 'details-episodes'
         : watchVideoId !== null
           ? 'details-watch'
           : 'details-my-list';
   // A kids profile waits for the full details and TMDB, which decide whether Watch is there.
+  // A series also waits for saved progress, which decides whether there is a place to start.
   useScreenFocus(
     defaultFocus,
-    (isMovie && !kids) || failed || (state.status === 'success' && kidsDecided),
+    failed ||
+      ((isMovie || progressReady) &&
+        ((isMovie && !kids) || (state.status === 'success' && kidsDecided))),
   );
 
   // The same sizes as the hero, so the image it already loaded is reused.
@@ -296,20 +356,13 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               onPress={() => play(watchVideoId, 0)}
             />
           )}
-          {latestVideo && latestResume !== undefined && (
+          {start && (
             <Button
-              focusKey="details-resume-episode"
-              label={
-                latestVideo.season !== undefined && latestVideo.episode !== undefined
-                  ? t('details.resumeEpisode', {
-                      season: latestVideo.season,
-                      episode: latestVideo.episode,
-                    })
-                  : t('details.resumeFrom', { time: formatTime(latestResume) })
-              }
+              focusKey="details-start"
+              label={startLabel(t, start)}
               variant="primary"
-              onFocus={restOn(latestVideo.id)}
-              onPress={() => play(latestVideo.id)}
+              onFocus={restOn(start.video.id)}
+              onPress={() => play(start.video.id, start.kind === 'again' ? 0 : undefined)}
             />
           )}
           {trailer && kidsAllowed && (
@@ -363,9 +416,11 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
       </div>
       {!isMovie && !canWatch && !failed && kidsAllowed && (
         <div className={styles.panel}>
-          {meta && hasEpisodes ? (
+          {meta && hasEpisodes && opening ? (
             <Episodes
               meta={meta}
+              seasons={seasons}
+              opening={opening}
               tmdb={extra}
               onPress={(video) => play(video.id)}
               onFocusVideo={(video) => setResting(video.id)}

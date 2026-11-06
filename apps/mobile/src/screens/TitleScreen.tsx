@@ -1,11 +1,5 @@
 import { phone } from '@brand/tokens/design';
-import {
-  kidsTitleAllowed,
-  MIN_RESUME_SECONDS,
-  nextVideo,
-  ratingAllowed,
-  tmdbImageUrl,
-} from '@bannertv/core';
+import { kidsTitleAllowed, ratingAllowed, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
 import { describeAddonError, formatDate, metaFacts } from '@tv/data/describe';
@@ -21,8 +15,11 @@ import {
   defaultSeason,
   episodeState,
   groupSeasons,
+  openingEpisode,
   type Season,
-  seasonOf,
+  type StartPoint,
+  startPoint,
+  type StartReader,
 } from '@tv/screens/details/seasons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -74,6 +71,21 @@ function ActionTile({
 
 /** The season each title last showed, for this run. */
 const shownSeason = new Map<string, number>();
+
+/** The Play button's words for where a series' page sends the viewer, as on the TV. */
+function startLabel(t: ReturnType<typeof useTranslation>['t'], point: StartPoint): string {
+  const { season, episode } = point.video;
+  const numbered = season !== undefined && episode !== undefined;
+  if (point.kind === 'resume') {
+    return numbered
+      ? t('details.resumeEpisode', { season, episode })
+      : t('details.resumeFrom', { time: formatTime(point.at) });
+  }
+  if (point.kind === 'next') {
+    return numbered ? t('home.nextEpisodeNote', { season, episode }) : t('home.nextNote');
+  }
+  return numbered ? t('browsing.playEpisode', { season, episode }) : t('phone.play');
+}
 
 function seasonLabel(t: ReturnType<typeof useTranslation>['t'], season: Season): string {
   if (season.number === null) return t('details.episodes');
@@ -195,6 +207,7 @@ export function TitleScreen({
 
   useSyncExternalStore(progress.subscribe, progress.version);
   useSyncExternalStore(library.subscribe, library.version);
+  useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
   useEffect(() => {
     void progress.load();
   }, []);
@@ -203,42 +216,30 @@ export function TitleScreen({
   }, [item]);
 
   const resumeAt = watchVideoId === null ? undefined : progress.resumeAt(watchVideoId);
-  const latest = !canWatch && kidsAllowed ? progress.forMeta(id)[0] : undefined;
-  const latestVideo = latest && meta?.videos.find((video) => video.id === latest.videoId);
-  const latestResume = latest && progress.resumeAt(latest.videoId);
-  // An episode stopped in its first seconds starts again from the beginning, as Continue
-  // Watching has it, rather than being skipped for the next one.
-  const latestAgain =
-    !!latest &&
-    latestResume === undefined &&
-    !latest.watched &&
-    latest.position < MIN_RESUME_SECONDS &&
-    !!latestVideo;
-  // After a finished episode, the next one that has aired.
-  const upNext =
-    latest && latestResume === undefined && !latestAgain && meta
-      ? nextVideo(meta, latest.videoId, now)
+  // A series opens where the viewer is up to, with the same rules as the TV's Details.
+  const seasons = useMemo(() => (meta ? groupSeasons(meta.videos) : []), [meta]);
+  const reader: StartReader | undefined =
+    hasEpisodes && kidsAllowed
+      ? {
+          latest: progress.forMeta(id)[0],
+          resumeAt: (videoId) => progress.resumeAt(videoId),
+          ticked: (videoId) => watchedSet.has(videoId),
+        }
       : undefined;
-  // The first episode that has aired: an announced series has nothing to play yet.
-  const firstListed = hasEpisodes && !latest ? groupSeasons(meta.videos)[0]?.videos[0] : undefined;
-  const firstEpisode =
-    firstListed && episodeState(firstListed, undefined, false, now).kind !== 'upcoming'
-      ? firstListed
-      : undefined;
+  const start = reader && meta ? startPoint(meta, seasons, reader, now) : undefined;
 
-  const primaryVideoId = watchVideoId ?? latestVideo?.id ?? upNext?.id ?? firstEpisode?.id ?? null;
+  const primaryVideoId = watchVideoId ?? start?.video.id ?? null;
   usePrefetch(titleType, kidsAllowed ? primaryVideoId : null, item?.runtime);
 
-  const seasons = useMemo(() => (meta ? groupSeasons(meta.videos) : []), [meta]);
   const [seasonIndex, setSeasonIndex] = useState<number | null>(null);
   const shownIndex =
     seasonIndex ??
     shownSeason.get(id) ??
-    (seasons.length > 0
-      ? latest
-        ? seasonOf(seasons, latest.videoId)
-        : defaultSeason(seasons)
-      : 0);
+    (reader
+      ? openingEpisode(seasons, start, reader).season
+      : seasons.length > 0
+        ? defaultSeason(seasons)
+        : 0);
   const season = seasons[Math.min(shownIndex, seasons.length - 1)];
   const seasonQuery = useMemo(
     () =>
@@ -340,57 +341,12 @@ export function TitleScreen({
               style={styles.main}
             />
           ) : null}
-          {latestVideo && latestAgain ? (
+          {start ? (
             <Button
               kind="play"
               icon="play"
-              label={
-                latestVideo.season !== undefined && latestVideo.episode !== undefined
-                  ? `${t('phone.play')} ${t('home.episodeNote', {
-                      season: latestVideo.season,
-                      episode: latestVideo.episode,
-                    })}`
-                  : t('phone.play')
-              }
-              onPress={() => play(latestVideo.id, 0)}
-              style={styles.main}
-            />
-          ) : null}
-          {latestVideo && latestResume !== undefined ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={
-                latestVideo.season !== undefined && latestVideo.episode !== undefined
-                  ? t('details.resumeEpisode', {
-                      season: latestVideo.season,
-                      episode: latestVideo.episode,
-                    })
-                  : t('details.resumeFrom', { time: formatTime(latestResume) })
-              }
-              onPress={() => play(latestVideo.id)}
-              style={styles.main}
-            />
-          ) : null}
-          {upNext ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={
-                upNext.season !== undefined && upNext.episode !== undefined
-                  ? t('home.nextEpisodeNote', { season: upNext.season, episode: upNext.episode })
-                  : t('home.nextNote')
-              }
-              onPress={() => play(upNext.id)}
-              style={styles.main}
-            />
-          ) : null}
-          {firstEpisode && kidsAllowed ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={t('phone.play')}
-              onPress={() => play(firstEpisode.id)}
+              label={startLabel(t, start)}
+              onPress={() => play(start.video.id, start.kind === 'again' ? 0 : undefined)}
               style={styles.main}
             />
           ) : null}

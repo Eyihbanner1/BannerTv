@@ -28,6 +28,9 @@ interface EpisodeListProps {
   /** Where the list keeps its scroll and last episode, e.g. per title and season. */
   memoryKey: string;
   videos: readonly Video[];
+  /** The episode focus goes to, and the list starts at, when nothing is remembered. */
+  startIndex?: number;
+  /** An episode that has aired was pressed. One not out yet says when it is instead. */
   onPress: (video: Video) => void;
   /** Focus moved to an episode, so its streams can be looked for. */
   onFocusVideo?: (video: Video) => void;
@@ -44,6 +47,7 @@ export function EpisodeList({
   focusKey,
   memoryKey,
   videos,
+  startIndex = 0,
   onPress,
   onFocusVideo,
   extras,
@@ -51,15 +55,21 @@ export function EpisodeList({
   const { t } = useTranslation();
   // Trakt's watched ticks arrive with a sync.
   useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
+  const lastIndex = Math.max(0, videos.length - 1);
+  const start = Math.min(startIndex, lastIndex);
+  const remembered = recallFocus(memoryKey);
   const [anchor, setAnchor] = useState(() =>
-    Math.min(recallScroll(memoryKey), Math.max(0, videos.length - 1)),
+    // Nothing remembered: the episode to start at sits second from the top, as focus leaves it.
+    Math.min(remembered ? recallScroll(memoryKey) : Math.max(0, start - 1), lastIndex),
   );
   const { ref } = useFocusable<object, HTMLDivElement>({
     focusKey,
     saveLastFocusedChild: true,
-    preferredChildFocusKey: recallFocus(memoryKey) ?? `${focusKey}-0`,
+    preferredChildFocusKey: remembered ?? `${focusKey}-${start}`,
   });
   const [now] = useState(Date.now);
+  // The episode not out yet that OK was last pressed on: it says when it is out.
+  const [told, setTold] = useState<string | null>(null);
 
   const first = Math.max(0, anchor - OVERSCAN);
   const last = Math.min(videos.length, anchor + VISIBLE + OVERSCAN);
@@ -79,20 +89,24 @@ export function EpisodeList({
     const upcoming = state.kind === 'upcoming';
     const watched = state.kind === 'watched';
     const fraction = state.kind === 'started' ? state.fraction : 0;
+    const telling = upcoming && told === video.id;
     const date = video.released
-      ? upcoming
-        ? t('details.airs', { date: formatDate(video.released) })
-        : formatDate(video.released)
+      ? telling
+        ? t('browsing.outOn', { date: formatDate(video.released) })
+        : upcoming
+          ? t('details.airs', { date: formatDate(video.released) })
+          : formatDate(video.released)
       : '';
     items.push(
       <Pressable
         key={index}
         focusKey={itemKey}
         label={[title, date, watched ? t('details.watched') : ''].filter(Boolean).join(', ')}
-        className={styles.episode}
+        className={upcoming ? `${styles.episode} ${styles.soon}` : styles.episode}
         focusedClassName={styles.focused}
         style={{ top: index * ITEM_HEIGHT }}
-        onPress={() => onPress(video)}
+        // Not out yet: no streams can exist, so it says when instead of opening the player.
+        onPress={() => (upcoming ? setTold(video.id) : onPress(video))}
         onFocus={() => {
           onFocusVideo?.(video);
           rememberFocus(memoryKey, itemKey);
@@ -117,7 +131,20 @@ export function EpisodeList({
         </div>
         <div className={styles.text}>
           <p className={styles.title}>{title}</p>
-          {date && <p className={upcoming ? styles.upcoming : styles.date}>{date}</p>}
+          {date && (
+            <p
+              className={
+                telling
+                  ? `${styles.upcoming} ${styles.told}`
+                  : upcoming
+                    ? styles.upcoming
+                    : styles.date
+              }
+              aria-live={telling ? 'polite' : undefined}
+            >
+              {date}
+            </p>
+          )}
           {overview && <p className={styles.overview}>{overview}</p>}
         </div>
       </Pressable>,

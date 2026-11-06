@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ProgressEntry } from '@bannertv/core';
-import { defaultSeason, episodeState, groupSeasons, seasonOf } from './seasons';
+import type { MetaDetail } from '@bannertv/protocol';
+import {
+  defaultSeason,
+  episodeState,
+  groupSeasons,
+  openingEpisode,
+  seasonOf,
+  type StartReader,
+  startPoint,
+} from './seasons';
 
 const video = (id: string, season?: number, episode?: number, released?: string) => ({
   id,
@@ -82,5 +91,98 @@ describe('episodeState', () => {
     // A length not known yet, or nothing played, is not a start.
     expect(episodeState(video('e', 1, 1), seen(15, 0), false, now).kind).toBe('new');
     expect(episodeState(video('e', 1, 1), seen(0, 40), false, now).kind).toBe('new');
+  });
+});
+
+describe('startPoint and openingEpisode', () => {
+  const now = Date.parse('2026-10-30T12:00:00Z');
+  const meta = {
+    id: 'tt1',
+    type: 'series',
+    name: 'Show',
+    videos: [
+      video('s1e1', 1, 1),
+      video('s1e2', 1, 2),
+      video('s2e1', 2, 1),
+      video('s2e2', 2, 2, '2026-12-12'),
+      video('special', 0, 1),
+    ],
+  } as unknown as MetaDetail;
+  const seasons = groupSeasons(meta.videos);
+  const entry = (videoId: string, position: number, duration: number, watched = false) =>
+    ({ metaId: 'tt1', type: 'series', videoId, position, duration, watched }) as ProgressEntry;
+  const reader = (
+    latest: ProgressEntry | undefined,
+    options: { resume?: number; ticked?: string[] } = {},
+  ): StartReader => ({
+    latest,
+    resumeAt: (videoId) => (latest && videoId === latest.videoId ? options.resume : undefined),
+    ticked: (videoId) => (options.ticked ?? []).indexOf(videoId) !== -1,
+  });
+  const point = (r: StartReader) => {
+    const found = startPoint(meta, seasons, r, now);
+    return found && [found.kind, found.video.id];
+  };
+
+  it('resumes the episode left part-way, in its season', () => {
+    const r = reader(entry('s2e1', 600, 2400), { resume: 600 });
+    expect(startPoint(meta, seasons, r, now)).toEqual({
+      kind: 'resume',
+      video: meta.videos[2],
+      at: 600,
+    });
+    expect(openingEpisode(seasons, startPoint(meta, seasons, r, now), r)).toEqual({
+      season: 1,
+      index: 0,
+    });
+  });
+
+  it('offers the next episode after a finished one, across seasons', () => {
+    const r = reader(entry('s1e2', 2400, 2400, true));
+    expect(point(r)).toEqual(['next', 's2e1']);
+    expect(openingEpisode(seasons, startPoint(meta, seasons, r, now), r)).toEqual({
+      season: 1,
+      index: 0,
+    });
+  });
+
+  it('plays an episode stopped in its first seconds again', () => {
+    expect(point(reader(entry('s1e2', 12, 2400)))).toEqual(['again', 's1e2']);
+  });
+
+  it('has nothing to offer when the next episode is not out yet, and opens on the last played', () => {
+    const r = reader(entry('s2e1', 2400, 2400, true));
+    expect(point(r)).toBeUndefined();
+    expect(openingEpisode(seasons, undefined, r)).toEqual({ season: 1, index: 0 });
+  });
+
+  it('starts a new series at its first episode', () => {
+    const r = reader(undefined);
+    expect(point(r)).toEqual(['first', 's1e1']);
+    expect(openingEpisode(seasons, startPoint(meta, seasons, r, now), r)).toEqual({
+      season: 0,
+      index: 0,
+    });
+  });
+
+  it('goes on after the furthest episode Trakt ticks, leaving Specials aside', () => {
+    const r = reader(undefined, { ticked: ['s1e1', 's1e2', 'special'] });
+    expect(point(r)).toEqual(['next', 's2e1']);
+  });
+
+  it('has no first episode for a series announced but not out', () => {
+    const announced = {
+      ...meta,
+      videos: [video('s1e1', 1, 1, '2027-01-01')],
+    } as unknown as MetaDetail;
+    expect(startPoint(announced, groupSeasons(announced.videos), reader(undefined), now)).toBe(
+      undefined,
+    );
+  });
+
+  it('offers nothing for progress on an episode the addon no longer lists', () => {
+    const r = reader(entry('gone', 2400, 2400, true));
+    expect(point(r)).toBeUndefined();
+    expect(openingEpisode(seasons, undefined, r)).toEqual({ season: 0, index: 0 });
   });
 });

@@ -1,8 +1,15 @@
 import { historyView, kidsTitleAllowed, libraryView, type LibraryKind } from '@bannertv/core';
 import { library } from '@tv/data/library';
+import {
+  fillLibraryCards,
+  historyCard,
+  historyCardsVersion,
+  subscribeHistoryCards,
+} from '@tv/data/library-cards';
 import { playedVideos, progress } from '@tv/data/playback';
 import { isKidsProfile } from '@tv/data/profiles';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,10 +26,12 @@ const subscribeAll = (listener: () => void) => {
     library.subscribe(listener),
     progress.subscribe(listener),
     playedVideos.subscribe(listener),
+    subscribeHistoryCards(listener),
   ];
   return () => undo.forEach((stop) => stop());
 };
-const versions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
+const versions = () =>
+  `${library.version()}:${progress.version()}:${playedVideos.version()}:${historyCardsVersion()}`;
 
 export function LibraryScreen() {
   const { t } = useTranslation();
@@ -38,11 +47,15 @@ export function LibraryScreen() {
       .then(() => setLoaded(true));
   }, []);
 
+  // Titles from Trakt arrive without artwork: it is fetched while this tab is the one on
+  // show (it stays mounted behind the others).
+  useFocusEffect(useCallback(() => (loaded ? fillLibraryCards(show) : undefined), [loaded, show]));
+
   const items = useMemo(() => {
     const shown =
       show === 'list'
         ? libraryView(library.items(), kind, 'added')
-        : historyView(progress.recent(), playedVideos.get, kind);
+        : historyView(progress.recent(), historyCard, kind);
     return isKidsProfile() ? shown.filter((item) => kidsTitleAllowed(item, true)) : shown;
     // `version` stands for the stores' contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
