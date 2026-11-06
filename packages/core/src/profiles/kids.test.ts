@@ -6,6 +6,7 @@ import { discoverSources, searchSources } from '../addons/sources';
 import {
   buildKidsBoard,
   kidsAddons,
+  kidsDetailsAllowed,
   kidsDiscoverSources,
   kidsSearchSources,
   kidsTitleAllowed,
@@ -168,5 +169,34 @@ describe('kids Discover and Search', () => {
       true,
     );
     expect(sources.some((s) => s.addon === adult || s.addon === tv)).toBe(false);
+  });
+});
+
+describe('kidsDetailsAllowed', () => {
+  const film = (genres: string[]) => ({ type: 'movie', genres });
+
+  it('lets the strictest UK rating decide: a PG at the cinema and 15 on disc is a 15', () => {
+    const rated = { certificate: 'PG', strictestCertificate: '15' };
+    expect(kidsDetailsAllowed(film(['Animation']), rated, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Animation']), rated, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Animation']), { certificate: 'PG' }, 'PG')).toBe(true);
+  });
+
+  it('needs no Family genre with a rating, but never takes a genre not for children', () => {
+    expect(kidsDetailsAllowed(film(['Animation', 'Adventure']), { certificate: 'U' }, 'PG')).toBe(
+      true,
+    );
+    expect(kidsDetailsAllowed(film(['Horror']), { certificate: 'PG' }, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: '12' }, 'PG')).toBe(false);
+  });
+
+  it('needs Family without a rating, and a profile limit with one', () => {
+    expect(kidsDetailsAllowed(film(['Family', 'Comedy']), undefined, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Comedy']), {}, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film([]), undefined, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: 'U' }, undefined)).toBe(false);
+    expect(
+      kidsDetailsAllowed({ type: 'channel', genres: ['Family'] }, { certificate: 'U' }, 'PG'),
+    ).toBe(false);
   });
 });

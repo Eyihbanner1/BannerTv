@@ -218,6 +218,8 @@ export {
   KIDS_GENRE,
   KIDS_TYPES,
   kidsAddons,
+  kidsDetailsAllowed,
+  type KidsRatingFacts,
   kidsTitleAllowed,
   ratingAllowed,
   ukRating,
