@@ -267,6 +267,10 @@ type PreferenceKey =
   | 'pref/subtitleLanguage'
   | 'pref/tmdb'
   | 'pref/stillWatching'
+  | 'pref/subtitleWhen'
+  | 'pref/maxResolution'
+  | 'pref/avoidHdr'
+  | 'pref/learnLanguages'
   | 'style/size'
   | 'style/colour'
   | 'style/background'
@@ -297,6 +301,14 @@ const PREFERENCE_KEYS: ReadonlyArray<
   ],
   ['pref/tmdb', (p) => p.tmdb, (p, v) => ({ ...p, tmdb: v as never })],
   ['pref/stillWatching', (p) => p.stillWatching, (p, v) => ({ ...p, stillWatching: v as never })],
+  ['pref/subtitleWhen', (p) => p.subtitleWhen, (p, v) => ({ ...p, subtitleWhen: v as never })],
+  ['pref/maxResolution', (p) => p.maxResolution, (p, v) => ({ ...p, maxResolution: v as never })],
+  ['pref/avoidHdr', (p) => p.avoidHdr, (p, v) => ({ ...p, avoidHdr: v as never })],
+  [
+    'pref/learnLanguages',
+    (p) => p.learnLanguages,
+    (p, v) => ({ ...p, learnLanguages: v as never }),
+  ],
   [
     'style/size',
     (p) => p.subtitleStyle.size,

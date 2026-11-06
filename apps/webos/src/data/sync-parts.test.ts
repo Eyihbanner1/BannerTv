@@ -361,6 +361,34 @@ describe('preferencesPart', () => {
     void part.adopt(change([['style/position', { t: 2, v: 'bottom' }]]));
     expect(writes()).toBe(1);
   });
+
+  it('carries when subtitles show, the resolution cap, HDR and language learning, checked as when read', () => {
+    const { part, store } = prefsSetup({
+      subtitleWhen: 'foreign',
+      maxResolution: '1080p',
+      avoidHdr: true,
+      learnLanguages: true,
+    });
+    expect(plain(part.snapshot())).toEqual({
+      'pref/subtitleWhen': { v: 'foreign' },
+      'pref/maxResolution': { v: '1080p' },
+      'pref/avoidHdr': { v: true },
+      'pref/learnLanguages': { v: true },
+    });
+    // From an older or newer screen: a value this build cannot use becomes the default.
+    void part.adopt(
+      change([
+        ['pref/subtitleWhen', { t: 1, v: 'sometimes' }],
+        ['pref/maxResolution', { t: 1, v: '4320p' }],
+        ['pref/avoidHdr', { t: 1, v: 'yes' }],
+        ['pref/learnLanguages', { t: 1, v: 1 }],
+      ]),
+    );
+    expect(store.get()).toEqual(DEFAULT_PREFERENCES);
+    void part.adopt(change([['pref/maxResolution', { t: 2, v: '720p' }]], ['pref/avoidHdr']));
+    expect(store.get().maxResolution).toBe('720p');
+    expect(store.get().avoidHdr).toBe(false);
+  });
 });
 
 describe('sportsPart', () => {
