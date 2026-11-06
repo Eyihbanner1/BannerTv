@@ -1,4 +1,10 @@
-import { HttpError, InstallError, NotFoundError } from '@bannertv/core';
+import {
+  type AddonHealth,
+  HttpError,
+  InstallError,
+  type InstalledAddon,
+  NotFoundError,
+} from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import type { TFunction } from 'i18next';
 
@@ -50,4 +56,42 @@ export function addonFocusId(transportUrl: string): string {
     hash = ((hash << 5) + hash + transportUrl.charCodeAt(i)) | 0;
   }
   return `addon-${(hash >>> 0).toString(36)}`;
+}
+
+/**
+ * An addon card's line about how the addon last answered: "Not answering
+ * since 14:05" (with the day when it is not today), "Slow to answer", or
+ * undefined while it answers in good time or has not been asked yet.
+ */
+export function healthLine(
+  t: TFunction,
+  health: AddonHealth | undefined,
+  now: number = Date.now(),
+): string | undefined {
+  if (!health || health.state === 'fine') return undefined;
+  if (health.state === 'slow') return t('addonState.slow');
+  const since = new Date(health.since);
+  const time = since.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (since.toDateString() === new Date(now).toDateString()) {
+    return t('addonState.notAnswering', { time });
+  }
+  const day = since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return t('addonState.notAnsweringDay', { day, time });
+}
+
+/**
+ * "Torrentio didn't answer." or "Torrentio and 2 more didn't answer.", for
+ * the addons a stream search heard nothing from; undefined when none.
+ */
+export function addonsDidntAnswer(
+  t: TFunction,
+  addons: readonly InstalledAddon[],
+): string | undefined {
+  const first = addons[0];
+  if (!first) return undefined;
+  return t('player.problem.addonsFailed', {
+    count: addons.length,
+    name: first.manifest.name,
+    more: addons.length - 1,
+  });
 }

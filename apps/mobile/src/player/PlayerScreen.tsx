@@ -21,6 +21,7 @@ import {
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
+import { addonsDidntAnswer } from '@tv/data/describe';
 import { playedVideos, progress } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
 import { useSkipSegments } from '@tv/data/skips';
@@ -570,9 +571,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                 : t(`player.problem.${state.error?.kind ?? 'other'}`)}
             </Text>
             {finderState.failed.length > 0 ? (
-              <Text style={styles.problemText}>
-                {t('player.problem.addonsFailed', { count: finderState.failed.length })}
-              </Text>
+              <Text style={styles.problemText}>{addonsDidntAnswer(t, finderState.failed)}</Text>
             ) : null}
             <View style={styles.problemButtons}>
               {!nothing && session?.hasNext() ? (

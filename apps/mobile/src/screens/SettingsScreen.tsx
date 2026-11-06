@@ -1,7 +1,7 @@
 import { MAIN_PROFILE_ID } from '@bannertv/core';
 import { serviceStatus } from '@tv/data/api';
 import { preferences, setPreference, type Preferences } from '@tv/data/preferences';
-import { addonCollection } from '@tv/data/addons';
+import { allAddons } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
 import Constants from 'expo-constants';
@@ -80,7 +80,8 @@ export function SettingsScreen() {
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
   const account = useSyncExternalStore(accountState.subscribe, accountState.get);
   const list = useSyncExternalStore(profiles.subscribe, profiles.get).profiles;
-  const addons = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  // Every install, those switched off too: Addons lists them all.
+  const addons = useSyncExternalStore(allAddons.subscribe, allAddons.get);
   const [choosing, setChoosing] = useState<Choice | null>(null);
   const kids = isKidsProfile();
   const isMain = activeProfileId.get() === MAIN_PROFILE_ID;

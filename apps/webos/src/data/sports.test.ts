@@ -1,4 +1,10 @@
-import type { InstalledAddon, Store } from '@bannertv/core';
+import {
+  type AddonCollection,
+  type InstalledAddon,
+  installIdOf,
+  type Store,
+  type SwitchesState,
+} from '@bannertv/core';
 import {
   type ManifestCatalog,
   type MetaPreview,
@@ -23,9 +29,17 @@ vi.mock('./storage', () => ({
 }));
 
 vi.mock('./addons', async () => {
-  const { createStore } = await import('@bannertv/core');
+  const { createStore, switchedOnOnly } = await import('@bannertv/core');
+  const allAddons = createStore({ ready: false, addons: [] });
+  // The installs switched off, which a test changes as Addons would.
+  const addonSwitches = createStore<SwitchesState>({ ready: true, off: new Set() });
   return {
-    addonCollection: createStore({ ready: false, addons: [] }),
+    allAddons,
+    addonSwitches,
+    addonCollection: switchedOnOnly(allAddons as unknown as AddonCollection, {
+      ...addonSwitches,
+      load: () => Promise.resolve(),
+    }),
     addonClient: {},
   };
 });
@@ -69,7 +83,7 @@ const matches = ['Arsenal vs Chelsea', 'Celtic vs Rangers', 'Ajax vs PSV'].map((
 async function start(addons: InstalledAddon[]) {
   vi.resetModules();
   const sports = await import('./sports');
-  const collection = (await import('./addons')).addonCollection as unknown as Collection;
+  const collection = (await import('./addons')).allAddons as unknown as Collection;
   await sports.startSports();
   collection.set({ ready: true, addons });
   return { sports, collection };
@@ -161,6 +175,30 @@ describe('an addon set up again with other settings', () => {
     expect(saved.get('sports.settings')).toEqual({});
     expect(saved.get('sports.evidence')).toEqual([]);
     expect(saved.get('sports.kickoffs')).toEqual([]);
+  });
+});
+
+describe('an addon switched off', () => {
+  const addon = install('org.x.sports', 'https://x.example.com/manifest.json', [FOOTBALL, LIVE]);
+
+  it('leaves Sports, and keeps its Show in Sports and kick-offs for when it is back', async () => {
+    const { sports } = await start([addon]);
+    const switches = (await import('./addons')).addonSwitches as unknown as Store<SwitchesState>;
+    sports.setSportsSetting(addon, 'yes');
+    const at = Date.parse('2026-10-28T20:00:00Z');
+    sports.kickoffs.note(addon.manifest.id, 'x:0', { at, sure: true, source: 'released' });
+    await sports.kickoffs.flush();
+    expect(sports.sportsState.get().shown).toBe(true);
+
+    switches.set({ ready: true, off: new Set([installIdOf(addon)]) });
+    expect(sports.sportsState.get().shown).toBe(false);
+    expect(sports.sportsState.get().catalogs).toEqual([]);
+    expect(sports.sportsSetting(addon)).toBe('yes');
+    expect(saved.get('sports.settings')).toEqual({ 'org.x.sports': 'yes' });
+    expect(sports.kickoffs.get(addon.manifest.id, 'x:0')?.at).toBe(at);
+
+    switches.set({ ready: true, off: new Set() });
+    expect(sports.sportsState.get().shown).toBe(true);
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  addonSwitchesPart,
   checkSyncService,
   collectionPart,
   createProfileStores,
@@ -26,7 +27,7 @@ import {
 } from '@bannertv/core';
 import { SPORTS_IN_BUILD } from '../app/features';
 import { pageCrypto, webCryptoWorks } from '../platform/web-crypto';
-import { addonCollection } from './addons';
+import { addonSwitches, allAddons } from './addons';
 import { homeLayout, library, subtitleOffsets, trackMemory } from './library';
 import { playedVideos, progress } from './playback';
 import { preferences, profilePreferences } from './preferences';
@@ -297,7 +298,9 @@ function accountParts(): SyncPart[] {
       heldKids: heldKidsChange,
       hidden: setHiddenProfiles,
     }),
-    collectionPart(addonCollection),
+    // Every install, those switched off too: their switches are a part of their own.
+    collectionPart(allAddons),
+    addonSwitchesPart(addonSwitches),
   ];
   // A build without Sports leaves the account's Sports settings as they are.
   if (SPORTS_IN_BUILD) parts.push(sportsPart(sportsChoices));

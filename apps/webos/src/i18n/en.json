@@ -100,7 +100,7 @@
     "noCatalogs": "None of your addons has a catalog to browse. Add one, such as Cinemeta, in Addons."
   },
   "addons": {
-    "lead": "Addons give BannerTV its catalogs and titles, and in Phase 2 its streams. Higher addons answer first, and their rows come first on Home.",
+    "lead": "Addons give BannerTV its catalogs, titles, streams and subtitles. Higher addons answer first, and their rows come first on Home.",
     "add": "Add an addon",
     "none": "You have no addons, so Home is empty. Add one, such as Cinemeta, with its address.",
     "version": "v{{version}}",
@@ -176,6 +176,25 @@
     "invalid": "{{addon}} sent something BannerTV cannot read.",
     "notFound": "None of your addons know this title.",
     "other": "{{addon}} did not answer."
+  },
+  "addonState": {
+    "removeEverywhere": "Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address.",
+    "slow": "Slow to answer",
+    "notAnswering": "Not answering since {{time}}",
+    "notAnsweringDay": "Not answering since {{day}}, {{time}}",
+    "checking": "Checking…",
+    "checkNow": "Check now",
+    "checkNowLabel": "Check {{name}} now",
+    "answering": "{{name}} is answering.",
+    "answeringSlowly": "{{name}} answered, but slowly.",
+    "stillNotAnswering": "{{name}} still isn't answering.",
+    "switchOffLabel": "{{name}} is on. Switch it off",
+    "switchOnLabel": "{{name}} is off. Switch it on",
+    "switchLabel": "Use {{name}}",
+    "offLine": "Off: its settings are kept",
+    "switchedOff": "{{name}} is off: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOffEverywhere": "{{name}} is off on every screen in your BannerTV account: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOn": "{{name}} is on again."
   },
   "meta": {
     "rating": "IMDb {{rating}}"
@@ -421,8 +440,8 @@
       "decode": "The TV couldn't decode this stream.",
       "clip": "This stream is only a short clip, not the video. Its source may not have it ready yet.",
       "other": "Something went wrong playing this stream.",
-      "addonsFailed_one": "One addon didn't answer.",
-      "addonsFailed_other": "{{count}} addons didn't answer.",
+      "addonsFailed_one": "{{name}} didn't answer.",
+      "addonsFailed_other": "{{name}} and {{more}} more didn't answer.",
       "tryAnother": "Try another stream",
       "back": "Back to the title"
     }

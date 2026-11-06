@@ -2,6 +2,7 @@ import { activeProfileId } from '@tv/data/profiles';
 import { Tabs } from 'expo-router';
 import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAddonLinks } from '../../nav/use-addon-links';
 import { useSportsShown } from '../../screens/sports/use-sports';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OutlineIcon, type OutlineName } from '../../ui/icons';
@@ -27,6 +28,8 @@ export default function TabsLayout() {
   useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
   const sportsShown = useSportsShown();
   const insets = useSafeAreaInsets();
+  // An addon link from outside the app opens Addons over the tabs, for a grown-up.
+  useAddonLinks();
   return (
     <Tabs
       screenOptions={{
