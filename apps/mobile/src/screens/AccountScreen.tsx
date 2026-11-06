@@ -1,15 +1,22 @@
 import {
+  type AsideCopy,
   formatAccountCode,
   MAIN_PROFILE_ID,
   readAccountCode,
   SyncSetupError,
   type JoinMode,
 } from '@bannertv/core';
+import { asideDate, asideLines, asideRestarts } from '@tv/data/account-aside';
 import { pinGuard, profiles } from '@tv/data/profiles';
 import {
   accountCode,
   accountSection,
   accountState,
+  asideCopy,
+  bringBackAside,
+  checkAsideCopy,
+  confirmAccount,
+  createAccount,
   deleteAccount,
   hasOwnData,
   joinAccount,
@@ -19,6 +26,7 @@ import {
   syncAccountNow,
   type AccountProfile,
 } from '@tv/data/sync';
+import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -32,7 +40,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { bringTotal, joinPlan, statusLine } from '../data/account-text';
+import { bringTotal, joinPlan, matchesLastFour, statusLine } from '../data/account-text';
 import { goBack } from '../nav/routes';
 import { reportTyping } from '../runtime/whereabouts';
 import { Button } from '../ui/Button';
@@ -42,36 +50,57 @@ import { colors, radius, space, type } from '../ui/theme';
 
 const STATUS_TICK_MS = 30_000;
 const CODE_INPUT_MAX = 40;
+const CHECK_INPUT_MAX = 8;
+const KEY_INPUT_MAX = 256;
 
 type Step =
   | { kind: 'menu' }
+  /** `held`: Back waits for it, as a create, a confirm, a join, a leave or a delete must finish. */
   | { kind: 'busy'; text: string; held: boolean }
+  /** The service's setup key, typed before a new account is made. */
+  | { kind: 'key' }
+  /** The new account's code, to write down. */
+  | { kind: 'code'; code: string }
+  /** Its last four characters typed back, so the person knows they have it. */
+  | { kind: 'check'; code: string }
   | { kind: 'join' }
   | { kind: 'choose'; code: string; account: AccountProfile[] }
   | { kind: 'show'; code: string };
 
-type Guarded = 'show' | 'delete';
+/** What Main's PIN is asked for first. */
+type Guarded = 'create' | 'show' | 'delete';
 
 function problemOf(error: unknown): string {
   return error instanceof SyncSetupError ? error.problem : 'failed';
 }
 
-function confirm(title: string, message: string, action: string, run: () => void, cancel: string) {
+function confirm(
+  title: string,
+  message: string,
+  action: string,
+  run: () => void,
+  cancel: string,
+  destructive = true,
+) {
   Alert.alert(title, message, [
     { text: cancel, style: 'cancel' },
-    { text: action, style: 'destructive', onPress: run },
+    { text: action, style: destructive ? 'destructive' : 'default', onPress: run },
   ]);
 }
 
 /**
- * The BannerTV account on this phone (ADR 0006), for Main only. The first phone build joins an
- * account and keeps it in sync; making one stays on the TV for now. Showing the code and
- * deleting the account ask for Main's PIN, as on the TV.
+ * The BannerTV account on this phone (ADR 0006), for Main only, with the TV's steps. Signed out
+ * it makes an account (its code shown to write down or copy, then its last four characters
+ * typed back) or joins one by its code; signed in it syncs, shows the code, leaves and deletes.
+ * Making the account, showing the code and deleting it ask for Main's PIN, and a service that
+ * needs its setup key asks for it first. While the copy a join with Use kept lasts, the menu
+ * says what it holds and offers to bring it back.
  */
 export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(accountState.subscribe, accountState.get);
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
+  const copy = useSyncExternalStore(asideCopy.subscribe, asideCopy.get);
   const [step, setStep] = useState<Step>({ kind: startOnJoin ? 'join' : 'menu' });
   const [note, setNote] = useState<string | undefined>();
   const [typed, setTyped] = useState('');
@@ -80,7 +109,10 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
   const [pinMessage, setPinMessage] = useState<string | undefined>();
   const action = useRef(0);
 
-  useEffect(() => openAccount(), []);
+  useEffect(() => {
+    openAccount();
+    checkAsideCopy();
+  }, []);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), STATUS_TICK_MS);
     // Leaving the screen drops the answer of anything still running.
@@ -133,7 +165,7 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
     );
   };
 
-  // Main's PIN guards showing the code and deleting the account.
+  // Main's PIN guards making the account, showing the code and deleting the account.
   const main = profiles.get().profiles.find((profile) => profile.id === MAIN_PROFILE_ID);
   const lockedMessage = () =>
     t('pin.locked', { seconds: Math.ceil(pinGuard.waitMs(MAIN_PROFILE_ID) / 1000) });
@@ -157,6 +189,16 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
     }
   };
   const proceed = (what: Guarded) => {
+    if (what === 'create') {
+      // A new account on a service that needs its setup key asks for it first. One carried on
+      // sends the key it was given before.
+      if (section.needsKey && state.engine === 'running' && state.status.state === 'off') {
+        setTyped('');
+        setNote(undefined);
+        setStep({ kind: 'key' });
+      } else startCreate();
+      return;
+    }
     if (what === 'show') {
       const code = accountCode();
       if (code) setStep({ kind: 'show', code });
@@ -175,6 +217,82 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
           () => toMenu(t('account.deleteOffline')),
         ),
       t('common.cancel'),
+    );
+  };
+
+  /** Makes the account, or carries on making it; `key` is the service's setup key, when typed. */
+  const startCreate = (key?: string) =>
+    run(
+      t('account.creating'),
+      true,
+      () => createAccount(key),
+      (code) => {
+        setTyped('');
+        setStep({ kind: 'code', code });
+      },
+      (problem) => {
+        if (problem === 'key') {
+          // The service needs its setup key: asked for, or asked for again.
+          setStep({ kind: 'key' });
+          if (key !== undefined) setNote(t('account.key'));
+        } else if (problem === 'closed') {
+          // createAccount has kept the answer, so the menu says so and offers only Join.
+          toMenu();
+        } else {
+          toMenu(
+            problem === 'exists' || problem === 'offline'
+              ? t(`account.${problem}`)
+              : t('account.failed'),
+          );
+        }
+      },
+    );
+
+  const sendKey = () => {
+    if (typed.trim() === '') {
+      setNote(t('account.keyMissing'));
+      return;
+    }
+    startCreate(typed);
+  };
+
+  // Nothing of the phone's is sent until the code is typed back.
+  const check = (code: string) => {
+    if (!matchesLastFour(typed, code)) {
+      setNote(t('account.checkWrong'));
+      return;
+    }
+    run(
+      t('account.sending'),
+      true,
+      confirmAccount,
+      () => toMenu(t('account.created')),
+      () => toMenu(t('account.offline')),
+    );
+  };
+
+  /** Brings back what Use set aside, after asking. When profiles come back, the app starts again. */
+  const bringBack = (signedIn: boolean, kept: AsideCopy) => {
+    const message = [t(signedIn ? 'account.aside.intoAccount' : 'account.aside.onScreen')];
+    if (asideRestarts(kept, profiles.get().profiles)) message.push(t('account.aside.restarts'));
+    const go = () =>
+      run(
+        t('account.aside.bringing'),
+        true,
+        bringBackAside,
+        () => toMenu(t('account.aside.done')),
+        (problem) => {
+          if (problem === 'profiles' || problem === 'none') toMenu(t(`account.aside.${problem}`));
+          else toMenu(problem === 'offline' ? t('account.offline') : t('account.failed'));
+        },
+      );
+    confirm(
+      t('account.aside.confirmTitle'),
+      message.join(' '),
+      t('account.aside.confirm'),
+      go,
+      t('common.cancel'),
+      false,
     );
   };
 
@@ -260,25 +378,88 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
       );
     }
 
+    if (step.kind === 'key') {
+      return (
+        <View style={styles.group}>
+          <Text style={styles.heading}>{t('account.keyTitle')}</Text>
+          <Text style={styles.lead}>{t('account.keyHelp')}</Text>
+          <Field
+            label={t('account.keyLabel')}
+            placeholder={t('account.keyPlaceholder')}
+            value={typed}
+            maxLength={KEY_INPUT_MAX}
+            capitals="none"
+            onChange={(text) => {
+              setNote(undefined);
+              setTyped(text);
+            }}
+            onSubmit={sendKey}
+          />
+          <Button label={t('account.continue')} kind="primary" onPress={sendKey} />
+          <Button label={t('common.cancel')} kind="quiet" onPress={() => toMenu()} />
+        </View>
+      );
+    }
+
+    if (step.kind === 'code') {
+      const { code } = step;
+      return (
+        <View style={styles.group}>
+          <CodePanel code={code} help={t('account.codeHelp')} />
+          <Button
+            label={t('account.codeSaved')}
+            kind="primary"
+            onPress={() => {
+              setTyped('');
+              setNote(undefined);
+              setStep({ kind: 'check', code });
+            }}
+          />
+        </View>
+      );
+    }
+
+    if (step.kind === 'check') {
+      const { code } = step;
+      return (
+        <View style={styles.group}>
+          <Text style={styles.lead}>{t('account.checkHelp')}</Text>
+          <Field
+            label={t('account.checkLabel')}
+            placeholder={t('account.checkPlaceholder')}
+            value={typed}
+            maxLength={CHECK_INPUT_MAX}
+            capitals="characters"
+            onChange={(text) => {
+              setNote(undefined);
+              setTyped(text);
+            }}
+            onSubmit={() => check(code)}
+          />
+          <Button label={t('account.check')} kind="primary" onPress={() => check(code)} />
+          <Button
+            label={t('account.showAgain')}
+            onPress={() => {
+              setNote(undefined);
+              setStep({ kind: 'code', code });
+            }}
+          />
+        </View>
+      );
+    }
+
     if (step.kind === 'join') {
       return (
         <View style={styles.group}>
           <Text style={styles.lead}>{t('phone.accountJoinLead')}</Text>
-          <TextInput
-            value={typed}
-            onChangeText={(text) => setTyped(text.slice(0, CODE_INPUT_MAX))}
+          <Field
+            label={t('account.codeLabel')}
             placeholder={t('account.codePlaceholder')}
-            placeholderTextColor={colors.textSubtle}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            autoFocus
+            value={typed}
             maxLength={CODE_INPUT_MAX}
-            style={styles.input}
-            onFocus={() => reportTyping(true)}
-            onBlur={() => reportTyping(false)}
-            onSubmitEditing={checkCode}
-            returnKeyType="go"
-            accessibilityLabel={t('account.codeLabel')}
+            capitals="characters"
+            onChange={setTyped}
+            onSubmit={checkCode}
           />
           <Button label={t('account.continue')} kind="primary" onPress={checkCode} />
           <Button label={t('common.cancel')} kind="quiet" onPress={() => toMenu()} />
@@ -345,14 +526,15 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
     if (step.kind === 'show') {
       return (
         <View style={styles.group}>
-          <Text style={styles.code} selectable accessibilityLabel={step.code.split('').join(' ')}>
-            {formatAccountCode(step.code)}
-          </Text>
-          <Text style={styles.lead}>{t('account.showCodeHelp')}</Text>
+          <CodePanel code={step.code} help={t('account.showCodeHelp')} />
           <Button label={t('account.hideCode')} onPress={() => toMenu()} />
         </View>
       );
     }
+
+    // What the copy a join with Use kept holds, while it lasts.
+    const aside = (signedIn: boolean) =>
+      copy ? <AsideCard copy={copy} onBring={() => bringBack(signedIn, copy)} /> : null;
 
     // The menu, by where the account is.
     const status = state.status;
@@ -361,18 +543,21 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
         <View style={styles.group}>
           <Text style={styles.lead}>{t('phone.accountLead')}</Text>
           <Text style={styles.small}>{t('account.private')}</Text>
+          {section.canCreate ? (
+            <Button label={t('account.create')} kind="primary" onPress={() => guarded('create')} />
+          ) : (
+            <Text style={styles.lead}>{t('account.closed')}</Text>
+          )}
           <Button
             label={t('account.join')}
-            kind="primary"
+            kind={section.canCreate ? 'secondary' : 'primary'}
             onPress={() => {
               setTyped('');
               setNote(undefined);
               setStep({ kind: 'join' });
             }}
           />
-          <Text style={styles.small}>
-            {section.canCreate ? t('phone.accountCreateOnTv') : t('account.closed')}
-          </Text>
+          {aside(false)}
         </View>
       );
     }
@@ -393,13 +578,41 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
           </View>
         );
       }
-      // Made on this phone's data before an earlier build, or mid-way on another screen.
+      if (state.setup === 'creating') {
+        // Made, but the code was never typed back: shown again behind Main's PIN, or given up.
+        return (
+          <View style={styles.group}>
+            <Text style={styles.lead}>{t('account.setupCreating')}</Text>
+            <Button
+              label={t('account.setupShow')}
+              kind="primary"
+              onPress={() => guarded('create')}
+            />
+            <Button
+              label={t('account.setupCancel')}
+              onPress={() =>
+                run(
+                  t('account.deleting'),
+                  true,
+                  deleteAccount,
+                  () => toMenu(),
+                  () => toMenu(t('account.deleteOffline')),
+                )
+              }
+            />
+          </View>
+        );
+      }
+      // The code was typed back, and the phone's data is still on its way.
       return (
         <View style={styles.group}>
-          <Text style={styles.lead}>
-            {state.setup === 'confirmed' ? t('account.setupConfirmed') : t('account.setupCreating')}
-          </Text>
-          <Button label={t('account.tryNow')} onPress={() => void syncAccountNow()} />
+          <Text style={styles.lead}>{t('account.setupConfirmed')}</Text>
+          <Button
+            label={t('account.tryNow')}
+            kind="primary"
+            onPress={() => void syncAccountNow()}
+          />
+          <Button label={t('account.delete')} kind="danger" onPress={() => guarded('delete')} />
         </View>
       );
     }
@@ -428,6 +641,7 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
         <Button label={t('account.showCode')} icon="lock" onPress={() => guarded('show')} />
         <Button label={t('account.leave')} onPress={() => leave(true)} />
         <Button label={t('account.delete')} kind="danger" onPress={() => guarded('delete')} />
+        {aside(true)}
       </View>
     );
   };
@@ -448,6 +662,91 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
         onPin={tryPin}
         onCancel={() => setGuarding(null)}
       />
+    </View>
+  );
+}
+
+/** A text box for a code or a key, which tells the app that the keyboard is up. */
+function Field({
+  label,
+  placeholder,
+  value,
+  maxLength,
+  capitals,
+  onChange,
+  onSubmit,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  maxLength: number;
+  capitals: 'characters' | 'none';
+  onChange: (text: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={(text) => onChange(text.slice(0, maxLength))}
+      placeholder={placeholder}
+      placeholderTextColor={colors.textSubtle}
+      autoCapitalize={capitals}
+      autoCorrect={false}
+      autoFocus
+      maxLength={maxLength}
+      style={styles.input}
+      onFocus={() => reportTyping(true)}
+      onBlur={() => reportTyping(false)}
+      onSubmitEditing={onSubmit}
+      returnKeyType="go"
+      accessibilityLabel={label}
+    />
+  );
+}
+
+/** The account code, large, with what to do with it and a button that copies it. */
+function CodePanel({ code, help }: { code: string; help: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState<boolean | undefined>();
+  const copyCode = () => {
+    Clipboard.setStringAsync(code).then(
+      (done) => setCopied(done),
+      () => setCopied(false),
+    );
+  };
+  return (
+    <View style={styles.group}>
+      <Text style={styles.heading}>{t('account.codeTitle')}</Text>
+      <Text
+        style={styles.code}
+        selectable
+        testID="account-code"
+        accessibilityLabel={code.split('').join(' ')}
+      >
+        {formatAccountCode(code)}
+      </Text>
+      <Text style={styles.lead}>{help}</Text>
+      <Button label={t('phone.copyCode')} onPress={copyCode} />
+      {copied === undefined ? null : (
+        <Text style={styles.small}>{t(copied ? 'phone.codeCopied' : 'phone.codeNotCopied')}</Text>
+      )}
+    </View>
+  );
+}
+
+/** What the copy a join with Use kept holds, until when, and the button that brings it back. */
+function AsideCard({ copy, onBring }: { copy: AsideCopy; onBring: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.card} accessibilityLabel={t('account.aside.title')}>
+      <Text style={styles.heading}>{t('account.aside.title')}</Text>
+      <Text style={styles.lead}>{t('account.aside.lead', { date: asideDate(copy.until) })}</Text>
+      {asideLines(t, copy).map((line) => (
+        <Text key={line} style={styles.plan}>
+          {line}
+        </Text>
+      ))}
+      <Button label={t('account.aside.bring')} onPress={onBring} />
     </View>
   );
 }
