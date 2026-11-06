@@ -47,7 +47,29 @@ function withoutSeason(key: string): string {
   return key.replace(/\s*\b(?:19|20)\d\d(?:\s*(?:\/|-|\s)\s*(?:\d\d|\d{4}))?$/, '').trim();
 }
 
+/**
+ * The same fold, remembered by the text it was given. The calendars name each
+ * team many times over (thousands of names, under two hundred different ones),
+ * and folding is most of what building the maps costs on a TV.
+ */
+function remembered(fold: (text: string) => string): (text: string) => string {
+  const folded = new Map<string, string>();
+  return (text) => {
+    let key = folded.get(text);
+    if (key === undefined) {
+      key = fold(text);
+      folded.set(text, key);
+    }
+    return key;
+  };
+}
+
 export function createMatcher(data: SportsData): Matcher {
+  // For building only: the lookups below fold what addons say as it comes,
+  // and keep nothing, so the matcher does not grow as it is used.
+  const teamKeyOf = remembered(teamKey);
+  const competitionKeyOf = remembered(competitionKey);
+
   const competitions = new Map<string, CompetitionEntry[]>();
   const byId = new Map<string, CompetitionEntry>();
   const bySofascore = new Map<number, CompetitionEntry>();
@@ -62,13 +84,13 @@ export function createMatcher(data: SportsData): Matcher {
 
   for (const country of data.countries) {
     countries.set(country.code, country);
-    countryWords.set(competitionKey(country.name), country.code);
-    countryWords.set(competitionKey(country.adjective), country.code);
+    countryWords.set(competitionKeyOf(country.name), country.code);
+    countryWords.set(competitionKeyOf(country.adjective), country.code);
   }
   for (const entry of data.competitions) {
     byId.set(entry.id, entry);
     for (const name of [entry.name].concat(entry.aliases)) {
-      const key = competitionKey(name);
+      const key = competitionKeyOf(name);
       if (key !== '') addTo(competitions, key, entry);
     }
     for (const id of entry.sofascore ?? []) bySofascore.set(id, entry);
@@ -77,7 +99,7 @@ export function createMatcher(data: SportsData): Matcher {
   for (const team of data.teams) {
     const names: string[] = [];
     for (const name of [team.name].concat(team.aliases)) {
-      const key = teamKey(name);
+      const key = teamKeyOf(name);
       if (key === '' || names.indexOf(key) !== -1) continue;
       names.push(key);
       addTo(teams, key, team);
@@ -87,8 +109,8 @@ export function createMatcher(data: SportsData): Matcher {
   for (const league in data.calendars) {
     const pairs = new Map<string, number[]>();
     for (const [date, home, away] of data.calendars[league]!) {
-      const a = teams.get(teamKey(home));
-      const b = teams.get(teamKey(away));
+      const a = teams.get(teamKeyOf(home));
+      const b = teams.get(teamKeyOf(away));
       if (!a || !b) continue;
       addTo(pairs, pairKey(teamIndex.get(a[0]!)!, teamIndex.get(b[0]!)!), dayNumber(date));
     }
@@ -97,7 +119,7 @@ export function createMatcher(data: SportsData): Matcher {
   for (const id in data.uefa) {
     const clubs = new Set<TeamEntry>();
     for (const name of data.uefa[id]!) {
-      const found = teams.get(teamKey(name));
+      const found = teams.get(teamKeyOf(name));
       if (found) clubs.add(found[0]!);
     }
     uefa.set(id, clubs);
