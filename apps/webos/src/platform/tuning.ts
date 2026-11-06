@@ -92,6 +92,13 @@ export interface Tuning {
    * a sports screen or search opens or focus enters the Live sport row.
    */
   matcherAt: 'launch' | 'idle';
+  // Starting playback (speed pass U3). Each default is what shipped before the switch.
+  /**
+   * How long focus rests on Watch or an episode before Details asks the
+   * addons for its streams. The phone's title page waits 300 ms, as nothing
+   * there moves focus.
+   */
+  prefetchRestMs: number;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -116,6 +123,9 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   idbPrune: 'open',
   idbRelaxed: false,
   matcherAt: 'launch',
+
+  // Starting playback (speed pass U3).
+  prefetchRestMs: 1500,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -160,6 +170,9 @@ export function parseTuning(raw: string | null): Tuning {
     idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
     idbRelaxed: flag(stored.idbRelaxed, d.idbRelaxed),
     matcherAt: oneOf(stored.matcherAt, ['launch', 'idle'], d.matcherAt),
+
+    // Starting playback (speed pass U3).
+    prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
   };
 }
 

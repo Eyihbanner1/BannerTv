@@ -4,10 +4,14 @@ import type { EventPlay } from '../app/router';
 import { preferences } from '../data/preferences';
 import { isAndroid } from '../platform/android';
 import { knownCapabilities } from '../platform/capabilities';
+import { tuning } from '../platform/tuning';
 import { stopProbing, type StreamFinder, streamFinder } from './finder';
 
-/** How long focus must rest on Watch or an episode before BannerTV starts looking. */
-export const PREFETCH_REST_MS = 1500;
+/**
+ * How long focus must rest on Watch or an episode before BannerTV starts
+ * looking: 1.5 s unless the `prefetchRestMs` tuning switch says otherwise.
+ */
+export const PREFETCH_REST_MS = tuning.prefetchRestMs;
 
 /**
  * Whether links may be tested before Play. Off on webOS 5 TVs under "auto"
@@ -77,12 +81,15 @@ export function startPrefetch(
  * While focus rests on Watch or an episode, asks the addons for its streams
  * and then quietly tests the best links, so Play starts at once. Moving on
  * stops the test straight away; the answers stay cached for the player.
+ * `restMs`: how long the rest is, PREFETCH_REST_MS by default; a page where
+ * nothing moves focus passes a short one that still skips a quick back-out.
  */
 export function usePrefetch(
   type: string,
   videoId: string | null,
   runtime?: string,
   event?: EventPlay,
+  restMs: number = PREFETCH_REST_MS,
 ): void {
   const latestRuntime = useRef(runtime);
   const current = useRef<Prefetch | null>(null);
@@ -93,11 +100,11 @@ export function usePrefetch(
   }, [runtime]);
   useEffect(() => {
     if (videoId === null) return;
-    const prefetch = startPrefetch(type, videoId, event, PREFETCH_REST_MS, latestRuntime.current);
+    const prefetch = startPrefetch(type, videoId, event, restMs, latestRuntime.current);
     current.current = prefetch;
     return () => {
       current.current = null;
       prefetch.stop();
     };
-  }, [type, videoId, event]);
+  }, [type, videoId, event, restMs]);
 }

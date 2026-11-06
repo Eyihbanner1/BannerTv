@@ -22,6 +22,8 @@ describe('TUNING_DEFAULTS', () => {
       idbPrune: 'open',
       idbRelaxed: false,
       matcherAt: 'launch',
+      // Starting playback (speed pass U3): what shipped before each switch.
+      prefetchRestMs: 1500,
     });
   });
 });
@@ -53,6 +55,18 @@ describe('parseTuning', () => {
       heroFade: true,
       marks: true,
     });
+  });
+
+  it('reads the switches for starting playback', () => {
+    expect(parseTuning('{"prefetchRestMs":500}')).toEqual({
+      ...TUNING_DEFAULTS,
+      prefetchRestMs: 500,
+    });
+    // No rest at all is a choice too.
+    expect(parseTuning('{"prefetchRestMs":0}').prefetchRestMs).toBe(0);
+    expect(parseTuning('{"prefetchRestMs":-1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"prefetchRestMs":60000}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"prefetchRestMs":"500"}')).toEqual(TUNING_DEFAULTS);
   });
 
   it('ignores values out of range or of the wrong kind', () => {
