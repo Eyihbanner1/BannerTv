@@ -35,6 +35,8 @@ const PHONE = {
   seekingTo: 'Going to {{time}}',
   sceneIntro: 'Intro',
   sceneRecap: 'Recap',
+  backTo: 'Back to {{time}}',
+  backToLabel: 'Go back to {{time}}, where you were',
   playLabel: 'Play',
   pauseLabel: 'Pause',
   leavePlayer: 'Leave the player',
