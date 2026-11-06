@@ -16,14 +16,20 @@ export function answeredOk(): void {
   answeredAt = Date.now();
 }
 
-/** Whether a click now came with an OK that something has answered already. */
-export function clickCameWithOk(): boolean {
-  return Date.now() - answeredAt <= CLICK_AFTER_OK_MS;
-}
-
 // Counted as spatial navigation counts a held key: up again on its key up.
 let okDowns = 0;
 let okDownOn: string | null = null;
+let okDownAt = -Infinity;
+
+/**
+ * Whether a click now came with an OK that something has answered already:
+ * one still held down (a hold, which answers when OK comes up or the hold
+ * fires), or one just let go.
+ */
+export function clickCameWithOk(): boolean {
+  if (okDowns > 0 && answeredAt >= okDownAt) return true;
+  return Date.now() - answeredAt <= CLICK_AFTER_OK_MS;
+}
 
 /** Notes what had focus when OK went down, so a held OK's repeats press only that. */
 export function watchOkHold(): void {
@@ -34,7 +40,9 @@ export function watchOkHold(): void {
     (event) => {
       if (event.keyCode !== KeyCode.Ok) return;
       okDowns += 1;
-      if (okDowns === 1) okDownOn = getCurrentFocusKey() || null;
+      if (okDowns !== 1) return;
+      okDownOn = getCurrentFocusKey() || null;
+      okDownAt = Date.now();
     },
     options,
   );
@@ -42,6 +50,8 @@ export function watchOkHold(): void {
     'keyup',
     (event) => {
       if (event.keyCode !== KeyCode.Ok) return;
+      // Its click can come as it is let go, however long it was held.
+      if (okDowns > 0 && answeredAt >= okDownAt) answeredAt = Date.now();
       okDowns = 0;
       okDownOn = null;
     },

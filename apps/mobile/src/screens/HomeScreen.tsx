@@ -3,6 +3,8 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { addonClient, addonCollection } from '@tv/data/addons';
 import { describeAddonError, typeLabel } from '@tv/data/describe';
 import { useHomeBoard } from '@tv/data/home-board';
+import { library } from '@tv/data/library';
+import { leaveContinueWatching } from '@tv/data/marks';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
 import { noteFirstPage, sportsState } from '@tv/data/sports';
 import { useQuery } from '@tv/data/use-query';
@@ -12,13 +14,15 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useContinueItems } from '../data/use-continue';
 import { LiveSportRow } from './sports/LiveSportRow';
-import { openCatalog, openPlayer, openTitle } from '../nav/routes';
+import { openBrowse, openCatalog, openPlayer, openTitle } from '../nav/routes';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { Hero } from '../ui/Hero';
+import { OutlineIcon } from '../ui/icons';
 import { Message } from '../ui/Message';
 import { PrismMark } from '../ui/PrismMark';
 import { Row, type RowItem } from '../ui/Row';
+import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, gutter, space, touch, type } from '../ui/theme';
 import { router } from 'expo-router';
 
@@ -141,6 +145,9 @@ export function HomeScreen() {
   // board waits for sport to be settled, so a sports catalog is never drawn for a moment.
   const board = useHomeBoard(collection.addons, ready, sports.homeLeaveOut);
   const continueItems = useContinueItems();
+  // The Continue Watching title long-pressed, while its sheet shows.
+  const [held, setHeld] = useState<MetaPreview | null>(null);
+  useSyncExternalStore(library.subscribe, library.version);
   const [empty, setEmpty] = useState<ReadonlySet<string>>(() => new Set(emptyRows));
   const [firsts, setFirsts] = useState<Readonly<Record<string, MetaPreview>>>({});
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
@@ -199,6 +206,14 @@ export function HomeScreen() {
           {t('phone.appName')}
         </Text>
         <View style={styles.spacer} />
+        <Pressable
+          onPress={openBrowse}
+          accessibilityRole="button"
+          accessibilityLabel={t('rail.discover')}
+          style={styles.profile}
+        >
+          <OutlineIcon name="browse" size={26} color={colors.text} />
+        </Pressable>
         {profile ? (
           <Pressable
             onPress={() => router.push('/profiles')}
@@ -237,6 +252,7 @@ export function HomeScreen() {
             const item = continueRow.find((candidate) => candidate.videoId === entry.key);
             if (item) playContinue(item);
           }}
+          onLongPress={(entry) => setHeld(entry.item)}
         />
       ) : null}
       <LiveSportRow />
@@ -261,28 +277,58 @@ export function HomeScreen() {
     </View>
   );
 
+  const onHeld = (choice: 'remove' | 'details' | 'list') => {
+    const preview = held;
+    setHeld(null);
+    if (!preview) return;
+    if (choice === 'remove') leaveContinueWatching({ metaId: preview.id, type: preview.type });
+    else if (choice === 'details') openTitle(preview);
+    else void (library.has(preview.id) ? library.remove(preview.id) : library.add(preview));
+  };
+
   return (
-    <FlatList
-      style={styles.screen}
-      data={rows}
-      keyExtractor={(row) => row.key}
-      ListHeaderComponent={header}
-      renderItem={({ item: row, index }) => (
-        <HomeRow
-          row={row}
-          enabled={index <= loadUpTo}
-          onFirst={onFirst}
-          onEmpty={onEmpty}
-          onFailed={onFailed}
-        />
-      )}
-      onViewableItemsChanged={onViewable}
-      viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
-      contentContainerStyle={{ paddingBottom: space.xxl }}
-      removeClippedSubviews
-      initialNumToRender={4}
-      windowSize={7}
-    />
+    <>
+      <FlatList
+        style={styles.screen}
+        data={rows}
+        keyExtractor={(row) => row.key}
+        ListHeaderComponent={header}
+        renderItem={({ item: row, index }) => (
+          <HomeRow
+            row={row}
+            enabled={index <= loadUpTo}
+            onFirst={onFirst}
+            onEmpty={onEmpty}
+            onFailed={onFailed}
+          />
+        )}
+        onViewableItemsChanged={onViewable}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
+        contentContainerStyle={{ paddingBottom: space.xxl }}
+        removeClippedSubviews
+        initialNumToRender={4}
+        windowSize={7}
+      />
+      <Sheet
+        visible={held !== null}
+        {...(held ? { title: held.name } : {})}
+        onClose={() => setHeld(null)}
+      >
+        {held ? (
+          <>
+            <SheetOption
+              label={t('browsing.removeFromContinue')}
+              onPress={() => onHeld('remove')}
+            />
+            <SheetOption label={t('home.details')} onPress={() => onHeld('details')} />
+            <SheetOption
+              label={library.has(held.id) ? t('browsing.removeFromList') : t('browsing.addToList')}
+              onPress={() => onHeld('list')}
+            />
+          </>
+        ) : null}
+      </Sheet>
+    </>
   );
 }
 

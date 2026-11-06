@@ -745,6 +745,16 @@
   "browsing": {
     "play": "Play",
     "playEpisode": "Play S{{season}}:E{{episode}}",
-    "outOn": "Not out yet. Out on {{date}}"
+    "outOn": "Not out yet. Out on {{date}}",
+    "removeFromContinue": "Remove from Continue Watching",
+    "removeFromList": "Remove from My List",
+    "addToList": "Add to My List",
+    "markWatched": "Mark as watched",
+    "markUnwatched": "Mark as unwatched",
+    "markSeasonWatched": "Mark season {{season}} as watched",
+    "markSeasonUnwatched": "Mark season {{season}} as unwatched",
+    "watched": "Watched",
+    "markTitleWatched": "Mark {{name}} as watched",
+    "markTitleUnwatched": "Watched. Mark {{name}} as unwatched"
   }
 }

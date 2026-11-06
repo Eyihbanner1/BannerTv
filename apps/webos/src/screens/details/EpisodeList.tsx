@@ -32,6 +32,8 @@ interface EpisodeListProps {
   startIndex?: number;
   /** An episode that has aired was pressed. One not out yet says when it is instead. */
   onPress: (video: Video) => void;
+  /** OK held on an episode that has aired: what else can be done with it. */
+  onLongPress?: (video: Video, index: number) => void;
   /** Focus moved to an episode, so its streams can be looked for. */
   onFocusVideo?: (video: Video) => void;
   /** TMDB's names, overviews and stills by episode number, for what the addon left out. */
@@ -49,6 +51,7 @@ export function EpisodeList({
   videos,
   startIndex = 0,
   onPress,
+  onLongPress,
   onFocusVideo,
   extras,
 }: EpisodeListProps) {
@@ -107,6 +110,7 @@ export function EpisodeList({
         style={{ top: index * ITEM_HEIGHT }}
         // Not out yet: no streams can exist, so it says when instead of opening the player.
         onPress={() => (upcoming ? setTold(video.id) : onPress(video))}
+        onLongPress={onLongPress && !upcoming ? () => onLongPress(video, index) : undefined}
         onFocus={() => {
           onFocusVideo?.(video);
           rememberFocus(memoryKey, itemKey);

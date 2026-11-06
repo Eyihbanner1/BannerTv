@@ -64,6 +64,13 @@ export {
   type PagerStatus,
 } from './addons/pager';
 export {
+  catalogsFromManyAddons,
+  type DiscoverResolved,
+  type DiscoverSelection,
+  discoverSelection,
+  resolveDiscover,
+} from './addons/browse';
+export {
   type CatalogSource,
   discoverSources,
   type DiscoverSource,
@@ -186,9 +193,11 @@ export {
 } from './playback/up-next';
 export {
   createProgressStore,
+  isUnmarked,
   MIN_RESUME_SECONDS,
   type ProgressAdoption,
   type ProgressEntry,
+  type ProgressMark,
   type ProgressStore,
   type ProgressUpdate,
   WATCHED_FRACTION,
@@ -348,6 +357,13 @@ export {
   type TraktTarget,
   traktTarget,
 } from './integrations/trakt/ids';
+export {
+  createTraktMarks,
+  historyBody,
+  pausedIds,
+  type TraktMark,
+  type TraktMarks,
+} from './integrations/trakt/marks';
 export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
 export {
   createTraktSync,

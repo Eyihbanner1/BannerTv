@@ -5,10 +5,12 @@ import {
   defaultSeason,
   episodeState,
   groupSeasons,
+  markOffer,
   openingEpisode,
   seasonOf,
   type StartReader,
   startPoint,
+  startReader,
 } from './seasons';
 
 const video = (id: string, season?: number, episode?: number, released?: string) => ({
@@ -80,6 +82,11 @@ describe('episodeState', () => {
   it('is watched here or on Trakt', () => {
     expect(episodeState(video('e', 1, 1), seen(10, 40, true), false, now).kind).toBe('watched');
     expect(episodeState(video('e', 1, 1), undefined, true, now).kind).toBe('watched');
+  });
+
+  it('is not watched once marked so here, whatever Trakt ticks', () => {
+    const unmarked = { ...seen(0, 40), updatedAt: 5, unmarkedAt: 5 } as ProgressEntry;
+    expect(episodeState(video('e', 1, 1), unmarked, true, now).kind).toBe('new');
   });
 
   it('is part watched with how far in and how long is left', () => {
@@ -184,5 +191,58 @@ describe('startPoint and openingEpisode', () => {
     const r = reader(entry('gone', 2400, 2400, true));
     expect(point(r)).toBeUndefined();
     expect(openingEpisode(seasons, undefined, r)).toEqual({ season: 0, index: 0 });
+  });
+});
+
+describe('startReader', () => {
+  const entry = (videoId: string, updatedAt: number, extra: Partial<ProgressEntry> = {}) =>
+    ({
+      metaId: 'tt1',
+      type: 'series',
+      videoId,
+      position: 600,
+      duration: 2400,
+      updatedAt,
+      watched: false,
+      ...extra,
+    }) as ProgressEntry;
+
+  it('passes over episodes marked not watched, and their Trakt ticks', () => {
+    const entries = [entry('s1e1', 3, { unmarkedAt: 3, position: 0 }), entry('s1e2', 2)];
+    const progress = {
+      forMeta: () => entries,
+      get: (videoId: string) => entries.find((e) => e.videoId === videoId),
+      resumeAt: () => undefined,
+    };
+    const reader = startReader(progress, { has: () => true }, 'tt1');
+    expect(reader.latest?.videoId).toBe('s1e2');
+    expect(reader.ticked('s1e1')).toBe(false);
+    expect(reader.ticked('s2e1')).toBe(true);
+  });
+});
+
+describe('markOffer', () => {
+  const now = Date.parse('2026-10-30T12:00:00Z');
+  const season = {
+    number: 1,
+    videos: [video('e1', 1, 1), video('e2', 1, 2), video('e3', 1, 3, '2026-12-01')],
+  };
+
+  it('offers the episode and the season episodes that are out', () => {
+    const offer = markOffer(season.videos[0]!, season, (id) => id === 'e1', now);
+    expect(offer).toMatchObject({ watched: true, allWatched: false, season: 1 });
+    expect(offer.out.map((v) => v.id)).toEqual(['e1', 'e2']);
+    expect(markOffer(season.videos[1]!, season, () => true, now).allWatched).toBe(true);
+  });
+
+  it('offers no season mark for Specials, unnumbered videos or one episode out', () => {
+    expect(markOffer(season.videos[0]!, { ...season, number: 0 }, () => false, now).season).toBe(
+      undefined,
+    );
+    expect(
+      markOffer(season.videos[0]!, { ...season, number: null }, () => false, now).season,
+    ).toBeUndefined();
+    const single = { number: 2, videos: [video('e1', 2, 1)] };
+    expect(markOffer(single.videos[0]!, single, () => false, now).season).toBeUndefined();
   });
 });

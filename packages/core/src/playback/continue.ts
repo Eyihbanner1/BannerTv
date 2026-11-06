@@ -2,7 +2,7 @@ import type { ContentType, MetaDetail, MetaPreview } from '@bannertv/protocol';
 import type { KeyValueStore } from '../storage';
 import type { Listener } from '../store';
 import { nextVideo } from './next';
-import { END_SECONDS, MIN_RESUME_SECONDS, type ProgressEntry } from './progress';
+import { END_SECONDS, isUnmarked, MIN_RESUME_SECONDS, type ProgressEntry } from './progress';
 
 const KEY = 'played';
 const MAX_CARDS = 200;
@@ -357,11 +357,12 @@ function fraction(entry: ProgressEntry | undefined): number | undefined {
  * What a title's latest entry puts on the row, if anything. A video left
  * part-way resumes where it stopped. An episode stopped in its first seconds
  * starts again from the beginning. A finished episode, or one stopped in its
- * closing minute, gives way to the next one once it has aired (undated
- * episodes count as aired). Anything else is left out: a finished film, the
- * end of a series, a film barely started, a video whose length never became
- * known, such as a live broadcast, and one kept only to resume, such as a
- * sports replay (see ProgressEntry.continueRow).
+ * closing minute, or marked watched, gives way to the next one once it has
+ * aired (undated episodes count as aired). Anything else is left out: a
+ * finished film, the end of a series, a film barely started, a video whose
+ * length never became known, such as a live broadcast, and one kept off the
+ * row, such as a sports replay or a title the viewer took off it (see
+ * ProgressEntry.continueRow).
  */
 export function continueItem(
   entry: ProgressEntry,
@@ -369,7 +370,8 @@ export function continueItem(
   progress: ProgressReader,
   now: number,
 ): ContinueItem | undefined {
-  if (entry.duration <= 0 || entry.continueRow === false) return undefined;
+  // Of unknown length, as a live broadcast is: left out, unless the viewer marked it watched.
+  if ((entry.duration <= 0 && !entry.watched) || entry.continueRow === false) return undefined;
   const preview = previewOf(card);
   const resumeAt = progress.resumeAt(entry.videoId);
   if (resumeAt !== undefined) {
@@ -417,7 +419,8 @@ export function continueItem(
 
 /**
  * The titles to continue, most recently watched first: for each title, what
- * its last video played puts on the row (see continueItem). Titles whose last
+ * its last video played (or marked watched) puts on the row (see
+ * continueItem). Titles whose last
  * video has no card are left out. `now` decides which next episodes have aired.
  */
 export function continueWatching(
@@ -430,7 +433,8 @@ export function continueWatching(
   const seen = new Set<string>();
   for (const entry of progress.recent()) {
     if (items.length >= limit) break;
-    if (seen.has(entry.metaId)) continue;
+    // Marked not watched is not where the viewer is up to.
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
     const card = played(entry.videoId);
     const item = card && continueItem(entry, card, progress, now);

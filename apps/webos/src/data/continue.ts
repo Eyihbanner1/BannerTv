@@ -1,6 +1,7 @@
 import {
   CONTINUE_LIMIT,
   continueItem,
+  isUnmarked,
   type PlayedVideo,
   playedCard,
   type ProgressEntry,
@@ -110,14 +111,16 @@ function eachWithoutCard(
   let places = 0;
   for (const entry of progress.recent()) {
     if (places >= CONTINUE_LIMIT) break;
-    if (seen.has(entry.metaId)) continue;
+    // Marked not watched: the row passes over it, as continueWatching does.
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
     // Kept only to resume, as a sports replay is: never on the row, so no addon is asked
     // for its page. A fan-out would ask addons that never listed it.
     if (entry.continueRow === false) continue;
     // A film with nothing left to resume is never on the row, so needs no card;
-    // nor is a video of unknown length, such as a live broadcast.
-    if (entry.duration <= 0) continue;
+    // nor is a video of unknown length, such as a live broadcast, unless it was
+    // marked watched: an episode marked so offers the next one.
+    if (entry.duration <= 0 && !entry.watched) continue;
     if (entry.type === 'movie' && progress.resumeAt(entry.videoId) === undefined) continue;
     const card = playedVideos.get(entry.videoId);
     if (card && (card.type === 'movie' || card.episode !== undefined)) {

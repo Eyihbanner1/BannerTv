@@ -2422,11 +2422,15 @@ test('on a series, Next episode sits after Forward 10 s and plays the next one; 
 });
 
 /** Plays the series' first episode from its page, as the viewer would. */
-async function playFirstEpisode(page: Page) {
+/** `opensAt`: the episode Details opens on, the one after the furthest Trakt ticks. */
+async function playFirstEpisode(page: Page, opensAt = 0) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
-  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'Enter', `details-episodes-${opensAt}`);
+  for (let index = opensAt - 1; index >= 0; index--) {
+    await press(page, 'ArrowUp', `details-episodes-${index}`);
+  }
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 }
@@ -2446,7 +2450,8 @@ test('Episodes opens on the episode playing, says where each one is, and plays a
   await mockAddons(page, { upcoming: ['tt8000001:2:3'] });
   await seedStreamAddon(page, { kv: { traktWatched: ['tt8000001:1:2'] } });
   const mock = await mockPlayback(page);
-  await playFirstEpisode(page);
+  // Details opens on the episode after the one Trakt ticks.
+  await playFirstEpisode(page, 2);
 
   // The 720p release, picked in Quality: auto-play chooses 1080p.
   await press(page, 'ArrowUp', 'player-play');

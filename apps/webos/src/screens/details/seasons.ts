@@ -1,4 +1,4 @@
-import { MIN_RESUME_SECONDS, nextVideo, type ProgressEntry } from '@bannertv/core';
+import { isUnmarked, MIN_RESUME_SECONDS, nextVideo, type ProgressEntry } from '@bannertv/core';
 import type { MetaDetail, Video } from '@bannertv/protocol';
 
 export interface Season {
@@ -62,7 +62,8 @@ export function episodeState(
   now: number,
 ): EpisodeState {
   if (video.released !== undefined && Date.parse(video.released) > now) return { kind: 'upcoming' };
-  if (seen?.watched === true || watched) return { kind: 'watched' };
+  // Marked not watched here outranks Trakt's tick.
+  if (seen?.watched === true || (watched && !isUnmarked(seen))) return { kind: 'watched' };
   if (seen && seen.duration > 0 && seen.position > 0) {
     return {
       kind: 'started',
@@ -96,8 +97,58 @@ export interface StartReader {
   ticked: (videoId: string) => boolean;
 }
 
-function aired(video: Video, now: number): boolean {
+/**
+ * The reader a series' page uses: the latest progress that says where the
+ * viewer is up to (an episode marked not watched does not), and Trakt's ticks
+ * less those marked not watched here.
+ */
+export function startReader(
+  progress: {
+    forMeta(metaId: string): readonly ProgressEntry[];
+    get(videoId: string): ProgressEntry | undefined;
+    resumeAt(videoId: string): number | undefined;
+  },
+  ticks: { has(videoId: string): boolean },
+  metaId: string,
+): StartReader {
+  return {
+    latest: progress.forMeta(metaId).find((entry) => !isUnmarked(entry)),
+    resumeAt: (videoId) => progress.resumeAt(videoId),
+    ticked: (videoId) => ticks.has(videoId) && !isUnmarked(progress.get(videoId)),
+  };
+}
+
+/** Out by `now`: an undated or unreadable date counts as out. */
+export function aired(video: Video, now: number): boolean {
   return episodeState(video, undefined, false, now).kind !== 'upcoming';
+}
+
+/** What marking offers for an episode held on a series' page. */
+export interface MarkOffer {
+  /** The episode is watched: it is offered as not watched. */
+  watched: boolean;
+  /** The season's episodes that are out, which Mark season marks. */
+  out: Video[];
+  /** All of those are watched: the season is offered as not watched. */
+  allWatched: boolean;
+  /** The season's number, when it can be marked: a numbered season with more than one out. */
+  season: number | undefined;
+}
+
+export function markOffer(
+  video: Video,
+  season: Season,
+  isWatched: (videoId: string) => boolean,
+  now: number,
+): MarkOffer {
+  const out = season.videos.filter((episode) => aired(episode, now));
+  const markable = season.number !== null && season.number > 0 && out.length > 1;
+  return {
+    watched: isWatched(video.id),
+    out,
+    allWatched: out.length > 0 && out.every((episode) => isWatched(episode.id)),
+    season: markable ? season.number! : undefined,
+  };
 }
 
 /** The ticked regular episode furthest into the series, by season then episode. */

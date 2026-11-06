@@ -1,4 +1,4 @@
-import { HISTORY_LIMIT, type PlayedVideo, playedCard } from '@bannertv/core';
+import { HISTORY_LIMIT, isUnmarked, type PlayedVideo, playedCard } from '@bannertv/core';
 import type { ContentType, MetaDetail } from '@bannertv/protocol';
 import { addonClient } from './addons';
 import { library } from './library';
@@ -89,7 +89,8 @@ function wantHistoryCards(): void {
   const seen = new Set<string>();
   for (const entry of progress.recent()) {
     if (seen.size >= HISTORY_LIMIT) break;
-    if (seen.has(entry.metaId)) continue;
+    // Marked not watched: History passes over it, as historyView does.
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
     if (playedVideos.get(entry.videoId) || sessionCards.has(entry.videoId)) continue;
     // Kept only to resume, as a sports replay is: only the addon that listed it may be asked.

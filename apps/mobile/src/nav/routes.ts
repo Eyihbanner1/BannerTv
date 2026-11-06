@@ -98,6 +98,11 @@ export function openCatalog(route: CatalogRoute): void {
   router.push({ pathname: '/catalog', params: { key: keep(route) } });
 }
 
+/** Browse: every catalog, by type, catalog and genre (the TV's Discover). */
+export function openBrowse(): void {
+  router.push('/browse');
+}
+
 export function goBack(): void {
   if (router.canGoBack()) router.back();
   else router.replace('/');

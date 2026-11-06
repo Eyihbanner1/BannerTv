@@ -292,6 +292,12 @@ export function HomeScreen() {
     latestContinuing.current = continuing;
   });
 
+  // Where focus goes when the last title is taken off Continue Watching.
+  const focusAfterContinue = useCallback(() => {
+    const first = latestRows.current[0];
+    return first ? rowFocusKey(first) : RAIL_FOCUS_KEY;
+  }, []);
+
   // A row that turns out empty hands its place to the row below (or above, at
   // the end, which is Continue Watching above the first catalog row): the view
   // and the drawn rows follow, and so does focus if it was in the row, rather
@@ -419,7 +425,13 @@ export function HomeScreen() {
       <Hero />
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
-          {continuing && <ContinueRow items={continueItems} onItemFocus={onItemFocus} />}
+          {continuing && (
+            <ContinueRow
+              items={continueItems}
+              onItemFocus={onItemFocus}
+              focusAfterRow={focusAfterContinue}
+            />
+          )}
           {catalogRows}
         </div>
       </div>
