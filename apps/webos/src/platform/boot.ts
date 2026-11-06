@@ -8,7 +8,9 @@ const script = typeof document === 'undefined' ? null : document.currentScript;
 /**
  * When the bundle started to run, in ms since the page began to load
  * (performance.now()). main.tsx imports this module first, so this is read
- * before any other module of the bundle runs.
+ * before any other module of the bundle runs. Only the build's own first
+ * statement goes before it: the one that adds the app's stylesheet (about
+ * 60 KB of CSS), so boot:script comes after the page has taken that in.
  */
 export const scriptAt =
   typeof performance !== 'undefined' && typeof performance.now === 'function'
