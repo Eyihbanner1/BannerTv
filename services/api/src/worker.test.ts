@@ -349,6 +349,23 @@ describe('trakt', () => {
     expect(sent).toHaveLength(5);
   });
 
+  it('removes one paused item with a DELETE that carries no body', async () => {
+    // Trakt answers a removal with 204 and no body at all.
+    const sent = fakeUpstream(() => new Response(null, { status: 204 }));
+    const response = await trakt({
+      method: 'DELETE',
+      path: '/sync/playback/13',
+      token: 'viewer-token',
+    });
+    expect(response.json()).toEqual({ status: 204, data: null });
+    expect(sent).toHaveLength(1);
+    const request = sent[0]!;
+    expect(request.method).toBe('DELETE');
+    expect(request.url).toBe('https://api.trakt.tv/sync/playback/13');
+    expect(request.headers.get('Authorization')).toBe('Bearer viewer-token');
+    expect(request.body).toBeUndefined();
+  });
+
   it('refuses what it does not pass on, without asking Trakt', async () => {
     const sent = fakeUpstream(() => reply('{}'));
     for (const body of [
@@ -356,7 +373,8 @@ describe('trakt', () => {
       'not json',
       '{"method":"GET","path":"/sync/watchlist"',
       JSON.stringify({ method: 'GET', path: '/users/me' }),
-      JSON.stringify({ method: 'DELETE', path: '/sync/playback/123' }),
+      JSON.stringify({ method: 'DELETE', path: '/sync/playback/abc' }),
+      JSON.stringify({ method: 'DELETE', path: '/sync/playback/123?limit=1' }),
       JSON.stringify({ method: 'POST', path: '/sync/watched/movies' }),
       JSON.stringify({ method: 'GET', path: '/sync/watchlist?api_key=x' }),
       JSON.stringify({ method: 'GET', path: '/sync/watchlist', token: 'two words' }),
