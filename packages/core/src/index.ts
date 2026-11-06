@@ -109,6 +109,20 @@ export {
   type LibrarySort,
   libraryView,
 } from './library/views';
+export {
+  CALENDAR_MAX_TITLES,
+  CALENDAR_WINDOW,
+  type CalendarDay,
+  calendarDays,
+  type CalendarEntry,
+  calendarEntries,
+  type CalendarKind,
+  calendarStart,
+  calendarView,
+  type CalendarWindow,
+  type FollowedTitle,
+  followedTitles,
+} from './library/calendar';
 export { createLimiter, type Limiter } from './limiter';
 export { createPersisted, type Persisted, type PersistedOptions } from './persisted';
 export {

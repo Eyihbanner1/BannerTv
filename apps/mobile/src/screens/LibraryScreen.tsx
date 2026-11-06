@@ -1,4 +1,5 @@
 import { historyView, kidsTitleAllowed, libraryView, type LibraryKind } from '@bannertv/core';
+import { useCalendar } from '@tv/data/calendar';
 import { library } from '@tv/data/library';
 import {
   fillLibraryCards,
@@ -15,13 +16,14 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { syncForRefresh } from '../data/refresh';
 import { openTitle } from '../nav/routes';
+import { CalendarList } from '../ui/CalendarList';
 import { Chip } from '../ui/Chip';
 import { Grid } from '../ui/Grid';
 import { Message } from '../ui/Message';
 import { colors, gutter, space, type } from '../ui/theme';
 import { usePullRefresh } from '../ui/use-pull-refresh';
 
-type Show = 'list' | 'history';
+type Show = 'list' | 'history' | 'calendar';
 
 const subscribeAll = (listener: () => void) => {
   const undo = [
@@ -42,6 +44,7 @@ export function LibraryScreen() {
   const [loaded, setLoaded] = useState(false);
   const [show, setShow] = useState<Show>('list');
   const [kind, setKind] = useState<LibraryKind>('all');
+  const calendar = useCalendar(kind, show === 'calendar');
 
   useEffect(() => {
     void Promise.all([library.load(), progress.load(), playedVideos.load()])
@@ -51,9 +54,15 @@ export function LibraryScreen() {
 
   // Titles from Trakt arrive without artwork: it is fetched while this tab is the one on
   // show (it stays mounted behind the others).
-  useFocusEffect(useCallback(() => (loaded ? fillLibraryCards(show) : undefined), [loaded, show]));
+  useFocusEffect(
+    useCallback(
+      () => (loaded && show !== 'calendar' ? fillLibraryCards(show) : undefined),
+      [loaded, show],
+    ),
+  );
 
   const items = useMemo(() => {
+    if (show === 'calendar') return [];
     const shown =
       show === 'list'
         ? libraryView(library.items(), kind, 'added')
@@ -67,9 +76,19 @@ export function LibraryScreen() {
   // what came. The tab's own watch above keeps that going; this one only queues it.
   const refreshControl = usePullRefresh(() =>
     syncForRefresh().then(() => {
-      if (loaded) fillLibraryCards(show)();
+      if (loaded && show !== 'calendar') fillLibraryCards(show)();
     }),
   );
+
+  // The calendar fills in as titles answer: the phone scrolls, so rows may move.
+  let message: string | null = null;
+  if (show === 'calendar') {
+    if (calendar.days.length === 0) {
+      message = calendar.loading ? t('calendar.loading') : t('calendar.empty');
+    }
+  } else if (loaded && items.length === 0) {
+    message = show === 'list' ? t('library.emptyList') : t('library.emptyHistory');
+  }
 
   const header = (
     <View style={[styles.header, { paddingTop: insets.top + space.m }]}>
@@ -82,6 +101,11 @@ export function LibraryScreen() {
           label={t('library.history')}
           on={show === 'history'}
           onPress={() => setShow('history')}
+        />
+        <Chip
+          label={t('calendar.show')}
+          on={show === 'calendar'}
+          onPress={() => setShow('calendar')}
         />
       </View>
       <ScrollView
@@ -98,15 +122,25 @@ export function LibraryScreen() {
           onPress={() => setKind('series')}
         />
       </ScrollView>
-      {loaded && items.length === 0 ? (
-        <Message lead={show === 'list' ? t('library.emptyList') : t('library.emptyHistory')} />
+      {show === 'calendar' && calendar.days.length > 0 ? (
+        <Text style={styles.lead}>{t('calendar.lead')}</Text>
       ) : null}
+      {message ? <Message lead={message} /> : null}
     </View>
   );
 
   return (
     <View style={styles.screen}>
-      <Grid items={items} onPress={openTitle} header={header} refreshControl={refreshControl} />
+      {show === 'calendar' ? (
+        <CalendarList
+          days={calendar.days}
+          onPress={openTitle}
+          header={header}
+          refreshControl={refreshControl}
+        />
+      ) : (
+        <Grid items={items} onPress={openTitle} header={header} refreshControl={refreshControl} />
+      )}
     </View>
   );
 }
@@ -117,4 +151,5 @@ const styles = StyleSheet.create({
   title: { ...type.display, color: colors.text, paddingHorizontal: gutter },
   chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: gutter },
   kinds: { flexGrow: 0 },
+  lead: { ...type.meta, color: colors.textMuted, paddingHorizontal: gutter },
 });

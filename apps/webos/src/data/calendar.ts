@@ -1,0 +1,147 @@
+import {
+  type CalendarDay,
+  type CalendarEntry,
+  calendarView,
+  followedTitles,
+  kidsTitleAllowed,
+  type LibraryKind,
+  libraryPreview,
+} from '@bannertv/core';
+import type { MetaDetail } from '@bannertv/protocol';
+import type { TFunction } from 'i18next';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { addonClient } from './addons';
+import { library, watchedSet } from './library';
+import { playedVideos, progress } from './playback';
+import { isKidsProfile } from './profiles';
+
+export interface CalendarState {
+  days: CalendarDay[];
+  /** Some followed titles' dates are still being asked for. */
+  loading: boolean;
+  /** How many titles the calendar follows. */
+  following: number;
+}
+
+const subscribeLists = (listener: () => void) => {
+  const undo = [
+    library.subscribe(listener),
+    progress.subscribe(listener),
+    playedVideos.subscribe(listener),
+  ];
+  return () => undo.forEach((stop) => stop());
+};
+const listVersions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
+
+/**
+ * The calendar of the series this profile watches and the series and films
+ * on its My List, from their addons' meta (cached, so a second visit opens
+ * at once). Shared by the TV and the phone. While `enabled` is false nothing
+ * is asked for.
+ */
+export function useCalendar(kind: LibraryKind, enabled = true): CalendarState {
+  const lists = useSyncExternalStore(subscribeLists, listVersions);
+  const [loaded, setLoaded] = useState(false);
+  const [changes, setChanges] = useState(0);
+  // Read once per visit; a screen left open past midnight shows yesterday's "Today".
+  const [now] = useState(Date.now);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    void Promise.all([library.load(), progress.load(), playedVideos.load()])
+      .catch(() => undefined)
+      .then(() => {
+        if (live) setLoaded(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [enabled]);
+
+  const queries = useMemo(() => {
+    if (!enabled || !loaded) return [];
+    const kids = isKidsProfile();
+    const items = kids
+      ? library.items().filter((item) => kidsTitleAllowed(libraryPreview(item), true))
+      : library.items();
+    return followedTitles(items, progress.recent()).map((title) =>
+      addonClient.meta(title.type, title.id),
+    );
+    // `lists` stands for the contents of My List and the history.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, loaded, lists]);
+
+  useEffect(() => {
+    const stops = queries.map((query) => query.subscribe(() => setChanges((n) => n + 1)));
+    queries.forEach((query) => query.load());
+    return () => stops.forEach((stop) => stop());
+  }, [queries]);
+
+  return useMemo(() => {
+    const states = queries.map((query) => query.get());
+    const kids = isKidsProfile();
+    const metas = states
+      .map((state) => state.data)
+      .filter((meta): meta is MetaDetail => meta !== undefined)
+      .filter((meta) => !kids || kidsTitleAllowed(meta, true));
+    return {
+      days: calendarView(metas, now, kind),
+      loading:
+        enabled &&
+        (!loaded || states.some((state) => state.status === 'idle' || state.status === 'loading')),
+      following: queries.length,
+    };
+    // `changes` stands for the queries' answers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queries, changes, kind, now, loaded, enabled]);
+}
+
+const weekday = (start: number, form: 'long' | 'short') =>
+  new Date(start).toLocaleDateString('en-GB', { weekday: form });
+const dayAndMonth = (start: number) =>
+  new Date(start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+/** "Today", "Tomorrow", "Thursday" within the week, else "Thu"; and the date under it. */
+export function calendarDayLabel(t: TFunction, day: CalendarDay): { name: string; date: string } {
+  const date = dayAndMonth(day.start);
+  if (day.offset === 0) return { name: t('calendar.today'), date };
+  if (day.offset === 1) return { name: t('calendar.tomorrow'), date };
+  if (day.offset === -1) return { name: t('calendar.yesterday'), date };
+  if (day.offset > 1 && day.offset < 7) return { name: weekday(day.start, 'long'), date };
+  return { name: weekday(day.start, 'short'), date };
+}
+
+/** The line under the title: "S2 · E5 · Name", "S3 · E1–8 · 8 episodes", or "Film release". */
+export function calendarEntryLine(t: TFunction, entry: CalendarEntry): string {
+  if (entry.kind === 'movie') return t('calendar.film');
+  const parts: string[] = [];
+  if (entry.season !== undefined) parts.push(t('calendar.season', { season: entry.season }));
+  if (entry.episode !== undefined) {
+    parts.push(
+      entry.lastEpisode !== undefined
+        ? t('calendar.episodes', { first: entry.episode, last: entry.lastEpisode })
+        : t('calendar.episode', { episode: entry.episode }),
+    );
+  }
+  if (entry.lastEpisode !== undefined && entry.episode !== undefined) {
+    parts.push(t('calendar.count', { number: entry.lastEpisode - entry.episode + 1 }));
+  } else if (entry.episodeTitle) {
+    parts.push(entry.episodeTitle);
+  }
+  return parts.join(' · ');
+}
+
+/** A short tag for the entry, or '': an episode already seen, a premiere, or one out now. */
+export function calendarEntryTag(t: TFunction, entry: CalendarEntry, day: CalendarDay): string {
+  if (entry.kind === 'episode' && isWatched(entry.videoId)) return t('calendar.watched');
+  if (entry.kind === 'episode' && entry.episode === 1) {
+    return entry.season === 1 ? t('calendar.seriesPremiere') : t('calendar.seasonPremiere');
+  }
+  if (day.offset <= 0) return t('calendar.new');
+  return '';
+}
+
+function isWatched(videoId: string): boolean {
+  return watchedSet.has(videoId) || progress.get(videoId)?.watched === true;
+}
