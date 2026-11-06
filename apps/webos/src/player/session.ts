@@ -162,6 +162,33 @@ export interface PlaybackSession {
   destroy(): void;
 }
 
+/** The bar moves on at least every thousandth of its length, however short the video. */
+const BAR_STEPS = 1000;
+
+type ClockReading = Pick<SessionState, 'position' | 'duration' | 'liveWindow' | 'behind'>;
+
+function sameWindow(a: LiveWindow | null, b: LiveWindow | null): boolean {
+  if (!a || !b) return a === b;
+  return a.start === b.start && a.live === b.live && a.slack === b.slack;
+}
+
+/**
+ * Whether a reading of the media clock changes what the player shows, so it
+ * is worth a render. The times show whole seconds, and on a film the bar
+ * moves less than a pixel a second, so a reading within the same second is
+ * left out, unless a thousandth of the bar is less than a second (a short
+ * video). The length, a broadcast's window and how far behind live it is
+ * always count.
+ */
+export function clockShows(before: ClockReading, next: ClockReading): boolean {
+  if (next.duration !== before.duration || next.behind !== before.behind) return true;
+  if (!sameWindow(before.liveWindow, next.liveWindow)) return true;
+  if (Math.floor(next.position) !== Math.floor(before.position)) return true;
+  const kept = next.liveWindow;
+  const span = kept ? kept.live - kept.start : next.duration;
+  return span > 0 && Math.abs(next.position - before.position) >= span / BAR_STEPS;
+}
+
 export const INITIAL_SESSION_STATE: SessionState = {
   status: 'idle',
   entry: null,
@@ -238,6 +265,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let wantedText: string | null = null;
   // Shaka lets go of the video element asynchronously; the next engine waits for it.
   let releasing: Promise<void> = Promise.resolve();
+  // The status when the clock was last read into the state.
+  let tickStatus: SessionStatus | undefined;
 
   function release() {
     const old = engine;
@@ -639,7 +668,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
-        patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
+        const reading = { position: trusted ?? lastStartAt, duration, ...judge(position) };
+        // About four readings a second: only those that change what shows, or the first since
+        // the status changed, render the player again.
+        const shown = state.get();
+        if (shown.status !== tickStatus || clockShows(shown, reading)) {
+          tickStatus = shown.status;
+          patch(reading);
+        }
       },
     ],
     [

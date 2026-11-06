@@ -4,6 +4,7 @@ import { labStream } from '../lab/player';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  clockShows,
   LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
@@ -1318,6 +1319,62 @@ describe('play stage marks', () => {
     ]);
     // All of them the finder's, which names the video.
     expect(new Set(marks.playMark.mock.calls.map(([finder]) => finder)).size).toBe(1);
+    session.destroy();
+  });
+});
+
+describe('the media clock', () => {
+  const at = (position: number, duration = 7200) => ({
+    position,
+    duration,
+    liveWindow: null,
+    behind: 0,
+  });
+
+  it('renders again only for a reading that changes what shows', () => {
+    // A film: the times show whole seconds, and the bar moves under a pixel a second.
+    expect(clockShows(at(10.05), at(10.3))).toBe(false);
+    expect(clockShows(at(10.8), at(11.05))).toBe(true);
+    expect(clockShows(at(11.05), at(10.9))).toBe(true);
+    expect(clockShows(at(10.05), at(10.3, 7300))).toBe(true);
+    // A short clip: a thousandth of its bar is less than a second.
+    expect(clockShows(at(10.05, 30), at(10.3, 30))).toBe(true);
+    expect(clockShows(at(10.05, 30), at(10.06, 30))).toBe(false);
+  });
+
+  it("counts a broadcast's window and how far behind live it is", () => {
+    const window = { start: 7000, live: 7200, slack: 6 };
+    const live = (position: number, behind: number, kept = window) => ({
+      position,
+      duration: 0,
+      liveWindow: kept,
+      behind,
+    });
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.3, 99.7))).toBe(true);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window }))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window, live: 7206 }))).toBe(
+      true,
+    );
+    expect(clockShows(live(7100.05, 0), { ...live(7100.1, 0), liveWindow: null })).toBe(true);
+  });
+
+  it('tells the player about whole seconds of playback, not every reading', async () => {
+    const { video, session } = setup();
+    await start(session, video, first);
+    const heard = vi.fn();
+    session.subscribe(heard);
+    for (const time of [1, 1.25, 1.5, 1.75, 2, 2.25]) {
+      video.currentTime = time;
+      video.fire('timeupdate');
+    }
+    expect(heard).toHaveBeenCalledTimes(2);
+    expect(session.get().position).toBe(2);
+    // A pause tells it at once, and the next reading brings the clock up to date.
+    video.pause();
+    video.currentTime = 2.4;
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ status: 'paused', position: 2.4 });
     session.destroy();
   });
 });

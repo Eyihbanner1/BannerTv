@@ -18,6 +18,7 @@ import {
   type SubtitleListState,
   type SubtitleOption,
 } from '../../player/subtitles';
+import { sameAsLast } from './same-as-last';
 
 /** A subtitle file from an addon, or one of the stream's own tracks (HLS through hls.js). */
 export type SubtitleChoice = { kind: 'file'; key: string } | { kind: 'track'; id: string } | null;
@@ -128,10 +129,13 @@ export function useSubtitles(
   // Links of files that failed for this video, so a retry moves on to another,
   // and the same for the rows to show.
   const broken = useRef(new Set<string>());
+  // Counts the changes to `broken`, so a decision can tell whether it has changed.
+  const brokenChanges = useRef(0);
   const [failedLinks, setFailedLinks] = useState<ReadonlySet<string>>(() => new Set());
   const markBroken = (url: string, failed: boolean) => {
     if (failed) broken.current.add(url);
     else broken.current.delete(url);
+    brokenChanges.current++;
     setFailedLinks(new Set(broken.current));
   };
   const { options, pending } = listState;
@@ -141,6 +145,8 @@ export function useSubtitles(
   useEffect(() => {
     if (!entry || !session || !list) return;
     let stopped = false;
+    // The session tells of every clock reading, which changes nothing a decision reads.
+    const nothingNew = sameAsLast();
     const settle = (next: SubtitleChoice) => {
       decided.current = { entry, choice: next, auto: true };
       setChosen({ entry, choice: next });
@@ -148,11 +154,13 @@ export function useSubtitles(
     const decide = () => {
       if (stopped) return;
       const { text, status, engine } = session.get();
+      const listed = list.get();
+      const made = decided.current;
+      const wanted = isSubtitleCheck(entry) ? null : wantedSubtitle(metaId);
+      if (nothingNew([text, status, engine, listed, made, wanted, brokenChanges.current])) return;
       // hls.js and Shaka list the stream's tracks before its first picture; the
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
-      const made = decided.current;
-      const wanted = isSubtitleCheck(entry) ? null : wantedSubtitle(metaId);
       if (made?.entry === entry) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
@@ -181,7 +189,7 @@ export function useSubtitles(
         return;
       }
       // Addon files often arrive first, but the stream's own track wins once listed.
-      const { options: offered, pending: waiting } = list.get();
+      const { options: offered, pending: waiting } = listed;
       // One that failed earlier for this video only when it is all there is.
       const inLanguage = offered.filter((o) => languageKey(o.lang) === key);
       const file = inLanguage.find((o) => !broken.current.has(o.url)) ?? inLanguage[0];
