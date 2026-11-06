@@ -153,6 +153,12 @@ export interface PlaybackSession {
   /** The trusted position: never the 0 that webOS reads right after a resume. */
   trustedPosition(): number | undefined;
   /**
+   * On a broadcast, what it keeps and where live is now, read from the engine
+   * at the moment. The state's liveWindow is only refreshed as the time behind
+   * live changes, so it can be minutes old while that stays steady.
+   */
+  liveWindow(): LiveWindow | null;
+  /**
    * Where another stream of this video starts (Quality, Other streams, Try
    * again): where playback is now, or the live edge (0) of a live stream,
    * whose clock means nothing on another source's.
@@ -938,6 +944,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     saveProgress: save,
 
     trustedPosition: () => tracker?.position(),
+
+    liveWindow,
 
     carryOn,
 
