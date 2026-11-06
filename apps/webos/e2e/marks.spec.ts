@@ -204,14 +204,7 @@ test('a film can be marked watched from its page', async ({ page }) => {
   await seedStreamAddon(page);
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  // Home's first OK is sometimes lost under load, on the base branch too: press until Details shows.
-  await expect(async () => {
-    const focused = page.locator('[data-focused="true"]');
-    if ((await focused.getAttribute('data-focus-key')) !== 'details-watch') {
-      await page.keyboard.press('Enter');
-    }
-    await expect(focused).toHaveAttribute('data-focus-key', 'details-watch', { timeout: 1000 });
-  }).toPass();
+  await press(page, 'Enter', 'details-watch');
   const button = page.locator('[data-focus-key="details-watched"]');
   await expect(button).toHaveAttribute('aria-label', /^Mark .+ as watched$/);
   // A pointer click well after OK, which would count as that OK's own click.

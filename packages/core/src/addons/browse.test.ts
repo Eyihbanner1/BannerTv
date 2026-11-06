@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { catalogsFromManyAddons, discoverSelection, resolveDiscover } from './browse';
+import { parseManifest } from '@bannertv/protocol';
+import {
+  catalogsFromManyAddons,
+  discoverSelection,
+  moreLikeSource,
+  resolveDiscover,
+} from './browse';
+import type { InstalledAddon } from './collection';
 import type { DiscoverSource } from './sources';
 
 function source(
@@ -83,5 +90,58 @@ describe('discoverSelection and catalogsFromManyAddons', () => {
   it('says when a type has catalogs from more than one addon', () => {
     expect(catalogsFromManyAddons(resolveDiscover(SOURCES, undefined)!)).toBe(true);
     expect(catalogsFromManyAddons(resolveDiscover([SERIES], undefined)!)).toBe(false);
+  });
+});
+
+describe('moreLikeSource', () => {
+  const addon = (id: string, idPrefixes: string[], catalogs: unknown[]): InstalledAddon => ({
+    transportUrl: `https://${id}.example/manifest.json`,
+    manifest: parseManifest({
+      id,
+      version: '1.0.0',
+      name: id,
+      types: ['movie'],
+      resources: ['catalog'],
+      idPrefixes,
+      catalogs,
+    }),
+    official: false,
+    fetchedAt: 0,
+  });
+  const byGenre = (id: string, options: string[], isRequired = false) => ({
+    type: 'movie',
+    id,
+    name: id,
+    extra: [{ name: 'genre', options, isRequired }],
+  });
+  const other = addon('other', ['yt'], [byGenre('all', [])]);
+  const cinemeta = addon(
+    'cinemeta',
+    ['tt'],
+    [{ type: 'movie', id: 'plain', name: 'plain' }, byGenre('top', ['Action', 'Drama'])],
+  );
+  const film = { id: 'tt0000001', genres: ['Drama', 'Action'] };
+
+  it('takes the first genre from the addon that lists the title, then any that can filter', () => {
+    expect(moreLikeSource([other, cinemeta], film, 'movie')).toMatchObject({
+      addon: cinemeta,
+      catalog: { id: 'top' },
+      genre: 'Drama',
+    });
+    expect(
+      moreLikeSource([other, cinemeta], { id: 'x1', genres: ['Jazz'] }, 'movie'),
+    ).toMatchObject({ addon: other, genre: 'Jazz' });
+  });
+
+  it('passes over other types, left-out catalogs, and catalogs that need more than a genre', () => {
+    expect(moreLikeSource([cinemeta], film, 'series')).toBeUndefined();
+    expect(moreLikeSource([cinemeta], film, 'movie', () => true)).toBeUndefined();
+    const needsMore = addon(
+      'needs',
+      ['tt'],
+      [{ ...byGenre('n', []), extra: [{ name: 'genre' }, { name: 'skip', isRequired: true }] }],
+    );
+    expect(moreLikeSource([needsMore], film, 'movie')).toBeUndefined();
+    expect(moreLikeSource([cinemeta], { id: 'tt1', genres: [] }, 'movie')).toBeUndefined();
   });
 });

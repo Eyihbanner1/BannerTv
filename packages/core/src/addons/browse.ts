@@ -1,4 +1,6 @@
-import type { ContentType } from '@bannertv/protocol';
+import type { ContentType, ManifestCatalog, MetaPreview } from '@bannertv/protocol';
+import type { CatalogFilter } from './board';
+import type { InstalledAddon } from './collection';
 import { type DiscoverSource, orderedTypes } from './sources';
 
 /**
@@ -69,4 +71,46 @@ export function discoverSelection(
  */
 export function catalogsFromManyAddons(resolved: DiscoverResolved): boolean {
   return resolved.ofType.some((s) => s.addon !== resolved.ofType[0]!.addon);
+}
+
+/** Where a title page's "More like this" comes from: a catalog filtered by the title's genre. */
+export interface MoreLikeSource {
+  addon: InstalledAddon;
+  catalog: ManifestCatalog;
+  genre: string;
+}
+
+/**
+ * "More Drama from Cinemeta": the first installed addon with a catalog of the
+ * title's type that can be filtered by its first genre and needs nothing
+ * else. Addons that list the title's own ids go first. Catalogs `leaveOut`
+ * names, such as sport, are passed over. Undefined with no genre or no such
+ * catalog.
+ */
+export function moreLikeSource(
+  addons: readonly InstalledAddon[],
+  item: Pick<MetaPreview, 'id' | 'genres'>,
+  type: string,
+  leaveOut?: CatalogFilter,
+): MoreLikeSource | undefined {
+  const genre = item.genres[0];
+  if (!genre) return undefined;
+  const own = (addon: InstalledAddon) =>
+    addon.manifest.idPrefixes?.some((prefix) => item.id.indexOf(prefix) === 0) ? 0 : 1;
+  // Chromium 68 sorts unstably, so ties keep the addons' order by hand.
+  const ordered = addons
+    .map((addon, index) => ({ addon, index }))
+    .sort((a, b) => own(a.addon) - own(b.addon) || a.index - b.index)
+    .map(({ addon }) => addon);
+  for (const addon of ordered) {
+    for (const catalog of addon.manifest.catalogs) {
+      if (catalog.type !== type || leaveOut?.(addon, catalog)) continue;
+      const byGenre = catalog.extra.find((extra) => extra.name === 'genre');
+      if (!byGenre) continue;
+      if (byGenre.options.length > 0 && byGenre.options.indexOf(genre) === -1) continue;
+      if (catalog.extra.some((extra) => extra.isRequired && extra.name !== 'genre')) continue;
+      return { addon, catalog, genre };
+    }
+  }
+  return undefined;
 }

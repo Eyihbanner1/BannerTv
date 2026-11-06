@@ -211,3 +211,43 @@
   color: #fff;
   box-shadow: var(--bt-focus-ring);
 }
+
+/* The column slides up while focus is in More like this. */
+.info {
+  transition: transform var(--bt-motion) ease-out;
+}
+
+/* More like this: its own inset lines it up with the text above. Beside the
+   episodes it stops short of their panel; a film's runs to the edge. */
+.more {
+  width: 880px;
+  margin: 48px 0 0 calc(-1 * var(--bt-content-inset));
+}
+
+.moreWide {
+  width: 1736px;
+}
+
+/* "Best stream ready · 1080p" under the buttons. */
+.ready {
+  margin-top: 24px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.readyDot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 12px;
+  border-radius: 6px;
+  background: var(--bt-text-subtle);
+}
+
+.readyOn {
+  background: var(--bt-accent);
+}
+
+.readyOff {
+  background: var(--bt-danger);
+}

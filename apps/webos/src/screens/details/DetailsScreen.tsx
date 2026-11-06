@@ -2,7 +2,7 @@ import { kidsTitleAllowed, ratingAllowed, type TmdbDetails, tmdbImageUrl } from 
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import type { TFunction } from 'i18next';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -23,6 +23,7 @@ import { playTrailer } from '../../platform/youtube';
 import { formatTime } from '../../player/media';
 import { usePrefetch } from '../../player/prefetch';
 import { EpisodeList } from './EpisodeList';
+import { MoreLikeThis } from './MoreLikeThis';
 import { MyListButton } from './MyListButton';
 import {
   groupSeasons,
@@ -35,10 +36,14 @@ import {
   type StartReader,
   startReader,
 } from './seasons';
+import { StreamReady } from './StreamReady';
 import { WatchedButton } from './WatchedButton';
 import styles from './DetailsScreen.module.css';
 
 const MAX_CAST = 4;
+/** With focus in More like this, the page slides up so the row ends this far above the bottom. */
+const SCREEN_HEIGHT = 1080;
+const MORE_MARGIN = 32;
 /** Cast shown with TMDB's photos. */
 const MAX_FACES = 6;
 
@@ -305,7 +310,34 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
     setNote(null);
     push({ name: 'player', type, metaId: id, videoId, preview: item, startAt });
   };
-  const restOn = (videoId: string | null) => () => setResting(videoId);
+  // Focus back on the buttons or the episodes brings the page back down from More like this.
+  const [slide, setSlide] = useState(0);
+  const restOn = (videoId: string | null) => () => {
+    setResting(videoId);
+    setSlide(0);
+  };
+  const onMoreFocus = useCallback(
+    (row: HTMLElement) => {
+      setResting(null);
+      setSlide(Math.min(0, SCREEN_HEIGHT - MORE_MARGIN - (row.offsetTop + row.offsetHeight)));
+    },
+    [setResting, setSlide],
+  );
+  // The line under the buttons speaks of what Watch, Resume or Next would play.
+  const primaryVideoId = watchVideoId ?? start?.video.id ?? null;
+  // The buttons and More like this sit in one column, so Left from the episodes
+  // comes back to the first button rather than to whichever poster is nearest.
+  const { ref: infoRef, focusKey: infoKey } = useFocusable<object, HTMLDivElement>({
+    focusKey: 'details-info',
+    saveLastFocusedChild: false,
+    preferredChildFocusKey: failed
+      ? 'details-retry'
+      : watchVideoId !== null
+        ? 'details-watch'
+        : start
+          ? 'details-start'
+          : 'details-my-list',
+  });
   // Progress is kept under the id the page opened with, which the addon's answer may not repeat.
   const route = useMemo(() => ({ metaId: id, type }), [id, type]);
 
@@ -353,133 +385,147 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
           />
         )}
       </div>
-      <div className={isMovie ? `${styles.info} ${styles.wide}` : styles.info}>
-        <div className={styles.logoBox}>
-          {item ? (
-            <Artwork
-              key={logo}
-              src={logo}
-              retrySrc={item.logo}
-              className={styles.logo}
-              fallback={<h1 className={styles.title}>{item.name}</h1>}
-            />
-          ) : (
-            <h1 className={styles.title}>{t('details.loading')}</h1>
+      <FocusContext.Provider value={infoKey}>
+        <div
+          ref={infoRef}
+          className={isMovie ? `${styles.info} ${styles.wide}` : styles.info}
+          style={slide ? { transform: `translateY(${slide}px)` } : undefined}
+        >
+          <div className={styles.logoBox}>
+            {item ? (
+              <Artwork
+                key={logo}
+                src={logo}
+                retrySrc={item.logo}
+                className={styles.logo}
+                fallback={<h1 className={styles.title}>{item.name}</h1>}
+              />
+            ) : (
+              <h1 className={styles.title}>{t('details.loading')}</h1>
+            )}
+          </div>
+          {facts.length > 0 && <p className={styles.facts}>{facts.join(' · ')}</p>}
+          {item && item.genres.length > 0 && (
+            <p className={styles.genres}>{item.genres.slice(0, 4).join(' · ')}</p>
+          )}
+          {item?.description && (
+            <p
+              className={
+                faces.length > 0 ? `${styles.description} ${styles.short}` : styles.description
+              }
+            >
+              {item.description}
+            </p>
+          )}
+          {faces.length === 0 && meta && meta.cast.length > 0 && (
+            <p className={styles.credits}>
+              {t('details.cast', { names: meta.cast.slice(0, MAX_CAST).join(separator) })}
+            </p>
+          )}
+          {meta && meta.directors.length > 0 && (
+            <p className={styles.credits}>
+              {t('details.directors', { names: meta.directors.join(separator) })}
+            </p>
+          )}
+          {error && <p className={styles.error}>{error}</p>}
+          <div className={styles.actions}>
+            {watchVideoId !== null && (
+              <Button
+                focusKey="details-watch"
+                label={
+                  resumeAt === undefined
+                    ? t('details.watch')
+                    : t('details.resumeFrom', { time: formatTime(resumeAt) })
+                }
+                variant="primary"
+                onFocus={restOn(watchVideoId)}
+                onPress={() => play(watchVideoId)}
+              />
+            )}
+            {watchVideoId !== null && resumeAt !== undefined && (
+              <Button
+                focusKey="details-restart"
+                label={t('details.startOver')}
+                onFocus={restOn(watchVideoId)}
+                onPress={() => play(watchVideoId, 0)}
+              />
+            )}
+            {start && (
+              <Button
+                focusKey="details-start"
+                label={startLabel(t, start)}
+                variant="primary"
+                onFocus={restOn(start.video.id)}
+                onPress={() => play(start.video.id, start.kind === 'again' ? 0 : undefined)}
+              />
+            )}
+            {trailer && kidsAllowed && (
+              <Button
+                focusKey="details-trailer"
+                label={t('details.trailer')}
+                onFocus={restOn(null)}
+                onPress={() => {
+                  setNote(null);
+                  playTrailer(trailer).catch(() => setNote(t('details.trailerFailed')));
+                }}
+              />
+            )}
+            {watchVideoId !== null && (
+              <Button
+                focusKey="details-streams"
+                label={t('details.allStreams')}
+                onFocus={restOn(watchVideoId)}
+                onPress={() =>
+                  push({ name: 'streams', type, metaId: id, videoId: watchVideoId, preview: item })
+                }
+              />
+            )}
+            {failed && (
+              <Button
+                focusKey="details-retry"
+                label={t('common.tryAgain')}
+                onPress={() => query.retry()}
+              />
+            )}
+            {item && <MyListButton item={item} onFocus={restOn(null)} />}
+            {item && watchVideoId !== null && (
+              <WatchedButton
+                route={route}
+                item={item}
+                meta={meta}
+                videoId={watchVideoId}
+                onFocus={restOn(null)}
+              />
+            )}
+          </div>
+          {resting !== null && resting === primaryVideoId && kidsAllowed && (
+            <StreamReady type={type} videoId={resting} />
+          )}
+          {note && <p className={styles.note}>{note}</p>}
+          {kids && meta && kidsDecided && !kidsAllowed && (
+            <p className={styles.note}>{t('kids.notForKids')}</p>
+          )}
+          {faces.length > 0 && (
+            <ul className={styles.cast} aria-label={t('details.castTitle')}>
+              {faces.map((person, index) => (
+                <li key={index} className={styles.person}>
+                  <Artwork
+                    src={tmdbImageUrl(person.profilePath, 'w185')}
+                    className={styles.face}
+                    fallback={<span className={styles.face} />}
+                  />
+                  <span className={styles.personName}>{person.name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {item && kidsAllowed && !failed && (
+            <div className={isMovie ? `${styles.more} ${styles.moreWide}` : styles.more}>
+              <MoreLikeThis item={item} type={type} onFocus={onMoreFocus} />
+            </div>
           )}
         </div>
-        {facts.length > 0 && <p className={styles.facts}>{facts.join(' · ')}</p>}
-        {item && item.genres.length > 0 && (
-          <p className={styles.genres}>{item.genres.slice(0, 4).join(' · ')}</p>
-        )}
-        {item?.description && (
-          <p
-            className={
-              faces.length > 0 ? `${styles.description} ${styles.short}` : styles.description
-            }
-          >
-            {item.description}
-          </p>
-        )}
-        {faces.length === 0 && meta && meta.cast.length > 0 && (
-          <p className={styles.credits}>
-            {t('details.cast', { names: meta.cast.slice(0, MAX_CAST).join(separator) })}
-          </p>
-        )}
-        {meta && meta.directors.length > 0 && (
-          <p className={styles.credits}>
-            {t('details.directors', { names: meta.directors.join(separator) })}
-          </p>
-        )}
-        {error && <p className={styles.error}>{error}</p>}
-        <div className={styles.actions}>
-          {watchVideoId !== null && (
-            <Button
-              focusKey="details-watch"
-              label={
-                resumeAt === undefined
-                  ? t('details.watch')
-                  : t('details.resumeFrom', { time: formatTime(resumeAt) })
-              }
-              variant="primary"
-              onFocus={restOn(watchVideoId)}
-              onPress={() => play(watchVideoId)}
-            />
-          )}
-          {watchVideoId !== null && resumeAt !== undefined && (
-            <Button
-              focusKey="details-restart"
-              label={t('details.startOver')}
-              onFocus={restOn(watchVideoId)}
-              onPress={() => play(watchVideoId, 0)}
-            />
-          )}
-          {start && (
-            <Button
-              focusKey="details-start"
-              label={startLabel(t, start)}
-              variant="primary"
-              onFocus={restOn(start.video.id)}
-              onPress={() => play(start.video.id, start.kind === 'again' ? 0 : undefined)}
-            />
-          )}
-          {trailer && kidsAllowed && (
-            <Button
-              focusKey="details-trailer"
-              label={t('details.trailer')}
-              onFocus={restOn(null)}
-              onPress={() => {
-                setNote(null);
-                playTrailer(trailer).catch(() => setNote(t('details.trailerFailed')));
-              }}
-            />
-          )}
-          {watchVideoId !== null && (
-            <Button
-              focusKey="details-streams"
-              label={t('details.allStreams')}
-              onFocus={restOn(watchVideoId)}
-              onPress={() =>
-                push({ name: 'streams', type, metaId: id, videoId: watchVideoId, preview: item })
-              }
-            />
-          )}
-          {failed && (
-            <Button
-              focusKey="details-retry"
-              label={t('common.tryAgain')}
-              onPress={() => query.retry()}
-            />
-          )}
-          {item && <MyListButton item={item} onFocus={restOn(null)} />}
-          {item && watchVideoId !== null && (
-            <WatchedButton
-              route={route}
-              item={item}
-              meta={meta}
-              videoId={watchVideoId}
-              onFocus={restOn(null)}
-            />
-          )}
-        </div>
-        {note && <p className={styles.note}>{note}</p>}
-        {kids && meta && kidsDecided && !kidsAllowed && (
-          <p className={styles.note}>{t('kids.notForKids')}</p>
-        )}
-        {faces.length > 0 && (
-          <ul className={styles.cast} aria-label={t('details.castTitle')}>
-            {faces.map((person, index) => (
-              <li key={index} className={styles.person}>
-                <Artwork
-                  src={tmdbImageUrl(person.profilePath, 'w185')}
-                  className={styles.face}
-                  fallback={<span className={styles.face} />}
-                />
-                <span className={styles.personName}>{person.name}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      </FocusContext.Provider>
       {!isMovie && !canWatch && !failed && kidsAllowed && (
         <div className={styles.panel}>
           {meta && hasEpisodes && opening ? (
@@ -490,7 +536,10 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
               opening={opening}
               tmdb={extra}
               onPress={(video) => play(video.id)}
-              onFocusVideo={(video) => setResting(video.id)}
+              onFocusVideo={(video) => {
+                setResting(video.id);
+                setSlide(0);
+              }}
             />
           ) : (
             <p className={styles.note}>{t('details.loading')}</p>

@@ -79,6 +79,8 @@ export {
   type DiscoverResolved,
   type DiscoverSelection,
   discoverSelection,
+  moreLikeSource,
+  type MoreLikeSource,
   resolveDiscover,
 } from './addons/browse';
 export {

@@ -759,6 +759,10 @@
     "markSeasonUnwatched": "Mark season {{season}} as unwatched",
     "watched": "Watched",
     "markTitleWatched": "Mark {{name}} as watched",
-    "markTitleUnwatched": "Watched. Mark {{name}} as unwatched"
+    "markTitleUnwatched": "Watched. Mark {{name}} as unwatched",
+    "moreFrom": "More {{genre}} from {{addon}}",
+    "streamReady": "Best stream ready",
+    "findingStream": "Finding the best stream",
+    "noStreamYet": "No stream found yet"
   }
 }
