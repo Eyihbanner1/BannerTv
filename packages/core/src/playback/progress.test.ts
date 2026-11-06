@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { memoryKeyValueStore, type KeyValueStore } from '../storage';
 import {
+  AWAY_MS,
   createProgressStore,
   MIN_RESUME_SECONDS,
   type ProgressEntry,
   type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+  resumeLeadIn,
   WATCHED_FRACTION,
 } from './progress';
 
@@ -157,6 +161,32 @@ describe('createProgressStore', () => {
     expect(progress.record(movie(NaN, Infinity))).toMatchObject({ position: 0, duration: 0 });
     expect(progress.record(movie(-5, -1))).toMatchObject({ position: 0, duration: 0 });
     expect(progress.record(movie(Infinity, NaN))).toMatchObject({ position: 0, duration: 0 });
+  });
+
+  it('starts a resume a few seconds early, further after a day away, and says the exact place', async () => {
+    let time = 1_000_000;
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => time });
+    await progress.load();
+    expect(progress.resumeFrom('tt1')).toBeUndefined();
+    progress.record(movie(2530));
+    // Details still says where it stopped.
+    expect(progress.resumeAt('tt1')).toBe(2530);
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_S);
+    time += AWAY_MS - 1;
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_S);
+    time += 1;
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_AWAY_S);
+    // A time given wins over the store's clock.
+    expect(progress.resumeFrom('tt1', 1_000_000)).toBe(2530 - RESUME_LEAD_IN_S);
+    // Nothing to resume, nothing to start early.
+    progress.record(movie(MIN_RESUME_SECONDS - 1));
+    expect(progress.resumeFrom('tt1')).toBeUndefined();
+  });
+
+  it('never starts a resume before 0, and a clock set back is no time away', () => {
+    expect(resumeLeadIn(3, 0, 0)).toBe(0);
+    expect(resumeLeadIn(600, 5000, 1000)).toBe(600 - RESUME_LEAD_IN_S);
+    expect(resumeLeadIn(600, 0, AWAY_MS)).toBe(600 - RESUME_LEAD_IN_AWAY_S);
   });
 
   it('resumes only from the middle of a video', async () => {

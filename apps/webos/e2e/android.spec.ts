@@ -139,8 +139,9 @@ test('a film resumes on Android where it was left, and keeps its place', async (
   await press(page, 'Enter', 'player-surface');
   await expect
     .poll(async () => (await androidCalls(page)).player.find((command) => command.op === 'load'))
-    .toMatchObject({ op: 'load', startAt: 35 });
-  await androidOpens(page, 35, 120);
+    // A few seconds early (10 s: the seeded progress is long ago), to pick up the line it left.
+    .toMatchObject({ op: 'load', startAt: 25 });
+  await androidOpens(page, 25, 120);
   for (const position of [36, 38, 40, 42, 44]) {
     await androidSays(page, { type: 'player', event: 'time', position, duration: 120 });
     await page.waitForTimeout(250);

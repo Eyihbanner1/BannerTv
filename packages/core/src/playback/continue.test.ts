@@ -8,7 +8,13 @@ import {
   playedCard,
   type PlayedVideo,
 } from './continue';
-import { createProgressStore, type ProgressUpdate } from './progress';
+import {
+  AWAY_MS,
+  createProgressStore,
+  type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+} from './progress';
 
 const NOW = Date.parse('2026-06-01T00:00:00Z');
 const AIRS = '2026-06-08T00:00:00Z';
@@ -650,9 +656,10 @@ describe('continueWatching', () => {
     // An older episode played again is the latest.
     tv.play(episode('tt9:1:1', 1200), 4);
 
+    // Each a few seconds early, as every resume starts: these were watched long before NOW.
     expect(tv.items().map((item) => [item.preview.id, item.videoId, item.startAt])).toEqual([
-      ['tt9', 'tt9:1:1', 1200],
-      ['tt1', 'tt1', 600],
+      ['tt9', 'tt9:1:1', 1200 - RESUME_LEAD_IN_AWAY_S],
+      ['tt1', 'tt1', 600 - RESUME_LEAD_IN_AWAY_S],
     ]);
   });
 
@@ -681,7 +688,7 @@ describe('continueWatching', () => {
           ...hero,
         },
         videoId: 'tt1',
-        startAt: 1500,
+        startAt: 1500 - RESUME_LEAD_IN_AWAY_S,
         progress: 0.25,
         upNext: false,
       },
@@ -696,12 +703,24 @@ describe('continueWatching', () => {
       {
         preview: preview({ id: 'tt9', type: 'series', name: 'Show' }),
         videoId: 'tt9:1:2',
-        startAt: 1200,
+        startAt: 1200 - RESUME_LEAD_IN_AWAY_S,
         progress: 0.5,
         season: 1,
         episode: 2,
         upNext: false,
       },
+    ]);
+  });
+
+  it('resumes 5 s before where it stopped the same day, 10 s after a day away', async () => {
+    const tv = await watching();
+    const stoppedAt = NOW - 60 * 60 * 1000;
+    tv.play(movie('tt1', 1500), stoppedAt, filmCard());
+    expect(tv.items(undefined, NOW)).toMatchObject([
+      { videoId: 'tt1', startAt: 1500 - RESUME_LEAD_IN_S },
+    ]);
+    expect(tv.items(undefined, stoppedAt + AWAY_MS)).toMatchObject([
+      { videoId: 'tt1', startAt: 1500 - RESUME_LEAD_IN_AWAY_S },
     ]);
   });
 
@@ -737,7 +756,11 @@ describe('continueWatching', () => {
 
     const [item] = tv.items();
     // With how far through the next one already is (500 of 2400 s).
-    expect(item).toMatchObject({ videoId: 'tt9:1:2', startAt: 500, upNext: true });
+    expect(item).toMatchObject({
+      videoId: 'tt9:1:2',
+      startAt: 500 - RESUME_LEAD_IN_AWAY_S,
+      upNext: true,
+    });
     expect(item!.progress).toBeCloseTo(500 / 2400);
   });
 
@@ -756,7 +779,9 @@ describe('continueWatching', () => {
     expect(tv.items()).toEqual([]);
 
     tv.play(movie('tt1', 1200), 2);
-    expect(tv.items()).toMatchObject([{ videoId: 'tt1', startAt: 1200, progress: 0.2 }]);
+    expect(tv.items()).toMatchObject([
+      { videoId: 'tt1', startAt: 1200 - RESUME_LEAD_IN_AWAY_S, progress: 0.2 },
+    ]);
   });
 
   it('leaves out a series whose last episode was finished', async () => {

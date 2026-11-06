@@ -150,7 +150,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = route.startAt ?? progress.resumeAt(videoId) ?? 0;
+        // From saved progress a few seconds early (resumeLeadIn); a place carried over exactly.
+        const start = route.startAt ?? progress.resumeFrom(videoId) ?? 0;
         setResumedAt(start);
         const entry = route.stream ?? (await finder.choose(route.binge));
         if (cancelled) return;

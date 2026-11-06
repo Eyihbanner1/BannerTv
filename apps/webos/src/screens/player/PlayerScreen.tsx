@@ -18,7 +18,9 @@ import {
   skipAt,
   skipCardDone,
   skipKey,
+  SKIP_LANDS_AFTER_MS,
   skipRearms,
+  skipStep,
   type SleepChoice,
   sleepPhase,
   SPEED_KINDS,
@@ -101,7 +103,7 @@ import styles from './PlayerScreen.module.css';
 /** Controls hide after this long without a key press, while playing. */
 const CONTROLS_HIDE_MS = 5000;
 /** A skip lands this long after the last press. */
-const SCRUB_COMMIT_MS = 800;
+const SCRUB_COMMIT_MS = SKIP_LANDS_AFTER_MS;
 /** The note for a skip made with the controls hidden stays this long after it lands. */
 const SKIP_NOTE_MS = 1500;
 /**
@@ -146,16 +148,6 @@ interface PlayerScreenProps {
 
 const noop = () => () => undefined;
 const initial = () => INITIAL_SESSION_STATE;
-
-/**
- * How far one press skips: 10 s, the same for every way of skipping. A key
- * held down repeats, and goes further the longer it is held.
- */
-function skipStep(repeats: number): number {
-  if (repeats > 12) return 60;
-  if (repeats > 4) return 30;
-  return 10;
-}
 
 /** A skip's total, such as "+30 s" or "−1:30". */
 function formatSkip(seconds: number): string {
@@ -469,7 +461,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
+        // From saved progress a few seconds early (resumeLeadIn); a place carried over exactly.
+        const start = props.startAt ?? (remember ? progress.resumeFrom(videoId) : 0) ?? 0;
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose(props.binge));
         if (cancelled) return;

@@ -313,7 +313,7 @@ export interface ContinueItem {
   preview: MetaPreview;
   /** What Play opens: the video left part-way, or the next episode. */
   videoId: string;
-  /** Seconds to start at. */
+  /** Seconds to start at: for a resume, a few seconds before where it stopped (resumeLeadIn). */
   startAt: number;
   /** How far through, 0 to 1, when the duration is known. */
   progress?: number;
@@ -346,6 +346,7 @@ type ProgressReader = {
   recent(): readonly ProgressEntry[];
   get(videoId: string): ProgressEntry | undefined;
   resumeAt(videoId: string): number | undefined;
+  resumeFrom(videoId: string, now?: number): number | undefined;
 };
 
 /** How far through, 0 to 1, when the duration is known. */
@@ -371,12 +372,13 @@ export function continueItem(
 ): ContinueItem | undefined {
   if (entry.duration <= 0 || entry.continueRow === false) return undefined;
   const preview = previewOf(card);
-  const resumeAt = progress.resumeAt(entry.videoId);
-  if (resumeAt !== undefined) {
+  // A few seconds before where it stopped (resumeLeadIn), as every resume starts.
+  const resumeFrom = progress.resumeFrom(entry.videoId, now);
+  if (resumeFrom !== undefined) {
     const item: ContinueItem = {
       preview,
       videoId: entry.videoId,
-      startAt: resumeAt,
+      startAt: resumeFrom,
       upNext: false,
     };
     const done = fraction(entry);
@@ -398,7 +400,7 @@ export function continueItem(
   if (entry.watched || ending) {
     const next = card.next;
     if (!next || (next.released !== undefined && next.released > now)) return undefined;
-    const startAt = progress.resumeAt(next.videoId);
+    const startAt = progress.resumeFrom(next.videoId, now);
     const item: ContinueItem = {
       preview,
       videoId: next.videoId,

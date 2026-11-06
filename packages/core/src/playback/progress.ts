@@ -9,6 +9,15 @@ export const MIN_RESUME_SECONDS = 30;
 /** Resuming this close to the end would only show the credits, so it starts over instead. */
 export const END_SECONDS = 60;
 /**
+ * A resume starts this many seconds before where the viewer stopped, so they
+ * come back at the start of the line they left rather than in the middle of it.
+ */
+export const RESUME_LEAD_IN_S = 5;
+/** After a day or more away, further back, to pick the scene up again. */
+export const RESUME_LEAD_IN_AWAY_S = 10;
+/** Last watched longer ago than this counts as a day away. */
+export const AWAY_MS = 24 * 60 * 60 * 1000;
+/**
  * Trakt keeps progress as a rounded percentage. Within this share of the
  * video's own place it is the same place, as when the TV's stop comes back.
  */
@@ -91,6 +100,13 @@ export interface ProgressStore {
    * never near either end, nor in a video whose length is unknown.
    */
   resumeAt(videoId: string): number | undefined;
+  /**
+   * Where playing from saved progress starts: resumeAt, a few seconds early
+   * (resumeLeadIn). Undefined when it starts from the beginning. What Details
+   * says ("Resume from 42:10") stays resumeAt; a switch of stream keeps its
+   * exact place and never asks this.
+   */
+  resumeFrom(videoId: string, now?: number): number | undefined;
   /** Bumps on every change, for screens that show progress. */
   version(): number;
   subscribe(listener: Listener): () => void;
@@ -103,6 +119,31 @@ export interface ProgressStore {
  */
 function seconds(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Where a resume starts: RESUME_LEAD_IN_S before `position`, or
+ * RESUME_LEAD_IN_AWAY_S when it was last watched a day or more before `now`
+ * (milliseconds, as `updatedAt`). Never before 0. A clock set back before
+ * `updatedAt` counts as no time away.
+ */
+export function resumeLeadIn(position: number, updatedAt: number, now: number): number {
+  const away = now - updatedAt >= AWAY_MS;
+  return Math.max(0, position - (away ? RESUME_LEAD_IN_AWAY_S : RESUME_LEAD_IN_S));
+}
+
+/**
+ * Where to resume an entry, or undefined to start from the beginning: never
+ * near either end, nor in a video whose length is unknown.
+ */
+function resumeAt(entry: ProgressEntry | undefined): number | undefined {
+  if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
+  // No known length, as for a live broadcast: there is no place in it to come back to.
+  if (entry.duration <= 0) return undefined;
+  if (entry.duration - entry.position < END_SECONDS) return undefined;
+  // A rewatch resumes too, but never from the credits of one already seen.
+  if (entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
+  return entry.position;
 }
 
 function isAmount(value: unknown): value is number {
@@ -350,15 +391,11 @@ export function createProgressStore(options: {
           if (loaded) take();
         });
     },
-    resumeAt(videoId) {
+    resumeAt: (videoId) => resumeAt(entries.get(videoId)),
+    resumeFrom(videoId, at = now()) {
       const entry = entries.get(videoId);
-      if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
-      // No known length, as for a live broadcast: there is no place in it to come back to.
-      if (entry.duration <= 0) return undefined;
-      if (entry.duration - entry.position < END_SECONDS) return undefined;
-      // A rewatch resumes too, but never from the credits of one already seen.
-      if (entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
-      return entry.position;
+      const place = resumeAt(entry);
+      return place === undefined || !entry ? undefined : resumeLeadIn(place, entry.updatedAt, at);
     },
     version: () => changes,
     subscribe(listener) {

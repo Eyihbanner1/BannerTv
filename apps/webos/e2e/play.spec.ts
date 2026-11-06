@@ -481,7 +481,10 @@ test('a title left part way through resumes from where it stopped', async ({ pag
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).time).toBeGreaterThanOrEqual(35);
+  // A few seconds before it (10 s: the seeded progress is long ago), to pick up the line it left.
+  const resumed = (await video(page)).time;
+  expect(resumed).toBeGreaterThanOrEqual(25);
+  expect(resumed).toBeLessThan(33);
 });
 
 test('a title with no stream left to try keeps its resume point through All streams', async ({
@@ -508,7 +511,8 @@ test('a title with no stream left to try keeps its resume point through All stre
   await press(page, 'Enter', 'streams-item-0');
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).time).toBeGreaterThanOrEqual(35);
+  // The resume's own start, 10 s early, kept through All streams.
+  expect((await video(page)).time).toBeGreaterThanOrEqual(25);
 });
 
 test('subtitles come from the subtitles addon: a language on the left, its versions on the right, numbered by source', async ({
