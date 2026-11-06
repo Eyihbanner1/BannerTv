@@ -66,9 +66,10 @@ import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
 import { pickAudio } from '../../player/audio';
-import { headlineBadges, resolutionLabel } from '../../player/describe';
+import { headlineBadges, problemText, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
+import { playProblem } from '../../player/problem';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
 import {
   createPlaybackSession,
@@ -1549,8 +1550,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
       {problem && (
         <PlayerProblem
-          nothing={nothing}
-          error={state.error}
+          text={problemText(t, playProblem(nothing, finderState, state))}
           failedAddons={finderState.failed.length}
           canTryAnother={!nothing && !!session && session.hasNext()}
           onTryAnother={() => session?.playNext()}

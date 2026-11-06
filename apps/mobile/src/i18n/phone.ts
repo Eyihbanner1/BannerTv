@@ -106,6 +106,13 @@ const OVERRIDES = {
         'None of your addons offered a stream this phone can play. Try Streams, or add a stream addon in Settings, Addons.',
       format: "This phone can't play this stream's format.",
       decode: "This phone couldn't decode this stream.",
+      noStreamAddon: 'You have no addon that finds streams yet. Add one in Settings, Addons.',
+      failedRecently_one:
+        "The stream found didn't play a moment ago. Try again to give it another go, or open Streams.",
+      failedRecently_other:
+        "The {{count}} streams found didn't play a moment ago. Try again to give them another go, or open Streams.",
+      uncached:
+        "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in Streams.",
     },
   },
 } as const;

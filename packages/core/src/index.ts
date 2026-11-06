@@ -261,6 +261,13 @@ export { createStore } from './store';
 export * from './sync';
 export { assessStream, SEVERE_WARNINGS, streamRequestHeaders } from './streams/assess';
 export {
+  explainProblem,
+  type PlayAttempt,
+  type PlayProblem,
+  type ProblemExplained,
+  type ProblemInput,
+} from './streams/explain';
+export {
   DEFAULT_MAX_BITRATE,
   estimateBitrate,
   isLighter,

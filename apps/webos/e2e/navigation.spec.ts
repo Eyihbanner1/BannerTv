@@ -75,6 +75,9 @@ test('OK opens details and Back returns to the same tile', async ({ page }) => {
   // No stream addon is installed, so the player says so.
   await press(page, 'Enter', 'player-problem-streams');
   await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText('You have no addon that finds streams yet. Add one in Addons.'),
+  ).toBeVisible();
 
   await pressBack(page);
   await expectFocus(page, 'details-watch');

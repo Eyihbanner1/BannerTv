@@ -28,8 +28,9 @@ import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
 import { audioDetail, audioSummary, pickAudio } from '@tv/player/audio';
-import { resolutionLabel } from '@tv/player/describe';
+import { problemText, resolutionLabel } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
+import { playProblem } from '@tv/player/problem';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -167,6 +168,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
+  const problemWords = problem ? problemText(t, playProblem(nothing, finderState, state)) : null;
   const buffering = state.status === 'buffering';
   const playing = state.status === 'playing' || buffering;
   const ended = state.status === 'ended';
@@ -561,14 +563,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       {problem ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
-            <Text style={styles.problemTitle}>
-              {t(nothing ? 'player.problem.nothingTitle' : 'player.problem.failedTitle')}
-            </Text>
-            <Text style={styles.problemText}>
-              {nothing
-                ? t('player.problem.nothing')
-                : t(`player.problem.${state.error?.kind ?? 'other'}`)}
-            </Text>
+            <Text style={styles.problemTitle}>{problemWords?.title}</Text>
+            {problemWords?.lines.map((line) => (
+              <Text key={line} style={styles.problemText}>
+                {line}
+              </Text>
+            ))}
             {finderState.failed.length > 0 ? (
               <Text style={styles.problemText}>
                 {t('player.problem.addonsFailed', { count: finderState.failed.length })}

@@ -1,4 +1,5 @@
 import {
+  BANNERTV_DEMO_ID,
   createAddonClient,
   createAddonCollection,
   createLimiter,
@@ -37,6 +38,22 @@ export const addonClient = createAddonClient({
 /** Each installed addon's name, by its manifest id. */
 export function addonNames(): Map<string, string> {
   return new Map(addonCollection.get().addons.map((a) => [a.manifest.id, a.manifest.name]));
+}
+
+/**
+ * Whether any addon this profile uses finds streams: the BannerTV Demo addon
+ * aside, which only plays its own clips, and adult addons on a kids profile.
+ */
+export function hasStreamAddon(): boolean {
+  const kids = isKidsProfile();
+  return addonCollection
+    .get()
+    .addons.some(
+      (addon) =>
+        addon.manifest.id !== BANNERTV_DEMO_ID &&
+        !(kids && addon.manifest.behaviorHints.adult) &&
+        addon.manifest.resources.some((resource) => resource.name === 'stream'),
+    );
 }
 
 /**

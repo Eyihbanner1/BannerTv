@@ -7,6 +7,7 @@ import {
   isMuchShorter,
   judgeLive,
   type LiveWindow,
+  type PlayAttempt,
   type ProgressTracker,
   type ProgressUpdate,
   type QualityReference,
@@ -96,6 +97,11 @@ export interface SessionState {
    * it: nothing it plays counts as watching the video.
    */
   clip: boolean;
+  /**
+   * The streams opened that stopped since anything last played, oldest first,
+   * so the problem box can say what was tried and why it stopped.
+   */
+  attempts: readonly PlayAttempt[];
 }
 
 export interface SessionOptions {
@@ -179,6 +185,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamCues: {},
   rate: 1,
   clip: false,
+  attempts: [],
 };
 
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
@@ -368,6 +375,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (entry) {
       if (keep) sourceMemory.record(entry.addonId, false);
       finder.markFailed(entry);
+      const stopped: PlayAttempt = { key: entryKey(entry), entry, kind: error.kind };
+      if (error.detail !== undefined) stopped.detail = error.detail;
+      patch({ attempts: state.get().attempts.concat(stopped) });
     }
     const resumeAt = carryOn();
     const next =
@@ -548,7 +558,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         clearTimers();
         startedPlaying = true;
         const buffered = endBuffering();
-        patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
+        patch({
+          status: 'playing',
+          failedOver: false,
+          steppedDown: false,
+          error: null,
+          attempts: [],
+        });
         if (buffered) judgeBuffering(attempt);
       },
     ],

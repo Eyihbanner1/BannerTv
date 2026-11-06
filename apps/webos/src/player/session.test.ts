@@ -1293,3 +1293,38 @@ describe('a stream with an end', () => {
     expect(kept.progress).not.toHaveBeenCalled();
   });
 });
+
+describe('the streams tried', () => {
+  it('lists each stream that stopped, with why, until one plays', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().listener.fatal(
+      new PlaybackError('network', 'The helper is off', 'stream-helper-unreachable'),
+    );
+    await settle();
+    expect(session.get().entry).toBe(second);
+    lastEngine().listener.fatal(new PlaybackError('format', 'No decoder'));
+    await settle();
+    expect(session.get().status).toBe('failed');
+    expect(session.get().attempts.map(({ key, kind, detail }) => ({ key, kind, detail }))).toEqual([
+      { key: entryKey(first), kind: 'network', detail: 'stream-helper-unreachable' },
+      { key: entryKey(second), kind: 'format', detail: undefined },
+    ]);
+
+    // Try again on the last one, which plays: the list starts afresh.
+    session.play(second, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+    expect(session.get().attempts).toEqual([]);
+  });
+
+  it('lists the one stream picked from the list that would not play', async () => {
+    const { video, session } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get().attempts.map((attempt) => attempt.entry)).toEqual([second]);
+  });
+});

@@ -425,20 +425,90 @@ test('when nothing plays, the player says why and offers the list', async ({ pag
   await openMovie(page);
 
   await press(page, 'Enter', 'player-surface');
-  await expect(page.getByText("This stream won't play")).toBeVisible();
+  // Both links were tried: it says so, then why the last one stopped.
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(page.getByText('Tried 2 streams, and none of them played.')).toBeVisible();
   // A link that answers 404 is the link's fault, not a format the TV lacks.
   await expect(page.getByText('Its source may be busy or offline.')).toBeVisible();
-  // The torrent cannot play on a TV, so there is nothing left to try.
+  // The torrent cannot play on a TV: it says what would make it play.
+  await expect(
+    page.getByText(
+      'Test Streams also sent 1 torrent, which plays once a debrid service is set up in its settings.',
+    ),
+  ).toBeVisible();
   await expect(page.locator('[data-focus-key="player-problem-another"]')).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
   // A stray click beside the box neither leaves nor brings the controls up behind it.
   await page.mouse.move(80, 80);
   await page.mouse.click(60, 60);
   await page.waitForTimeout(300);
-  await expect(page.getByText("This stream won't play")).toBeVisible();
+  await expect(page.getByText('No stream could play')).toBeVisible();
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   await press(page, 'Enter', 'streams-item-0');
   expect(errors).toEqual([]);
+});
+
+test('with only torrents, the player names the addon and says to set up a debrid service', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n4K',
+          description: 'Open Movie 2160p REMUX\n👤 52',
+          infoHash: 'a'.repeat(40),
+        },
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p\n👤 12',
+          infoHash: 'b'.repeat(40),
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-problem-streams');
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText(
+      "Test Streams sent 2 torrents, and BannerTV can't play torrents by itself. Set up a debrid service in the addon's settings, then try again.",
+    ),
+  ).toBeVisible();
+});
+
+test('when only uncached debrid links were tried, the player says so', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: '[RD download] Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL',
+          path: '/movie-1080p.webm',
+        },
+        {
+          name: '[RD download] Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL',
+          path: '/movie-720p.webm',
+        },
+      ],
+    },
+    broken: ['/movie-1080p.webm', '/movie-720p.webm'],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect(page.getByText('Tried 2 streams, and none of them played.')).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(
+    page.getByText(
+      "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in All streams.",
+    ),
+  ).toBeVisible();
 });
 
 test('All streams lists every stream, says which cannot play, and plays the one picked', async ({
@@ -3250,7 +3320,7 @@ test('a stream that fails with the sheet open closes it, and the problem box has
   await pressCode(page, BLUE);
   const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
   await expect(sheet).toBeVisible();
-  await expect(page.getByText("This stream won't play")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('No stream could play')).toBeVisible({ timeout: 15000 });
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
 });

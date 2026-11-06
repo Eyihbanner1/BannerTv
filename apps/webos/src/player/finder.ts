@@ -48,6 +48,8 @@ const ASSUMED_EPISODE_RUNTIME_S = 3600;
 export type ProbeState = 'testing' | ProbeResult;
 
 export interface FinderState {
+  /** The addons asked, in priority order: an entry's addonRank is its place here. */
+  asked: InstalledAddon[];
   /** Addons that have not answered yet. */
   pending: number;
   /** Addons that could not answer, in priority order. */
@@ -168,6 +170,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
   const probes: Record<string, ProbeState> = {};
 
   const state = createStore<FinderState>({
+    asked: [],
     pending: 0,
     failed: [],
     entries: [],
@@ -215,7 +218,8 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       clearTimeout(settleTimer);
       settleTimer = undefined;
     }
-    state.set({ pending, failed, entries, candidates, probes: { ...probes }, settled });
+    const asked = answers.map((answer) => answer.addon);
+    state.set({ asked, pending, failed, entries, candidates, probes: { ...probes }, settled });
   }
 
   async function runProbes() {
