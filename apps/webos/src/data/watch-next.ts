@@ -5,8 +5,10 @@ import {
   type PlayedVideo,
   type ProgressEntry,
 } from '@bannertv/core';
+import { addonBaseUrl } from '@bannertv/protocol';
 import i18next from 'i18next';
 import { router, topRoute } from '../app/router';
+import { addonCollection } from './addons';
 import { playedVideos, progress } from './playback';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from './profiles';
 
@@ -57,6 +59,36 @@ export interface WatchedReader {
 /** The card title of an episode: the series' name and its number. */
 export type EpisodeTitle = (name: string, season: number, episode: number) => string;
 
+function parseUrl(text: string): URL | undefined {
+  try {
+    return new URL(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Which artwork stays off the row: anything on the host of an addon whose
+ * address holds more than its host. Such an address can carry its user's keys
+ * (for a debrid service, say), artwork the addon serves itself can carry them
+ * too, and the system's row is read outside the app. An addon at the root of
+ * its host has nowhere in its address to keep a key, so its artwork stays.
+ */
+export function hiddenArtwork(transportUrls: readonly string[]): (url: string) => boolean {
+  const hosts = new Set<string>();
+  for (const transportUrl of transportUrls) {
+    const address = parseUrl(addonBaseUrl(transportUrl));
+    if (address && (address.pathname.replace(/\/+$/, '') !== '' || address.search !== '')) {
+      hosts.add(address.host);
+    }
+  }
+  return (url) => {
+    const art = parseUrl(url);
+    // An address that is not one is no artwork the home screen could show anyway.
+    return art === undefined || hosts.has(art.host);
+  };
+}
+
 /** The episode's own name, from the card of the video that put the title on the row. */
 function episodeName(item: ContinueItem, card: PlayedVideo | undefined): string | undefined {
   if (!card) return undefined;
@@ -67,12 +99,14 @@ function episodeName(item: ContinueItem, card: PlayedVideo | undefined): string 
 /**
  * The cards for Continue Watching's titles, in the row's order. A title's
  * time is that of its latest progress, which is what put it on the row.
+ * Artwork `hideArt` picks (see hiddenArtwork) is left off.
  */
 export function watchNextCards(
   items: readonly ContinueItem[],
   watched: WatchedReader,
   played: (videoId: string) => PlayedVideo | undefined,
   episodeTitle: EpisodeTitle,
+  hideArt: (url: string) => boolean = () => false,
 ): WatchNextCard[] {
   const cards: WatchNextCard[] = [];
   for (const item of items) {
@@ -96,8 +130,8 @@ export function watchNextCards(
     if (item.season !== undefined) card.season = item.season;
     if (item.episode !== undefined) card.episode = item.episode;
     if (preview.description) card.description = preview.description;
-    if (preview.background) card.landscape = preview.background;
-    if (preview.poster) card.poster = preview.poster;
+    if (preview.background && !hideArt(preview.background)) card.landscape = preview.background;
+    if (preview.poster && !hideArt(preview.poster)) card.poster = preview.poster;
     cards.push(card);
   }
   return cards;
@@ -182,8 +216,13 @@ function profileCards(loaded: boolean): readonly WatchNextCard[] | null {
   if (!loaded) return null;
   let items = continueWatching(progress, playedVideos.get, Date.now());
   if (isKidsProfile()) items = items.filter((item) => kidsTitleAllowed(item.preview, true));
-  return watchNextCards(items, progress, playedVideos.get, (name, season, episode) =>
-    i18next.t('watchNext.episodeTitle', { name, season, episode }),
+  const addresses = addonCollection.get().addons.map((addon) => addon.transportUrl);
+  return watchNextCards(
+    items,
+    progress,
+    playedVideos.get,
+    (name, season, episode) => i18next.t('watchNext.episodeTitle', { name, season, episode }),
+    hiddenArtwork(addresses),
   );
 }
 

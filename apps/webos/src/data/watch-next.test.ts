@@ -20,6 +20,14 @@ const app = vi.hoisted(() => ({
   profiles: null as unknown as Store<ProfilesState>,
   activeId: null as unknown as Store<string | null>,
   router: null as unknown as Store<{ top: string }>,
+  /** The installed addons' addresses. */
+  addons: [] as string[],
+}));
+
+vi.mock('./addons', () => ({
+  addonCollection: {
+    get: () => ({ addons: app.addons.map((transportUrl) => ({ transportUrl })) }),
+  },
 }));
 
 vi.mock('./playback', () => ({
@@ -123,6 +131,7 @@ beforeEach(async () => {
   });
   app.activeId = createStore<string | null>('main');
   app.router = createStore({ top: 'home' });
+  app.addons = [];
   vi.resetModules();
   watchNext = await import('./watch-next');
 });
@@ -209,6 +218,23 @@ describe('watchNextCards', () => {
       expect.objectContaining({ video: 'tt5:1:3', position: 0, duration: 2700, next: true }),
     ]);
     expect(cards()[0]).not.toHaveProperty('episodeTitle');
+  });
+});
+
+describe('hiddenArtwork', () => {
+  it('hides artwork from the host of an addon whose address could hold a key', () => {
+    const hidden = watchNext.hiddenArtwork([
+      'https://meta.example/secret-config/manifest.json',
+      'https://plain.example/manifest.json',
+      'https://query.example/manifest.json?token=abc',
+    ]);
+    expect(hidden('https://meta.example/secret-config/poster/tt1.jpg')).toBe(true);
+    expect(hidden('https://meta.example/images/tt1.jpg')).toBe(true);
+    expect(hidden('https://query.example/poster/tt1.jpg')).toBe(true);
+    // An addon at the root of its host has no key in its address.
+    expect(hidden('https://plain.example/poster/tt1.jpg')).toBe(false);
+    expect(hidden('https://images.example/tt1/poster.jpg')).toBe(false);
+    expect(hidden('not an address')).toBe(true);
   });
 });
 
@@ -360,6 +386,21 @@ describe('startWatchNext', () => {
     await start();
     await vi.advanceTimersByTimeAsync(watchNext.QUIET_MS);
     expect(sent).toEqual([]);
+  });
+
+  it("keeps artwork an addon serves from its own address off the device's row", async () => {
+    app.addons = ['https://meta.example/secret-config/manifest.json'];
+    const film = preview('tt1', 'movie', {
+      poster: 'https://meta.example/secret-config/poster/tt1.jpg',
+      background: 'https://images.example/tt1/wide.jpg',
+    });
+    played(film, 'tt1', 1800, 6000);
+    await start();
+    await vi.advanceTimersByTimeAsync(watchNext.QUIET_MS);
+    expect(last()).toEqual([
+      expect.objectContaining({ meta: 'tt1', landscape: 'https://images.example/tt1/wide.jpg' }),
+    ]);
+    expect(last()![0]).not.toHaveProperty('poster');
   });
 
   it("leaves out of a kids profile's row what is not for children", async () => {
