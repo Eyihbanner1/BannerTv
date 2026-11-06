@@ -127,3 +127,19 @@
   margin-top: 40px;
   color: var(--bt-text-muted);
 }
+
+/* Follow buttons wrap onto a second line when the names are long. */
+.follows {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.follows > * {
+  margin: 0 24px 24px 0;
+}
+
+.followsFull {
+  width: 100%;
+  color: var(--bt-text-muted);
+}

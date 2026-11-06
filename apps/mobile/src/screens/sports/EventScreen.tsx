@@ -22,6 +22,7 @@ import { Artwork } from '../../ui/Artwork';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/icons';
 import { colors, space, type } from '../../ui/theme';
+import { FollowButtons } from './FollowButtons';
 import { useMinuteClock, useOnShow, useSportsFeed, useViewOptions } from './use-sports';
 
 // The TV's event page helpers (apps/webos/src/screens/sports/EventScreen.tsx), which sits
@@ -101,7 +102,8 @@ function TeamBadges({ event }: { event: Pick<SportEvent, 'homeLogo' | 'awayLogo'
 /**
  * One match: teams, competition, local kick-off, state, which addons list it, the addon's
  * background and any badges. Watch picks a stream across every source; All streams lists them.
- * Only the addons that listed it are asked, for its page and its streams.
+ * Only the addons that listed it are asked, for its page and its streams. Its teams and
+ * competition can be followed.
  */
 export function EventScreen({ event: opened }: { event: SportEvent }) {
   const { t } = useTranslation();
@@ -207,6 +209,7 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
         ) : (
           <Text style={styles.facts}>{t('sports.addonGone')}</Text>
         )}
+        <FollowButtons event={event} />
         {meta?.description ? <Text style={styles.description}>{meta.description}</Text> : null}
       </View>
     </ScrollView>

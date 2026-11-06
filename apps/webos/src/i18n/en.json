@@ -91,6 +91,12 @@
     "notInLists": "Nothing in your sports addons' lists matches. They can be asked directly.",
     "searchAddons": "Search sports addons"
   },
+  "sportsFollow": {
+    "row": "Following",
+    "follow": "Follow {{name}}",
+    "following": "Following {{name}}",
+    "full": "You follow {{count}} teams and competitions, the most BannerTV keeps. Unfollow one to follow this."
+  },
   "discover": {
     "type": "Type",
     "catalog": "Catalog",

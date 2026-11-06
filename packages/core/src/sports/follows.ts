@@ -267,6 +267,19 @@ export function followableTeams(event: SportEvent): [FollowTarget, FollowTarget]
   ];
 }
 
+/** Everything a match page offers to follow: the home side, the away side, then the competition. */
+export function followTargets(event: SportEvent): FollowTarget[] {
+  const targets: FollowTarget[] = followableTeams(event) ?? [];
+  const competition = followableCompetition(event);
+  if (competition) targets.push(competition);
+  return targets;
+}
+
+/** Whether `follows` holds a team or competition. */
+export function followsHas(follows: FollowSet, target: Pick<FollowTarget, 'kind' | 'id'>): boolean {
+  return (target.kind === 'team' ? follows.teams : follows.competitions).has(target.id);
+}
+
 /** Whether the profile follows either side of a match or its competition. */
 export function isFollowed(event: SportEvent, follows: FollowSet): boolean {
   if (follows.teams.size > 0 && event.followKeys) {

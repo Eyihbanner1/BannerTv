@@ -111,6 +111,9 @@ export function fixtureText(
 export function groupTitle(t: TFunction, group: SportsGroup): string {
   let title: string;
   switch (group.kind) {
+    case 'following':
+      title = t('sportsFollow.row');
+      break;
     case 'earlier':
       title = t('sports.earlier');
       break;
@@ -123,7 +126,7 @@ export function groupTitle(t: TFunction, group: SportsGroup): string {
     default:
       title = group.title;
   }
-  return group.live > 0 && group.kind === 'competition'
+  return group.live > 0 && (group.kind === 'competition' || group.kind === 'following')
     ? t('sports.liveCount', { title, live: group.live, count: group.events.length })
     : title;
 }

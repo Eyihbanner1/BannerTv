@@ -17,8 +17,10 @@ import {
   followableCompetition,
   followableTeams,
   followDocumentKey,
+  followsHas,
   followsPart,
   type FollowTarget,
+  followTargets,
   isFollowed,
   MAX_FOLLOWS,
 } from './follows';
@@ -136,6 +138,15 @@ describe('what a match offers to follow', () => {
     // A country's row is BannerTV's guess, not a competition.
     expect(country!.competition.source).toBe('country');
     expect(followableCompetition(country!)).toBeUndefined();
+    expect(followTargets(pl!).map((target) => target.name)).toEqual([
+      'Arsenal',
+      'Burnley',
+      'Premier League',
+    ]);
+    expect(followTargets(country!).map((target) => target.name)).toEqual(['Rangers', 'Celtic']);
+    expect(followsHas({ teams: new Set(['eng.1']), competitions: new Set() }, premierLeague)).toBe(
+      false,
+    );
   });
 
   it('tells a followed match by either side or its competition', () => {

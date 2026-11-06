@@ -1,6 +1,7 @@
 import {
   eventState,
   type EventState,
+  followTargets,
   localClock,
   localDate,
   type SportEvent,
@@ -18,6 +19,7 @@ import { itemSources } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { usePrefetch } from '../../player/prefetch';
 import { dayName } from './fixture';
+import { FIRST_FOLLOW_KEY, FollowButtons } from './FollowButtons';
 import { useMinuteClock, useSportsFeed, useViewOptions } from './use-sports';
 import styles from './EventScreen.module.css';
 
@@ -94,7 +96,8 @@ export function TeamBadges({ event }: { event: Pick<SportEvent, 'homeLogo' | 'aw
  * it, the addon's background and any team badges it sent. Watch uses the
  * automatic stream choice across every source; All streams lists them by
  * addon (docs/PLAN.md, Sports addons, Screens). Only the addons that listed
- * it are asked, for its page and its streams.
+ * it are asked, for its page and its streams. Under them, its teams and
+ * competition can be followed.
  */
 export function EventScreen({ event: opened }: { event: SportEvent }) {
   const { t } = useTranslation();
@@ -135,7 +138,9 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
     if (addonNames.indexOf(addonName) === -1) addonNames.push(addonName);
   }
 
-  useScreenFocus(primary ? 'event-watch' : undefined);
+  useScreenFocus(
+    primary ? 'event-watch' : followTargets(event).length > 0 ? FIRST_FOLLOW_KEY : undefined,
+  );
 
   const watch = (choose: boolean) => {
     if (!primary) return;
@@ -187,6 +192,7 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
         ) : (
           <p className={styles.note}>{t('sports.addonGone')}</p>
         )}
+        <FollowButtons event={event} />
       </div>
     </section>
   );
