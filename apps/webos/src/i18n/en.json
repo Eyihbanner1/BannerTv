@@ -565,7 +565,8 @@
     "hidden_other": "The account has {{count}} more profiles. Screens show six, and deleting one here shows the next.",
     "delete": "Delete profile",
     "deleteTitle": "Delete {{name}}?",
-    "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt."
+    "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt.",
+    "deleteMessageAccount": "Their Continue Watching, My List, history and settings are deleted from every screen in your BannerTV account. Anything synced to Trakt stays on Trakt."
   },
   "pin": {
     "entered_one": "{{count}} digit entered",
@@ -580,7 +581,32 @@
     "choose": "Choose a four-digit PIN",
     "again": "Enter the PIN again",
     "mismatch": "Those PINs didn't match. Choose one again.",
-    "changedElsewhere": "This PIN was just changed on another screen. Enter the new one first."
+    "changedElsewhere": "This PIN was just changed on another screen. Enter the new one first.",
+    "forgot": "Forgot PIN?"
+  },
+  "forgotPin": {
+    "mainPinTitle": "Enter {{main}}'s PIN to take the PIN off {{name}}",
+    "warnTitle": "Take the PIN off {{name}}?",
+    "warnMessage": "{{main}} has no PIN, so anyone using BannerTV here can do this. Give {{main}} a PIN in Settings, Profiles to stop that.",
+    "takeOff": "Take the PIN off",
+    "codeTitle": "Enter your account code to take the PIN off {{name}}",
+    "codeHelp": "The code you wrote down when you made your BannerTV account proves it's you. The PIN then comes off on every screen in the account, and you can choose a new one in Settings, Profiles.",
+    "wrongCode": "That isn't this account's code.",
+    "checking": "Checking…",
+    "resetTitle": "Reset BannerTV on this TV?",
+    "resetMessage": "Without a BannerTV account, {{name}}'s PIN can only come off by starting again. Every profile, addon, My List, Continue Watching and setting on this TV is deleted, and BannerTV starts as new. What Trakt has stays on Trakt.",
+    "reset": "Reset this TV",
+    "resetting": "Resetting…",
+    "cleared": "The PIN is off {{name}}. You can choose a new one in Settings, Profiles."
+  },
+  "lockGrownUps": {
+    "title": "Lock the grown-up profiles?",
+    "lead": "A kids profile only keeps children to family titles if the grown-up profiles have PINs. Without one, anyone can pick them in Who's watching.",
+    "setFor": "Set a PIN for {{name}}",
+    "chooseFor": "Choose a four-digit PIN for {{name}}",
+    "locked": "{{name}} has a PIN",
+    "done": "Done",
+    "notNow": "Not now"
   },
   "homeRows": {
     "title": "Home rows",

@@ -502,6 +502,18 @@ export async function syncAccountNow(): Promise<void> {
   if (made) await made.syncNow();
 }
 
+/**
+ * Brings in what the account changed since the last sync, for a screen that
+ * shows the account's profiles (item A8): "Who's watching?" from the rail
+ * and Settings > Profiles. Respects the engine's backing off, unlike Sync
+ * now. Nothing happens on a screen without an account. Never rejects.
+ */
+export async function refreshAccount(): Promise<void> {
+  if (!syncOn()) return;
+  const made = await openEngine();
+  if (made) await made.pullNow();
+}
+
 /** Whether this screen has profiles or data of its own, which makes joining ask Bring or Use. */
 export async function hasOwnData(): Promise<boolean> {
   return (await running()).hasLocalData();

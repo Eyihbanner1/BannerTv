@@ -1,0 +1,28 @@
+.title {
+  margin-bottom: 20px;
+  font: var(--bt-text-heading);
+}
+
+.help {
+  margin-bottom: 32px;
+  color: var(--bt-text-muted);
+}
+
+.message {
+  height: 40px;
+  margin: 16px 0;
+  color: var(--bt-accent);
+}
+
+/* Buttons side by side; margins instead of flex gap for Chromium 68. */
+.actions > * {
+  margin-right: 24px;
+}
+
+.list {
+  margin-bottom: 32px;
+}
+
+.list > * {
+  margin-bottom: 16px;
+}

@@ -186,6 +186,13 @@ export interface SyncEngine {
   syncNow(): Promise<void>;
   /** Pushes what waits at once. */
   flush(): Promise<void>;
+  /**
+   * Pulls at once, as when the app comes back on screen, unless failures are
+   * backing off or the service asked for quiet: for a screen that shows
+   * what the account holds, such as "Who's watching?". Pushes keep their
+   * own schedule. Resolves when done, whatever the outcome.
+   */
+  pullNow(): Promise<void>;
   /** Whether this screen has data of its own, which makes Join ask Bring or Use. */
   hasLocalData(): Promise<boolean>;
   /**
@@ -1587,6 +1594,11 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     },
 
     flush,
+
+    pullNow() {
+      if (resuming || backingOff()) return Promise.resolve();
+      return request(false, true);
+    },
 
     async hasLocalData() {
       // Not alongside a create, confirm, join, leave or delete: they change what the screen holds.

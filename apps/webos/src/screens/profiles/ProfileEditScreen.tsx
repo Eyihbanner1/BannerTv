@@ -20,6 +20,7 @@ import { PinPad } from '../../components/PinPad';
 import { Pressable } from '../../components/Pressable';
 import { TextField } from '../../components/TextField';
 import { deleteProfile } from '../../data/profile-delete';
+import { offerLockAfterSave } from '../../data/profiles-lock';
 import {
   activeProfileId,
   addProfile,
@@ -28,6 +29,9 @@ import {
   setProfilePin,
   updateProfile,
 } from '../../data/profiles';
+import { syncOn } from '../../data/sync-clock';
+import { ForgotPin } from './ForgotPin';
+import { LockGrownUps } from './LockGrownUps';
 import screen from '../Screen.module.css';
 import styles from './ProfileEditScreen.module.css';
 
@@ -75,6 +79,8 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
   // Where the PIN pad sends focus as it closes: the button that opened it, while it is there.
   const pinFrom = useRef('profile-pin');
   const [deleting, setDeleting] = useState(false);
+  const [forgetting, setForgetting] = useState<'change' | 'remove' | null>(null);
+  const [locking, setLocking] = useState(false);
   useScreenFocus('profile-name');
 
   const canBeKids = existing?.id !== MAIN_PROFILE_ID && existing?.id !== current;
@@ -86,14 +92,24 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
       void setFocus('profile-name');
       return;
     }
+    let id = existing?.id;
     if (existing) {
       updateProfile(existing.id, {
         name,
         colour,
         ...(canBeKids ? { kids: kids ?? null } : {}),
       });
-    } else if (!addProfile({ name, colour, ...(kids ? { kids } : {}) })) {
-      setProblem(t('profiles.full'));
+    } else {
+      id = addProfile({ name, colour, ...(kids ? { kids } : {}) });
+      if (!id) {
+        setProblem(t('profiles.full'));
+        return;
+      }
+    }
+    const list = profiles.get().profiles;
+    // A new kids profile only works if the grown-ups are locked: offer that before leaving.
+    if (offerLockAfterSave(existing, list.filter((p) => p.id === id)[0], list)) {
+      setLocking(true);
       return;
     }
     back();
@@ -268,13 +284,37 @@ export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unloc
             }
           }}
           onClose={() => setPin(null)}
+          {...(pin.step === 'current'
+            ? {
+                onForgot: () => {
+                  setForgetting(pin.then);
+                  setPin(null);
+                },
+              }
+            : {})}
         />
       )}
+      {existing && forgetting && (
+        <ForgotPin
+          profile={existing}
+          returnFocusKey={() => pinFrom.current}
+          onCleared={() => {
+            const then = forgetting;
+            setForgetting(null);
+            setPinMessage(undefined);
+            // With the PIN off, Change PIN goes on to choosing one; Remove PIN is already done.
+            if (then === 'change') setPin({ step: 'first' });
+            else pinFrom.current = 'profile-pin';
+          }}
+          onClose={() => setForgetting(null)}
+        />
+      )}
+      {locking && <LockGrownUps returnFocusKey="profile-save" onDone={() => back()} />}
       {existing && deleting && (
         <ConfirmDialog
           focusKey="profile-delete-confirm"
           title={t('profiles.deleteTitle', { name: existing.name })}
-          message={t('profiles.deleteMessage')}
+          message={t(syncOn() ? 'profiles.deleteMessageAccount' : 'profiles.deleteMessage')}
           confirmLabel={t('profiles.delete')}
           cancelLabel={t('common.cancel')}
           returnFocusKey="profile-delete"
