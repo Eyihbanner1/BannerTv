@@ -15,6 +15,7 @@ import {
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
 import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { videoSource } from './video-source';
 
 /**
  * The phone's side of the Android bridge (ADR 0005, protocol version 1), over expo-video's player
@@ -61,6 +62,8 @@ let ended = false;
 let openedUrl: string | null = null;
 let openedStartAt = 0;
 let openedType: ContentType = 'auto';
+/** The addon's request headers for the stream opened last, sent again when it is opened again. */
+let openedHeaders: Readonly<Record<string, string>> | undefined;
 /** Whether the link's kind is known; an unknown one is tried as HLS once (as the TV app does). */
 let typeSettled = false;
 let firstError: string | undefined;
@@ -280,7 +283,7 @@ function open(url: string, startAt: number, type: ContentType): void {
   readyOnce = false;
   nativeStatus = 'idle';
   startChecked = false;
-  current.replace({ uri: url, contentType: type }, true);
+  current.replace(videoSource(url, type, openedHeaders), true);
   if (startAt > 0 && isFinite(startAt)) current.currentTime = startAt;
   if (wantPlay) current.play();
   else current.pause();
@@ -298,6 +301,7 @@ function load(command: Extract<AndroidPlayerCommand, { op: 'load' }>): void {
   loadId = command.id;
   openedUrl = command.url;
   openedStartAt = command.startAt;
+  openedHeaders = command.headers;
   typeSettled = command.mime !== '';
   firstError = undefined;
   textChosen = false;
@@ -314,6 +318,7 @@ function release(): void {
   ended = false;
   wantPlay = false;
   openedUrl = null;
+  openedHeaders = undefined;
   audioTracks = [];
   textTracks = [];
   if (player) {

@@ -1,5 +1,7 @@
+import type { Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AndroidPlayerCommand, AndroidPlayerEvent } from '../../platform/android';
+import { noteRequestHeaders } from '../request-headers';
 import { createAndroidEngine, toEngineTrack } from './android';
 import type { PlaybackError } from './types';
 
@@ -375,5 +377,24 @@ describe("Android's engine", () => {
     events.length = 0;
     state({ playWhenReady: false, playing: false });
     expect(events).toEqual([]);
+  });
+});
+
+describe("Android's engine and an addon's request headers", () => {
+  it('sends the headers noted for a link with its load command, and none for other links', () => {
+    noteRequestHeaders({
+      source: { kind: 'url', url: 'https://live.example.com/match.m3u8' },
+      behaviorHints: {
+        proxyHeaders: { request: { Referer: 'https://site.example/', Range: 'bytes=0-' } },
+      },
+    } as unknown as Stream);
+    open('https://live.example.com/match.m3u8');
+    expect(lastCommand()).toMatchObject({
+      op: 'load',
+      headers: { Referer: 'https://site.example/' },
+    });
+    open('https://media.example.com/film.mkv');
+    expect(lastCommand()).toMatchObject({ op: 'load' });
+    expect(lastCommand()).not.toHaveProperty('headers');
   });
 });

@@ -94,3 +94,68 @@ test('a later launch opens on Home, and Settings shows playback and the build', 
   await expect(page.getByText(/BannerTV for phones/)).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("a stream that needs the addon's headers plays, and they go to the phone's player", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // Records what the page asks the phone's player to open, on its way to the host.
+  await page.addInitScript(() => {
+    const seen = window as unknown as { __loads: unknown[] };
+    seen.__loads = [];
+    let bridge: { player(command: string): void } | undefined;
+    Object.defineProperty(window, 'BannerAndroid', {
+      configurable: true,
+      get: () => bridge,
+      set: (value: { player(command: string): void }) => {
+        bridge = {
+          ...value,
+          player: (command: string) => {
+            const parsed = JSON.parse(command) as { op: string };
+            if (parsed.op === 'load') seen.__loads.push(parsed);
+            value.player(command);
+          },
+        };
+      },
+    });
+  });
+  await mockAddons(page);
+  const playback = await mockPlayback(page, {
+    streams: {
+      tt2285752: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Match feed 1080p WEB-DL',
+          path: '/movie-headers.webm',
+          requestHeaders: {
+            Referer: 'https://site.example/',
+            'user-agent': 'Agent/1.0',
+            Range: 'bytes=0-',
+          },
+        },
+      ],
+    },
+  });
+  await openApp(page);
+  await addStreamAddon(page);
+
+  await page
+    .getByLabel(/Tears of Steel/)
+    .last()
+    .click();
+  await page.getByRole('button', { name: /All streams/ }).click();
+  await page
+    .getByText(/Match feed 1080p/)
+    .first()
+    .click();
+
+  await expect(page.getByLabel('Pause', { exact: true }).first()).toBeVisible();
+  const loads = () =>
+    page.evaluate(() => (window as unknown as { __loads: Array<Record<string, unknown>> }).__loads);
+  await expect.poll(async () => (await loads()).length).toBeGreaterThan(0);
+  const load = (await loads()).pop()!;
+  // The page sends what the addon asked, less Range, which the player sets itself.
+  expect(load.headers).toEqual({ Referer: 'https://site.example/', 'user-agent': 'Agent/1.0' });
+  await expect.poll(() => playback.media).toContain('/movie-headers.webm');
+  expect(errors).toEqual([]);
+});

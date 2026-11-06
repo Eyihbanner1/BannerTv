@@ -69,6 +69,8 @@ export interface TestStream {
   path?: string;
   infoHash?: string;
   bingeGroup?: string;
+  /** Request headers the addon asks for (behaviorHints.proxyHeaders.request). */
+  requestHeaders?: Record<string, string>;
   /** Subtitles that come with the stream, as paths on SUBTITLE_HOST, with a release name if given. */
   subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
 }
@@ -330,6 +332,7 @@ export async function mockPlayback(
         ...(stream.infoHash && { infoHash: stream.infoHash }),
         behaviorHints: {
           ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
+          ...(stream.requestHeaders && { proxyHeaders: { request: stream.requestHeaders } }),
           filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
         ...(stream.subtitles && {
