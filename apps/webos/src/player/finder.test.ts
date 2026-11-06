@@ -258,6 +258,24 @@ describe('settling', () => {
     expect(finder.get()).toMatchObject({ settled: true, pending: 0 });
   });
 
+  it('marks its stages for a trace when the marks switch is on', async () => {
+    tuned.marks = true;
+    const finder = streamFinder('movie', 'tt-settle-marked');
+    // The oldest finder it pushed out settles as it goes: not this one's.
+    await vi.advanceTimersByTimeAsync(0);
+    const marked: string[] = [];
+    const spy = vi.spyOn(performance, 'mark').mockImplementation((name: string) => {
+      marked.push(name);
+      return undefined as unknown as PerformanceMark;
+    });
+    finder.start();
+    answer('tt-settle-marked', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS);
+    answer('tt-settle-marked', 1);
+    expect(marked).toEqual(['play:finder-start', 'play:first-stream', 'play:settled']);
+    spy.mockRestore();
+  });
+
   it('gives them the time the settleAfterFirstMs switch says', async () => {
     tuned.settleAfterFirstMs = 500;
     const finder = streamFinder('movie', 'tt-settle-tuned');

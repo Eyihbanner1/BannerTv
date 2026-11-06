@@ -29,6 +29,7 @@ import { afterLaunch } from './platform/launch';
 import { bootMark, mark } from './platform/marks';
 import { applyTuning, changedTuning, tuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
+import { readPlayMarks } from './player/play-marks';
 
 function fitToWindow(root: HTMLElement) {
   // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop or a phone,
@@ -58,6 +59,8 @@ function start() {
     document.documentElement.classList.add('low-power');
   }
   applyTuning(document.documentElement);
+  // The stages of the latest Play, read from the web inspector.
+  if (tuning.marks) window.__bannertvPlay = readPlayMarks;
   if (!isWebOS()) {
     fitToWindow(root);
     window.addEventListener('resize', () => fitToWindow(root));

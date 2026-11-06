@@ -47,6 +47,11 @@ const kept = vi.hoisted(() => ({
   },
 }));
 
+// The play stage marks the session sets, by the finder they belong to.
+const marks = vi.hoisted(() => ({ playMark: vi.fn() }));
+
+vi.mock('./play-marks', () => ({ playMark: marks.playMark }));
+
 vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
   sourceMemory: { record: kept.sourceMemory },
@@ -250,6 +255,7 @@ beforeEach(() => {
   kept.sourceMemory.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
+  marks.playMark.mockClear();
 });
 
 afterEach(() => {
@@ -1291,5 +1297,27 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('play stage marks', () => {
+  it("marks each stream's load and metadata, and the first picture once", async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    video.fire('loadedmetadata');
+    void video.play();
+    video.fire('playing');
+    video.fire('pause');
+    void video.play();
+    video.fire('playing');
+    expect(marks.playMark.mock.calls.map(([, stage, label]) => [stage, label])).toEqual([
+      ['load', 'hls.js'],
+      ['metadata', undefined],
+      ['first-frame', undefined],
+    ]);
+    // All of them the finder's, which names the video.
+    expect(new Set(marks.playMark.mock.calls.map(([finder]) => finder)).size).toBe(1);
+    session.destroy();
   });
 });

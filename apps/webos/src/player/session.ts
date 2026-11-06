@@ -16,6 +16,7 @@ import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
+import { playMark } from './play-marks';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
 export const STALL_MS = 20000;
@@ -535,6 +536,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       },
     ],
     [
+      'loadedmetadata',
+      () => {
+        if (engine) playMark(finder, 'metadata');
+      },
+    ],
+    [
       'playing',
       () => {
         // From a stream let go of (its engine can still be telling, as Android's
@@ -546,6 +553,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         judgeLength(current);
         if (current !== attempt || !engine) return;
         clearTimers();
+        if (!startedPlaying) playMark(finder, 'first-frame');
         startedPlaying = true;
         const buffered = endBuffering();
         patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
@@ -813,6 +821,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             firstTrusted = undefined;
             lastPosition = undefined;
           }
+          playMark(finder, 'load', created.name);
           await created.load(url, at);
         } catch (error) {
           listener.fatal(

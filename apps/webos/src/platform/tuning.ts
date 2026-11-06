@@ -63,7 +63,8 @@ export interface Tuning {
   heroFade: boolean;
   /**
    * Performance marks for a TV trace: key presses, row slides, rows filling
-   * in, hero changes and decoding ahead (performance.getEntriesByType('mark')).
+   * in, hero changes and decoding ahead (performance.getEntriesByType('mark')),
+   * and the stages from Play to the first picture (window.__bannertvPlay()).
    */
   marks: boolean;
 

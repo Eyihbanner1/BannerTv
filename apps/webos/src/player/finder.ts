@@ -27,6 +27,7 @@ import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { tuning } from '../platform/tuning';
+import { playMark } from './play-marks';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 
 /**
@@ -206,6 +207,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     if (candidates.length > 0 && firstPlayableAt === null) {
       firstPlayableAt = Date.now();
       settleTimer = window.setTimeout(refresh, settleAfterFirst);
+      playMark(finder, 'first-stream');
     }
     const settled =
       dropped ||
@@ -216,6 +218,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       clearTimeout(settleTimer);
       settleTimer = undefined;
     }
+    if (settled && !state.get().settled) playMark(finder, 'settled');
     state.set({ pending, failed, entries, candidates, probes: { ...probes }, settled });
   }
 
@@ -258,6 +261,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       }
       started = true;
       dropped = false;
+      playMark(finder, 'finder-start');
       // A sports event asks only the addons that listed it, once per source.
       answers = sources ? addonClient.streamsFrom(sources) : addonClient.streams(type, videoId);
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));

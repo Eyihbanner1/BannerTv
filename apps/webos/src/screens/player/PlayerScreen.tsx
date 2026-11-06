@@ -70,6 +70,7 @@ import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, putPlayerFirst, streamFinder } from '../../player/finder';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
+import { playMark } from '../../player/play-marks';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -447,6 +448,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const element = videoRef.current;
     if (!element) return;
     setVideo(element);
+    playMark(finder, 'open');
+    // Whether auto-play's choice will have to wait for the addons, for the play:chosen mark.
+    const settledAtOpen = finder.get().settled;
     const releaseProbing = holdProbing();
     // This video's stream and subtitles requests go first (tuning playFirst).
     const releaseFirst = putPlayerFirst(type, videoId, sportsEvent);
@@ -475,8 +479,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose(props.binge));
         if (cancelled) return;
-        if (entry) created.play(entry, start);
-        else setNothing(true);
+        if (entry) {
+          playMark(finder, 'chosen', props.stream ? 'picked' : settledAtOpen ? 'ready' : 'waited');
+          created.play(entry, start);
+        } else setNothing(true);
       });
     return () => {
       cancelled = true;
