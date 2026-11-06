@@ -27,6 +27,7 @@ const MAX_ROW_ITEMS = 40;
 const LOAD_AHEAD = 3;
 /** Rows found empty this run; they stay off Home until the app starts again. */
 const emptyRows = new Set<string>();
+const NO_CONTINUE: readonly ContinueItem[] = [];
 
 function playContinue(item: ContinueItem): void {
   const preview = item.preview;
@@ -165,7 +166,7 @@ export function HomeScreen() {
   }, []);
 
   const rows = useMemo(() => (board ?? []).filter((row) => !empty.has(row.key)), [board, empty]);
-  const continueRow = continueItems ?? [];
+  const continueRow = continueItems ?? NO_CONTINUE;
   const heroContinue = continueRow[0];
   const heroRow = rows.find((row) => !failed.has(row.key) && firsts[row.key]);
   const heroItem =
@@ -192,74 +193,91 @@ export function HomeScreen() {
   // The addons only list sport, which has its own tab.
   const sportsOnly = !kids && !allHidden && sports.shown;
 
-  const header = (
-    <View>
-      <View style={[styles.topBar, { paddingTop: insets.top + space.m }]}>
-        <PrismMark size={28} />
-        <Text style={styles.wordmark} accessibilityRole="header">
-          {t('phone.appName')}
-        </Text>
-        <View style={styles.spacer} />
-        {profile ? (
-          <Pressable
-            onPress={() => router.push('/profiles')}
-            accessibilityRole="button"
-            accessibilityLabel={t('phone.switchProfile')}
-            style={styles.profile}
-          >
-            <Avatar profile={profile} size={40} round />
-          </Pressable>
+  // Made again only when what it shows changes. Each row's first page and each newly reached row
+  // re-render this screen, which would otherwise draw the hero and every Continue Watching tile
+  // again too.
+  const header = useMemo(
+    () => (
+      <View>
+        <View style={[styles.topBar, { paddingTop: insets.top + space.m }]}>
+          <PrismMark size={28} />
+          <Text style={styles.wordmark} accessibilityRole="header">
+            {t('phone.appName')}
+          </Text>
+          <View style={styles.spacer} />
+          {profile ? (
+            <Pressable
+              onPress={() => router.push('/profiles')}
+              accessibilityRole="button"
+              accessibilityLabel={t('phone.switchProfile')}
+              style={styles.profile}
+            >
+              <Avatar profile={profile} size={40} round />
+            </Pressable>
+          ) : null}
+        </View>
+        <Hero
+          item={noRows ? null : heroItem}
+          {...(heroContinue && heroItem === heroContinue.preview
+            ? {
+                playLabel: t('phone.play'),
+                onPlay: () => playContinue(heroContinue),
+              }
+            : {})}
+          onDetails={openTitle}
+        />
+        {continueRow.length > 0 ? (
+          <Row
+            title={t('home.continueWatching')}
+            shape="landscape"
+            items={continueRow.map((item) => {
+              const note = continueNote(t, item);
+              return {
+                item: item.preview,
+                key: item.videoId,
+                ...(note ? { note } : {}),
+                ...(item.progress !== undefined ? { progress: item.progress } : {}),
+              };
+            })}
+            onPress={(entry) => {
+              const item = continueRow.find((candidate) => candidate.videoId === entry.key);
+              if (item) playContinue(item);
+            }}
+          />
+        ) : null}
+        <LiveSportRow />
+        {noRows ? (
+          <Message
+            title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
+            lead={t(
+              kids
+                ? 'home.noKidsRowsLead'
+                : allHidden
+                  ? 'home.allHiddenLead'
+                  : sportsOnly
+                    ? 'home.sportsOnlyLead'
+                    : 'home.noAddonsLead',
+            )}
+            // Addons are for the grown-ups: a kids profile gets the words only, as on the TV.
+            {...(kids
+              ? {}
+              : { action: { label: t('phone.addons'), onPress: () => router.push('/addons') } })}
+          />
         ) : null}
       </View>
-      <Hero
-        item={noRows ? null : heroItem}
-        {...(heroContinue && heroItem === heroContinue.preview
-          ? {
-              playLabel: t('phone.play'),
-              onPlay: () => playContinue(heroContinue),
-            }
-          : {})}
-        onDetails={openTitle}
-      />
-      {continueRow.length > 0 ? (
-        <Row
-          title={t('home.continueWatching')}
-          shape="landscape"
-          items={continueRow.map((item) => {
-            const note = continueNote(t, item);
-            return {
-              item: item.preview,
-              key: item.videoId,
-              ...(note ? { note } : {}),
-              ...(item.progress !== undefined ? { progress: item.progress } : {}),
-            };
-          })}
-          onPress={(entry) => {
-            const item = continueRow.find((candidate) => candidate.videoId === entry.key);
-            if (item) playContinue(item);
-          }}
-        />
-      ) : null}
-      <LiveSportRow />
-      {noRows ? (
-        <Message
-          title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
-          lead={t(
-            kids
-              ? 'home.noKidsRowsLead'
-              : allHidden
-                ? 'home.allHiddenLead'
-                : sportsOnly
-                  ? 'home.sportsOnlyLead'
-                  : 'home.noAddonsLead',
-          )}
-          // Addons are for the grown-ups: a kids profile gets the words only, as on the TV.
-          {...(kids
-            ? {}
-            : { action: { label: t('phone.addons'), onPress: () => router.push('/addons') } })}
-        />
-      ) : null}
-    </View>
+    ),
+    [
+      insets.top,
+      profile,
+      t,
+      noRows,
+      heroItem,
+      heroContinue,
+      continueRow,
+      kids,
+      allHidden,
+      sportsOnly,
+    ],
   );
 
   return (
