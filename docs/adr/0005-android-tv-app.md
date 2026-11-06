@@ -21,7 +21,7 @@ Four facts shaped the design:
 3. **A small bridge.** The page talks to Android through `window.BannerAndroid` and Android answers through `window.__bannerAndroid.event(…)`, as set out under "Protocol" below. The page treats itself as on Android only when `BannerAndroid.protocol()` exists, so a browser and the LG never take that path.
 4. **The Android engine is one more player engine.** `src/player/engines/android.ts` joins native, hls.js and Shaka; `chooseEngine` picks it for every stream on Android, and there is nothing to fall back to. It makes the page's `<video>` element tell Android's clock, pause state and events (`currentTime`, `duration`, `paused`, `seeking`, `readyState`, `play()`, `pause()`, and the `play`, `playing`, `pause`, `waiting`, `seeking`, `seeked`, `timeupdate`, `durationchange` and `ended` events), so the session, the subtitles, Continue Watching, Trakt and the controls work unchanged and need no Android code. It runs the clock between Android's readings (every 250 ms), holds it at the target while a seek runs, and lets a play or pause the viewer has just asked for outrank older news from Android for two seconds. When the player closes it takes all of that off the element again.
 5. **Remote keys.** The WebView passes the arrows, OK and digits to the page as it does on the LG. It never passes Back, so Android catches Back (`OnBackPressedDispatcher`, which also catches a phone's back gesture) and the page presses the LG Back key (461) where focus is. Media keys and the four colour keys are caught by the activity and pressed as the LG codes the app already answers; a remote's single Play/Pause button becomes Play or Pause from the player's state. Android never leaves the app on Back by itself: Back on Home's first row asks the page, which calls `exit()`, as `platformBack` does on the TV.
-6. **Subtitles.** Subtitles from addons are drawn by the web app as on the TV. Subtitles inside the file (SRT, ASS and PGS in Matroska, HLS and DASH subtitle tracks) are listed in the audio and subtitles panel and, once chosen, drawn by Android under the page. No cues reach the page in this first version.
+6. **Subtitles.** Subtitles from addons are drawn by the web app as on the TV. Subtitles inside the file (SRT, ASS and PGS in Matroska, HLS and DASH subtitle tracks) are listed in the audio and subtitles panel. Once one is chosen the page asks for its lines (`cues: true` on the `text` command). Android hands over each group of lines as its player shows it (`onCues`), with bold, italic and underline as `<b>`, `<i>` and `<u>`, and hides its own subtitle view for them. The page draws them like any other subtitles, in the profile's size, colour, background and position, moved by Timing. Picture subtitles (PGS, DVB) cannot be drawn by the page, so Android still shows them, in its own style, and the page gets an empty group. A line arrives as it starts, with no end of its own: it lasts until the next group. So Timing can show these lines later but not yet earlier: with a negative Timing they still show and go when Android's player shows and clears them (see Consequences). The Drift fix, which stretches a file timed for another frame rate, is not offered for these tracks, since their lines come in step with the video. The phone app sends the same lines through its own module (ADR 0007).
 7. **What the device can play.** `capabilities()` reports 4K, HDR10, Dolby Vision, HEVC, AV1, DTS and TrueHD from Android's display modes, HDR types, decoders and HDMI audio encodings, in the shape `TvCapabilities` already has, so stream ranking prefers what the device and the TV behind it can play. A fact Android cannot read is left unknown.
 8. **Addon request headers.** Some addons, sports ones most of all, give links that only open with a Referer, Origin or User-Agent of their own (`behaviorHints.proxyHeaders.request`). webOS's `<video>` cannot send them, so the LG lists those streams as unavailable. ExoPlayer can: the page reports `requestHeaders: true` for Android in `TvCapabilities`, the stream finder notes each link's cleaned headers (`streamRequestHeaders` in core), the Android engine adds them to the load command, and Android sets them on its HTTP data source for that stream. Both sides drop header names HTTP does not allow, values with line breaks, and the headers the player sets itself (Host, Range, Content-Length, Connection, Transfer-Encoding). The link test cannot send them, so it skips those links.
 9. **No link testing by default.** The link test loads a link's metadata into a hidden `<video>`, which on Android is the WebView's player, not ExoPlayer, and would fail Matroska and Dolby links ExoPlayer plays. Under "auto" it is off on Android; the viewer can still turn it on.
@@ -54,7 +54,9 @@ Player commands:
     addon's request headers (behaviorHints.proxyHeaders.request), sent with every request
     of that stream and dropped at the next load. A User-Agent among them replaces the app's.
 { "op": "play" }   { "op": "pause" }   { "op": "seek", "position": 123.4 }
-{ "op": "audio", "id": "1:0" }   { "op": "text", "id": "2:0" }   { "op": "text", "id": null }
+{ "op": "audio", "id": "1:0" }   { "op": "text", "id": "2:0", "cues": true }   { "op": "text", "id": null }
+    cues (optional): the page draws the track's lines, so Android sends them as cues events
+    and shows only picture subtitles itself. Without it Android draws every line, as before.
 { "op": "release" }                                              stop, and free the decoder
 ```
 
@@ -72,9 +74,17 @@ Player commands:
 { "type": "player", "event": "tracks", "audio": [ … ], "text": [ … ] }
     each track: id ("<group>:<track>"), lang, label, active, supported, and channels, mime,
     codecs, commentary, forced where known
+{ "type": "player", "event": "cues", "track": "2:0", "at": 61.2,
+  "cues": [ { "text": "<i>Hello</i>\nthere", "top": true } ] }
+    what shows from at (seconds on the player's clock) until the next cues event; [] for none,
+    or for picture subtitles Android shows itself. text has <b>, <i> and <u>, &, < and >
+    escaped, and \n between lines; top: placed at the top of the picture. Sent only after a
+    text command with cues, for that track.
 { "type": "player", "event": "error", "kind": "format" | "network" | "decode" | "other",
   "message", "detail" }                       detail names ExoPlayer's error code, never the link
 ```
+
+The page and the Android app are always built together (the page ships inside the APK), and an app that ignores `cues` draws the lines itself, so `cues` needed no new protocol version.
 
 Every player event also carries `"load"`, the id of the load command it is about. Android's player can send news about a stream just as the page moves on to another (an error, the end, its track list), so the page drops news whose id is not the latest.
 
@@ -86,6 +96,7 @@ Android's error codes map to the kinds the session already acts on: network erro
 
 - One codebase for the LG and Android: every screen, fix and addon feature lands on both. Android-only code is the Kotlin shell, `platform/android.ts` and the Android engine.
 - Streams the LG plays through its own pipeline (Matroska, Dolby sound, HEVC, HDR) play on Android through ExoPlayer, with sound passed through to a receiver where the device allows.
-- Subtitles inside a file follow Android's own style, not the app's subtitle style setting, until cues are sent to the page.
+- Subtitles inside a file follow the profile's subtitle style and Timing, as addon subtitles do. Picture subtitles (PGS, DVB) keep Android's own style.
+- Not yet: a negative Timing for subtitles inside the file. It needs each line before it shows: a second text renderer that reads the track ahead of the picture (a custom `RenderersFactory`), so lines arrive early enough to be shown sooner. The phone cannot do this while expo-video builds its renderers itself (a private `DefaultRenderersFactory` in its `VideoPlayer`).
 - The APK cannot be built on the cloud machines that write the code (Google's Maven is not reachable there), so every Kotlin change is checked by CI.
 - Not in this first version: a Play Store or Amazon Appstore listing, Android TV's home-screen channels and Continue Watching row, voice search, picture-in-picture, and downloads (phones only, later).
