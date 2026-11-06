@@ -215,15 +215,21 @@ function unwarm(image: HTMLImageElement): void {
  * of the art itself, so its fit and filtering match. The two share the
  * address and so the browser's decoded copy: drawing the copy decodes and
  * uploads it at the size the tile will draw it.
+ *
+ * The art was measured on the screen, and the page may be scaled down to
+ * fit a smaller window (main.tsx), as a 1080p Android TV's is by half. The
+ * box, 1 px wide in the page, measures by how much, so the copy is sized in
+ * the page's own px and is then scaled just as the tile is.
  */
 function drawWarm(box: HTMLElement, { image, box: drawn, key }: Next): void {
+  const scale = box.getBoundingClientRect().width || 1;
   const copy = document.createElement('img');
   copy.className = image.className;
   const decodingAttribute = image.getAttribute('decoding');
   if (decodingAttribute) copy.setAttribute('decoding', decodingAttribute);
   copy.alt = '';
   copy.draggable = false;
-  copy.style.cssText = `position:absolute;left:0;top:0;right:auto;bottom:auto;width:${drawn.width}px;height:${drawn.height}px;max-width:none;max-height:none`;
+  copy.style.cssText = `position:absolute;left:0;top:0;right:auto;bottom:auto;width:${drawn.width / scale}px;height:${drawn.height / scale}px;max-width:none;max-height:none`;
   copy.src = image.src;
   box.appendChild(copy);
   warm.push({ image: copy, slide: slides });

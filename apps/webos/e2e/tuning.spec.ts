@@ -356,6 +356,32 @@ test.describe('on a 4K TV', () => {
   }
 });
 
+// A 1080p Android TV gives its WebView a 960x540 window at 2 device px each,
+// and the page is scaled down to fit it (main.tsx).
+test.describe('scaled to fit a smaller window', () => {
+  test.use({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 2 });
+
+  test('aheadMode raster draws the art under the rail at the size its tile shows it', async ({
+    page,
+  }) => {
+    const art = { poster: png(500, 750), logo: png(500, 150), background: png(1920, 1080) };
+    await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+      }),
+    );
+    await tune(page, { aheadMode: 'raster' });
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    const featured = await tileArt(page, FEATURED_MOVIES, [0, 1, 2, 3, 4], 10);
+    // Wide tiles are 384 px wide in the page, and half that on the screen.
+    expect(featured.map((drawn) => drawn.size[0])).toContain(192);
+    await expect.poll(() => warmArt(page)).toEqual(featured);
+  });
+});
+
 test('art that loads after its row was reached is decoded as it arrives', async ({ page }) => {
   // The first four posters of the action row are new to the page: hold them.
   let release = () => {};

@@ -26,6 +26,8 @@ class FakeElement {
   className = '';
   style = { cssText: '' };
   listeners: string[] = [];
+  /** Where it is on the screen: the box under the rail is 1 px, in a page scaled by 1. */
+  rect = { left: 0, right: 1, top: 0, bottom: 1, width: 1, height: 1 };
   private attributes = new Map<string, string>();
 
   constructor(attributes: Record<string, string> = {}) {
@@ -93,6 +95,9 @@ class FakeElement {
   addEventListener(type: string) {
     this.listeners.push(type);
   }
+  getBoundingClientRect() {
+    return this.rect;
+  }
 }
 
 class FakeImage extends FakeElement {
@@ -103,13 +108,10 @@ class FakeImage extends FakeElement {
   alt = 'x';
   draggable = true;
   objectFit = 'fill';
-  rect = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+  override rect = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
   /** Each decode() asked, settled by the test. */
   static decodes: { image: FakeImage; settle: () => void }[] = [];
 
-  getBoundingClientRect() {
-    return this.rect;
-  }
   decode() {
     return new Promise<void>((resolve) => FakeImage.decodes.push({ image: this, settle: resolve }));
   }
@@ -330,6 +332,25 @@ describe('aheadMode raster', () => {
     expect(logo.style.cssText).toContain('width:238px;height:71.4px;');
     expect(FakeImage.decodes).toEqual([]);
     expect(page.marks.slice(0, 4)).toEqual(['ahead:c', 'ahead-done:c', 'ahead:c', 'ahead-done:c']);
+  });
+
+  it('sizes the copy in the page’s own px when the page is scaled down to fit the window', async () => {
+    const { ahead, box } = await raster();
+    // A 1080p Android TV's WebView: the page at half size, so the box is half a px on the screen.
+    box.rect = { left: 0, right: 0.5, top: 539.5, bottom: 540, width: 0.5, height: 0.5 };
+    const row = new FakeElement({ 'data-row-key': 'c' });
+    row.appendChild(new FakeElement()).appendChild(
+      image({
+        src: 'https://art/background/c/0',
+        natural: [1920, 1080],
+        drawn: [92, 192, 108],
+      }),
+    );
+    const { track, rows } = stack(posterRow('a', 2), posterRow('b', 2), row);
+    slide(ahead, track, rows[0]!);
+    runFrames(3);
+    const [wide] = box.children as FakeImage[];
+    expect(wide!.style.cssText).toContain('width:384px;height:216px;');
   });
 
   it('waits for two flowing frames after each image, and for a still remote', async () => {
