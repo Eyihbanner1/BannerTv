@@ -68,9 +68,9 @@ export interface Tuning {
    */
   marks: boolean;
 
-  // Launch switches (speed pass, U2). Each defaults to what shipped before
-  // it, so one install can compare them. With `marks` on, the launch is
-  // marked too: read window.__bannertvBoot() from the web inspector.
+  // Launch. Each default is what shipped before the switch came, so one
+  // install can compare them. With `marks` on, the launch is marked too:
+  // read window.__bannertvBoot() from the web inspector.
 
   /**
    * When the launch trims the cache of addon answers to MAX_CACHE_ENTRIES:
@@ -93,7 +93,8 @@ export interface Tuning {
    * a sports screen or search opens or focus enters the Live sport row.
    */
   matcherAt: 'launch' | 'idle';
-  // Starting playback (speed pass U3). Each default is what shipped before the switch.
+
+  // Starting playback. Each default is what shipped before the switch.
   /**
    * How long focus rests on Watch or an episode before Details asks the
    * addons for its streams. The phone's title page waits 300 ms, as nothing
@@ -121,8 +122,8 @@ export interface Tuning {
    * its end, on a slow debrid host, can rightly take over 12 s.
    */
   metadataTimeoutMs: number;
-  // Decoding ahead, second round. Kept together and last, so other changes to
-  // this file merge cleanly; each default is what shipped before it came.
+
+  // Decoding ahead, second round. Each default is what shipped before it came.
   /**
    * How `decodeAhead` gets art ready. `decode` asks the browser to decode it,
    * which it does at full size, leaving the upload to the press. `raster`
@@ -168,12 +169,12 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   decodeAhead: true,
   heroFade: false,
   marks: false,
-  // Launch switches (speed pass, U2): what shipped before them.
+  // Launch: what shipped before the switches.
   idbPrune: 'open',
   idbRelaxed: false,
   matcherAt: 'launch',
 
-  // Starting playback (speed pass U3).
+  // Starting playback.
   prefetchRestMs: 1500,
   settleAfterFirstMs: 2000,
   playFirst: false,
@@ -223,12 +224,12 @@ export function parseTuning(raw: string | null): Tuning {
     decodeAhead: flag(stored.decodeAhead, d.decodeAhead),
     heroFade: flag(stored.heroFade, d.heroFade),
     marks: flag(stored.marks, d.marks),
-    // Launch switches (speed pass, U2).
+    // Launch.
     idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
     idbRelaxed: flag(stored.idbRelaxed, d.idbRelaxed),
     matcherAt: oneOf(stored.matcherAt, ['launch', 'idle'], d.matcherAt),
 
-    // Starting playback (speed pass U3).
+    // Starting playback.
     prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
     settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
     playFirst: flag(stored.playFirst, d.playFirst),

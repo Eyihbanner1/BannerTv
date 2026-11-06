@@ -22,7 +22,6 @@ describe('TUNING_DEFAULTS', () => {
       idbPrune: 'open',
       idbRelaxed: false,
       matcherAt: 'launch',
-      // Starting playback (speed pass U3): what shipped before each switch.
       prefetchRestMs: 1500,
       settleAfterFirstMs: 2000,
       playFirst: false,
@@ -82,6 +81,8 @@ describe('parseTuning', () => {
     expect(parseTuning('{"metadataTimeoutMs":12000}').metadataTimeoutMs).toBe(12000);
     expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
+  });
+
   it('takes the second round of decoding-ahead switches', () => {
     expect(parseTuning('{"aheadMode":"raster","aheadOversize":2,"gridAhead":true}')).toEqual({
       ...TUNING_DEFAULTS,
@@ -186,7 +187,7 @@ describe('applyTuning', () => {
   });
 });
 
-// Launch switches (speed pass, U2), kept apart so they merge cleanly with other switches.
+// Launch switches.
 describe('the launch switches', () => {
   it('default to what shipped before them', () => {
     expect(TUNING_DEFAULTS.idbPrune).toBe('open');

@@ -226,6 +226,8 @@ describe('createAddonClient', () => {
       await flush();
       expect(query.get().data).not.toBe(items);
     }
+  });
+
   it('puts the stream and subtitles requests of the video playPriority names ahead of the rest waiting', async () => {
     const top = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
     const later = 'https://v3-cinemeta.strem.io/catalog/series/top.json';
