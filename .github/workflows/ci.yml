@@ -12,11 +12,49 @@ concurrency:
 permissions:
   contents: read
 
+# The TV app's checks run side by side: the build, the static checks and unit tests, and the
+# remote-key journeys in four shards on the build. "Check, test and package" waits for all of
+# them, fails unless every one passed, and only then packages the .ipk. It is the check to
+# require. The Android APK waits for it, so no .ipk or APK is uploaded before the checks and
+# every journey passed, as when they all ran in one job.
 jobs:
-  build:
-    name: Check, test and package
+  web:
+    name: Build the TV app
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check the build for webOS 5.0
+        run: pnpm check:bundle
+
+      # The journeys run on this exact build, and the .ipk and the Android APK ship it, rather
+      # than building their own.
+      - name: Upload the web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
+          retention-days: 3
+          if-no-files-found: error
+
+  checks:
+    name: Format, lint, typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -45,26 +83,125 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+  journeys:
+    name: TV journeys ${{ matrix.shard }}/${{ strategy.job-total }}
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Every shard runs to the end, so one run shows every journey that fails.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v5
 
-      - name: Check the build for webOS 5.0
-        run: pnpm check:bundle
+      - uses: pnpm/action-setup@v4
 
-      # The Android job ships this exact build inside its APK rather than building its own.
-      - name: Upload the web build
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the web build
+        uses: actions/download-artifact@v4
         with:
           name: bannertv-web
           path: apps/webos/dist
-          retention-days: 3
-          if-no-files-found: error
 
       - name: Install Playwright's Chromium
         run: pnpm --filter @bannertv/webos exec playwright install --with-deps chromium
 
+      # Playwright splits the journeys by count, a quarter each. One worker, as on the 2-vCPU
+      # runner before the split, so every journey keeps the timing it was written for. The blob
+      # reporter's results come together in "TV journeys report".
       - name: Remote-key journeys
-        run: pnpm e2e
+        run: >-
+          pnpm --filter @bannertv/webos exec playwright test
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --workers=1
+          --reporter=github,blob
+
+      - name: Upload the journeys' results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: apps/webos/blob-report/
+          retention-days: 1
+          if-no-files-found: ignore
+
+  journeys-report:
+    name: TV journeys report
+    needs: journeys
+    if: ${{ failure() && needs.journeys.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the shards' results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: blob-report-*
+          path: apps/webos/blob-reports
+          merge-multiple: true
+
+      - name: Merge them into one report
+        run: pnpm --filter @bannertv/webos exec playwright merge-reports --reporter html blob-reports
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/webos/playwright-report/
+          if-no-files-found: error
+
+  tv:
+    name: Check, test and package
+    needs: [web, checks, journeys]
+    # Runs even when one of them failed or the run was cancelled, so that this check fails rather
+    # than being skipped: a required check that was skipped counts as passed.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every check passed
+        if: ${{ always() && (needs.web.result != 'success' || needs.checks.result != 'success' || needs.journeys.result != 'success') }}
+        run: |
+          echo "::error::Build: ${{ needs.web.result }}. Checks: ${{ needs.checks.result }}. Journeys: ${{ needs.journeys.result }}."
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the web build
+        uses: actions/download-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
 
       - name: Package .ipk
         run: pnpm package
@@ -76,19 +213,11 @@ jobs:
           path: out/*.ipk
           if-no-files-found: error
 
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            apps/webos/playwright-report/
-            apps/webos/test-results/
-          if-no-files-found: ignore
-
   android:
     name: Android APK
-    needs: build
+    # Only once "Check, test and package" passed, so every APK here passed the TV checks and
+    # journeys. It ships the web build those journeys ran on.
+    needs: tv
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
