@@ -32,6 +32,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.ui.PlayerView
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
+import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The whole app: the bundled web build in a full-screen WebView, with the native player's video
@@ -41,10 +43,21 @@ class MainActivity : ComponentActivity() {
     private var webView: WebView? = null
     private var player: PlayerController? = null
     private var events: JsEvents? = null
+    private var watchNext: WatchNextPublisher? = null
     private var keyboardVisible = false
+
+    // The link the app was opened with (a Watch Next card), until the page takes it. The page
+    // takes it once someone is watching, which may be after a reload to ask "Who's watching?",
+    // so it is held here rather than sent. The page reads it on the WebView's bridge thread.
+    private val pendingLink = AtomicReference<OpenLink?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Restored from saved state, or reopened from Recents, the activity is handed the intent
+        // it was first started with again: that card was opened already.
+        if (savedInstanceState == null && !launchedFromHistory(intent)) {
+            pendingLink.set(DeepLink.parse(intent?.dataString))
+        }
 
         val tooOld = webViewTooOld()
         if (tooOld != null) {
@@ -126,17 +139,21 @@ class MainActivity : ComponentActivity() {
                 emit = js::send,
                 onPlayingChanged = ::keepScreenOn,
             )
+        val publisher = WatchNextPublisher(this)
         val bridge =
             WebBridge(
                 facts = DeviceFacts(this),
                 onExit = { finish() },
                 onOpenExternal = ::openExternal,
                 onPlayerCommand = controller::handle,
+                onWatchNext = publisher::publish,
+                onTakeLink = { pendingLink.getAndSet(null)?.let(::linkJson) ?: "" },
             )
         web.addJavascriptInterface(bridge, Protocol.BRIDGE_NAME)
         webView = web
         player = controller
         events = js
+        watchNext = publisher
 
         // Back never reaches the page, so it is always sent there; the page calls exit() at its root.
         onBackPressedDispatcher.addCallback(
@@ -148,8 +165,18 @@ class MainActivity : ComponentActivity() {
             },
         )
         // Opened again from the launcher while running, as webOSRelaunch on the TV. Not on every
-        // return to the front: the page asks "Who's watching?" again on relaunch.
-        addOnNewIntentListener { events?.relaunch() }
+        // return to the front: the page asks "Who's watching?" again on relaunch. Opened from a
+        // card instead, the page is told a link waits; it asks "Who's watching?" by the same rule
+        // before it takes the link.
+        addOnNewIntentListener { newIntent ->
+            val link = DeepLink.parse(newIntent.dataString)
+            if (link == null) {
+                events?.relaunch()
+            } else {
+                pendingLink.set(link)
+                events?.open()
+            }
+        }
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val visible = insets.isVisible(WindowInsetsCompat.Type.ime())
             if (visible != keyboardVisible) {
@@ -221,7 +248,19 @@ class MainActivity : ComponentActivity() {
         player?.destroy()
         player = null
         releaseWebView()
+        watchNext?.close()
+        watchNext = null
         super.onDestroy()
+    }
+
+    private fun launchedFromHistory(intent: Intent?): Boolean =
+        intent != null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+
+    /** A link as the page reads it from takeLink(). */
+    private fun linkJson(link: OpenLink): String {
+        val json = JSONObject().put("type", link.type).put("meta", link.meta)
+        if (link.video != null) json.put("video", link.video)
+        return json.toString()
     }
 
     private fun keepScreenOn(playing: Boolean) {
