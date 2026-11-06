@@ -15,6 +15,9 @@ interface AndroidHost {
   exit(): void;
   openExternal(url: string): void;
   player(command: string): void;
+  /** The stream helper for the LG. Missing from apps built before it. */
+  helper?(command: string): void;
+  helperState?(): string;
 }
 
 /** The Android app, as it describes itself. */
@@ -84,7 +87,15 @@ export type AndroidEvent =
   | AndroidPlayerEvent;
 
 export type AndroidPlayerCommand =
-  | { op: 'load'; id: number; url: string; startAt: number; mime: string }
+  | {
+      op: 'load';
+      id: number;
+      url: string;
+      startAt: number;
+      mime: string;
+      /** Request headers the addon asks to be sent with the link, for every request of the stream. */
+      headers?: Record<string, string>;
+    }
   | { op: 'play' }
   | { op: 'pause' }
   | { op: 'seek'; position: number }
@@ -127,7 +138,10 @@ export function androidHostInfo(): AndroidHostInfo | null {
   return info;
 }
 
-/** What the device can decode and pass to the TV or receiver. Nothing is known off Android. */
+/**
+ * What the device can decode and pass to the TV or receiver. Nothing is known off Android.
+ * Android's player always sends an addon's request headers (the build ships inside the app).
+ */
 export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
   const bridge = host();
   if (!bridge) return null;
@@ -144,7 +158,41 @@ export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
     av1: flag(facts.av1),
     dts: flag(facts.dts),
     truehd: flag(facts.truehd),
+    requestHeaders: true,
   };
+}
+
+/** The stream helper this device runs for a TV on the home network (apps/androidtv helper/). */
+export interface AndroidHelperState {
+  on: boolean;
+  /** The home-network address the TV types in; null while not on Wi-Fi or Ethernet. */
+  address?: string | null;
+  port?: number;
+  /** Six digits, shown on the phone and typed on the TV once. */
+  code?: string;
+  /** How many TVs have paired. */
+  paired: number;
+}
+
+/** The helper's state, or null off Android or in an app built before the helper. */
+export function androidHelperState(): AndroidHelperState | null {
+  const bridge = host();
+  if (!bridge || typeof bridge.helperState !== 'function') return null;
+  const read = bridge.helperState.bind(bridge);
+  const state = readJson<Partial<AndroidHelperState>>(read);
+  if (!state || typeof state.on !== 'boolean') return null;
+  return {
+    on: state.on,
+    address: typeof state.address === 'string' ? state.address : null,
+    port: typeof state.port === 'number' ? state.port : undefined,
+    code: typeof state.code === 'string' ? state.code : undefined,
+    paired: typeof state.paired === 'number' ? state.paired : 0,
+  };
+}
+
+/** Turns the stream helper on or off, or unpairs every TV. */
+export function sendHelperCommand(command: 'start' | 'stop' | 'forget'): void {
+  host()?.helper?.(command);
 }
 
 export function sendPlayerCommand(command: AndroidPlayerCommand): void {

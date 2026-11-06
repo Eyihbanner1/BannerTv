@@ -1,6 +1,8 @@
 import { isAndroid } from '../../platform/android';
 import { guessMimeType } from '../media';
+import { requestHeadersFor } from '../request-headers';
 import { createAndroidEngine } from './android';
+import { throughStreamHelper } from './helper';
 import { createHlsEngine } from './hls';
 import { createNativeEngine } from './native';
 import { createShakaEngine } from './shaka';
@@ -78,6 +80,9 @@ async function fetchPlaylist(url: string): Promise<string | null> {
 export async function chooseEngine(url: string): Promise<EngineName> {
   // Android's player opens files, HLS and DASH alike, and lists their tracks itself.
   if (isAndroid()) return 'android';
+  // Through the stream helper: the playlist can't be read here without the addon's
+  // headers, so the TV's player takes it rather than waiting on a read that fails.
+  if (requestHeadersFor(url)) return 'native';
   const mime = guessMimeType(url);
   if (mime === 'application/dash+xml') return canUseMse() ? 'shaka' : 'native';
   if (mime !== 'application/vnd.apple.mpegurl' || !canUseMse()) return 'native';
@@ -103,15 +108,7 @@ export function fallbackEngine(
   return other;
 }
 
-/**
- * Creates an engine. The hls.js and Shaka engines are small; their libraries
- * load as separate scripts when they first open a stream.
- */
-export function createEngine(
-  name: EngineName,
-  video: HTMLVideoElement,
-  listener: EngineListener,
-): Engine {
+function create(name: EngineName, video: HTMLVideoElement, listener: EngineListener): Engine {
   switch (name) {
     case 'hls.js':
       return createHlsEngine(video, listener);
@@ -122,4 +119,18 @@ export function createEngine(
     default:
       return createNativeEngine(video, listener);
   }
+}
+
+/**
+ * Creates an engine. The hls.js and Shaka engines are small; their libraries
+ * load as separate scripts when they first open a stream. Off Android, streams
+ * that need request headers go through the stream helper.
+ */
+export function createEngine(
+  name: EngineName,
+  video: HTMLVideoElement,
+  listener: EngineListener,
+): Engine {
+  const engine = create(name, video, listener);
+  return name === 'android' ? engine : throughStreamHelper(engine);
 }

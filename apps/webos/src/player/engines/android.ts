@@ -6,6 +6,7 @@ import {
 } from '../../platform/android';
 import { channelName, formatName } from '../audio';
 import { guessMimeType } from '../media';
+import { requestHeadersFor } from '../request-headers';
 import { type Engine, type EngineFactory, type EngineTrack, PlaybackError } from './types';
 
 /** Shown while Android's player draws the picture under the page. */
@@ -288,6 +289,7 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
       if (!loaded) attach();
       loaded = true;
       const mime = guessMimeType(url);
+      const headers = requestHeadersFor(url);
       loadId = ++loads;
       sendPlayerCommand({
         op: 'load',
@@ -297,6 +299,8 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
         // Android works out files itself; adaptive streams without an extension need saying.
         mime:
           mime === 'application/vnd.apple.mpegurl' || mime === 'application/dash+xml' ? mime : '',
+        // A Referer, Origin or User-Agent some addons' links (often sport) only open with.
+        ...(headers ? { headers } : {}),
       });
       return Promise.resolve();
     },

@@ -4,6 +4,12 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The stream helper for the LG (helper/HelperService): runs with the screen off, says so in a notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- One APK for TVs and phones: neither the TV launcher nor a touchscreen is required. -->
     <uses-feature
         android:name="android.software.leanback"
@@ -51,5 +57,15 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Fetches add-on streams that need request headers for a TV on the home network. -->
+        <service
+            android:name=".helper.HelperService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local network media relay: fetches a video stream with the headers it needs and serves it to a TV on the same home network while the user watches." />
+        </service>
     </application>
 </manifest>
