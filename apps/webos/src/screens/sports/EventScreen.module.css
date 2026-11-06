@@ -143,3 +143,9 @@
   width: 100%;
   color: var(--bt-text-muted);
 }
+
+/* A line under Watch, All streams and Remind me: when the reminder comes, or why it was not set. */
+.remindNote {
+  margin-top: 8px;
+  color: var(--bt-text-muted);
+}

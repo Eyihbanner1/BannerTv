@@ -54,6 +54,16 @@
   animation: rise var(--bt-motion) ease-out;
 }
 
+/* A note that something needs a moment's attention, over a screen left as it was. */
+.banner {
+  top: var(--bt-safe-y);
+  right: var(--bt-safe-x);
+  width: 760px;
+  padding: 32px 40px;
+  border-radius: 24px;
+  animation: rise var(--bt-motion) ease-out;
+}
+
 @keyframes rise {
   from {
     transform: translateY(80px);

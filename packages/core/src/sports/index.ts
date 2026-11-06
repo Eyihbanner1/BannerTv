@@ -38,6 +38,21 @@ export {
 } from './feed';
 export { createKickoffMemory, dayEvidence, type KickoffMemory } from './kickoffs';
 export { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
+export {
+  canRemind,
+  createReminders,
+  dueReminders,
+  findReminded,
+  isDue,
+  MAX_REMINDERS,
+  nextReminderChange,
+  type Reminder,
+  REMIND_BEFORE_MS,
+  REMIND_LATE_MS,
+  reminderFor,
+  type Reminders,
+  remindAt,
+} from './reminders';
 export { sportOf } from './sport';
 export { addDays, localClock, localDate, localDayStart } from './time';
 export type {
