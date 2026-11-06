@@ -7,6 +7,7 @@ import {
   APP_URL,
   expectFocus,
   expectFocusLabel,
+  expectLoadedFocus,
   openSection,
   press,
   pressBack,
@@ -314,6 +315,8 @@ test('a kids profile goes by the strictest UK rating, while Details shows the ci
   await page.goto(APP_URL);
 
   await expectFocus(page, 'home-0-movie-top-genre-family-tile-0');
+  // OK on a tile still loading opens nothing, so it waits for the title as a person would.
+  await expectLoadedFocus(page);
   await page.keyboard.press('Enter');
   const details = page.locator('section[aria-label="Big Buck Bunny"]');
   await expect(details.getByText("This title isn't available in a kids profile.")).toBeVisible();
