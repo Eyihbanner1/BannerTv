@@ -607,6 +607,57 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     }
   }
 
+  /**
+   * Turns what changed in a store while the engine was not watching it (a
+   * build without sync, the app closed before its push) into edits, by
+   * diffing the store against what it held when it last matched the account.
+   * A key the account has never had is the store's own and goes. A value the
+   * account holds otherwise goes only when the store had taken every change
+   * the account brought (base.apply not set): until then the account's is the
+   * newer, and apply() brings it. Of what the store lacks, only an addon is
+   * taken for a removal: elsewhere a store trims, or never had a key at all.
+   */
+  function catchUp(watch: Watch): void {
+    const part = watch.part;
+    const doc = docs.get(part.document);
+    if (!doc) return;
+    // Never pulled or pushed here, it says nothing of what the store matched. The account's own
+    // documents exist from its create on, so are left; a profile's may never have been sent.
+    const unknown = doc.base.ver === 0;
+    if (unknown && documentProfile(doc.name) === undefined) return;
+    // Only the default addons is what a collection that could not be read falls back to: the
+    // account's addons, order and removed defaults are then brought back, not sent over.
+    if (doc.name === 'addons' && part.ownData && !part.ownData()) return;
+    const view = mergeItems(doc.name, doc.base.items, doc.pend);
+    const taken = !unapplied(doc);
+    const here = watch.seen;
+    const was = new Map<string, PartItem>();
+    here.forEach((item, key) => {
+      // Then only a value with a time of its own goes: it merges by that time, which a
+      // default stamped now would not.
+      if (unknown && item.t === undefined) {
+        was.set(key, item);
+        return;
+      }
+      const current = itemAt(view, key);
+      if (!current) return;
+      const same = !isRemoval(current) && sameValue(part, key, current.v, item.v);
+      // A value with a time of its own no newer than the account's is not a later edit.
+      const older = item.t !== undefined && item.t <= current.t;
+      if (same || older || !taken) was.set(key, item);
+    });
+    if (taken && doc.name === 'addons') {
+      for (const key of Object.keys(view)) {
+        const current = view[key]!;
+        if (here.has(key) || isRemoval(current) || !partOwns(part, key)) continue;
+        was.set(key, { t: current.t, v: current.v });
+      }
+    }
+    watch.seen = was;
+    diff(watch, here);
+    watch.seen = here;
+  }
+
   function capture(watch: Watch): void {
     if (watch.adopting > 0 || !watching || closing) return;
     const next = watch.part.snapshot();
@@ -1172,7 +1223,12 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     if (!sameStatus(status.get(), next)) status.set(next);
   }
 
-  async function begin(): Promise<void> {
+  /**
+   * Watches the stores. `catchingUp` (a launch, not a create or join, which
+   * send what the screen holds themselves) first turns what changed while
+   * nothing watched into edits.
+   */
+  async function begin(catchingUp = false): Promise<void> {
     if (watching || !active) return;
     const parts = accountParts.concat(active.parts);
     await loadParts(parts);
@@ -1186,6 +1242,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       return watch;
     });
     watching = true;
+    if (catchingUp) watches.forEach(catchUp);
     startPulls();
     updateStatus();
   }
@@ -1477,7 +1534,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           // A read that failed is not "no account": the start fails, and nothing is watched or changed.
           state = await loadSyncState(storage, timers);
           if (state) keys = await deriveAccountKeys(crypto, state.code);
-          if (state && state.phase === 'ready') await begin();
+          if (state && state.phase === 'ready') await begin(true);
         } catch (error) {
           // A document's edits or base unread: the screen says what it says when the state
           // itself could not be read, rather than In sync while nothing is watched.
