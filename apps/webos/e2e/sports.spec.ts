@@ -1013,3 +1013,111 @@ test('odd items stay text, inside their tiles', async ({ page }) => {
   expect(tile.beyond).toBe(false);
   expect(realErrors(errors)).toEqual([]);
 });
+
+/** A match page's Follow buttons, in their order. */
+function followButtons(page: Page) {
+  return page.locator('[data-focus-key^="event-follow-"]');
+}
+
+/** The first line of each tile's label in a row: the two sides. */
+async function rowMatches(page: Page, rowKey: string): Promise<string[]> {
+  return (await tileLabels(page, rowKey)).map((label) => label.split(',')[0]!);
+}
+
+test('following a team or a competition puts its matches first, on Sports and on Home', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  // Before anything is followed, the Live sport row goes by competition.
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
+  expect(await rowMatches(page, LIVE_ROW)).toEqual(['Arsenal v Brighton', 'Celtic v Rangers']);
+
+  // Celtic v Rangers' page offers both sides, but not Scottish football: that row is
+  // BannerTV's guess from the teams, not a competition.
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'ArrowDown', 'sports-row-c-country-gb-sct-football-tile-0');
+  await press(page, 'Enter', 'event-watch');
+  await expect(followButtons(page)).toHaveText(['Follow Celtic', 'Follow Rangers']);
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'Enter', 'event-follow-0');
+  await expect(followButtons(page)).toHaveText(['Following Celtic', 'Follow Rangers']);
+
+  // Back finds the match in the Following row, first; the row it came from has gone.
+  await pressBack(page);
+  await expectFocus(page, 'sports-row-following-tile-0');
+  await expect(sportsRows(page)).toHaveText([
+    'Following',
+    'EFL Cup · 1 live of 2',
+    'Earlier today',
+  ]);
+  expect(await tileLabels(page, 'sports-row-following')).toEqual([
+    expect.stringMatching(/^Celtic v Rangers, Scottish football, /),
+  ]);
+  // Kept for this profile, by the team's key rather than the name on the page.
+  const saved = (await readKv(page, 'sports.follows')) as Array<{ kind: string; id: string }>;
+  expect(saved.map((follow) => `${follow.kind} ${follow.id}`)).toEqual(['team football:celtic']);
+
+  // Home's Live sport row now starts with it.
+  await pressBack(page);
+  await expectFocus(page, 'sports-day-1');
+  await pressBack(page);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await expect
+    .poll(() => rowMatches(page, LIVE_ROW))
+    .toEqual(['Celtic v Rangers', 'Arsenal v Brighton']);
+
+  // A competition: every EFL Cup match joins Following, by kick-off.
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await press(page, 'ArrowDown', 'sports-row-following-tile-0');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'ArrowRight', `${EFL_CUP}-tile-1`);
+  await press(page, 'Enter', 'event-watch');
+  await expect(followButtons(page)).toHaveText([
+    'Follow Manchester City',
+    'Follow Burnley',
+    'Follow EFL Cup',
+  ]);
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'ArrowRight', 'event-follow-1');
+  await press(page, 'ArrowRight', 'event-follow-2');
+  await press(page, 'Enter', 'event-follow-2');
+  await expect(followButtons(page).last()).toHaveText('Following EFL Cup');
+  await pressBack(page);
+  await expectFocus(page, 'sports-row-following-tile-2');
+  await expect(sportsRows(page)).toHaveText(['Following · 1 live of 3', 'Earlier today']);
+  expect(await rowMatches(page, 'sports-row-following')).toEqual([
+    'Arsenal v Brighton',
+    'Celtic v Rangers',
+    'Manchester City v Burnley',
+  ]);
+  // Live now starts with Following too.
+  await press(page, 'ArrowUp', 'sports-day-1');
+  await press(page, 'ArrowLeft', 'sports-day-0');
+  await expect(sportsRows(page).first()).toHaveText('Following · 1 live of 2');
+
+  // Unfollowing gives the competition its row back, and Back finds the match in it.
+  await press(page, 'ArrowRight', 'sports-day-1');
+  await expect(sportsRows(page).first()).toHaveText('Following · 1 live of 3');
+  await press(page, 'ArrowDown', 'sports-row-following-tile-0');
+  await press(page, 'ArrowRight', 'sports-row-following-tile-1');
+  await press(page, 'ArrowRight', 'sports-row-following-tile-2');
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'ArrowRight', 'event-follow-1');
+  await press(page, 'ArrowRight', 'event-follow-2');
+  await press(page, 'Enter', 'event-follow-2');
+  await expect(followButtons(page).last()).toHaveText('Follow EFL Cup');
+  await pressBack(page);
+  await expectFocus(page, `${EFL_CUP}-tile-1`);
+  await expect(sportsRows(page)).toHaveText([
+    'Following',
+    'EFL Cup · 1 live of 2',
+    'Earlier today',
+  ]);
+  expect(realErrors(errors)).toEqual([]);
+});
