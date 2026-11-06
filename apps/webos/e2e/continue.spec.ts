@@ -115,10 +115,11 @@ test('Home opens on a film left part way, with its progress, and OK resumes it i
     new MutationObserver(count).observe(row.parentElement!, { childList: true });
   }, CONTINUE_ROW);
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  // 10 s before where it stopped (the seeded progress is long ago), to pick up the line it left.
+  // Before where it stopped (35 s), to pick up the line it left: 10 s early, as the seeded
+  // progress is long ago, but never before 30 s, where a resume begins.
   const resumed = (await video(page)).time;
-  expect(resumed).toBeGreaterThanOrEqual(20);
-  expect(resumed).toBeLessThan(28);
+  expect(resumed).toBeGreaterThanOrEqual(29);
+  expect(resumed).toBeLessThan(33);
   expect(mock.streams).toEqual([`movie/${MOVIE}`]);
   // The tile's title went with the route, so the player names the film at once.
   await expect(page.locator('section[aria-label="Big Buck Bunny"]:visible')).toBeVisible();
