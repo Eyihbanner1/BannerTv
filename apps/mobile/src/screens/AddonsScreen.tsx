@@ -1,7 +1,12 @@
-import type { InstalledAddon, SportsSetting } from '@bannertv/core';
+import {
+  type AddonHealth,
+  type InstalledAddon,
+  installIdOf,
+  type SportsSetting,
+} from '@bannertv/core';
 import { addonBaseUrl } from '@bannertv/protocol';
-import { addonCollection } from '@tv/data/addons';
-import { describeInstallError, typeLabel } from '@tv/data/describe';
+import { addonCollection, addonHealth, checkAddon } from '@tv/data/addons';
+import { describeInstallError, healthLine, typeLabel } from '@tv/data/describe';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '@tv/data/sports';
 import { syncOn } from '@tv/data/sync-clock';
 import * as Clipboard from 'expo-clipboard';
@@ -41,12 +46,15 @@ function AddonCard({
   addon,
   index,
   count,
+  health,
   onSettings,
   onSports,
 }: {
   addon: InstalledAddon;
   index: number;
   count: number;
+  /** How it last answered, when this phone has asked it. */
+  health: AddonHealth | undefined;
   onSettings: (addon: InstalledAddon) => void;
   /** "Show in Sports", for an addon that could hold sport. */
   onSports?: (addon: InstalledAddon) => void;
@@ -61,6 +69,13 @@ function AddonCard({
     .filter(Boolean)
     .join(' · ');
   const [from, to] = fallbackArt(manifest.id);
+  const [checking, setChecking] = useState(false);
+  const answering = checking ? t('addonState.checking') : healthLine(t, health);
+  const check = () => {
+    if (checking) return;
+    setChecking(true);
+    void checkAddon(addon).finally(() => setChecking(false));
+  };
   // In an account the addons are the account's, so removing one reaches every screen.
   const removeMessage = t(syncOn() ? 'addonState.removeEverywhere' : 'addons.removeMessage');
   const remove = () =>
@@ -101,6 +116,23 @@ function AddonCard({
         <Text style={styles.description} numberOfLines={4}>
           {manifest.description}
         </Text>
+      ) : null}
+      {answering ? (
+        <View style={styles.healthRow}>
+          <Text
+            style={[styles.health, !checking && health?.state === 'failed' && styles.failing]}
+            accessibilityLiveRegion="polite"
+          >
+            {answering}
+          </Text>
+          <Button
+            label={t('addonState.checkNow')}
+            accessibilityLabel={t('addonState.checkNowLabel', { name: manifest.name })}
+            kind="quiet"
+            busy={checking}
+            onPress={check}
+          />
+        </View>
       ) : null}
       {onSports ? (
         <Pressable
@@ -171,6 +203,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
   const [problem, setProblem] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
   const [sportsFor, setSportsFor] = useState<InstalledAddon | null>(null);
+  const health = useSyncExternalStore(addonHealth.subscribe, addonHealth.get);
   // Read again as addons are detected as sports ones, which changes who gets the Sports row.
   useSyncExternalStore(sportsState.subscribe, sportsState.get);
 
@@ -234,6 +267,8 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
       <FlatList
         data={collection.addons}
         keyExtractor={(addon) => addon.transportUrl}
+        // The cards also show how each addon answers, which the list itself does not hold.
+        extraData={health}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -254,6 +289,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
             addon={item}
             index={index}
             count={collection.addons.length}
+            health={health.get(installIdOf(item))}
             onSettings={openSettings}
             {...(mayHoldSports(item) ? { onSports: setSportsFor } : {})}
           />
@@ -374,6 +410,9 @@ const styles = StyleSheet.create({
     paddingVertical: space.s,
   },
   sportsText: { ...type.label, color: colors.textMuted, flexShrink: 1 },
+  healthRow: { flexDirection: 'row', alignItems: 'center', gap: space.s },
+  health: { ...type.label, color: colors.textMuted, flex: 1 },
+  failing: { color: colors.danger },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.s, paddingTop: space.s },
   iconButton: {
     width: 44,

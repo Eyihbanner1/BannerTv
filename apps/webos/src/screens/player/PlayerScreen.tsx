@@ -1551,7 +1551,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         <PlayerProblem
           nothing={nothing}
           error={state.error}
-          failedAddons={finderState.failed.length}
+          failedAddons={finderState.failed}
           canTryAnother={!nothing && !!session && session.hasNext()}
           onTryAnother={() => session?.playNext()}
           onAllStreams={() =>

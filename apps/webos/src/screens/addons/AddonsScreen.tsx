@@ -1,4 +1,9 @@
-import type { InstalledAddon, SportsSetting } from '@bannertv/core';
+import {
+  type AddonHealth,
+  type InstalledAddon,
+  installIdOf,
+  type SportsSetting,
+} from '@bannertv/core';
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,8 +13,8 @@ import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Menu } from '../../components/Menu';
 import { fallbackArt } from '../../components/Tile';
-import { addonCollection } from '../../data/addons';
-import { addonFocusId, typeLabel } from '../../data/describe';
+import { addonCollection, addonHealth, checkAddon } from '../../data/addons';
+import { addonFocusId, healthLine, typeLabel } from '../../data/describe';
 import { PAIR_SERVICE } from '../../data/pairing';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '../../data/sports';
 import { syncOn } from '../../data/sync-clock';
@@ -50,11 +55,17 @@ interface AddonCardProps {
   onSettings?: () => void;
   /** "Show in Sports", for addons that may hold sport. */
   onSports?: () => void;
+  /** How it last answered, when this screen has asked it. */
+  health: AddonHealth | undefined;
+  /** Check now is asking it. */
+  checking: boolean;
+  onCheck: () => void;
   onRemove: () => void;
 }
 
 function AddonCard(props: AddonCardProps) {
   const { addon, index, count, onFocus, onMove, onSettings, onSports, onRemove } = props;
+  const { health, checking, onCheck } = props;
   const { t } = useTranslation();
   const { manifest } = addon;
   const id = addonFocusId(addon.transportUrl);
@@ -65,6 +76,9 @@ function AddonCard(props: AddonCardProps) {
   const summary = [types.join(t('common.listSeparator')), gives.join(t('common.listSeparator'))]
     .filter(Boolean)
     .join(' · ');
+  // Not answering or slow takes the description's line, so the card keeps its height.
+  const answering = checking ? t('addonState.checking') : healthLine(t, health);
+  const failed = !checking && health?.state === 'failed';
 
   return (
     <div className={styles.card} style={{ top: index * CARD_STEP }}>
@@ -85,7 +99,13 @@ function AddonCard(props: AddonCardProps) {
           {addon.official && <span className={styles.badge}>{t('addons.default')}</span>}
         </p>
         {summary && <p className={styles.summary}>{summary}</p>}
-        {manifest.description && <p className={styles.description}>{manifest.description}</p>}
+        {answering ? (
+          <p className={failed ? styles.failing : styles.state} role="status">
+            {answering}
+          </p>
+        ) : (
+          manifest.description && <p className={styles.description}>{manifest.description}</p>
+        )}
       </div>
       <div className={styles.actions}>
         <Button
@@ -129,6 +149,16 @@ function AddonCard(props: AddonCardProps) {
             {t('addons.sports')}
           </Button>
         )}
+        {answering !== undefined && (
+          <Button
+            focusKey={`${id}-check`}
+            label={t('addonState.checkNowLabel', { name: manifest.name })}
+            onFocus={onFocus}
+            onPress={onCheck}
+          >
+            {t('addonState.checkNow')}
+          </Button>
+        )}
         <Button
           focusKey={`${id}-remove`}
           label={t('addons.removeLabel', { name: manifest.name })}
@@ -154,6 +184,8 @@ export function AddonsScreen() {
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
   const [configuring, setConfiguring] = useState<InstalledAddon | null>(null);
   const [sportsFor, setSportsFor] = useState<InstalledAddon | null>(null);
+  const health = useSyncExternalStore(addonHealth.subscribe, addonHealth.get);
+  const [checking, setChecking] = useState<readonly string[]>([]);
   // Detection changes which addons offer "Show in Sports".
   useSyncExternalStore(sportsState.subscribe, sportsState.get);
   const [notice, setNotice] = useState<string | null>(null);
@@ -182,6 +214,31 @@ export function AddonsScreen() {
     addonCollection.move(addon.transportUrl, offset);
     // React moves the card's element, which drops DOM focus; give it back.
     void setFocus(key);
+  };
+
+  /**
+   * Asks the addon for its manifest once and says how it went. A good answer
+   * takes Check now away, so focus moves to the button in its place first.
+   */
+  const check = (addon: InstalledAddon) => {
+    const installId = installIdOf(addon);
+    if (checking.indexOf(installId) !== -1) return;
+    setChecking((ids) => ids.concat(installId));
+    void checkAddon(addon).then(() => {
+      setChecking((ids) => ids.filter((one) => one !== installId));
+      const state = addonHealth.get().get(installId)?.state;
+      const name = addon.manifest.name;
+      if (state === 'fine') {
+        void setFocus(removeKey(addon));
+        setNotice(t('addonState.answering', { name }));
+      } else {
+        setNotice(
+          t(state === 'slow' ? 'addonState.answeringSlowly' : 'addonState.stillNotAnswering', {
+            name,
+          }),
+        );
+      }
+    });
   };
 
   const confirmRemove = (addon: InstalledAddon) => {
@@ -233,6 +290,9 @@ export function AddonsScreen() {
                   }}
                   onSettings={hasSettings(addon) ? () => setConfiguring(addon) : undefined}
                   onSports={mayHoldSports(addon) ? () => setSportsFor(addon) : undefined}
+                  health={health.get(installIdOf(addon))}
+                  checking={checking.indexOf(installIdOf(addon)) !== -1}
+                  onCheck={() => check(addon)}
                   onRemove={() => setRemoving(addon)}
                 />
               ))}

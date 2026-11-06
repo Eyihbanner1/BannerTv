@@ -178,7 +178,16 @@
     "other": "{{addon}} did not answer."
   },
   "addonState": {
-    "removeEverywhere": "Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address."
+    "removeEverywhere": "Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address.",
+    "slow": "Slow to answer",
+    "notAnswering": "Not answering since {{time}}",
+    "notAnsweringDay": "Not answering since {{day}}, {{time}}",
+    "checking": "Checking…",
+    "checkNow": "Check now",
+    "checkNowLabel": "Check {{name}} now",
+    "answering": "{{name}} is answering.",
+    "answeringSlowly": "{{name}} answered, but slowly.",
+    "stillNotAnswering": "{{name}} still isn't answering."
   },
   "meta": {
     "rating": "IMDb {{rating}}"
@@ -424,8 +433,8 @@
       "decode": "The TV couldn't decode this stream.",
       "clip": "This stream is only a short clip, not the video. Its source may not have it ready yet.",
       "other": "Something went wrong playing this stream.",
-      "addonsFailed_one": "One addon didn't answer.",
-      "addonsFailed_other": "{{count}} addons didn't answer.",
+      "addonsFailed_one": "{{name}} didn't answer.",
+      "addonsFailed_other": "{{name}} and {{more}} more didn't answer.",
       "tryAnother": "Try another stream",
       "back": "Back to the title"
     }

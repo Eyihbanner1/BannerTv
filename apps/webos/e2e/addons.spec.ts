@@ -8,6 +8,7 @@ import {
   mockAddons,
   PLAIN_ADDON_URL,
 } from './addons';
+import { mockPlayback, seedStreamAddon } from './play';
 import {
   APP_URL,
   expectFocus,
@@ -202,4 +203,92 @@ test('a settings address too long for a QR code is left out of it', async ({ pag
   const dialog = page.getByRole('dialog', { name: 'Settings for Open Shorts' });
   await expect(dialog.getByText(/too long for a QR code/)).toBeVisible();
   await expect(dialog.getByText('K7P 3QZ')).toBeVisible();
+});
+
+/**
+ * Presses `key` until focus reaches the button labelled `label`: cards hold
+ * different buttons, so the same button sits at another place on each.
+ */
+async function walkTo(
+  page: import('@playwright/test').Page,
+  key: string,
+  label: string,
+): Promise<void> {
+  for (let presses = 0; presses < 8; presses++) {
+    const focused = await page.locator('[data-focused="true"]').getAttribute('aria-label');
+    if (focused === label) return;
+    await page.keyboard.press(key);
+    await settle(page);
+  }
+  await expectFocusLabel(page, label);
+}
+
+/** From the first card's Move up, to the second card's Move up. */
+async function downToSecond(page: import('@playwright/test').Page, name: string): Promise<void> {
+  await page.keyboard.press('ArrowDown');
+  await settle(page);
+  await walkTo(page, 'ArrowLeft', `Move ${name} up`);
+}
+
+test('an addon that stops answering says since when, and Check now asks it again', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await mockPlayback(page);
+  await seedStreamAddon(page);
+  // Test Streams answers nothing, its manifest included, until the test brings it back.
+  let down = true;
+  await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) =>
+    down ? route.abort() : route.fallback(),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  // The daily manifest refresh, a few seconds after launch, hears nothing from it.
+  const line = page.getByRole('status').filter({ hasText: /^Not answering since \d\d:\d\d$/ });
+  await expect(line).toHaveCount(1, { timeout: 15000 });
+  const since = await line.textContent();
+  // The addons that answer have no such line, nor Check now.
+  await expect(page.getByRole('button', { name: /^Check .* now$/ })).toHaveCount(1);
+
+  await downToSecond(page, 'Test Streams');
+  await walkTo(page, 'ArrowRight', 'Check Test Streams now');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText("Test Streams still isn't answering.")).toBeVisible();
+  await expect(line).toHaveText(since!);
+  await expectFocusLabel(page, 'Check Test Streams now');
+
+  // Since when is kept across a restart.
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expect(line).toHaveText(since!);
+
+  // It answers again: the line and Check now go, and focus stays on the card.
+  await downToSecond(page, 'Test Streams');
+  await walkTo(page, 'ArrowRight', 'Check Test Streams now');
+  down = false;
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Test Streams is answering.')).toBeVisible();
+  await expect(line).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Check .* now$/ })).toHaveCount(0);
+  await expectFocusLabel(page, 'Remove Test Streams');
+});
+
+test('the player names the addon that did not answer', async ({ page }) => {
+  await mockAddons(page);
+  await mockPlayback(page);
+  await seedStreamAddon(page);
+  await page.route(/^https:\/\/streams\.example\.com\/bannertv\/stream\//, (route) =>
+    route.abort(),
+  );
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await settle(page);
+  await press(page, 'Enter', 'details-watch');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('No stream could play')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText("Test Streams didn't answer.")).toBeVisible();
+  await expectFocus(page, 'player-problem-streams');
 });

@@ -1,6 +1,8 @@
+import type { InstalledAddon } from '@bannertv/core';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
+import { addonsDidntAnswer } from '../../data/describe';
 import type { PlaybackError } from '../../player/engines/types';
 import styles from './PlayerScreen.module.css';
 
@@ -8,8 +10,8 @@ interface PlayerProblemProps {
   /** No addon offered a stream this TV can play. */
   nothing: boolean;
   error: PlaybackError | null;
-  /** Addons that did not answer, so the viewer knows the list may be short. */
-  failedAddons: number;
+  /** Addons that did not answer, named so the viewer knows the list may be short and why. */
+  failedAddons: readonly InstalledAddon[];
   canTryAnother: boolean;
   onTryAnother: () => void;
   onAllStreams: () => void;
@@ -41,10 +43,8 @@ export function PlayerProblem(props: PlayerProblemProps) {
     >
       <h2 className={styles.problemTitle}>{title}</h2>
       <p className={styles.problemMessage}>{message}</p>
-      {failedAddons > 0 && (
-        <p className={styles.problemMessage}>
-          {t('player.problem.addonsFailed', { count: failedAddons })}
-        </p>
+      {failedAddons.length > 0 && (
+        <p className={styles.problemMessage}>{addonsDidntAnswer(t, failedAddons)}</p>
       )}
       <div className={styles.problemActions}>
         {canTryAnother && (

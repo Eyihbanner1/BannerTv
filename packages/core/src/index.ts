@@ -48,8 +48,21 @@ export {
   type InstallErrorKind,
   type InstalledAddon,
   installIdOf,
+  MANIFEST_TIMEOUT_MS,
   type StoredAddon,
 } from './addons/collection';
+export {
+  type AddonHealth,
+  type AddonHealthMap,
+  type AddonHealthState,
+  type AddonHealthStore,
+  answerState,
+  createAddonHealth,
+  installForUrl,
+  installIdForUrl,
+  observeAnswers,
+  SLOW_SHARE,
+} from './addons/health';
 export {
   BANNERTV_DEMO_ID,
   BANNERTV_DEMO_URL,
