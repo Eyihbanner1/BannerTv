@@ -13,6 +13,7 @@ import {
   type StoredPin,
   type SyncPart,
 } from '@bannertv/core';
+import { filterKey, readFilterKey } from '../player/stream-filter';
 import { DEFAULT_PREFERENCES, type Preferences, readPreferences } from './preferences';
 
 /**
@@ -271,6 +272,7 @@ type PreferenceKey =
   | 'pref/maxResolution'
   | 'pref/avoidHdr'
   | 'pref/learnLanguages'
+  | 'pref/streamFilter'
   | 'style/size'
   | 'style/colour'
   | 'style/background'
@@ -308,6 +310,12 @@ const PREFERENCE_KEYS: ReadonlyArray<
     'pref/learnLanguages',
     (p) => p.learnLanguages,
     (p, v) => ({ ...p, learnLanguages: v as never }),
+  ],
+  // The filter's canonical JSON, a string so a value compares with ===; '{}' is none.
+  [
+    'pref/streamFilter',
+    (p) => filterKey(p.streamFilter),
+    (p, v) => ({ ...p, streamFilter: readFilterKey(v) }),
   ],
   [
     'style/size',
@@ -361,6 +369,10 @@ export function preferencesPart(profileId: string, store: Store<Preferences>): S
       return new Map(items);
     },
     subscribe: (listener) => store.subscribe(listener),
+    // A filter is read as this build reads it, so fields a newer build added ride along
+    // instead of looking like an edit that would wipe them from the account.
+    compare: (key, value) =>
+      key === 'pref/streamFilter' ? filterKey(readFilterKey(value)) : value,
     adopt(change) {
       const current = store.get();
       let next = current;

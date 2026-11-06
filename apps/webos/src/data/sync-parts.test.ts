@@ -7,6 +7,7 @@ import {
   type ProfilesState,
 } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
+import { NO_FILTER } from '../player/stream-filter';
 import { DEFAULT_PREFERENCES, type Preferences } from './preferences';
 import { preferencesPart, profilesPart, type SportsChoices, sportsPart } from './sync-parts';
 
@@ -388,6 +389,40 @@ describe('preferencesPart', () => {
     void part.adopt(change([['pref/maxResolution', { t: 2, v: '720p' }]], ['pref/avoidHdr']));
     expect(store.get().maxResolution).toBe('720p');
     expect(store.get().avoidHdr).toBe(false);
+  });
+
+  it('carries the stream filter as its canonical JSON, and anything it cannot read is no filter', () => {
+    const { part, store } = prefsSetup({ streamFilter: { resolution: '1080p', cached: true } });
+    expect(plain(part.snapshot())).toEqual({
+      'pref/streamFilter': { v: '{"resolution":"1080p","cached":true}' },
+    });
+    // Round trip: another screen's filter is kept as this one reads it.
+    void part.adopt(
+      change([['pref/streamFilter', { t: 1, v: '{"addonId":"org.example","language":"es"}' }]]),
+    );
+    expect(store.get().streamFilter).toEqual({ addonId: 'org.example', language: 'es' });
+    expect(plain(part.snapshot())).toEqual({
+      'pref/streamFilter': { v: '{"addonId":"org.example","language":"es"}' },
+    });
+    // A removal, and values this build cannot read, are no filter.
+    void part.adopt(change([], ['pref/streamFilter']));
+    expect(store.get().streamFilter).toBe(NO_FILTER);
+    for (const bad of ['not json', 7, null, '[1]', '{"resolution":"8k"}']) {
+      store.set({ ...DEFAULT_PREFERENCES, streamFilter: { cached: true } });
+      void part.adopt(change([['pref/streamFilter', { t: 2, v: bad }]]));
+      expect(store.get().streamFilter).toBe(NO_FILTER);
+    }
+    expect(plain(part.snapshot())).toEqual({});
+  });
+
+  it('compares a filter as this build reads it, so a newer field is not an edit', () => {
+    const { part } = prefsSetup();
+    const compare = part.compare!;
+    expect(compare('pref/streamFilter', '{"cached":true,"future":1}')).toEqual(
+      compare('pref/streamFilter', '{"cached":true}'),
+    );
+    expect(compare('pref/streamFilter', 'not json')).toEqual(compare('pref/streamFilter', '{}'));
+    expect(compare('pref/audioLanguage', 'fre')).toBe('fre');
   });
 });
 
