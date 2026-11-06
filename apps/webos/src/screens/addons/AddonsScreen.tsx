@@ -12,6 +12,7 @@ import { addonCollection } from '../../data/addons';
 import { addonFocusId, typeLabel } from '../../data/describe';
 import { PAIR_SERVICE } from '../../data/pairing';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '../../data/sports';
+import { syncOn } from '../../data/sync-clock';
 import { canSlide } from '../../platform/input-mode';
 import { ConfigureDialog } from './ConfigureDialog';
 import { InstallDialog } from './InstallDialog';
@@ -290,7 +291,8 @@ export function AddonsScreen() {
         <ConfirmDialog
           focusKey="remove-addon"
           title={t('addons.removeTitle', { name: removing.manifest.name })}
-          message={t('addons.removeMessage')}
+          // In an account the addons are the account's, so removing one reaches every screen.
+          message={t(syncOn() ? 'addonState.removeEverywhere' : 'addons.removeMessage')}
           confirmLabel={t('addons.remove')}
           cancelLabel={t('addons.keep')}
           returnFocusKey={() => afterRemove.current ?? removeKey(removing)}

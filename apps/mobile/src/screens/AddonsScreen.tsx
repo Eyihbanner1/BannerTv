@@ -3,6 +3,7 @@ import { addonBaseUrl } from '@bannertv/protocol';
 import { addonCollection } from '@tv/data/addons';
 import { describeInstallError, typeLabel } from '@tv/data/describe';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '@tv/data/sports';
+import { syncOn } from '@tv/data/sync-clock';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { useState, useSyncExternalStore } from 'react';
@@ -60,8 +61,10 @@ function AddonCard({
     .filter(Boolean)
     .join(' · ');
   const [from, to] = fallbackArt(manifest.id);
+  // In an account the addons are the account's, so removing one reaches every screen.
+  const removeMessage = t(syncOn() ? 'addonState.removeEverywhere' : 'addons.removeMessage');
   const remove = () =>
-    Alert.alert(t('addons.removeTitle', { name: manifest.name }), t('addons.removeMessage'), [
+    Alert.alert(t('addons.removeTitle', { name: manifest.name }), removeMessage, [
       { text: t('addons.keep'), style: 'cancel' },
       {
         text: t('addons.remove'),

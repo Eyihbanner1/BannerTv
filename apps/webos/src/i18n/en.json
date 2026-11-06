@@ -177,6 +177,9 @@
     "notFound": "None of your addons know this title.",
     "other": "{{addon}} did not answer."
   },
+  "addonState": {
+    "removeEverywhere": "Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address."
+  },
   "meta": {
     "rating": "IMDb {{rating}}"
   },
