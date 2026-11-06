@@ -18,7 +18,7 @@ The body is plain text holding JSON:
 { "method": "GET", "path": "/sync/watchlist/movies?extended=full", "token": "<access token>" }
 ```
 
-`method` is GET, POST or DELETE (though no call on the list below uses DELETE yet). `token` (the viewer's access token, at most 4 KB) and `body` (any JSON, sent to Trakt on a POST) are optional, and the whole request is at most 64 KB. The answer is HTTP 200 with
+`method` is GET, POST or DELETE. `token` (the viewer's access token, at most 4 KB) and `body` (any JSON, sent to Trakt on a POST) are optional, and the whole request is at most 64 KB. The answer is HTTP 200 with
 
 ```json
 { "status": 200, "data": [], "retryAfter": 30 }
@@ -39,6 +39,7 @@ The calls passed on, matched on the path without its query. The query may hold o
 - POST `/scrobble/start`, `/scrobble/pause`, `/scrobble/stop`
 - GET `/sync/last_activities`
 - GET `/sync/playback`, `/sync/playback/movies`, `/sync/playback/episodes`
+- DELETE `/sync/playback/<id>`, where the id is Trakt's numeric playback id (1 to 12 digits), with no query; it removes one paused item, and no body is sent
 - GET `/sync/watched/movies`, `/sync/watched/shows`
 - GET `/sync/watchlist`, `/sync/watchlist/movies`, `/sync/watchlist/shows`
 - POST `/sync/watchlist`, `/sync/watchlist/remove`
