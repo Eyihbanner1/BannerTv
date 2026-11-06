@@ -682,7 +682,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         const kept = liveWindow();
         if (kept && noPlace(kept, position)) return;
         const duration = durationNow();
-        if (tracker?.update(position, Date.now())) save();
+        // Until a jump lands, the element can read back where it was sent,
+        // which 'learn' and 'again' put past where the viewer asked: the bar
+        // and the place saved stay where they asked.
+        const place = landings.placeOf(position);
+        if (tracker?.update(place, Date.now())) save();
         const trusted = tracker?.position();
         if (trusted !== undefined && firstTrusted === undefined) firstTrusted = trusted;
         // A live stream's clock starts wherever the broadcast is.
@@ -709,7 +713,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
-        patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
+        patch({ position: trusted ?? lastStartAt, duration, ...judge(place) });
         readLanding(false);
       },
     ],
@@ -959,7 +963,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       lastSeekAt = Date.now();
       // In 'learn' the element is sent as much past the target as this stream's
       // jumps usually fall short. The viewer's place stays the target.
-      const aimed = landings.aim(target, video.currentTime, jumpBounds());
+      const from = video.currentTime;
+      const aimed = landings.aim(target, from, jumpBounds());
       stopLandingTimer();
       video.currentTime = aimed;
       // Before the first picture the engine is still finding its start, which it checks itself.
@@ -967,6 +972,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         landings.jumped({
           wanted: target,
           aimed,
+          from,
           paused: video.paused,
           stream: landingStream(engine?.name ?? null, state.get().entry?.facts),
         });

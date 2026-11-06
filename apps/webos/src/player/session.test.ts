@@ -1361,8 +1361,11 @@ describe('where a jump lands', () => {
     }
   });
 
-  it("changes nothing in 'measure': every jump goes where it was asked, once", async () => {
-    landingMode('measure');
+  it.each([
+    ["in 'measure'", 'measure' as const],
+    ['with no switch set, as it ships', null],
+  ])('changes nothing %s: every jump goes where it was asked, once', async (_name, mode) => {
+    landingMode(mode);
     const { video, session } = setup();
     await start(session, video, first, 600);
     session.seek(1800);
@@ -1373,6 +1376,7 @@ describe('where a jump lands', () => {
     land(video, 2396);
     expect(video.currentTime).toBe(2396.25);
     expect(recentLandings().map((landing) => landing.aimed)).toEqual([1800, 2400]);
+    expect(recentLandings().map((landing) => landing.mode)).toEqual(['measure', 'measure']);
     expect(lastEngine().seeks).toBe(2);
   });
 
@@ -1387,6 +1391,10 @@ describe('where a jump lands', () => {
     expect(lastEngine().seeks).toBe(1);
     expect(session.get()).toMatchObject({ status: 'playing', position: 1796.25 });
     expect(recentLandings()).toHaveLength(0);
+    // The second jump's end reads its aim back: the bar shows the place asked for, not the aim.
+    video.fire('timeupdate');
+    expect(session.get().position).toBe(1800);
+    expect(session.trustedPosition()).toBe(1800);
 
     // Short again, and left there: a second jump is never corrected.
     land(video, 1801);
@@ -1410,8 +1418,8 @@ describe('where a jump lands', () => {
     expect(session.trustedPosition()).toBe(1801.25);
   });
 
-  it("sends later jumps further by the stream's usual miss in 'learn', the default, as the bar shows the place asked for", async () => {
-    landingMode(null);
+  it("sends later jumps further by the stream's usual miss in 'learn', as the bar shows the place asked for", async () => {
+    landingMode('learn');
     const { video, session } = setup();
     await start(session, video, first, 600);
     session.seek(1800);
@@ -1437,6 +1445,46 @@ describe('where a jump lands', () => {
     session.seek(2300);
     expect(video.currentTime).toBe(2303.625);
     expect(lastEngine().seeks).toBe(3);
+    // Start over goes to the start: nothing lies before it to fall short of.
+    session.seek(0);
+    expect(video.currentTime).toBe(0);
+  });
+
+  it("keeps the viewer's place where they asked while the element reads back the aim in 'learn'", async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    session.pause();
+    kept.progress.mockClear();
+
+    // Paused, the element is sent past the target, and the jump's end reads that aim back.
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+    video.fire('timeupdate');
+    video.fire('seeked');
+    expect(session.trustedPosition()).toBe(2400);
+    expect(session.get().position).toBe(2400);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(recentLandings()[1]).toMatchObject({ paused: true, aimed: 2403.75, sure: false });
+    expect(session.trustedPosition()).toBe(2400);
+    expect(session.get().position).toBe(2400);
+    session.saveProgress();
+    expect(kept.progress).toHaveBeenCalled();
+    for (const [update] of kept.progress.mock.calls) expect(update.position).toBe(2400);
+
+    // Playing, the aim read back is still the place asked for, and a landing off it is where the picture is.
+    session.resume();
+    session.seek(3000);
+    expect(video.currentTime).toBe(3003.75);
+    video.fire('timeupdate');
+    expect(session.get().position).toBe(3000);
+    land(video, 2999);
+    expect(session.get().position).toBe(2999.25);
+    expect(session.trustedPosition()).toBe(2999.25);
+    session.saveProgress();
+    expect(kept.progress).toHaveBeenLastCalledWith(expect.objectContaining({ position: 2999.25 }));
   });
 
   it('starts each new stream with nothing learnt', async () => {
@@ -1514,9 +1562,9 @@ describe('where a jump lands', () => {
 
     session.seek(7198);
     expect(video.currentTime).toBe(7200);
-    // A segment in from the oldest kept, then the allowance.
+    // A segment in from the oldest kept, and no allowance: nothing lies before it to fall short of.
     session.seek(6000);
-    expect(video.currentTime).toBe(7009.75);
+    expect(video.currentTime).toBe(7006);
     expect(session.get().behind).toBe(194);
     session.destroy();
   });
