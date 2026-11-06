@@ -32,7 +32,11 @@ const ADULT = {
   behaviorHints: { adult: true },
 };
 
-async function setup(answers: Record<string, () => Promise<unknown>>, kids = false) {
+async function setup(
+  answers: Record<string, () => Promise<unknown>>,
+  kids = false,
+  options: Partial<Pick<Parameters<typeof createAddonClient>[0], 'limiter' | 'playPriority'>> = {},
+) {
   const fetchJson = vi.fn((url: string) => {
     if (url === ANIME_URL) return Promise.resolve(ANIME);
     if (url === ADULT_URL) return Promise.resolve(ADULT);
@@ -48,9 +52,10 @@ async function setup(answers: Record<string, () => Promise<unknown>>, kids = fal
   const client = createAddonClient({
     collection,
     queries: createQueryCache(),
-    limiter: createLimiter(6),
+    limiter: options.limiter ?? createLimiter(6),
     fetchJson,
     kidsOnly: () => kids,
+    playPriority: options.playPriority,
   });
   return { client, collection, fetchJson };
 }
@@ -221,6 +226,44 @@ describe('createAddonClient', () => {
       await flush();
       expect(query.get().data).not.toBe(items);
     }
+  it('puts the stream and subtitles requests of the video playPriority names ahead of the rest waiting', async () => {
+    const top = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
+    const later = 'https://v3-cinemeta.strem.io/catalog/series/top.json';
+    let finishTop = () => undefined as void;
+    const asked: string[] = [];
+    const answer = (url: string, body: unknown) => () => {
+      asked.push(url);
+      return Promise.resolve(body);
+    };
+    const { client, collection } = await setup(
+      {
+        [top]: () => {
+          asked.push(top);
+          return new Promise((resolve) => (finishTop = () => resolve({ metas: [] })));
+        },
+        [later]: answer(later, { metas: [] }),
+        'https://adult.example/stream/movie/tt1.json': answer('stream tt1', { streams: [] }),
+        'https://adult.example/stream/movie/tt2.json': answer('stream tt2', { streams: [] }),
+        'https://opensubtitles-v3.strem.io/subtitles/movie/tt2.json': answer('subtitles tt2', {
+          subtitles: [],
+        }),
+      },
+      false,
+      { limiter: createLimiter(1), playPriority: (_type, videoId) => (videoId === 'tt2' ? 1 : 0) },
+    );
+    await collection.install(ADULT_URL);
+    const cinemeta = collection.get().addons.find((a) => a.transportUrl === CINEMETA_URL)!;
+    // One slot: the first catalog holds it while the rest queue in the order asked.
+    client.catalog(cinemeta, 'movie', 'top').load();
+    client.catalog(cinemeta, 'series', 'top').load();
+    client.streams('movie', 'tt1').forEach(({ query }) => query.load());
+    client.streams('movie', 'tt2').forEach(({ query }) => query.load());
+    client.subtitles('movie', 'tt2').forEach(({ query }) => query.load());
+    await flush();
+    expect(asked).toEqual([top]);
+    finishTop();
+    await flush();
+    expect(asked).toEqual([top, 'stream tt2', 'subtitles tt2', later, 'stream tt1']);
   });
 
   it('reports the network failure when no addon answered', async () => {
