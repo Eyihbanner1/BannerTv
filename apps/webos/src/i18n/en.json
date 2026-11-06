@@ -359,6 +359,7 @@
     "noSubtitles": "No subtitles found",
     "pickLanguage": "Pick a language on the left.",
     "noAudioChoice": "This stream has no other audio to choose from.",
+    "audioSwitch": "{{language}} audio: switch stream",
     "audioDefault": "As sent",
     "timing": "Timing",
     "timingLater": "Subtitles {{amount}} s later",

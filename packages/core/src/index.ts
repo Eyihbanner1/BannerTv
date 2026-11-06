@@ -278,10 +278,12 @@ export {
 export { describeStream } from './streams/facts';
 export {
   closestCandidate,
+  namesOnlyOthers,
   orderStreams,
   otherLanguages,
   playableCandidates,
   qualityChoices,
+  streamInLanguage,
   streamTier,
 } from './streams/order';
 export type {

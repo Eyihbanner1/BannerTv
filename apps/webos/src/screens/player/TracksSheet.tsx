@@ -17,7 +17,7 @@ import { preferences } from '../../data/preferences';
 import { focusedKey } from '../../navigation/spatial';
 import { inputMode } from '../../platform/input-mode';
 import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
-import { streamTitle } from '../../player/describe';
+import { resolutionLabel, streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { formatOffset, offsetWay, stepOffset, TIMING_STEPS } from '../../player/timing';
 import { type SheetRow, SheetList } from './SheetList';
@@ -94,6 +94,11 @@ interface TracksSheetProps {
   /** Focused again when it closes: read at closing time. */
   returnFocusKey: () => string;
   onAudio: (track: EngineTrack) => void;
+  /**
+   * A stream to switch to for audio in a language this one lacks, as the
+   * Audio tab's last row ("English audio: switch stream").
+   */
+  audioSwitch?: { language: string; entry: StreamEntry; onPress: () => void };
   /** Back from the tabs: the sheet closes onto the controls. */
   onBack: () => void;
   /** Blue, or a click above it. */
@@ -114,7 +119,7 @@ function Note({ children }: { children: ReactNode }) {
  * one. Rows keep their places while the sheet is open, as more addons answer.
  */
 export function TracksSheet(props: TracksSheetProps) {
-  const { audio, subtitles, entry, tab, onTab, onAudio } = props;
+  const { audio, subtitles, entry, tab, onTab, onAudio, audioSwitch } = props;
   const { t } = useTranslation();
   const styleSummary = useStyleSummary();
   const { choice } = subtitles;
@@ -282,6 +287,14 @@ export function TracksSheet(props: TracksSheetProps) {
       selected: track.active,
       onPress: () => onAudio(track),
     }));
+    if (audioSwitch) {
+      rows.push({
+        focusKey: `${SHEET}-audio-switch`,
+        label: t('player.audioSwitch', { language: languageName(audioSwitch.language) }),
+        detail: resolutionLabel(audioSwitch.entry.facts.resolution),
+        onPress: audioSwitch.onPress,
+      });
+    }
     content =
       rows.length > 0 ? (
         <Pane focusKey={`${SHEET}-audio`} className={styles.content}>

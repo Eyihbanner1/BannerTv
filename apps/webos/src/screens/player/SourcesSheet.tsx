@@ -79,7 +79,7 @@ export function SourcesSheet({
   );
   const [stable] = useState(rememberPlaces);
   const entries = useMemo(
-    () => stable(order, listOrder(state.entries, order, finder.runtimeSeconds())),
+    () => stable(order, listOrder(state.entries, order, finder.orderOptions())),
     [stable, state.entries, order, finder],
   );
   const playingKey = playing ? entryKey(playing) : undefined;

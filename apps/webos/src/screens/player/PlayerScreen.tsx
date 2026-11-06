@@ -65,7 +65,7 @@ import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
-import { pickAudio } from '../../player/audio';
+import { audioSwitch, pickAudio } from '../../player/audio';
 import { headlineBadges, problemText, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
@@ -178,7 +178,7 @@ function formatSkip(seconds: number): string {
  */
 export function PlayerScreen(props: PlayerScreenProps) {
   const { type, metaId, videoId, preview } = props;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const sportsEvent = props.event;
@@ -1071,6 +1071,22 @@ export function PlayerScreen(props: PlayerScreenProps) {
     () => qualityChoices(finderState.candidates, reference, finder.orderOptions()),
     [finderState.candidates, reference, finder],
   );
+  // Audio in the language wanted, or the app's own when none was chosen, from
+  // another stream when this one lacks it. Not for a Lab file, which has no other.
+  const switchLanguage = (!props.lab && wantedAudio(metaId)) || i18n.language;
+  const switchTo = useMemo(
+    () =>
+      reference && !props.lab
+        ? audioSwitch(
+            state.audio,
+            reference,
+            finderState.candidates,
+            switchLanguage,
+            finder.orderOptions(),
+          )
+        : undefined,
+    [state.audio, reference, finderState.candidates, switchLanguage, finder, props.lab],
+  );
   const currentQuality = state.entry?.facts.resolution ?? 'other';
   // Whether the Quality menu offers something smaller than what is playing.
   const lowerChoice = useMemo(() => {
@@ -1304,6 +1320,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Anything else says on its row why it can't play here.
   }
 
+  /** "English audio: switch stream": plays from where the film is, and keeps the language for the title. */
+  function switchForAudio(entry: StreamEntry, language: string) {
+    closedBy.current = 'pick';
+    setPanel(null);
+    if (!session) return;
+    chooseAudioLanguage(metaId, language);
+    session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
+    setSwitching({ entry });
+  }
+
   const chooseAudio = (track: EngineTrack) => {
     session?.selectAudio(track.id);
     if (track.lang) chooseAudioLanguage(props.lab ? undefined : metaId, track.lang);
@@ -1447,6 +1473,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onTab={setSheetTab}
           returnFocusKey={sheetReturn('player-tracks-button')}
           onAudio={chooseAudio}
+          audioSwitch={
+            switchTo && {
+              language: switchLanguage,
+              entry: switchTo,
+              onPress: () => switchForAudio(switchTo, switchLanguage),
+            }
+          }
           onBack={backFromSheet}
           onClose={() => setPanel(null)}
         />

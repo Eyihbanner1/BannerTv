@@ -79,7 +79,7 @@ export function StreamsScreen(props: StreamsScreenProps) {
   // Re-sorted when the order changes or more addons answer. The finder answers
   // again when the running time or the connection's limit changes.
   const entries = useMemo(
-    () => listOrder(state.entries, order, finder.runtimeSeconds()),
+    () => listOrder(state.entries, order, finder.orderOptions()),
     [state.entries, order, finder],
   );
   const names = addonNames();

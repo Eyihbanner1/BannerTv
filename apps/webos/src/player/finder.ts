@@ -23,9 +23,11 @@ import {
 import type { Stream } from '@bannertv/protocol';
 import type { EventPlay } from '../app/router';
 import { addonClient } from '../data/addons';
+import { trackMemory } from '../data/library';
 import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
+import { wantedAudio } from '../data/tracks';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 import { noteRequestHeaders } from './request-headers';
@@ -156,6 +158,22 @@ function buildEntries(
   return entries;
 }
 
+/**
+ * The title a video belongs to, for the audio language chosen for it: a
+ * film's own id, or a series episode's id without ":season:episode". None
+ * for a sports event, which follows the profile's choice.
+ */
+function titleOf(
+  type: string,
+  videoId: string,
+  sources?: readonly ItemSource[],
+): string | undefined {
+  if (sources) return undefined;
+  if (type === 'movie') return videoId;
+  const episode = /^(.+):\d+:\d+$/.exec(videoId);
+  return episode ? episode[1] : undefined;
+}
+
 function create(type: string, videoId: string, sources?: readonly ItemSource[]): StreamFinder {
   let answers: ReadonlyArray<AddonAnswer<Stream[]>> = [];
   let unsubscribe: Array<() => void> = [];
@@ -180,17 +198,24 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
   });
 
   const runtimeSeconds = () => runtime ?? ASSUMED_RUNTIME_S[type] ?? ASSUMED_EPISODE_RUNTIME_S;
+  const title = titleOf(type, videoId, sources);
+  // The audio the ranking last used: a new choice in the player ranks the streams again.
+  let rankedAudio: string | null = null;
 
   function orderOptions(): OrderOptions {
     const memory = sourceMemory;
-    return {
+    const options: OrderOptions = {
       addonScore: (id) => memory.score(id),
       maxBitrate: bandwidth.maxBitrate(),
       runtimeSeconds: runtimeSeconds(),
     };
+    const audio = wantedAudio(title);
+    if (audio !== null) options.audioLanguage = audio;
+    return options;
   }
 
   function rank(entries: readonly StreamEntry[]): StreamEntry[] {
+    rankedAudio = wantedAudio(title);
     return playableCandidates(
       entries,
       preferences.get().streamChoice,
@@ -269,6 +294,11 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
       // A lower limit after a stream kept buffering moves heavy streams down.
       unsubscribe.push(bandwidth.subscribe(refresh));
+      // Another audio language chosen moves dubs in or out of the way.
+      const audioChanged = () => {
+        if (wantedAudio(title) !== rankedAudio) refresh();
+      };
+      unsubscribe.push(preferences.subscribe(audioChanged), trackMemory.subscribe(audioChanged));
       answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);
@@ -441,15 +471,15 @@ export function isHeavy(entry: StreamEntry, runtimeSeconds: number): boolean {
   return bitrate !== undefined && bitrate > bandwidth.maxBitrate();
 }
 
-/** All streams, in the order the viewer picked for that list. */
+/**
+ * All streams, in the order the viewer picked for that list, weighed as the
+ * finder weighs them now (`finder.orderOptions()`): the connection, the
+ * addons' record and the audio language wanted.
+ */
 export function listOrder(
   entries: readonly StreamEntry[],
   order: StreamOrder,
-  runtimeSeconds: number,
+  options: OrderOptions,
 ): StreamEntry[] {
-  return orderStreams(entries, order, knownCapabilities(), {
-    addonScore: (id) => sourceMemory.score(id),
-    maxBitrate: bandwidth.maxBitrate(),
-    runtimeSeconds,
-  });
+  return orderStreams(entries, order, knownCapabilities(), options);
 }

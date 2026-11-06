@@ -28,7 +28,7 @@ export function StreamList({
   const order = useSyncExternalStore(preferences.subscribe, preferences.get).allStreamsOrder;
   const names = addonNames();
   const entries = useMemo(
-    () => listOrder(state.entries, order, finder.runtimeSeconds()),
+    () => listOrder(state.entries, order, finder.orderOptions()),
     [state.entries, order, finder],
   );
   const status = streamsStatus(t, state, entries.length);

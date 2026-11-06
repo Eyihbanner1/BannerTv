@@ -479,6 +479,56 @@ test('with only torrents, the player names the addon and says to set up a debrid
   ).toBeVisible();
 });
 
+test('Play passes over a dub for a release in the language wanted, and Audio can switch back to it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const playback = await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p BluRay REMUX 🇪🇸\n💾 9 GB ⚡ Cached',
+          path: '/movie-1080p-castellano.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL\n💾 2 GB ⚡ Cached',
+          path: '/movie-720p.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  expect(playback.media).not.toContain('/movie-1080p-castellano.webm');
+
+  // The dub picked by hand, Audio offers the language back from the other stream.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(1));
+  await press(page, 'ArrowDown', source(0));
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p-castellano.webm');
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await page.keyboard.press('Enter');
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  const offer = page.locator('[data-focus-key="player-tracks-audio-switch"]');
+  await expect(offer).toContainText('English audio: switch stream');
+  await expect(offer).toContainText('720p');
+  await press(page, 'ArrowDown', 'player-tracks-audio-switch');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  expect((await video(page)).time).toBeGreaterThan(0);
+});
+
 test('when only uncached debrid links were tried, the player says so', async ({ page }) => {
   await mockAddons(page);
   await seedStreamAddon(page);

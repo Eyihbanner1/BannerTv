@@ -1,6 +1,8 @@
 import type { EventSource, InstalledAddon, ItemSource, QueryState } from '@bannertv/core';
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { trackMemory } from '../data/library';
+import { setPreference } from '../data/preferences';
 import { BINGE_WAIT_MS, entryKey, isHeavy, SETTLE_AFTER_FIRST_MS, streamFinder } from './finder';
 
 interface FakeQuery {
@@ -474,5 +476,36 @@ describe('heavy streams', () => {
 
     finder.destroy();
     expect(limit.listeners.size).toBe(following - 1);
+  });
+});
+
+describe('streamFinder and the audio language wanted', () => {
+  const dubbed = [
+    { url: 'https://media.example.com/castellano.mkv', name: 'Test\n2160p', title: 'Film 🇪🇸' },
+    { url: 'https://media.example.com/original.mkv', name: 'Test\n1080p', title: 'Film' },
+  ];
+
+  afterEach(() => setPreference('audioLanguage', null));
+
+  it('puts a dub below the rest, and ranks again when another language is chosen', () => {
+    addons.installs = [{ id: 'org.test.streams', streams: dubbed }];
+    const finder = streamFinder('movie', 'tt-dubbed');
+    finder.start();
+    expect(files(finder.get().candidates)).toEqual(['original', 'castellano']);
+    expect(finder.orderOptions().audioLanguage).toBeUndefined();
+
+    setPreference('audioLanguage', 'spa');
+    expect(finder.orderOptions().audioLanguage).toBe('spa');
+    expect(files(finder.get().candidates)).toEqual(['castellano', 'original']);
+  });
+
+  it("follows the language chosen for the episode's series over the profile's", async () => {
+    addons.installs = [{ id: 'org.test.streams', streams: dubbed }];
+    setPreference('audioLanguage', 'spa');
+    await trackMemory.rememberAudio('tt-series', 'eng');
+    const episode = streamFinder('series', 'tt-series:1:2');
+    episode.start();
+    expect(episode.orderOptions().audioLanguage).toBe('eng');
+    expect(files(episode.get().candidates)).toEqual(['original', 'castellano']);
   });
 });
