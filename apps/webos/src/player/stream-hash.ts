@@ -1,4 +1,5 @@
 import { guessMimeType } from './media';
+import { requestHeadersFor } from './request-headers';
 
 /**
  * The OpenSubtitles hash of a video file, read from its first and last 64 KB
@@ -52,11 +53,14 @@ export function openSubtitlesHash(
 }
 
 /**
- * Whether a link is one file the hash can be read from: not a playlist. A
- * link that needs an addon's headers fails the read, and is asked without.
+ * Whether a link is one file the hash can be read from: not a playlist, and
+ * not a link whose addon asked for request headers. The page cannot send
+ * those (Referer, Origin and cookies are a browser's own), and a host that
+ * wants them should not be asked without them: such a stream's subtitles are
+ * asked for with no hash.
  */
 export function canHash(url: string): boolean {
-  if (!/^https?:\/\//i.test(url)) return false;
+  if (!/^https?:\/\//i.test(url) || requestHeadersFor(url)) return false;
   const mime = guessMimeType(url);
   return mime !== 'application/vnd.apple.mpegurl' && mime !== 'application/dash+xml';
 }
