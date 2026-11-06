@@ -95,7 +95,8 @@ const HomeRow = memo(function HomeRow({
 }: HomeRowProps) {
   const { t } = useTranslation();
   const query = useMemo(
-    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
+    // A refreshed row equal to the one shown keeps its items, so no tile draws again.
+    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra, { keepEqual: true }),
     [row.addon, row.type, row.catalog.id, row.extra],
   );
   const state = useQuery(query, near);
