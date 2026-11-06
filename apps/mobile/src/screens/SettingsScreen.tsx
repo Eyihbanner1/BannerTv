@@ -3,14 +3,23 @@ import { serviceStatus } from '@tv/data/api';
 import { preferences, setPreference, type Preferences } from '@tv/data/preferences';
 import { addonCollection } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
-import { accountSection, accountState, checkAccountSection } from '@tv/data/sync';
+import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { statusLine } from '../data/account-text';
+import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { ListRow } from '../ui/Button';
 import { Sheet, SheetOption } from '../ui/Sheet';
@@ -78,10 +87,13 @@ export function SettingsScreen() {
   const profile = activeProfile();
 
   const [now, setNow] = useState(() => Date.now());
+  const { refreshing, onRefresh } = useAccountRefresh();
   // Each visit, as the TV's Settings mounts on each: a failed check offline tries again later.
+  // The profiles shown are the account's now, not as of the last sync (item A8).
   useFocusEffect(
     useCallback(() => {
       if (isMain) checkAccountSection();
+      void refreshAccount();
     }, [isMain]),
   );
   useEffect(() => {
@@ -104,6 +116,15 @@ export function SettingsScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + space.m }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.action]}
+          progressViewOffset={insets.top}
+        />
+      }
     >
       <Text style={styles.title} accessibilityRole="header">
         {t('phone.tabs.settings')}
@@ -152,6 +173,11 @@ export function SettingsScreen() {
           </Section>
 
           <Section title={t('phone.libraryAndAccounts')}>
+            <ListRow
+              title={t('profiles.title')}
+              value={t('phone.profilesCount', { count: list.length })}
+              onPress={() => router.push('/manage-profiles')}
+            />
             <ListRow
               title={t('phone.addons')}
               {...(addons.ready

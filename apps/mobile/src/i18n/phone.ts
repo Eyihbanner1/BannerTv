@@ -83,6 +83,9 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  profilesCount_one: '{{count}} profile',
+  profilesCount_other: '{{count}} profiles',
+  askAtLaunch: 'Ask who’s watching when BannerTV opens',
 } as const;
 
 const OVERRIDES = {
@@ -93,6 +96,22 @@ const OVERRIDES = {
     },
   },
   search: { hint: PHONE.searchHint },
+  profiles: {
+    full: 'This phone already has six profiles.',
+    deleteMessage:
+      'Their Continue Watching, My List, history and settings are deleted from this phone. Anything synced to Trakt stays on Trakt.',
+  },
+  forgotPin: {
+    resetTitle: 'Reset BannerTV on this phone?',
+    resetMessage:
+      'Without a BannerTV account, {{name}}’s PIN can only come off by starting again. Every profile, addon, My List, Continue Watching and setting on this phone is deleted, and BannerTV starts as new. What Trakt has stays on Trakt.',
+    reset: 'Reset this phone',
+  },
+  // The phone has no subtitle style row yet (it comes with the phone's subtitle style work), so
+  // a kids profile's Settings only says who can change them.
+  settings: {
+    kidsLead: 'Grown-ups can change the settings from their own profile.',
+  },
   library: { emptyList: PHONE.emptyList },
   details: { trailerFailed: 'The trailer didn’t open.' },
   welcome: {
