@@ -34,8 +34,9 @@ afterEach(() => {
 });
 
 describe('the tester switch', () => {
-  it('ships learn', () => {
-    expect(LANDING_DEFAULT).toBe('learn');
+  it('ships measure, which changes nothing a viewer sees, until the TV round picks a mode', () => {
+    expect(LANDING_DEFAULT).toBe('measure');
+    expect(parseLandingMode(null)).toBe('measure');
   });
 
   it('takes each mode, and the default for anything else', () => {
@@ -95,6 +96,27 @@ describe('aimFor', () => {
     // Forward to live on a broadcast.
     expect(aimFor(7200, -5, 7197, broadcast)).toBe(7200);
   });
+
+  it('adds nothing to a jump to the very start, where nothing lies before it to fall short of', () => {
+    // Start over, and Play again from the end.
+    expect(aimFor(0, 4, 2400, film)).toBe(0);
+    expect(aimFor(0, 4, 7199, film)).toBe(0);
+    // Left within ten seconds of the start.
+    expect(aimFor(0, 4, 8, film)).toBe(0);
+    // Back to the oldest a rewind may reach on a broadcast.
+    expect(aimFor(7006, 4, 7100, broadcast)).toBe(7006);
+    expect(aimFor(7006, 4, 7012, broadcast)).toBe(7006);
+    // Just after the start, the allowance is still made.
+    expect(aimFor(1, 4, 30, film)).toBe(5);
+  });
+
+  it('takes a jump to where the picture already is as no jump', () => {
+    // Left at 0 stays at 0, rather than moving the picture forward.
+    expect(aimFor(0, 4, 0, film)).toBe(0);
+    expect(aimFor(1800, 4, 1800, film)).toBe(1800);
+    // Right at the last second stays there, rather than going back.
+    expect(aimFor(7199, -4, 7199, film)).toBe(7199);
+  });
 });
 
 describe('learnFrom', () => {
@@ -140,30 +162,41 @@ describe('learnFrom', () => {
 
 describe('againFor', () => {
   it('jumps again only after a miss of more than a second', () => {
-    expect(againFor(1800, 1800, 1799.2, film)).toBeUndefined();
-    expect(againFor(1800, 1800, 1800.9, film)).toBeUndefined();
+    expect(againFor(1800, 1800, 1799.2, 600, film)).toBeUndefined();
+    expect(againFor(1800, 1800, 1800.9, 600, film)).toBeUndefined();
   });
 
   it('sends the second further by the miss than the first was sent', () => {
-    expect(againFor(1800, 1800, 1796, film)).toBe(1804);
-    expect(againFor(1800, 1800, 1803, film)).toBe(1797);
+    expect(againFor(1800, 1800, 1796, 600, film)).toBe(1804);
+    expect(againFor(1800, 1800, 1803, 600, film)).toBe(1797);
     // A first jump already sent past its target goes further still.
-    expect(againFor(1800, 1802, 1797, film)).toBe(1805);
+    expect(againFor(1800, 1802, 1797, 600, film)).toBe(1805);
   });
 
   it('keeps the second to the film, and makes none with nowhere new to go', () => {
-    expect(againFor(7196, 7196, 7193, film)).toBe(7199);
-    expect(againFor(7199, 7199, 7195, film)).toBeUndefined();
-    expect(againFor(2, 2, 5, film)).toBe(0);
+    expect(againFor(7196, 7196, 7193, 7000, film)).toBe(7199);
+    expect(againFor(7199, 7199, 7195, 7000, film)).toBeUndefined();
+    expect(againFor(2, 2, 5, 12, film)).toBe(0);
   });
 
   it('never sends the second past live', () => {
-    expect(againFor(7150, 7150, 7146, broadcast)).toBe(7154);
-    expect(againFor(7200, 7200, 7196, broadcast)).toBeUndefined();
+    expect(againFor(7150, 7150, 7146, 7100, broadcast)).toBe(7154);
+    expect(againFor(7200, 7200, 7196, 7100, broadcast)).toBeUndefined();
   });
 
   it('makes none for a miss too wild to be a keyframe', () => {
-    expect(againFor(1800, 1800, 1700, film)).toBeUndefined();
+    expect(againFor(1800, 1800, 1700, 600, film)).toBeUndefined();
+  });
+
+  it('never turns the viewer round', () => {
+    // Back ten seconds from 1800, landed thirteen short: a second jump would go to 1803, ahead of where Back was pressed.
+    expect(againFor(1790, 1790, 1777, 1800, film)).toBeUndefined();
+    // Short by less than the skip, the second still goes back.
+    expect(againFor(1790, 1790, 1786, 1800, film)).toBe(1794);
+    // Forward ten seconds, landed thirteen past: a second jump would go behind where Right was pressed.
+    expect(againFor(1810, 1810, 1823, 1800, film)).toBeUndefined();
+    // A jump to where the picture already was is no jump, and is not jumped again.
+    expect(againFor(1800, 1800, 1796, 1800, film)).toBeUndefined();
   });
 });
 
@@ -213,9 +246,10 @@ describe('a landing watch', () => {
     return w.read(at, false, bounds);
   }
 
-  const jump = (wanted: number, aimed = wanted, paused = false) => ({
+  const jump = (wanted: number, aimed = wanted, paused = false, from = 600) => ({
     wanted,
     aimed,
+    from,
     paused,
     stream,
   });
@@ -334,6 +368,47 @@ describe('a landing watch', () => {
     w.jumped(jump(1800));
     expect(land(w, 1700)).toBeUndefined();
     expect(kept.mock.calls[0]![0]).toMatchObject({ miss: -100, corrected: false, learnt: 0 });
+  });
+
+  it("in 'again', jumps a back jump once more only when the second stays behind where the viewer pressed", () => {
+    const w = watch('again');
+    w.jumped(jump(1790, 1790, false, 1800));
+    expect(land(w, 1777)).toBeUndefined();
+    expect(kept.mock.calls[0]![0]).toMatchObject({ wanted: 1790, landed: 1777, corrected: false });
+    w.jumped(jump(1790, 1790, false, 1800));
+    expect(land(w, 1786)).toBe(1794);
+  });
+
+  it('takes a reading of the aim read back, before the jump lands, as the place asked for', () => {
+    const w = watch('learn');
+    w.jumped(jump(1800));
+    land(w, 1796);
+    // Paused: the next jump is sent to 2404 for 2400, and the element reads 2404 back.
+    w.jumped(jump(2400, 2404, true, 1796));
+    expect(w.placeOf(2404)).toBe(2400);
+    expect(w.placeOf(2404.005)).toBe(2400);
+    // Off the aim, it is where the picture really is.
+    expect(w.placeOf(2399.5)).toBe(2399.5);
+    expect(w.placeOf(2404.25)).toBe(2404.25);
+    // Once the jump has landed, every reading is where the picture is.
+    w.seeked();
+    w.read(2404, true, film);
+    expect(w.placeOf(2404)).toBe(2404);
+  });
+
+  it("takes the second jump's aim read back in 'again' as the place asked for", () => {
+    const w = watch('again');
+    w.jumped(jump(1800));
+    expect(land(w, 1796)).toBe(1804);
+    expect(w.placeOf(1804)).toBe(1800);
+    expect(w.placeOf(1802.5)).toBe(1802.5);
+    land(w, 1802.5);
+    expect(w.placeOf(1804)).toBe(1804);
+  });
+
+  it('takes every reading as it is with no jump watched', () => {
+    const w = watch('learn');
+    expect(w.placeOf(1800)).toBe(1800);
   });
 
   it('forgets what it learnt for a new stream', () => {

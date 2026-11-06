@@ -23,15 +23,18 @@ export type LandingMode = 'measure' | 'again' | 'learn';
 export const LANDING_MODES: readonly LandingMode[] = ['measure', 'again', 'learn'];
 
 /**
- * 'learn' ships until the TV round says otherwise. It never adds a second
- * jump, so the viewer never waits for a second picture, and the big files
- * that miss are where a jump is slowest already. Where jumps land well it
- * learns next to nothing and changes nothing, and where they miss its
- * allowance is capped and drawn back by every landing, so it cannot do much
- * harm. Its first jump on each stream still lands as today: that is the case
- * 'again' would mend, and Skip recap is often the first jump of an episode.
+ * 'measure' ships until the TV round picks which mode does: it only keeps the
+ * log, so it changes nothing a viewer sees. The round sets the switch by hand
+ * to try the others. 'learn' never adds a second jump, so the viewer never
+ * waits for a second picture, and the big files that miss are where a jump is
+ * slowest already. Where jumps land well it learns next to nothing and changes
+ * nothing, and where they miss its allowance is capped and drawn back by every
+ * landing, so it cannot do much harm. Its first jump on each stream still
+ * lands as today: that is the case 'again' would mend, and Skip recap is often
+ * the first jump of an episode. 'again' mends every miss, at the cost of a
+ * second picture.
  */
-export const LANDING_DEFAULT: LandingMode = 'learn';
+export const LANDING_DEFAULT: LandingMode = 'measure';
 
 export const LANDING_KEY = 'bannertv.landing';
 
@@ -103,16 +106,28 @@ export function within(bounds: LandingBounds, place: number): number {
 }
 
 /**
+ * Whether sending the element to `place` turns round the viewer's jump from
+ * `from` to `wanted`: it is on the other side of where the jump started, or
+ * right on it. A jump to where the picture already is counts as no jump, so
+ * every place turns it round.
+ */
+function turnsRound(wanted: number, from: number, place: number): boolean {
+  return (wanted - from) * (place - from) <= 0;
+}
+
+/**
  * Where to send the element for a jump to `wanted` from `from`, allowing for
- * `gap`, the seconds this stream's jumps usually fall short. The allowance
- * never turns a jump round: a jump forward that it would send behind where
- * it started goes where the viewer asked.
+ * `gap`, the seconds this stream's jumps usually fall short. A jump to the
+ * very start, 0 or the oldest a rewind may reach on a broadcast, has nothing
+ * before it to fall short of, so it goes where the viewer asked. So does one
+ * the allowance would turn round: a jump forward that it would send behind
+ * where it started, and a jump to where the picture already is.
  */
 export function aimFor(wanted: number, gap: number, from: number, bounds: LandingBounds): number {
   if (!(Math.abs(gap) >= LEARN_FROM_S)) return wanted;
+  if (wanted <= within(bounds, 0)) return wanted;
   const aimed = within(bounds, wanted + gap);
-  if ((wanted - from) * (aimed - from) < 0) return wanted;
-  return aimed;
+  return turnsRound(wanted, from, aimed) ? wanted : aimed;
 }
 
 /** What 'learn' keeps of a stream's landings. */
@@ -142,21 +157,26 @@ export function learnFrom(gap: LearntGap, aimed: number, landed: number): Learnt
 }
 
 /**
- * Where 'again' sends a second jump after a miss: further by the miss than
- * the first was sent. None when the first landed well, when the miss is too
- * wild to be a keyframe, or when the bounds leave the second nowhere new to
- * go, as at the very end or at live.
+ * Where 'again' sends a second jump after a miss of the viewer's jump to
+ * `wanted` from `from`: further by the miss than the first was sent. None
+ * when the first landed well, when the miss is too wild to be a keyframe, or
+ * when the bounds leave the second nowhere new to go, as at the very end or
+ * at live. Nor when it would turn the viewer round, as a jump back that fell
+ * short by more than the skip would: its second would land ahead of where the
+ * viewer pressed Back.
  */
 export function againFor(
   wanted: number,
   aimed: number,
   landed: number,
+  from: number,
   bounds: LandingBounds,
 ): number | undefined {
   const miss = landed - wanted;
   if (!(Math.abs(miss) > LANDING_SLACK_S) || Math.abs(miss) > WILD_MISS_S) return undefined;
   const second = within(bounds, aimed - miss);
-  return Math.abs(second - aimed) > LANDING_SLACK_S ? second : undefined;
+  if (!(Math.abs(second - aimed) > LANDING_SLACK_S)) return undefined;
+  return turnsRound(wanted, from, second) ? undefined : second;
 }
 
 /**
@@ -293,6 +313,8 @@ export function clearLandings(): void {
 interface Watched {
   wanted: number;
   aimed: number;
+  /** Where the element was when the viewer jumped, so a second jump never turns them round. */
+  from: number;
   paused: boolean;
   stream: LandingStream;
   /** When the element was sent, and when it said it had finished. */
@@ -307,8 +329,14 @@ export interface LandingWatch {
   readonly mode: LandingMode;
   /** Where to send the element for a viewer's jump to `wanted` from `from`. */
   aim(wanted: number, from: number, bounds: LandingBounds): number;
-  /** The viewer jumped: this jump is watched, and one still to land is let go. */
-  jumped(jump: { wanted: number; aimed: number; paused: boolean; stream: LandingStream }): void;
+  /** The viewer jumped from `from`: this jump is watched, and one still to land is let go. */
+  jumped(jump: {
+    wanted: number;
+    aimed: number;
+    from: number;
+    paused: boolean;
+    stream: LandingStream;
+  }): void;
   /** The element finished a jump. True for the watched jump's first. */
   seeked(): boolean;
   /**
@@ -316,6 +344,13 @@ export interface LandingWatch {
    * jump, when one is due; the caller only moves the element there.
    */
   read(reading: number, final: boolean, bounds: LandingBounds): number | undefined;
+  /**
+   * Where the viewer is, by a clock reading. Until the watched jump lands, the
+   * element can read back where it was sent, which in 'learn' is past where
+   * the viewer asked, and in 'again' is the second jump's aim. That reading is
+   * the place asked for. Any other reading is where the picture is.
+   */
+  placeOf(reading: number): number;
   /** A new stream, or the end of this one: nothing learnt, nothing watched. */
   reset(): void;
   /** The gap allowed for now, in seconds. */
@@ -393,7 +428,9 @@ export function createLandingWatch(
         secondReadMs: null,
       };
       const second =
-        sure && mode === 'again' ? againFor(jump.wanted, jump.aimed, reading, bounds) : undefined;
+        sure && mode === 'again'
+          ? againFor(jump.wanted, jump.aimed, reading, jump.from, bounds)
+          : undefined;
       if (second === undefined) {
         keep(landing);
         return undefined;
@@ -406,6 +443,10 @@ export function createLandingWatch(
         first: { ...landing, corrected: true, secondAimed: hundredths(second) },
       };
       return second;
+    },
+
+    placeOf(reading) {
+      return watched && Math.abs(reading - watched.aimed) < AT_AIM_S ? watched.wanted : reading;
     },
 
     reset() {
