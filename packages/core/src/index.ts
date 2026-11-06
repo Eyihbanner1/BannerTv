@@ -115,6 +115,14 @@ export {
 } from './playback/continue';
 export { bingeEntry, type BingeHint, bingeHint, findBingeStream, nextVideo } from './playback/next';
 export {
+  createReleaseMemory,
+  MAX_RELEASE_TITLES,
+  type ReleaseChoice,
+  releaseChoice,
+  releaseHint,
+  type ReleaseMemory,
+} from './playback/releases';
+export {
   clampToWindow,
   judgeLive,
   type LiveJudgement,

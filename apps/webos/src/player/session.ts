@@ -13,7 +13,7 @@ import {
   type QualityReference,
   type StreamEntry,
 } from '@bannertv/core';
-import { bandwidth, progress, sourceMemory } from '../data/playback';
+import { bandwidth, progress, releaseMemory, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
@@ -629,6 +629,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           reportedWorked = true;
           const entry = state.get().entry;
           if (entry && keep) sourceMemory.record(entry.addonId, true);
+          // Its release starts first the next time the title does (improvements list PL2):
+          // the last that played, so a step-down replaces the stream that kept buffering.
+          // Not a broadcast's, a clip's or a sports event's.
+          if (entry && keep && !offRow && !live && !clip) {
+            void releaseMemory.remember(metaId, entry).catch(() => undefined);
+          }
         }
         // Ten minutes in a row without buffering: the connection keeps up with this stream.
         if (trusted !== undefined && lastPosition !== undefined) {

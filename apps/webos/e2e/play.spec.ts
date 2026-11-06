@@ -529,6 +529,40 @@ test('Play passes over a dub for a release in the language wanted, and Audio can
   expect((await video(page)).time).toBeGreaterThan(0);
 });
 
+test('Watch starts the release played last for the title', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      releaseChoices: [
+        { metaId: MOVIE, addonId: 'org.bannertv.test-streams', bingeGroup: 'test-720p' },
+      ],
+    },
+  });
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  // What is kept names the release, never its link.
+  expect(JSON.stringify(await readKv(page, 'releaseChoices'))).not.toContain('media.example.com');
+});
+
+test('a release played last that the addon no longer sends leaves the usual pick', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      releaseChoices: [
+        { metaId: MOVIE, addonId: 'org.bannertv.test-streams', bingeGroup: 'test-gone' },
+      ],
+    },
+  });
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p.webm');
+});
+
 test('when only uncached debrid links were tried, the player says so', async ({ page }) => {
   await mockAddons(page);
   await seedStreamAddon(page);

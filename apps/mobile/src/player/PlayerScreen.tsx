@@ -21,7 +21,7 @@ import {
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
-import { playedVideos, progress } from '@tv/data/playback';
+import { playedVideos, progress, releaseMemory, rememberedRelease } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
 import { useSkipSegments } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
@@ -142,14 +142,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setSession(created);
     finder.start();
     let cancelled = false;
-    void progress
-      .load()
+    void Promise.all([progress.load(), releaseMemory.load()])
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
         const start = route.startAt ?? progress.resumeAt(videoId) ?? 0;
         setResumedAt(start);
-        const entry = route.stream ?? (await finder.choose(route.binge));
+        // The release played last for the title goes first, as the next episode's does.
+        const release =
+          remembersPlace(route) && !sportsEvent ? rememberedRelease(metaId) : undefined;
+        const entry = route.stream ?? (await finder.choose(route.binge ?? release));
         if (cancelled) return;
         if (entry) created.play(entry, start);
         else setNothing(true);

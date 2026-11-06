@@ -39,6 +39,7 @@ const kept = vi.hoisted(() => ({
   progress: vi.fn(),
   cleared: vi.fn(),
   sourceMemory: vi.fn(),
+  releases: vi.fn(() => Promise.resolve()),
   bandwidth: {
     maxBitrate: () => 40e6,
     struggled: vi.fn<(bitrate: number, ceiling?: number) => void>(),
@@ -50,6 +51,7 @@ const kept = vi.hoisted(() => ({
 vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
   sourceMemory: { record: kept.sourceMemory },
+  releaseMemory: { remember: kept.releases },
   bandwidth: kept.bandwidth,
 }));
 
@@ -248,6 +250,7 @@ beforeEach(() => {
   kept.progress.mockClear();
   kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
+  kept.releases.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
 });
@@ -923,6 +926,37 @@ describe('a stream that is not remembered', () => {
     expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
     expect(kept.progress).not.toHaveBeenCalled();
     expect(kept.sourceMemory).not.toHaveBeenCalled();
+    expect(kept.releases).not.toHaveBeenCalled();
+  });
+});
+
+describe('the release kept for the title', () => {
+  it('is the stream that played half a minute, kept once', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 20);
+    expect(kept.releases).not.toHaveBeenCalled();
+    playFor(video, 40);
+    expect(kept.releases).toHaveBeenCalledTimes(1);
+    expect(kept.releases).toHaveBeenCalledWith('tt1', first);
+  });
+
+  it("is not a sports event's", async () => {
+    const { video, session } = setup({ continueRow: false });
+    await start(session, video, first, 600);
+    playFor(video, 40);
+    expect(kept.releases).not.toHaveBeenCalled();
+  });
+
+  it('is the step-down once it plays, not the stream that kept buffering', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    video.fire('playing');
+    playFor(video, 40);
+    expect(kept.releases).toHaveBeenLastCalledWith('tt1', bluray);
   });
 });
 
@@ -1125,6 +1159,8 @@ describe('a live stream', () => {
     expect(kept.sourceMemory).not.toHaveBeenCalled();
     playFor(video, 15);
     expect(kept.sourceMemory).toHaveBeenCalledWith(first.addonId, true);
+    // A broadcast's release is not one to start the title with again.
+    expect(kept.releases).not.toHaveBeenCalled();
   });
   it('is opened once, at the live edge, when it was opened where an older build saved it', async () => {
     const { video, session } = setup();

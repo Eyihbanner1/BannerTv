@@ -53,7 +53,13 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
 import { addonClient } from '../../data/addons';
-import { playedVideos, progress, speedMemory } from '../../data/playback';
+import {
+  playedVideos,
+  progress,
+  releaseMemory,
+  rememberedRelease,
+  speedMemory,
+} from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { useSkipSegments } from '../../data/skips';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
@@ -465,14 +471,15 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setSession(created);
     if (!props.lab) finder.start();
     let cancelled = false;
-    void progress
-      .load()
+    void Promise.all([progress.load(), releaseMemory.load()])
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
         const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
         setResumedAt(start);
-        const entry = props.stream ?? (await finder.choose(props.binge));
+        // The release played last for the title goes first, as the next episode's does.
+        const release = remember && !sportsEvent ? rememberedRelease(metaId) : undefined;
+        const entry = props.stream ?? (await finder.choose(props.binge ?? release));
         if (cancelled) return;
         if (entry) created.play(entry, start);
         else setNothing(true);
