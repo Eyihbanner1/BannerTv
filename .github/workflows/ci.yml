@@ -125,8 +125,10 @@ jobs:
           --workers=1
           --reporter=github,blob
 
+      # Kept whether the journeys passed or not: a journey that failed and then passed on retry
+      # leaves the job green, and its failed try's trace is only here.
       - name: Upload the journeys' results
-        if: ${{ failure() }}
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: blob-report-${{ matrix.shard }}
@@ -137,7 +139,8 @@ jobs:
   journeys-report:
     name: TV journeys report
     needs: journeys
-    if: ${{ failure() && needs.journeys.result == 'failure' }}
+    # Also after a failed shard, which is when the report matters most.
+    if: ${{ !cancelled() && needs.journeys.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -163,11 +166,14 @@ jobs:
       - name: Merge them into one report
         run: pnpm --filter @bannertv/webos exec playwright merge-reports --reporter html blob-reports
 
+      # On every run, not only on failure, with the trace of each try that failed, including
+      # the first try of a journey that passed on retry (trace: 'retain-on-failure').
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: apps/webos/playwright-report/
+          retention-days: 3
           if-no-files-found: error
 
   tv:
