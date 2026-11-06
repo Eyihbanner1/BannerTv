@@ -3301,3 +3301,53 @@ test('Settings shows subtitle style in the same sheet, with a sample line above 
   await expect(page.getByRole('dialog', { name: 'Subtitle style' })).toHaveCount(0);
   await expectFocus(page, 'settings-subtitle-style');
 });
+
+test('with timing marks on, the stages of a Play read in order, and no mark names an address', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('bannertv.tuning', JSON.stringify({ marks: true })),
+  );
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await openMovie(page);
+
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  const read = () =>
+    page.evaluate(() => (window as { __bannertvPlay?: () => unknown }).__bannertvPlay?.());
+  await expect
+    .poll(async () => {
+      const marks = (await read()) as { stages: Record<string, number> } | null;
+      return marks ? Object.keys(marks.stages).sort() : [];
+    })
+    .toEqual(
+      [
+        'press',
+        'open',
+        'finder-start',
+        'first-stream',
+        'settled',
+        'chosen',
+        'load',
+        'metadata',
+        'first-frame',
+      ].sort(),
+    );
+  const { stages, streams } = (await read()) as {
+    stages: Record<string, number>;
+    streams: number;
+  };
+  expect(stages.press).toBe(0);
+  expect(stages.open).toBeGreaterThanOrEqual(0);
+  expect(stages.chosen).toBeGreaterThanOrEqual(stages.open!);
+  expect(stages.load).toBeGreaterThanOrEqual(stages.chosen!);
+  expect(stages['first-frame']).toBeGreaterThanOrEqual(stages.load!);
+  expect(streams).toBe(1);
+  const names = await page.evaluate(() =>
+    performance.getEntriesByType('mark').map((entry) => entry.name),
+  );
+  expect(names).toContain('play:press');
+  expect(names.filter((name) => /https?:|\/\//.test(name))).toEqual([]);
+});
