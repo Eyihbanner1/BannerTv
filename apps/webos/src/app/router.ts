@@ -114,7 +114,9 @@ export type Route =
   | { name: 'account'; join?: boolean }
 
   /** Settings > Stream helper: run it (Android) or pair with one (the LG). */
-  | { name: 'stream-helper' };
+  | { name: 'stream-helper' }
+  /** Settings > Languages and picture: the profile's audio, subtitles and picture limits. */
+  | { name: 'languages' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 

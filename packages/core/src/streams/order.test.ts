@@ -1172,3 +1172,39 @@ describe('streamInLanguage, for "English audio: switch stream"', () => {
     expect(streamInLanguage(list, { entry: list[0]! }, 'Klingon')).toBeUndefined();
   });
 });
+
+describe('the first ranking, within the picture limits a profile set', () => {
+  const list = () =>
+    entries(UHD_HDR, [
+      ['2160p hdr', { facts: { resolution: '2160p', hdr: ['HDR10'], cached: true } }],
+      ['2160p', { facts: { resolution: '2160p', cached: true } }],
+      ['1080p hdr', { facts: { resolution: '1080p', hdr: ['DV', 'HDR10'], cached: true } }],
+      ['1080p', { facts: { resolution: '1080p' } }],
+      ['unknown', { facts: {} }],
+    ]);
+
+  it('puts streams above the highest picture below the rest', () => {
+    expect(labels(orderStreams(list(), 'quality', UHD_HDR, { maxResolution: '1080p' }))).toEqual([
+      '1080p hdr',
+      '1080p',
+      'unknown',
+      '2160p hdr',
+      '2160p',
+    ]);
+  });
+
+  it('puts HDR below the rest when the profile avoids it, in both orders', () => {
+    expect(labels(orderStreams(list(), 'quality', UHD_HDR, { avoidHdr: true }))).toEqual([
+      '2160p',
+      '1080p',
+      'unknown',
+      '2160p hdr',
+      '1080p hdr',
+    ]);
+    expect(
+      labels(
+        playableCandidates(list(), 'fast', UHD_HDR, { avoidHdr: true, maxResolution: '1080p' }),
+      ),
+    ).toEqual(['1080p', 'unknown', '1080p hdr', '2160p', '2160p hdr']);
+  });
+});

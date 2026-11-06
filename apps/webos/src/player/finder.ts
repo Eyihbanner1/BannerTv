@@ -199,8 +199,13 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
 
   const runtimeSeconds = () => runtime ?? ASSUMED_RUNTIME_S[type] ?? ASSUMED_EPISODE_RUNTIME_S;
   const title = titleOf(type, videoId, sources);
-  // The audio the ranking last used: a new choice in the player ranks the streams again.
-  let rankedAudio: string | null = null;
+  // What the ranking last weighed from the profile: a new audio choice in the
+  // player, or new limits in Settings, rank the streams again.
+  let rankedWith = '';
+  const weighed = () => {
+    const { maxResolution, avoidHdr, streamChoice } = preferences.get();
+    return [wantedAudio(title), maxResolution, avoidHdr, streamChoice].join('|');
+  };
 
   function orderOptions(): OrderOptions {
     const memory = sourceMemory;
@@ -211,11 +216,14 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     };
     const audio = wantedAudio(title);
     if (audio !== null) options.audioLanguage = audio;
+    const { maxResolution, avoidHdr } = preferences.get();
+    if (maxResolution !== null) options.maxResolution = maxResolution;
+    if (avoidHdr) options.avoidHdr = true;
     return options;
   }
 
   function rank(entries: readonly StreamEntry[]): StreamEntry[] {
-    rankedAudio = wantedAudio(title);
+    rankedWith = weighed();
     return playableCandidates(
       entries,
       preferences.get().streamChoice,
@@ -294,11 +302,11 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
       // A lower limit after a stream kept buffering moves heavy streams down.
       unsubscribe.push(bandwidth.subscribe(refresh));
-      // Another audio language chosen moves dubs in or out of the way.
-      const audioChanged = () => {
-        if (wantedAudio(title) !== rankedAudio) refresh();
+      // Another audio language or picture limit moves streams in or out of the way.
+      const reweigh = () => {
+        if (weighed() !== rankedWith) refresh();
       };
-      unsubscribe.push(preferences.subscribe(audioChanged), trackMemory.subscribe(audioChanged));
+      unsubscribe.push(preferences.subscribe(reweigh), trackMemory.subscribe(reweigh));
       answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);

@@ -33,7 +33,24 @@ export interface Preferences {
   tmdb: boolean;
   /** The third episode in a row to start by itself asks "Still watching?" first. */
   stillWatching: boolean;
+  // Languages and picture (Settings > Languages and picture, improvements list PL6).
+  /**
+   * always: subtitles in subtitleLanguage show for every title. foreign: only
+   * when the audio heard is in another language than they are.
+   */
+  subtitleWhen: 'always' | 'foreign';
+  /** The highest picture auto-play goes for first. Null: as high as the TV shows. */
+  maxResolution: MaxResolution | null;
+  /** Auto-play passes over HDR streams while one without HDR plays as well. */
+  avoidHdr: boolean;
+  /**
+   * A language chosen in the player also becomes the profile's own, for
+   * every title. Off: it stays with the title it was chosen for.
+   */
+  learnLanguages: boolean;
 }
+
+export type MaxResolution = '2160p' | '1080p' | '720p';
 
 export const DEFAULT_PREFERENCES: Preferences = {
   streamChoice: 'quality',
@@ -44,6 +61,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
   tmdb: true,
   stillWatching: true,
+  subtitleWhen: 'always',
+  maxResolution: null,
+  avoidHdr: false,
+  learnLanguages: false,
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
@@ -55,6 +76,10 @@ function keyFor(profileId: string): string {
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.indexOf(value as T) !== -1 ? (value as T) : fallback;
+}
+
+function pickOr<T extends string, F>(value: unknown, allowed: readonly T[], fallback: F): T | F {
   return allowed.indexOf(value as T) !== -1 ? (value as T) : fallback;
 }
 
@@ -108,6 +133,14 @@ export function readPreferences(raw: string | null): Preferences {
     tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
     stillWatching:
       typeof stored.stillWatching === 'boolean' ? stored.stillWatching : d.stillWatching,
+    subtitleWhen: pick(stored.subtitleWhen, ['always', 'foreign'] as const, d.subtitleWhen),
+    maxResolution:
+      stored.maxResolution === null
+        ? null
+        : pickOr(stored.maxResolution, ['2160p', '1080p', '720p'] as const, d.maxResolution),
+    avoidHdr: typeof stored.avoidHdr === 'boolean' ? stored.avoidHdr : d.avoidHdr,
+    learnLanguages:
+      typeof stored.learnLanguages === 'boolean' ? stored.learnLanguages : d.learnLanguages,
   };
 }
 

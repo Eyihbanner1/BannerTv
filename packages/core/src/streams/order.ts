@@ -117,6 +117,21 @@ function sourceRank(entry: StreamEntry): number {
   return source === undefined ? UNKNOWN_SOURCE_RANK : SOURCE_RANK[source];
 }
 
+/**
+ * 0 for a stream within the profile's limits, 1 for one with HDR it wants to
+ * avoid, 2 for one above its highest picture, 3 for both. A resolution not
+ * stated is never above the limit.
+ */
+function pictureLimits(entry: StreamEntry, options: OrderOptions): number {
+  const resolution = entry.facts.resolution;
+  const above =
+    options.maxResolution !== undefined &&
+    resolution !== undefined &&
+    RESOLUTIONS.indexOf(resolution) < RESOLUTIONS.indexOf(options.maxResolution);
+  const hdr = options.avoidHdr === true && entry.facts.hdr.length > 0;
+  return (above ? 2 : 0) + (hdr ? 1 : 0);
+}
+
 function scorer(options: OrderOptions): (addonId: string) => number {
   const read = options.addonScore;
   if (!read) return () => 0.5;
@@ -159,13 +174,16 @@ function keyFor(
   const head = streamTier(entry);
   if (order === 'addon') return [head, entry.addonRank, entry.rank];
   // A dub the viewer can't follow is worse than any picture, so the language
-  // comes straight after how likely a stream is to play.
+  // comes straight after how likely a stream is to play; then the limits the
+  // profile set on the picture.
   const language = languageRank(entry.facts, wanted);
+  const limits = pictureLimits(entry, options);
   if (order === 'fast') {
     const size = entry.facts.sizeBytes;
     return [
       head,
       language,
+      limits,
       heavy(entry, options),
       -cacheRank(entry),
       fastResolutionRank(entry.facts.resolution),
@@ -184,6 +202,7 @@ function keyFor(
     head,
     isCinema(entry) ? 1 : 0,
     language,
+    limits,
     heavy(entry, options),
     -resolutionRank(entry, tv),
     -cacheRank(entry),

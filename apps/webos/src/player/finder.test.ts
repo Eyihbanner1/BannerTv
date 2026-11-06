@@ -485,7 +485,28 @@ describe('streamFinder and the audio language wanted', () => {
     { url: 'https://media.example.com/original.mkv', name: 'Test\n1080p', title: 'Film' },
   ];
 
-  afterEach(() => setPreference('audioLanguage', null));
+  afterEach(() => {
+    setPreference('audioLanguage', null);
+    setPreference('maxResolution', null);
+  });
+
+  it('ranks again within the highest picture set in Settings', () => {
+    addons.installs = [
+      {
+        id: 'org.test.streams',
+        streams: [
+          { url: 'https://media.example.com/uhd.mkv', name: 'Test\n2160p' },
+          { url: 'https://media.example.com/hd.mkv', name: 'Test\n1080p' },
+        ],
+      },
+    ];
+    const finder = streamFinder('movie', 'tt-limited');
+    finder.start();
+    expect(files(finder.get().candidates)).toEqual(['uhd', 'hd']);
+    setPreference('maxResolution', '1080p');
+    expect(finder.orderOptions().maxResolution).toBe('1080p');
+    expect(files(finder.get().candidates)).toEqual(['hd', 'uhd']);
+  });
 
   it('puts a dub below the rest, and ranks again when another language is chosen', () => {
     addons.installs = [{ id: 'org.test.streams', streams: dubbed }];

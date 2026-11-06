@@ -563,6 +563,100 @@ test('a release played last that the addon no longer sends leaves the usual pick
   await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p.webm');
 });
 
+test('Languages and picture in Settings: the highest picture keeps Play within it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  for (const key of [
+    'settings-probing',
+    'settings-subtitle-style',
+    'settings-still-watching',
+    'settings-diagnostics',
+    'settings-lab',
+    'settings-stream-helper',
+    'settings-languages',
+  ]) {
+    await press(page, 'ArrowDown', key);
+  }
+  await press(page, 'Enter', 'languages-audio');
+  await expect(page.locator('[data-focus-key="languages-audio"]')).toHaveAttribute(
+    'aria-label',
+    'Audio: Original',
+  );
+
+  // Subtitles in English, only when the audio isn't English.
+  await press(page, 'ArrowDown', 'languages-subtitles');
+  await press(page, 'Enter', 'languages-subtitles-menu-0');
+  await press(page, 'ArrowDown', 'languages-subtitles-menu-1');
+  await press(page, 'Enter', 'languages-subtitles');
+  await expect(page.locator('[data-focus-key="languages-subtitles"]')).toHaveAttribute(
+    'aria-label',
+    'Subtitles: English',
+  );
+  await press(page, 'ArrowDown', 'languages-when');
+  await press(page, 'Enter', 'languages-when-menu-0');
+  await press(page, 'ArrowDown', 'languages-when-menu-1');
+  await press(page, 'Enter', 'languages-when');
+  await expect(page.locator('[data-focus-key="languages-when"]')).toHaveAttribute(
+    'aria-label',
+    "Show subtitles: Only when the audio isn't English",
+  );
+
+  // At most 720p.
+  await press(page, 'ArrowDown', 'languages-picture');
+  await press(page, 'Enter', 'languages-picture-menu-0');
+  for (const index of [1, 2, 3]) await press(page, 'ArrowDown', `languages-picture-menu-${index}`);
+  await press(page, 'Enter', 'languages-picture');
+  await expect(page.locator('[data-focus-key="languages-picture"]')).toHaveAttribute(
+    'aria-label',
+    'Highest picture: 720p',
+  );
+  expect(
+    JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
+  ).toMatchObject({ subtitleLanguage: 'en', subtitleWhen: 'foreign', maxResolution: '720p' });
+
+  await pressBack(page);
+  await expectFocus(page, 'settings-languages');
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  // A stream that names no other language is taken to be in English: no subtitles.
+  await expect.poll(async () => (await video(page)).time, { timeout: 10000 }).toBeGreaterThan(2);
+  await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
+});
+
+test('subtitles set to show only when the audio is in another language show for a dub', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    preferences: { subtitleLanguage: 'en', subtitleWhen: 'foreign', audioLanguage: 'fr' },
+  });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL 🇫🇷',
+          path: '/movie-1080p-vf.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p-vf.webm');
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+});
+
 test('when only uncached debrid links were tried, the player says so', async ({ page }) => {
   await mockAddons(page);
   await seedStreamAddon(page);
@@ -726,9 +820,12 @@ test('subtitles come from the subtitles addon: a language on the left, its versi
   await pressBack(page);
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
-  // The language is remembered: the next video starts with it.
+  // The language is kept for the title; the profile's own, set in Settings, stays as it was.
+  await expect
+    .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
+    .toEqual([expect.objectContaining({ subtitle: 'eng' })]);
   const saved = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
-  expect(JSON.parse(saved ?? '{}')).toMatchObject({ subtitleLanguage: 'eng' });
+  expect(JSON.parse(saved ?? '{}').subtitleLanguage ?? null).toBeNull();
 });
 
 test('near the end of an episode, Up Next plays the next one from the same release', async ({
@@ -1386,10 +1483,8 @@ test('HLS with audio and subtitle choices plays through hls.js, and both show in
   await press(page, 'Enter', 'player-tracks-audio-fre|French');
   await expect(page.locator('[data-focus-key="player-tracks-tab-audio"]')).toContainText('French');
   await expect
-    .poll(async () =>
-      JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
-    )
-    .toMatchObject({ audioLanguage: 'fre' });
+    .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
+    .toContainEqual(expect.objectContaining({ audio: 'fre' }));
 });
 
 test("in the language last chosen, the stream's own subtitles come before an addon's file", async ({

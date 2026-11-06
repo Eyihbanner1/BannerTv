@@ -168,6 +168,13 @@ export interface OrderOptions {
    * only languages other than English rank below the rest.
    */
   audioLanguage?: string;
+  /**
+   * The highest picture wanted first (a profile's Settings). Streams known to
+   * be above it rank below the rest in the quality and fast orders.
+   */
+  maxResolution?: Resolution;
+  /** HDR streams rank below the rest in the quality and fast orders (a profile's Settings). */
+  avoidHdr?: boolean;
 }
 
 /** One line of the player's Quality menu: the best stream at that resolution. */

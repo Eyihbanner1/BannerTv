@@ -526,6 +526,33 @@
     "tmdbCredit": "Extra details and images from TMDB. BannerTV uses the TMDB API but is not endorsed or certified by TMDB.",
     "account": "BannerTV account"
   },
+  "languages": {
+    "title": "Languages and picture",
+    "lead": "What every title starts with, unless you chose something else for it in the player. Kept for this profile.",
+    "audio": "Audio: {{value}}",
+    "audioTitle": "Audio",
+    "original": "Original",
+    "subtitles": "Subtitles: {{value}}",
+    "subtitlesTitle": "Subtitles",
+    "showSubtitles": "Show subtitles: {{value}}",
+    "showSubtitlesTitle": "Show subtitles",
+    "when": {
+      "always": "Always",
+      "foreign": "Only when the audio isn't {{language}}"
+    },
+    "highest": "Highest picture: {{value}}",
+    "highestTitle": "Highest picture",
+    "picture": {
+      "any": "As high as the TV shows",
+      "2160p": "4K",
+      "1080p": "1080p",
+      "720p": "720p"
+    },
+    "avoidHdr": "Avoid HDR: {{value}}",
+    "learn": "Use player choices for every title: {{value}}",
+    "learnOn": "A language you choose in the player becomes this profile's own, for every title.",
+    "learnOff": "A language you choose in the player stays with that title."
+  },
   "diagnostics": {
     "refresh": "Refresh",
     "loading": "Collecting…"

@@ -12,6 +12,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { statusLine } from '../data/account-text';
 import { Avatar } from '../ui/Avatar';
+import { LanguagesSection } from './LanguagesSection';
 import { ListRow } from '../ui/Button';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
@@ -150,6 +151,8 @@ export function SettingsScreen() {
               onChange={(next) => setPreference('stillWatching', next)}
             />
           </Section>
+
+          <LanguagesSection />
 
           <Section title={t('phone.libraryAndAccounts')}>
             <ListRow

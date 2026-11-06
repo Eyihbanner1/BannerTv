@@ -159,3 +159,30 @@ test("a stream that needs the addon's headers plays, and they go to the phone's 
   await expect.poll(() => playback.media).toContain('/movie-headers.webm');
   expect(errors).toEqual([]);
 });
+
+test("Languages and picture: the profile's subtitles and highest picture, kept", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await openApp(page);
+  await page.getByRole('tab', { name: 'Settings' }).click();
+  await expect(page.getByText('Languages and picture')).toBeVisible();
+
+  await page.getByText('Subtitles', { exact: true }).click();
+  await page.getByText('English', { exact: true }).last().click();
+  await page.getByText('Show subtitles', { exact: true }).click();
+  await page.getByText("Only when the audio isn't English").last().click();
+  await page.getByText('Highest picture', { exact: true }).click();
+  await page.getByText('1080p', { exact: true }).last().click();
+  await expect(page.getByText("Only when the audio isn't English")).toBeVisible();
+
+  const stored = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
+  expect(JSON.parse(stored ?? '{}')).toMatchObject({
+    subtitleLanguage: 'en',
+    subtitleWhen: 'foreign',
+    maxResolution: '1080p',
+    learnLanguages: false,
+  });
+  expect(errors).toEqual([]);
+});

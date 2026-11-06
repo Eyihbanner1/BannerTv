@@ -83,6 +83,15 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  // Settings, Languages and picture (the TV's words where they fit a phone).
+  picture: {
+    any: 'As high as the phone shows',
+    '2160p': '4K',
+    '1080p': '1080p',
+    '720p': '720p',
+  },
+  avoidHdr: 'Avoid HDR',
+  learnLanguages: 'Use player choices for every title',
 } as const;
 
 const OVERRIDES = {

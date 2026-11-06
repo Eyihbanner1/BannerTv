@@ -8,7 +8,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
 import { subtitleDrifts, subtitleOffsets } from '../../data/library';
-import { chooseSubtitleLanguage, wantedSubtitle } from '../../data/tracks';
+import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
 import { streamTitle } from '../../player/describe';
 import { stretchCues, type SubtitleDrift } from '../../player/drift';
 import type { EngineTrack } from '../../player/engines/types';
@@ -137,6 +137,8 @@ export function useSubtitles(
     entry: StreamEntry | null;
     choice: SubtitleChoice;
     auto: boolean;
+    /** The language wanted when it was made, which the audio heard can change. */
+    wanted?: string | null;
   } | null>(null);
   // Links of files that failed for this video, so a retry moves on to another,
   // and the same for the rows to show.
@@ -155,18 +157,23 @@ export function useSubtitles(
   useEffect(() => {
     if (!entry || !session || !list) return;
     let stopped = false;
+    // The language wanted at the latest look, kept with an automatic choice.
+    let wantedNow: string | null = null;
     const settle = (next: SubtitleChoice) => {
-      decided.current = { entry, choice: next, auto: true };
+      decided.current = { entry, choice: next, auto: true, wanted: wantedNow };
       setChosen({ entry, choice: next });
     };
     const decide = () => {
       if (stopped) return;
-      const { text, status, engine } = session.get();
+      const { text, status, engine, audio } = session.get();
       // hls.js and Shaka list the stream's tracks before its first picture; the
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
       const made = decided.current;
-      const wanted = isSubtitleCheck(entry) ? null : wantedSubtitle(metaId);
+      const wanted = isSubtitleCheck(entry)
+        ? null
+        : wantedSubtitle(metaId, heardLanguages(audio, entry));
+      wantedNow = wanted;
       const { options: offered, pending: waiting } = list.get();
       if (made?.entry === entry) {
         // A track that left with its engine (hls.js handing the stream to the
@@ -196,7 +203,9 @@ export function useSubtitles(
             !matchesRelease(current, release) &&
             matchesRelease(best, release);
         }
-        if (!lost && !better && !matching) return;
+        // "Only when the audio isn't in that language", once the audio's language is known.
+        const heardOther = made.auto && made.wanted !== undefined && made.wanted !== wanted;
+        if (!lost && !better && !matching && !heardOther) return;
       }
       if (wanted === null) {
         settle(null);

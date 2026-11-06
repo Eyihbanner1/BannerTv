@@ -30,7 +30,45 @@ describe('readPreferences', () => {
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
       tmdb: true,
       stillWatching: true,
+      subtitleWhen: 'always',
+      maxResolution: null,
+      avoidHdr: false,
+      learnLanguages: false,
     });
+  });
+
+  it('keeps the languages and picture chosen in Settings, and drops bad ones', () => {
+    expect(
+      readPreferences(
+        JSON.stringify({
+          subtitleWhen: 'foreign',
+          maxResolution: '1080p',
+          avoidHdr: true,
+          learnLanguages: true,
+        }),
+      ),
+    ).toMatchObject({
+      subtitleWhen: 'foreign',
+      maxResolution: '1080p',
+      avoidHdr: true,
+      learnLanguages: true,
+    });
+    expect(
+      readPreferences(
+        JSON.stringify({
+          subtitleWhen: 'never',
+          maxResolution: '8K',
+          avoidHdr: 1,
+          learnLanguages: 'y',
+        }),
+      ),
+    ).toMatchObject({
+      subtitleWhen: 'always',
+      maxResolution: null,
+      avoidHdr: false,
+      learnLanguages: false,
+    });
+    expect(readPreferences(JSON.stringify({ maxResolution: null })).maxResolution).toBeNull();
   });
 
   it('keeps TMDB turned off', () => {
