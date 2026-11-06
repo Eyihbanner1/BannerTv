@@ -91,6 +91,22 @@
     "notInLists": "Nothing in your sports addons' lists matches. They can be asked directly.",
     "searchAddons": "Search sports addons"
   },
+  "sportsFollow": {
+    "row": "Following",
+    "follow": "Follow {{name}}",
+    "following": "Following {{name}}",
+    "full": "You follow {{count}} teams and competitions, the most BannerTV keeps. Unfollow one to follow this."
+  },
+  "sportsRemind": {
+    "remind": "Remind me",
+    "on": "Reminder on",
+    "tvNote": "BannerTV reminds you at {{time}} if it's open then.",
+    "full": "You have {{count}} reminders, the most BannerTV keeps. Turn one off to add this.",
+    "starting": "{{name}} is starting",
+    "startsAt": "Starts at {{time}}",
+    "watch": "Watch",
+    "notNow": "Not now"
+  },
   "discover": {
     "type": "Type",
     "catalog": "Catalog",

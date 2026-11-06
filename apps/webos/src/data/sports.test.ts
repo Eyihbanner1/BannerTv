@@ -16,17 +16,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // What the app keeps, in memory.
 const saved = vi.hoisted(() => new Map<string, unknown>());
 
-vi.mock('./storage', () => ({
-  storage: {
-    kv: {
-      get: (key: string) => Promise.resolve(saved.get(key)),
-      set: (key: string, value: unknown) => {
-        saved.set(key, value);
-        return Promise.resolve();
-      },
+vi.mock('./storage', () => {
+  const kv = {
+    get: (key: string) => Promise.resolve(saved.get(key)),
+    set: (key: string, value: unknown) => {
+      saved.set(key, value);
+      return Promise.resolve();
     },
-  },
-}));
+  };
+  // One profile, Main, whose keys have no prefix (ADR 0004).
+  return { storage: { kv }, profileKv: kv };
+});
 
 vi.mock('./addons', async () => {
   const { createStore, switchedOnOnly } = await import('@bannertv/core');

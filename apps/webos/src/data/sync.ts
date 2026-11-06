@@ -2,10 +2,12 @@ import {
   addonSwitchesPart,
   checkSyncService,
   collectionPart,
+  createFollows,
   createProfileStores,
   createStore,
   createSyncEngine,
   deriveAccountKeys,
+  followsPart,
   isRemoval,
   itemAt,
   type Items,
@@ -50,7 +52,7 @@ import {
   savedProfiles,
   setHiddenProfiles,
 } from './profiles';
-import { browserTimers, sportsChoices } from './sports';
+import { browserTimers, sportsChoices, sportsFollows } from './sports';
 import { storage } from './storage';
 import { accountClock, setSyncOn, storeNow, syncOn } from './sync-clock';
 import { markJoined, settleJoined } from './sync-joined';
@@ -274,6 +276,8 @@ function activeParts(profileId: string): SyncPart[] {
       subtitleOffsets,
     }),
     preferencesPart(profileId, preferences),
+    // A build without Sports leaves the follows in the account as they are.
+    ...(SPORTS_IN_BUILD ? [followsPart(profileId, sportsFollows)] : []),
   ];
 }
 
@@ -283,6 +287,9 @@ function spareParts(profileId: string): SyncPart[] {
   return [
     ...profileParts(profileId, createProfileStores(kv, storeNow)),
     preferencesPart(profileId, profilePreferences(profileId)),
+    ...(SPORTS_IN_BUILD
+      ? [followsPart(profileId, createFollows({ storage: kv, now: storeNow }))]
+      : []),
   ];
 }
 

@@ -2,7 +2,7 @@ import type { Matcher } from './dictionary';
 import type { Listing, Side } from './listing';
 import { sortStable } from './sort';
 import { AWAY_FIRST_SPORTS, sportOf, TEAM_SPORTS } from './sport';
-import { competitionKey, foldText, slugOf, teamKey } from './text';
+import { competitionKey, foldText, type SideMarks, slugOf, teamKey } from './text';
 import { addDays, localDate } from './time';
 import type {
   Competition,
@@ -134,6 +134,11 @@ const SPORT_WORDS: Record<Sport, string> = {
 
 export function sportWord(sport: Sport): string {
   return SPORT_WORDS[sport];
+}
+
+/** Whether a value is one of the sports BannerTV tells apart, as a saved or synced value says. */
+export function isSport(value: unknown): value is Sport {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SPORT_WORDS, value);
 }
 
 function capitalise(text: string): string {
@@ -287,6 +292,20 @@ function competitionSport(members: readonly Combined[]): Sport | undefined {
   return best?.sport;
 }
 
+/**
+ * Whether a fight the addon tagged with a word for any fight sport ("Fight",
+ * read as boxing) names an MMA competition the dictionary knows: "ONE
+ * Championship" in a Fight catalog is MMA, and gets its row there.
+ */
+function namesMma(members: readonly Combined[], matcher: Matcher): boolean {
+  for (const member of members) {
+    for (const { text } of member.competitions) {
+      if (matcher.competition(text, 'mma')) return true;
+    }
+  }
+  return false;
+}
+
 function compatibleTimes(a: KickOff | undefined, b: KickOff | undefined): boolean {
   if (!a || !b) return true;
   if (a.at !== undefined && b.at !== undefined) {
@@ -302,6 +321,35 @@ function compatibleTimes(a: KickOff | undefined, b: KickOff | undefined): boolea
 
 function canonicalKey(side: Side, team: TeamEntry | undefined): string {
   return team ? teamKey(team.name) : side.key;
+}
+
+// The dictionary has no rugby or cricket sides, and addons write the sport after the club or
+// leave it off: "Bath Rugby" and "Bath", "Yorkshire County Cricket Club" and "Yorkshire".
+const SPORT_TAIL =
+  /\s(?:rugby(?:\s(?:union|league|club|football club))?|rfc|rufc|rlfc|cricket(?:\sclub)?|county cricket club|ccc)$/;
+
+/**
+ * A side's key for following it: the sport, its team key, and its youth and
+ * women's marks, which make it another side than the club's first team
+ * ("football:arsenal:women"). The same wherever the same club is listed:
+ * through the dictionary's names where it knows the team, and with the sport
+ * word rugby and cricket clubs carry in some addons and not others left off.
+ * A lone reserve mark is left out, as in matchKey: it is often the club's
+ * own name, which another addon leaves off.
+ */
+export function followKeyOf(
+  sport: Sport,
+  key: string,
+  marks: Pick<SideMarks, 'youth'>,
+  women: boolean,
+): string {
+  let base = key;
+  if (sport === 'rugby' || sport === 'cricket') {
+    for (let tail = SPORT_TAIL.exec(base); tail && tail.index > 0; tail = SPORT_TAIL.exec(base)) {
+      base = base.slice(0, tail.index);
+    }
+  }
+  return `${sport}:${base}${marks.youth ? ':youth' : ''}${women ? ':women' : ''}`;
 }
 
 /**
@@ -558,23 +606,66 @@ const US_LEAGUES: Record<string, Sport> = {
 };
 
 /**
- * Competition rows are for football and the four US leagues; every other
- * sport is one row per sport, and the rest of American football, basketball,
- * ice hockey and baseball goes in its "Other" row (Eyitayo, 28 October 2026).
- * What the addon called the competition stays on the tile as a note.
+ * Sports whose competitions get a row of their own wherever the dictionary
+ * names them, so the Six Nations no longer sits with club rugby (Eyitayo, 6
+ * November 2026). What the dictionary does not know stays in the sport's row.
+ */
+const NAMED_ROW_SPORTS: ReadonlySet<Sport> = new Set<Sport>([
+  'rugby',
+  'cricket',
+  'motorsport',
+  'mma',
+  'boxing',
+]);
+
+// Keys BannerTV makes up for rows that are not one competition.
+const MADE_UP_KEY = /^(?:text|country|group|other|sport):/;
+
+/**
+ * Whether a competition is a row of the bundled dictionary, whose id is the
+ * same on every screen with the same data, rather than a name an addon gave
+ * or a group BannerTV made up.
+ */
+export function isDictionaryCompetition(competition: Pick<Competition, 'key' | 'source'>): boolean {
+  return !MADE_UP_KEY.test(competition.key) && isNamed(competition);
+}
+
+/** A competition the items named, as against a group BannerTV made up from the teams. */
+function isNamed(competition: Pick<Competition, 'source'>): boolean {
+  return competition.source !== 'country' && competition.source !== 'other';
+}
+
+/**
+ * Competition rows are for football, the four US leagues, and the
+ * competitions of rugby, cricket, motor racing and fight sports that the
+ * dictionary names (Eyitayo, 28 October and 6 November 2026). Every other
+ * sport is one row per sport, as are those four's competitions the
+ * dictionary does not know, and the rest of American football, basketball,
+ * ice hockey and baseball goes in its "Other" row. What the addon called the
+ * competition stays on the tile as a note, with its key for following it.
  */
 function rowCompetition(
   competition: Competition,
   sport: Sport,
-): { competition: Competition; note?: string } {
+): { competition: Competition; note?: string; noteKey?: string } {
   if (sport === 'football') return { competition };
-  const named = competition.source !== 'country' && competition.source !== 'other';
-  const note = named ? competition.name : undefined;
+  if (
+    NAMED_ROW_SPORTS.has(sport) &&
+    competition.sport === sport &&
+    isDictionaryCompetition(competition)
+  ) {
+    return { competition };
+  }
+  // A named competition's key is a dictionary id or a `text:` key: the same on every screen.
+  const noted = (row: Competition) =>
+    isNamed(competition)
+      ? { competition: row, note: competition.name, noteKey: competition.key }
+      : { competition: row };
   const textKey = /^text:[^:]+:(nfl|nba|nhl|mlb)$/.exec(competition.key);
   const league = textKey ? textKey[1]! : competition.key;
   if (US_LEAGUES[league] !== undefined) {
     if (US_LEAGUES[league] === sport) return { competition };
-    return { competition: otherCompetition(sport), note };
+    return noted(otherCompetition(sport));
   }
   if (
     sport === 'american-football' ||
@@ -583,16 +674,42 @@ function rowCompetition(
     sport === 'baseball' ||
     sport === 'other'
   ) {
-    return { competition: otherCompetition(sport), note };
+    return noted(otherCompetition(sport));
   }
-  const bySport = groupCompetition(
-    'sport',
-    capitalise(sportWord(sport)),
-    sport,
-    NON_FOOTBALL + 500,
-    'other',
+  return noted(
+    groupCompetition('sport', capitalise(sportWord(sport)), sport, NON_FOOTBALL + 500, 'other'),
   );
-  return note === undefined ? { competition: bySport } : { competition: bySport, note };
+}
+
+// The format a stage names: a Test, a one-day or a T20 international, each its own row.
+const CRICKET_FORMATS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\btests?\b/i, 'cricket.test'],
+  [/\bodis?\b/i, 'cricket.odi'],
+  [/\bt20is?\b/i, 'cricket.t20i'],
+];
+
+/**
+ * The competition a cricket stage names when the item names none: "T20
+ * World Cup", or the format of "4th T20I" and "1st Test Day 2", which only
+ * national sides play. Not over youth or women's sides, whose competitions
+ * the dictionary keeps apart.
+ */
+function cricketFormat(
+  round: string,
+  sides: [Side, Side] | undefined,
+  matcher: Matcher,
+): Competition | undefined {
+  if (sides?.some((side) => side.marks.youth || side.marks.reserve || side.marks.women)) {
+    return undefined;
+  }
+  const named = matcher.competition(round, 'cricket');
+  if (named) return competitionFromEntry(named, 'name-suffix');
+  for (const [pattern, id] of CRICKET_FORMATS) {
+    if (!pattern.test(round)) continue;
+    const entry = matcher.competitionById(id);
+    return entry ? competitionFromEntry(entry, 'name-suffix') : undefined;
+  }
+  return undefined;
 }
 
 function otherCompetition(sport: Sport): Competition {
@@ -669,6 +786,7 @@ export function buildEvents(
     if (namedSport !== undefined && namedSport !== sport && !closedLeaguePair(known)) {
       sport = namedSport;
     }
+    if (sport === 'boxing' && matcher && namesMma(members, matcher)) sport = 'mma';
     const { kickOff, from } = chooseKickOff(members);
     // Home and away: an "Away at Home" listing knows best, then the one the time came from.
     const sided =
@@ -682,9 +800,13 @@ export function buildEvents(
       undefined,
     ];
 
+    const round = members.find((m) => m.round)?.round;
     let named =
       namedCompetition(members, sport, teams, matcher) ??
       (matcher ? teamCompetition(members, sport, kickOff, matcher) : undefined);
+    if (sport === 'cricket' && matcher && round && (!named || !isNamed(named))) {
+      named = cricketFormat(round, sided?.sides, matcher) ?? named;
+    }
     // "English Premier League" over two U18 sides is their league, not the Premier League.
     if (named && matcher && sided?.sides && wrongLevel(named, sided.sides, matcher)) {
       named =
@@ -701,7 +823,6 @@ export function buildEvents(
     if (sport === 'other' && named && named.sport !== 'other') sport = named.sport;
     const resolved = rowCompetition(named ?? otherCompetition(sport), sport);
     const competition = resolved.competition;
-    const round = members.find((m) => m.round)?.round;
     if (round) competition.round = round;
 
     let key = `${lead.listing.source.addonIndex}-${slugOf(lead.listing.source.id)}`;
@@ -721,15 +842,31 @@ export function buildEvents(
     };
     if (kickOff) event.kickOff = kickOff;
     if (resolved.note) event.note = resolved.note;
+    if (resolved.noteKey) event.noteKey = resolved.noteKey;
     if (sided?.sides) {
-      event.home = sided.sides[0].name;
-      event.away = sided.sides[1].name;
-      event.teamKeys = [
-        canonicalKey(sided.sides[0], teams[0]),
-        canonicalKey(sided.sides[1], teams[1]),
+      const [homeSide, awaySide] = sided.sides;
+      event.home = homeSide.name;
+      event.away = awaySide.name;
+      const keys: [string, string] = [
+        canonicalKey(homeSide, teams[0]),
+        canonicalKey(awaySide, teams[1]),
       ];
+      event.teamKeys = keys;
       const match = matchKey(sided);
       if (match !== undefined) event.matchKey = match;
+      // Players and fighters are not followed as teams: their names are too often a card's.
+      if (TEAM_SPORTS.has(sport)) {
+        // A women's or youth competition says so for sides listed by the club's name alone
+        // ("Arsenal vs Chelsea" in the Women's Super League), and men's and women's sides
+        // never meet, so one side's mark tells for both.
+        const level = named && matcher ? matcher.competitionById(named.key) : undefined;
+        const women = homeSide.marks.women || awaySide.marks.women || level?.women === true;
+        const youth = level?.youth === true;
+        event.followKeys = [
+          followKeyOf(sport, keys[0], youth ? { youth } : homeSide.marks, women),
+          followKeyOf(sport, keys[1], youth ? { youth } : awaySide.marks, women),
+        ];
+      }
     }
     for (const member of members) {
       // A listing may name the teams the other way round: its badges follow its own sides.

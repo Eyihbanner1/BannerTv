@@ -22,9 +22,11 @@ import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
 import { TraktScreen } from '../screens/settings/TraktScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { EventScreen } from '../screens/sports/EventScreen';
+import { ReminderBanner } from '../screens/sports/ReminderBanner';
 import { SportsScreen } from '../screens/sports/SportsScreen';
 import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
+import { SPORTS_IN_BUILD } from './features';
 import { back, currentSection, openSection, type Route, router } from './router';
 import { createScreenSlot, ScreenSlotContext } from './screen-slot';
 import styles from './App.module.css';
@@ -241,6 +243,8 @@ export function App() {
       {!welcomeDone && <WelcomeScreen />}
       {welcomeDone && profileId === null && <ProfilePicker mode="launch" />}
       {ready && switching && <ProfilePicker mode="switch" />}
+      {/* Match reminders (SP4), only once someone is watching. */}
+      {ready && SPORTS_IN_BUILD && <ReminderBanner />}
     </div>
   );
 }

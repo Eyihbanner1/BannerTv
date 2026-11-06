@@ -91,6 +91,14 @@ const PHONE = {
     confirm: 'Add {{name}}?',
     lead: 'This link came from another app. Addons are shared by every profile on this phone.',
   },
+  reminders: {
+    title: '{{name}} is starting',
+    body: 'Starts at {{time}}. Tap to open the match.',
+    channel: 'Match reminders',
+    note: 'Your phone reminds you at {{time}}.',
+    denied:
+      'Notifications are off for BannerTV. Turn them on in your phone’s settings to get reminders.',
+  },
 } as const;
 
 const OVERRIDES = {
