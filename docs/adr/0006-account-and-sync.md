@@ -95,7 +95,7 @@ Profile ids are the account's. Times are account-clock milliseconds.
 | `p/<id>/list`     | `<titleId>`                                                                                                                                                                 | the saved tile: type, name, artwork, year, rating, genres (only type and time are compared)                                                               | `addedAt`; 1,000 at most                                |
 | `p/<id>/watch`    | `<videoId>`                                                                                                                                                                 | progress (`metaId`, type, position, duration, watched, `continueRow`) and the card without its description past 300 characters (the card is not compared) | `updatedAt`; 500 at most                                |
 
-`probing` (link testing) stays on each screen.
+`probing` (link testing) stays on each screen. So does the drift fix kept for each subtitle file (`subtitleDrift`, `createSubtitleDrifts` in the core) for now: it has `drifts()` and `adopt()` like the timings, but no part yet, so a fix chosen on the TV is not on the phone.
 
 ### HTTP
 

@@ -67,6 +67,7 @@ import { phonePlayer, pictureShown } from './phone-host';
 import { SeekBar } from './SeekBar';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SubtitleText } from './SubtitleText';
+import { TracksPanel } from './TracksPanel';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
 const CONTROLS_HIDE_MS = motion.controlsHide;
@@ -788,71 +789,36 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('phone.audioAndSubtitles')}
         onClose={() => setPanel(null)}
       >
-        <View style={styles.columns}>
-          {state.audio.length > 0 ? (
-            <PanelColumn title={t('phone.audio')}>
-              <ScrollView>
-                {state.audio.map((track) => {
-                  const detail = audioDetail(track);
-                  return (
-                    <PanelOption
-                      key={track.id}
-                      label={audioSummary(track)}
-                      {...(detail ? { detail } : {})}
-                      selected={track.active}
-                      onPress={() => {
-                        session?.selectAudio(track.id);
-                        if (track.lang) chooseAudioLanguage(metaId, track.lang);
-                        setPanel(null);
-                      }}
-                    />
-                  );
-                })}
-              </ScrollView>
-            </PanelColumn>
-          ) : null}
-          <PanelColumn title={t('phone.subtitles')}>
-            <ScrollView>
-              <PanelOption
-                label={t('phone.subtitlesOff')}
-                selected={subtitles.choice === null}
-                onPress={() => chooseSubtitle(null)}
-              />
-              {subtitles.tracks.map((track) => (
-                <PanelOption
-                  key={`track-${track.id}`}
-                  label={languageName(track.lang) || track.label || t('common.unknown')}
-                  detail={t('phone.embeddedSubtitles')}
-                  selected={subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id}
-                  onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
-                />
-              ))}
-              {subtitles.options.map((option) => {
-                const status = subtitles.statusOf({ kind: 'file', key: option.key });
-                return (
-                  <PanelOption
-                    key={`file-${option.key}`}
-                    label={languageName(option.lang) || option.lang}
-                    detail={[
-                      t('phone.fromAddon', { addon: option.source }),
-                      status === 'loading' ? t('common.loading') : '',
-                      status === 'failed' ? t('player.subtitlesFailed') : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    selected={
-                      subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key
-                    }
-                    onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
-                  />
-                );
-              })}
-              {subtitles.pending > 0 ? (
-                <Text style={styles.sheetNote}>{t('common.loading')}</Text>
-              ) : null}
-            </ScrollView>
-          </PanelColumn>
-        </View>
+        {/* Mounted only while open, so its rows take their places afresh each time. */}
+        {panel === 'tracks' ? (
+          <TracksPanel
+            subtitles={subtitles}
+            entry={state.entry}
+            tracksDrawnByPlayer={state.engine === 'android'}
+            onChoose={chooseSubtitle}
+            audioRows={
+              // The Audio tab: the stream's audio tracks.
+              state.audio.length > 0
+                ? state.audio.map((track) => {
+                    const detail = audioDetail(track);
+                    return (
+                      <PanelOption
+                        key={track.id}
+                        label={audioSummary(track)}
+                        {...(detail ? { detail } : {})}
+                        selected={track.active}
+                        onPress={() => {
+                          session?.selectAudio(track.id);
+                          if (track.lang) chooseAudioLanguage(metaId, track.lang);
+                          setPanel(null);
+                        }}
+                      />
+                    );
+                  })
+                : null
+            }
+          />
+        ) : null}
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
@@ -1010,7 +976,6 @@ const styles = StyleSheet.create({
   skipPillPressed: { backgroundColor: colors.controlPress },
   skipPillText: { ...type.label, color: colors.text },
   pillText: { ...type.meta, fontWeight: '700', color: colors.text },
-  columns: { flex: 1, flexDirection: 'row', gap: 18 },
   upNext: {
     position: 'absolute',
     bottom: space.xl,
