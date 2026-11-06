@@ -52,7 +52,7 @@ function settled(state: QueryState<MetaPreview[]>): boolean {
 /**
  * One row of the best titles from several search queries, decided once: when
  * every query has answered or failed, or `wait` ms after the first listener,
- * whichever is sooner. It is shown only when two or more catalogs found
+ * whichever is sooner. When every one failed it waits on, for Try again. It is shown only when two or more catalogs found
  * titles. `visible` keeps what the profile may see; `rank` orders them.
  */
 export function createTopResults(
@@ -73,8 +73,20 @@ export function createTopResults(
     timer = undefined;
   };
 
+  const allFailed = () =>
+    queries.every((query) => {
+      const now = query.get();
+      return now.status === 'error' && now.data === undefined;
+    });
+
   const decide = () => {
     if (state.status !== 'waiting') return;
+    // Every catalog failed: nothing to decide on. Try again may yet bring answers.
+    if (allFailed()) {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      return;
+    }
     const groups = queries.map((query) => visible(query.get().data ?? []));
     const found = groups.filter((group) => group.length > 0).length;
     const items = found >= 2 ? rank(groups) : [];
@@ -84,7 +96,10 @@ export function createTopResults(
   };
 
   const check = () => {
+    if (state.status !== 'waiting') return;
     if (queries.every((query) => settled(query.get()))) decide();
+    // Asked again after every one failed: wait for them as at the start.
+    else if (timer === undefined) timer = setTimeout(decide, wait);
   };
 
   return {
@@ -178,6 +193,12 @@ export interface SmartSearch {
   understanding: Understanding;
   /** Rows for what the words mean, drawn after Top results and before the addons' rows. */
   planned: readonly PlannedRow[];
+  /**
+   * The words were read only by forgiving typos ("horor", or "Spooks" as
+   * spoof): the addons' rows come before the planned ones, since a title
+   * they found by those very words is the likelier meaning.
+   */
+  plannedLast: boolean;
   /** One search query per source, in the sources' order. */
   queries: readonly Query<MetaPreview[]>[];
   /** Per source, its state. */
@@ -229,15 +250,23 @@ export function useSmartSearch(
     () =>
       createTopResults(
         queries,
-        (items) => visibleTitles(items),
+        // Only titles of the types the words ask for count: "comedy films" with
+        // the series catalog finding titles is still one catalog's row.
+        (items) => {
+          const types = understanding.types;
+          const kept = visibleTitles(items);
+          return types ? kept.filter((item) => types.indexOf(item.type) !== -1) : kept;
+        },
         (groups) => topResults(understanding, groups, rankContext),
       ),
     [queries, understanding],
   );
   const topState = useSyncExternalStore(top.subscribe, top.get);
+  const intents = understanding.intents;
   return {
     understanding,
     planned,
+    plannedLast: intents.length > 0 && intents.every((intent) => intent.typo),
     queries,
     states,
     results,

@@ -86,10 +86,13 @@ test('Search: Top results from both catalogs, with each addon’s own results fo
   await expect(hero).toHaveCount(2);
   await expect(page.getByText('Cinemeta', { exact: true })).toHaveCount(2);
 
-  // Series: the films leave Top results and the Films section.
+  // Series: only the series catalog is asked. One catalog is no Top results: its own
+  // section shows, unfolded, and the films are gone.
   await page.getByRole('button', { name: 'Series', exact: true }).click();
   await expect(hero).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Pepper and Carrot/ })).toHaveCount(2);
+  await expect(page.getByText('Top results', { exact: true })).toHaveCount(0);
+  await expect(fold).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Pepper and Carrot/ })).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 

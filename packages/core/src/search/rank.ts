@@ -70,6 +70,10 @@ export function topResults(
       seen.add(item.id);
       if (types && types.indexOf(item.type) === -1) continue;
       let score = nameScore(item.name, understanding.titleWords);
+      // A typed year can be part of the name: "Blade Runner 2049", "Wonder Woman 1984".
+      if (understanding.years.length > 0) {
+        score = Math.max(score, nameScore(item.name, understanding.words) + 15);
+      }
       const year = yearOf(item);
       if (year !== undefined && understanding.years.indexOf(year) !== -1) score += 15;
       if (context.saved?.(item.id)) score += 8;

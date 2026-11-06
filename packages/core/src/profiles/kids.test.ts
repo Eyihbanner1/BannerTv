@@ -177,21 +177,24 @@ describe('kidsDetailsAllowed', () => {
 
   it('lets the strictest UK rating decide: a PG at the cinema and 15 on disc is a 15', () => {
     const rated = { certificate: 'PG', strictestCertificate: '15' };
-    expect(kidsDetailsAllowed(film(['Animation']), rated, 'PG')).toBe(false);
-    expect(kidsDetailsAllowed(film(['Animation']), rated, '12')).toBe(false);
-    expect(kidsDetailsAllowed(film(['Animation']), { certificate: 'PG' }, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Family']), rated, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), rated, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: 'PG' }, 'PG')).toBe(true);
   });
 
-  it('needs no Family genre with a rating, but never takes a genre not for children', () => {
+  it('always needs the details to say it is for families or children', () => {
+    // As the Details screens did before the rule was shared: a rating alone is not enough.
     expect(kidsDetailsAllowed(film(['Animation', 'Adventure']), { certificate: 'U' }, 'PG')).toBe(
-      true,
+      false,
     );
-    expect(kidsDetailsAllowed(film(['Horror']), { certificate: 'PG' }, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film([]), { certificate: 'U' }, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family', 'Horror']), { certificate: 'PG' }, '12')).toBe(false);
     expect(kidsDetailsAllowed(film(['Family']), { certificate: '12' }, 'PG')).toBe(false);
   });
 
-  it('needs Family without a rating, and a profile limit with one', () => {
+  it('takes Family without a rating, and needs a profile limit with one', () => {
     expect(kidsDetailsAllowed(film(['Family', 'Comedy']), undefined, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Family', 'Comedy']), {}, undefined)).toBe(true);
     expect(kidsDetailsAllowed(film(['Comedy']), {}, 'PG')).toBe(false);
     expect(kidsDetailsAllowed(film([]), undefined, 'PG')).toBe(false);
     expect(kidsDetailsAllowed(film(['Family']), { certificate: 'U' }, undefined)).toBe(false);

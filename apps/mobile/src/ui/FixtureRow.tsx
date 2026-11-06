@@ -98,6 +98,7 @@ export function FixtureRow({
             <FixtureCard fixture={item} onPress={() => onPress(index)} />
           )}
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={Separator}
           initialNumToRender={3}

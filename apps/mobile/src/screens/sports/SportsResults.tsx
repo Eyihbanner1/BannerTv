@@ -140,7 +140,9 @@ export function SportsResults({
   const onFound = useCallback((key: string, count: number) => {
     setCounts((current) => (current[key] === count ? current : { ...current, [key]: count }));
   }, []);
-  const fromAddons = Object.keys(counts).some((key) => counts[key] !== 0);
+  // Only the addons asked now: a count left from one that went says nothing.
+  const fromAddons =
+    asked && sources.some((source) => counts[source.key] !== undefined && counts[source.key] !== 0);
   const has = found.length > 0 || fromAddons;
   useEffect(() => onContent(has), [onContent, has]);
 

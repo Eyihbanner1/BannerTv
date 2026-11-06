@@ -319,8 +319,10 @@ type Section =
 
 /**
  * The results for a term, top to bottom: Sports, Top results, rows for what the words mean
- * ("Comedy films"), then each addon's own results, folded under Top results. The kind chip
- * filters what is drawn; the requests are the same whichever chip is on.
+ * ("Comedy films"), then each addon's own results, folded under Top results. When the words
+ * were read only by forgiving a typo, the addons' results come before the understood rows.
+ * The kind chip narrows what is asked: `sources` holds only its type's catalogs, and only the
+ * understood rows of its type are asked.
  */
 function Results({
   term,
@@ -341,10 +343,12 @@ function Results({
   onPick: (text: string) => void;
 }) {
   const { t } = useTranslation();
-  const { planned, queries, states, results, failed, top } = useSmartSearch(
-    term,
-    sources,
-    discover,
+  const smart = useSmartSearch(term, sources, discover);
+  const { queries, states, results, failed, top, plannedLast } = smart;
+  // The understood rows the kind chip keeps.
+  const planned = useMemo(
+    () => smart.planned.filter((row) => keeps(kind, row.type)),
+    [smart.planned, kind],
   );
   // The understood rows' own queries, read here too to know when they have answered.
   const plannedQueries = useMemo(() => planned.map((row) => plannedQuery(row)), [planned]);
@@ -388,28 +392,18 @@ function Results({
     [term],
   );
 
-  // What the kind chip leaves, by index.
-  const searched: number[] = [];
-  sources.forEach((source, index) => {
-    if (keeps(kind, source.catalog.type)) searched.push(index);
-  });
-  const rows: number[] = [];
-  planned.forEach((row, index) => {
-    if (keeps(kind, row.type)) rows.push(index);
-  });
   const rowFailed = (index: number) => {
     const state = plannedStates[index];
     return state !== undefined && state.status === 'error' && state.data === undefined;
   };
-  const searchFound = searched.some((index) => (results[index]?.length ?? 0) > 0);
-  const plannedFound = rows.some((index) => (plannedItems[index]?.length ?? 0) > 0);
+  const searchFound = results.some((items) => (items?.length ?? 0) > 0);
+  const plannedFound = plannedItems.some((items) => (items?.length ?? 0) > 0);
   // Only while the group is there: it says nothing as it goes.
   const found = searchFound || plannedFound || (sportsSources !== null && sportsFound);
   const done =
-    searched.every((index) => results[index] != null) &&
-    rows.every((index) => plannedItems[index] !== null || rowFailed(index));
-  const someFailed = searched.some((index) => failed[index] === true);
-  // Every addon, whatever the chip: one of another type answering means the connection works.
+    results.every((items) => items != null) &&
+    plannedItems.every((items, index) => items !== null || rowFailed(index));
+  const someFailed = failed.some(Boolean);
   const allFailed = done && !found && sources.length > 0 && failed.every(Boolean);
   const nothing = done && !found && !allFailed;
   const help = useMemo(
@@ -429,32 +423,32 @@ function Results({
   // Until Top results is decided, the addons' sections wait behind the fold, so the list
   // only grows: they never fold away under the finger.
   const waiting = top.status === 'waiting';
-  if (waiting && searched.length > 0 && !nothing && !allFailed) {
+  if (waiting && sources.length > 0 && !nothing && !allFailed) {
     sections.push({ key: 'waiting', kind: 'waiting' });
   }
   if (topItems.length > 0) sections.push({ key: 'top', kind: 'top', items: topItems });
-  for (const index of rows) {
+  const understood: Section[] = [];
+  planned.forEach((row, index) => {
     const items = plannedItems[index];
     // An understood row only adds to what the addons found: it goes quietly when it has nothing.
-    if (rowFailed(index) || (items && items.length === 0)) continue;
-    sections.push({ key: `planned-${planned[index]!.key}`, kind: 'planned', index });
-  }
+    if (rowFailed(index) || (items && items.length === 0)) return;
+    understood.push({ key: `planned-${row.key}`, kind: 'planned', index });
+  });
   // When every addon failed, one message says so instead of a section each.
-  const addons = allFailed
-    ? []
-    : searched.filter((index) => {
-        const items = results[index];
-        return failed[index] === true || !items || items.length > 0;
-      });
-  const behindFold = waiting || topItems.length > 0;
-  if (addons.length > 0) {
-    if (behindFold) sections.push({ key: 'fold', kind: 'fold' });
-    if (!behindFold || unfolded) {
-      for (const index of addons) {
-        sections.push({ key: `addon-${sources[index]!.key}`, kind: 'addon', index });
+  const addons: Section[] = [];
+  if (!allFailed) {
+    sources.forEach((source, index) => {
+      const items = results[index];
+      if (failed[index] === true || !items || items.length > 0) {
+        addons.push({ key: `addon-${source.key}`, kind: 'addon', index });
       }
-    }
+    });
   }
+  const behindFold = waiting || topItems.length > 0;
+  const folded: Section[] = [];
+  if (addons.length > 0 && behindFold) folded.push({ key: 'fold', kind: 'fold' });
+  if (!behindFold || unfolded) folded.push(...addons);
+  sections.push(...(plannedLast ? folded.concat(understood) : understood.concat(folded)));
 
   const renderItem = ({ item: section }: { item: Section }) => {
     switch (section.kind) {
@@ -507,7 +501,7 @@ function Results({
         term={term}
         help={help}
         someFailed={someFailed}
-        canRetry={someFailed || rows.some(rowFailed)}
+        canRetry={someFailed || planned.some((_, index) => rowFailed(index))}
         onPick={onPick}
         onRetry={retryFailed}
       />
@@ -568,6 +562,11 @@ export function SearchScreen() {
       (source) => !leaveOut?.(source.addon, source.catalog),
     );
   }, [ready, collection.addons, sports.homeLeaveOut]);
+  // The kind chip narrows what is asked, as it always has.
+  const shownSources = useMemo(
+    () => (kind === 'all' ? sources : sources.filter((source) => source.catalog.type === kind)),
+    [sources, kind],
+  );
   const pick = useCallback((next: string) => {
     setText(next);
     setTerm(termOf(next));
@@ -645,7 +644,7 @@ export function SearchScreen() {
           key={term}
           term={term}
           kind={kind}
-          sources={sources}
+          sources={shownSources}
           sportsSources={sportsSources}
           discover={discover}
           onPick={pick}

@@ -184,6 +184,14 @@ describe('topResults', () => {
     ).toEqual(['b', 'a']);
   });
 
+  it('reads a typed year as part of a name too', () => {
+    const groups = [[meta('a', 'Blade Runner', '1982'), meta('b', 'Blade Runner 2049', '2017')]];
+    expect(topResults(understand('blade runner 2049'), groups).map((item) => item.id)).toEqual([
+      'b',
+      'a',
+    ]);
+  });
+
   it('keeps to the type the words ask for', () => {
     const groups = [[meta('a', 'Scary Movie'), meta('b', 'Scary Stories', '2019', 'series')]];
     expect(names('scary films', groups)).toEqual(['Scary Movie']);
@@ -227,5 +235,9 @@ describe('suggestions', () => {
       'Fantasy',
     ]);
     expect(genreChips('zzz', [])).toEqual([]);
+    // Never a genre a kids profile sees nothing of.
+    expect(genreChips('hurrer', sources, { kids: true }).map((chip) => chip.label)).not.toContain(
+      'Horror',
+    );
   });
 });

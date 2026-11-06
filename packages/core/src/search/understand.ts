@@ -53,8 +53,17 @@ export interface Understanding {
 }
 
 const TYPE_WORDS: Record<string, ContentType> = {};
-for (const word of ['film', 'movie', 'flick', 'cinema']) TYPE_WORDS[stem(word)] = 'movie';
-for (const word of [
+// Each type word as written, singular and plural, for reading one with a typo.
+const TYPE_SPELLINGS: (readonly [string, ContentType])[] = [];
+const typeWords = (type: ContentType, words: readonly string[]) => {
+  for (const word of words) {
+    TYPE_WORDS[stem(word)] = type;
+    TYPE_SPELLINGS.push([word, type]);
+    if (word.charAt(word.length - 1) !== 's') TYPE_SPELLINGS.push([`${word}s`, type]);
+  }
+};
+typeWords('movie', ['film', 'movie', 'flick', 'cinema']);
+typeWords('series', [
   'series',
   'show',
   'tv',
@@ -64,8 +73,15 @@ for (const word of [
   'program',
   'boxset',
   'miniseries',
-]) {
-  TYPE_WORDS[stem(word)] = 'series';
+]);
+
+/** A type word of five letters or more written with a typo: "moveis", "serise", "filmz". */
+function typeWithTypo(word: string): ContentType | undefined {
+  for (const [spelling, type] of TYPE_SPELLINGS) {
+    const max = typosAllowed(Math.min(word.length, spelling.length));
+    if (max > 0 && distance(word, spelling, max) <= max) return type;
+  }
+  return undefined;
 }
 
 // Words that say nothing about what to find. "like" is not one: "shows like
@@ -159,14 +175,29 @@ interface PhraseIndex {
   all: Indexed[];
 }
 
-function addTo(index: PhraseIndex, entry: VocabularyEntry | AddonEntry): void {
+/**
+ * Whether an addon's genre takes a phrase from the entry holding it: a bundled
+ * mood or language no installed catalog can answer yet (it waits for TMDB),
+ * so "music" or "korean" goes to an addon that filters by Music or Korean.
+ */
+function takesOver(entry: VocabularyEntry | AddonEntry, held: Indexed): boolean {
+  const kind = held.entry.kind;
+  return (
+    entry.kind === 'genre' &&
+    (kind === 'mood' || kind === 'language') &&
+    held.entry.genres.length === 0
+  );
+}
+
+function addTo(index: PhraseIndex, entry: VocabularyEntry | AddonEntry, addon = false): void {
   for (const phrase of entry.phrases) {
     const words = wordsOf(phrase);
     if (words.length === 0) continue;
     const key = keyOf(words);
     const item = { key, entry };
     // The first entry to claim a phrase keeps it: the bundled list before addons'.
-    if (!index.exact.has(key)) index.exact.set(key, item);
+    const held = index.exact.get(key);
+    if (!held || (addon && takesOver(entry, held))) index.exact.set(key, item);
     index.all.push(item);
   }
 }
@@ -209,7 +240,7 @@ function indexWith(phrases: readonly AddonPhrase[]): PhraseIndex {
             phrases: [phrase.text],
           };
     if (phrase.sourceKey !== undefined) entry.sourceKey = phrase.sourceKey;
-    addTo(index, entry);
+    addTo(index, entry, true);
   }
   return index;
 }
@@ -337,6 +368,13 @@ export function understand(text: string, phrases: readonly AddonPhrase[] = []): 
         i += n;
         continue read;
       }
+    }
+    // A type word with a typo, tried last: a phrase is the likelier meaning.
+    const typed = typeWithTypo(word);
+    if (typed) {
+      if (types.indexOf(typed) === -1) types.push(typed);
+      i += 1;
+      continue;
     }
     // A word nothing explains: the words are a title, or something Search cannot read.
     return none;

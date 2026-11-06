@@ -214,6 +214,55 @@ test('Search reads a genre in everyday words, and See all opens it in Discover',
   expect(errors).toEqual([]);
 });
 
+test('words read only by forgiving a typo put the addons’ titles first', async ({ page }) => {
+  const errors = watchErrors(page);
+  // "Comdy" is one letter off Comedy, but an addon has a title by that very name.
+  await mockAddons(page, {
+    catalogs: {
+      'movie/top/search=comdy': (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify({
+            metas: [
+              {
+                id: 'tt8000010',
+                type: 'movie',
+                name: 'Comdy Nights',
+                releaseInfo: '2019',
+                poster: 'https://images.metahub.space/poster/small/tt8000010/img',
+                genres: ['Comedy'],
+              },
+            ],
+          }),
+        }),
+    },
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'search');
+  await expectFocus(page, FIELD);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('comdy');
+
+  await expect(page.locator(`[data-row-key="${COMEDY_FILMS}"] h2`)).toHaveText(
+    'Comedy filmsCinemeta',
+  );
+  await expect(page.locator(`[data-row-key="${MOVIE_RESULTS}"]`)).toBeVisible();
+  const order = await page
+    .locator('[data-row-key]')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-row-key')));
+  expect(order.indexOf(MOVIE_RESULTS)).toBeLessThan(order.indexOf(COMEDY_FILMS));
+  await page.keyboard.press('Escape');
+  await press(page, 'ArrowDown', `${MOVIE_RESULTS}-tile-0`);
+  await expect(page.locator(`[data-focus-key="${MOVIE_RESULTS}-tile-0"]`)).toHaveAttribute(
+    'aria-label',
+    /^Comdy Nights/,
+  );
+  await press(page, 'ArrowDown', `${COMEDY_FILMS}-tile-0`);
+  expect(errors).toEqual([]);
+});
+
 test('Top results puts the best match from every addon first, once', async ({ page }) => {
   const errors = watchErrors(page);
   // The series catalog finds a title too, so two catalogs answer.

@@ -195,15 +195,22 @@ interface HelpProps {
   help: SearchHelp;
   onPick: (term: string) => void;
   onRetry: () => void;
+  /** A button took focus: the view goes back to the top, where the help is. */
+  onFocus: () => void;
 }
 
 /** Under "Nothing found": a likely spelling, genres to look through, or Try again. */
-function Help({ allFailed, someFailed, help, onPick, onRetry }: HelpProps) {
+function Help({ allFailed, someFailed, help, onPick, onRetry, onFocus }: HelpProps) {
   const { t } = useTranslation();
   if (allFailed) {
     return (
       <div className={styles.help}>
-        <Button focusKey={HELP_RETRY} label={t('common.tryAgain')} onPress={onRetry} />
+        <Button
+          focusKey={HELP_RETRY}
+          label={t('common.tryAgain')}
+          onFocus={onFocus}
+          onPress={onRetry}
+        />
       </div>
     );
   }
@@ -216,6 +223,7 @@ function Help({ allFailed, someFailed, help, onPick, onRetry }: HelpProps) {
           <Button
             focusKey={HELP_MEANT}
             label={t('search.didYouMean', { term: meant })}
+            onFocus={onFocus}
             onPress={() => onPick(meant)}
           />
         </div>
@@ -228,6 +236,7 @@ function Help({ allFailed, someFailed, help, onPick, onRetry }: HelpProps) {
               <Button
                 focusKey={`${HELP_PREFIX}genre-${index}`}
                 label={chip.label}
+                onFocus={onFocus}
                 onPress={() => onPick(chip.query)}
               />
             </div>
@@ -260,11 +269,13 @@ interface ResultsProps {
 /**
  * Search results, top to bottom: Sports, Top results across the addons, rows
  * for what the words mean ("Comedy films"), then each addon's own results.
+ * When the words were read only by forgiving a typo, the addons' rows come
+ * before the understood ones.
  */
 function Results({ term, sources, discover, sportsSources, onPick }: ResultsProps) {
   const { t } = useTranslation();
   const smart = useSmartSearch(term, sources, discover);
-  const { planned, queries, states, results, failed, top } = smart;
+  const { planned, plannedLast, queries, states, results, failed, top } = smart;
   const [counts, setCounts] = useState<Readonly<Record<string, number>>>({});
   const [sportsContent, setSportsContent] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -308,18 +319,18 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
       { key: HELP_SLOT, focus: helpKey ?? '', drawn: helpKey !== undefined },
       { key: TOP_KEY, focus: TOP_KEY, drawn: top.status === 'shown' },
     ];
-    for (const row of planned) {
+    const understood = planned.map((row) => {
       const key = `${PLANNED_PREFIX}${row.key}`;
-      list.push({ key, focus: key, drawn: counts[row.key] !== 0 });
-    }
-    sources.forEach((source, index) => {
+      return { key, focus: key, drawn: counts[row.key] !== 0 };
+    });
+    const addons = sources.map((source, index) => {
       const key = `${RESULT_PREFIX}${source.key}`;
       const items = results[index] ?? null;
       const drawn = !allFailed && (failed[index] === true || items === null || items.length > 0);
-      list.push({ key, focus: key, drawn });
+      return { key, focus: key, drawn };
     });
-    return list;
-  }, [helpKey, top.status, planned, counts, sources, results, failed, allFailed]);
+    return list.concat(plannedLast ? addons.concat(understood) : understood.concat(addons));
+  }, [helpKey, top.status, planned, plannedLast, counts, sources, results, failed, allFailed]);
   const latest = useRef(slots);
   const drawnRows = slots
     .filter((slot) => slot.drawn)
@@ -361,6 +372,11 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
     slideTrack(trackRef.current, rowKey);
   }, []);
   const onTopFocus = useCallback(() => onItemFocus(TOP_KEY), [onItemFocus]);
+  const onHelpFocus = useCallback(() => {
+    if (!canSlide()) return;
+    memory.slideRow = undefined;
+    slideTrack(trackRef.current, undefined);
+  }, []);
   const onItemPress = useCallback(
     (item: MetaPreview) => {
       recentSearches.add(term);
@@ -380,6 +396,32 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
     }
   }, [queries, states, planned]);
 
+  const plannedRows = planned.map((row) => (
+    <PlannedResultRow
+      key={`u-${row.key}`}
+      row={row}
+      onCount={onCount}
+      onGone={onGone}
+      onItemFocus={onItemFocus}
+      onItemPress={onItemPress}
+    />
+  ));
+  const addonRows = sources.map((source, index) => (
+    <ResultRow
+      key={source.key}
+      source={source}
+      query={queries[index]!}
+      items={results[index] ?? null}
+      failed={failed[index] === true}
+      error={states[index]?.error}
+      hidden={allFailed}
+      tag={tags[index]!}
+      onGone={onGone}
+      onItemFocus={onItemFocus}
+      onItemPress={onItemPress}
+    />
+  ));
+
   return (
     <div className={styles.results}>
       {allFailed && <p className={styles.message}>{t('search.noAnswer')}</p>}
@@ -396,7 +438,14 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
           />
         )}
         {allFailed ? (
-          <Help allFailed someFailed help={NO_HELP} onPick={onPick} onRetry={onRetry} />
+          <Help
+            allFailed
+            someFailed
+            help={NO_HELP}
+            onPick={onPick}
+            onRetry={onRetry}
+            onFocus={onHelpFocus}
+          />
         ) : nothing && help !== undefined ? (
           <Help
             allFailed={false}
@@ -404,6 +453,7 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
             help={help}
             onPick={onPick}
             onRetry={onRetry}
+            onFocus={onHelpFocus}
           />
         ) : null}
         {top.status === 'shown' && (
@@ -416,31 +466,8 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
             onItemPress={onItemPress}
           />
         )}
-        {planned.map((row) => (
-          <PlannedResultRow
-            key={row.key}
-            row={row}
-            onCount={onCount}
-            onGone={onGone}
-            onItemFocus={onItemFocus}
-            onItemPress={onItemPress}
-          />
-        ))}
-        {sources.map((source, index) => (
-          <ResultRow
-            key={source.key}
-            source={source}
-            query={queries[index]!}
-            items={results[index] ?? null}
-            failed={failed[index] === true}
-            error={states[index]?.error}
-            hidden={allFailed}
-            tag={tags[index]!}
-            onGone={onGone}
-            onItemFocus={onItemFocus}
-            onItemPress={onItemPress}
-          />
-        ))}
+        {plannedLast ? addonRows : plannedRows}
+        {plannedLast ? plannedRows : addonRows}
       </div>
     </div>
   );

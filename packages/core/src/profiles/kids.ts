@@ -140,18 +140,18 @@ export interface KidsRatingFacts {
 
 /**
  * Whether a kids profile allowing `max` may play a title on Details (TV and
- * phone alike), from its full details and what TMDB rates it. With a UK
- * rating, the rating decides: the strictest of the country's (a film rated
- * PG at the cinema and 15 on disc is a 15) must be within the profile's, and
- * no genre may say it is not for children. Without one, the details must
- * list it as for families or children. No profile limit means no title.
+ * phone alike), from its full details and what TMDB rates it. The details
+ * must list it as for families or children, and no genre may say it is not
+ * for children. With a UK rating, it must also be within the profile's: the
+ * strictest of the country's when known (a film rated PG at the cinema and
+ * 15 on disc is a 15). A rated title needs a profile limit.
  */
 export function kidsDetailsAllowed(
   meta: Pick<MetaPreview, 'type' | 'genres'>,
   rating: KidsRatingFacts | undefined,
   max: KidsRating | undefined,
 ): boolean {
+  if (!kidsTitleAllowed(meta)) return false;
   const certificate = rating?.strictestCertificate ?? rating?.certificate;
-  if (certificate === undefined) return kidsTitleAllowed(meta);
-  return max !== undefined && ratingAllowed(certificate, max) && kidsTitleAllowed(meta, true);
+  return certificate === undefined || (max !== undefined && ratingAllowed(certificate, max));
 }

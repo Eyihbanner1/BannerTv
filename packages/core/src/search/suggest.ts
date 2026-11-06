@@ -1,3 +1,4 @@
+import { kidsTitleAllowed } from '../profiles/kids';
 import type { DiscoverSource } from '../addons/sources';
 import { vocabulary, type VocabularyEntry } from './vocabulary';
 import { distance, keyOf, typosAllowed, wordsOf } from './words';
@@ -69,7 +70,9 @@ export function genreChips(
     (entry) =>
       (entry.kind === 'genre' || entry.kind === 'family') &&
       entry.genres.length > 0 &&
-      entry.genres.every((genre) => filtered.has(keyOf(wordsOf(genre)))),
+      entry.genres.every((genre) => filtered.has(keyOf(wordsOf(genre)))) &&
+      // A kids profile sees no title of a genre not for children: offering it leads nowhere.
+      (!options.kids || kidsTitleAllowed({ type: 'movie', genres: [...entry.genres] }, true)),
   );
   // Close means one typo more than Search forgives, so "horrrorr" still offers Horror.
   const key = keyOf(wordsOf(text));

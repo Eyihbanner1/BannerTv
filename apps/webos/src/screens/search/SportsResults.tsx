@@ -193,7 +193,12 @@ export function SportsResults({
     if (asked) handOff(-1);
   }, [asked, handOff]);
 
-  const fromAddons = Object.keys(addonCounts).some((key) => addonCounts[key] !== 0);
+  // Only the addons asked now: a count left from one that went says nothing.
+  const fromAddons =
+    asked &&
+    sources.some(
+      (source) => addonCounts[source.key] !== undefined && addonCounts[source.key] !== 0,
+    );
   // Matches only: the button alone is not something found, so Nothing found still helps.
   const has = found.length > 0 || fromAddons;
   useEffect(() => onContent(has), [onContent, has]);

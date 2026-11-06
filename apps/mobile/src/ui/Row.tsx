@@ -74,6 +74,7 @@ export function Row({
             />
           )}
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={Separator}
           initialNumToRender={4}

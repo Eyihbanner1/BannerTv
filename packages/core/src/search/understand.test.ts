@@ -86,6 +86,10 @@ describe('understand', () => {
     expect(ids('documentries')).toEqual(['documentary']);
     expect(ids('comdey')).toEqual(['comedy']);
     expect(ids('thriler films')).toEqual(['thriller']);
+    // A type word too, so the genre beside it is not lost.
+    expect(understand('horror moveis').types).toEqual(['movie']);
+    expect(ids('horror moveis')).toEqual(['horror']);
+    expect(understand('comedy serise').types).toEqual(['series']);
     // Four letters or fewer must be exact: "wat" is not War, "lov" not Love.
     expect(ids('wat')).toEqual([]);
     expect(ids('lov')).toEqual([]);
@@ -154,6 +158,13 @@ describe('understand', () => {
     });
     // The bundled list keeps its own phrases.
     expect(understand('anime', phrases).intents[0]?.id).toBe('anime');
+    // Except a mood or language no catalog answers yet: an addon's genre does.
+    const korean = [{ kind: 'genre', text: 'Korean' }] as const;
+    expect(understand('korean', korean).intents[0]).toMatchObject({
+      kind: 'genre',
+      genres: ['Korean'],
+    });
+    expect(understand('korean').intents[0]?.id).toBe('korean');
   });
 
   it('has a phrase list of about 300 phrases with stable, unique ids', () => {
