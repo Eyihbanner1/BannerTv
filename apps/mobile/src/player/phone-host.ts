@@ -248,6 +248,40 @@ function onSourceLoad(): void {
   emitTracks();
 }
 
+/**
+ * modules/banner-cues: the lines of the file's own subtitle track as they show, so the page draws
+ * them in the profile's style (ADR 0005, decision 6). Missing on the web.
+ */
+interface CuesModule {
+  watch(player: VideoPlayer): void;
+  draw(on: boolean): void;
+  addListener(
+    event: 'cues',
+    listener: (news: Pick<Extract<AndroidEvent, { event: 'cues' }>, 'at' | 'cues'>) => void,
+  ): { remove(): void };
+}
+
+let cuesModule: CuesModule | null = null;
+/** The subtitle track whose lines the page draws, and the stream it was chosen for. */
+let drawnText: { id: string; load: number } | null = null;
+
+function watchCues(created: VideoPlayer): void {
+  cuesModule = requireOptionalNativeModule<CuesModule>('BannerCues');
+  if (!cuesModule) return;
+  cuesModule.watch(created);
+  cuesModule.addListener('cues', ({ at, cues }) => {
+    // Only lines of the track the page chose, for the stream open now.
+    if (!hasMedia || !drawnText || drawnText.load !== loadId) return;
+    emit({ type: 'player', event: 'cues', load: loadId, track: drawnText.id, at, cues });
+  });
+}
+
+/** The page chose subtitle track `id` (or none), and whether it draws the lines itself. */
+function drawText(id: string | null, pageDraws: boolean): void {
+  drawnText = id !== null && pageDraws ? { id, load: loadId } : null;
+  cuesModule?.draw(pageDraws);
+}
+
 function ensurePlayer(): VideoPlayer {
   if (player) return player;
   const created = createVideoPlayer(null);
@@ -265,6 +299,7 @@ function ensurePlayer(): VideoPlayer {
   created.addListener('audioTrackChange', emitTracks);
   created.addListener('availableSubtitleTracksChange', emitTracks);
   created.addListener('subtitleTrackChange', emitTracks);
+  watchCues(created);
   player = created;
   return created;
 }
@@ -374,10 +409,14 @@ function handle(json: string): void {
       textChosen = true;
       if (command.id === null) {
         current.subtitleTrack = null;
+        drawText(null, command.cues === true);
         return;
       }
       const track = textTracks.find((item, index) => trackId('t', item, index) === command.id);
-      if (track) current.subtitleTrack = track;
+      if (track) {
+        current.subtitleTrack = track;
+        drawText(command.id, command.cues === true);
+      }
       return;
     }
     case 'release':

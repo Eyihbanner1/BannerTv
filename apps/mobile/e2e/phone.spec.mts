@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mockAddons } from '../../webos/e2e/addons.ts';
-import { mockPlayback, STREAM_ADDON_URL } from '../../webos/e2e/play.ts';
+import { mockPlayback, seedStreamAddon, STREAM_ADDON_URL } from '../../webos/e2e/play.ts';
 
 /*
  * The phone app's web build, held like a phone, against the TV journeys' fake addons. On the
@@ -92,5 +92,53 @@ test('a later launch opens on Home, and Settings shows playback and the build', 
   await page.getByRole('tab', { name: 'Settings' }).click();
   await expect(page.getByText('Auto-play picks')).toBeVisible();
   await expect(page.getByText(/BannerTV for phones/)).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("subtitles are drawn in the profile's subtitle style", async ({ page }) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    preferences: {
+      subtitleLanguage: 'eng',
+      subtitleStyle: { size: 'large', colour: 'yellow', background: 'box', position: 'top' },
+    },
+  });
+  await mockPlayback(page);
+  await openApp(page);
+
+  await page
+    .getByLabel(/Tears of Steel/)
+    .last()
+    .click();
+  await page.getByRole('button', { name: /All streams/ }).click();
+  await page
+    .getByText(/Open Movie 1080p/)
+    .first()
+    .click();
+  const pause = page.getByLabel('Pause', { exact: true }).first();
+  await expect(pause).toBeVisible();
+  // The browser waits for a tap before it plays; the phone does not.
+  await pause.click();
+  await page.getByLabel('Play', { exact: true }).first().click();
+
+  // The TV's large size (64 of 1080 lines) on the 412-wide screen, in yellow, on a box, at the top.
+  const words = page.getByText('Hello from the', { exact: false });
+  await expect(words).toBeVisible();
+  const look = await words.evaluate((span) => {
+    const text = getComputedStyle(span);
+    return {
+      size: text.fontSize,
+      colour: text.color,
+      box: span.parentElement ? getComputedStyle(span.parentElement).backgroundColor : '',
+      top: span.getBoundingClientRect().top,
+    };
+  });
+  expect(look).toMatchObject({
+    size: '24.4px',
+    colour: 'rgb(255, 228, 92)',
+    box: 'rgba(0, 0, 0, 0.6)',
+  });
+  expect(look.top).toBeLessThan(915 / 3);
   expect(errors).toEqual([]);
 });
