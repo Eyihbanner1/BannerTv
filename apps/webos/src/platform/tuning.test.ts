@@ -26,6 +26,7 @@ describe('TUNING_DEFAULTS', () => {
       prefetchRestMs: 1500,
       settleAfterFirstMs: 2000,
       playFirst: false,
+      metadataTimeoutMs: 0,
     });
   });
 });
@@ -75,6 +76,9 @@ describe('parseTuning', () => {
     expect(parseTuning('{"settleAfterFirstMs":true}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"playFirst":true}').playFirst).toBe(true);
     expect(parseTuning('{"playFirst":1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"metadataTimeoutMs":12000}').metadataTimeoutMs).toBe(12000);
+    expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
   });
 
   it('ignores values out of range or of the wrong kind', () => {
@@ -138,6 +142,7 @@ describe('applyTuning', () => {
         prefetchRestMs: 500,
         settleAfterFirstMs: 1000,
         playFirst: true,
+        metadataTimeoutMs: 12000,
       }),
     ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
     expect(

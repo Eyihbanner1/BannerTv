@@ -113,6 +113,14 @@ export interface Tuning {
    * ahead for other episodes, which keep their order among themselves.
    */
   playFirst: boolean;
+  /**
+   * A stream auto-play chose that has not said how long it is (loadedmetadata)
+   * this long after it was opened gives way to the next one, as a link that
+   * failed would. 0: no such deadline, only the 30 s one for the first
+   * picture. Never a stream the viewer picked; a big file whose index sits at
+   * its end, on a slow debrid host, can rightly take over 12 s.
+   */
+  metadataTimeoutMs: number;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -142,6 +150,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   prefetchRestMs: 1500,
   settleAfterFirstMs: 2000,
   playFirst: false,
+  metadataTimeoutMs: 0,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -191,6 +200,7 @@ export function parseTuning(raw: string | null): Tuning {
     prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
     settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
     playFirst: flag(stored.playFirst, d.playFirst),
+    metadataTimeoutMs: count(stored.metadataTimeoutMs, 0, 30000, d.metadataTimeoutMs),
   };
 }
 

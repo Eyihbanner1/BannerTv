@@ -13,6 +13,7 @@ import {
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
+import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
@@ -24,6 +25,8 @@ export const STALL_MS = 20000;
 export const START_TIMEOUT_MS = 30000;
 /** Auto-play moves to another stream at most this many times before asking the user. */
 export const MAX_FAILOVERS = 3;
+/** HTMLMediaElement.HAVE_METADATA: the element knows the stream's length and size. */
+const HAVE_METADATA = 1;
 /** After this much playback a source counts as having worked. */
 const WORKED_AFTER_S = 30;
 /**
@@ -251,6 +254,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   const special = options.type === 'series' && /:0:\d+$/.test(options.videoId);
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
+  // Gives up on a stream auto-play chose that says nothing of itself (tuning metadataTimeoutMs).
+  let metadataTimer: number | undefined;
   // Judges a wait still going on, once it alone would make the stream count as struggling.
   let judgeTimer: number | undefined;
   let destroyed = false;
@@ -281,9 +286,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     clearTimeout(stallTimer);
     clearTimeout(startTimer);
     clearTimeout(judgeTimer);
+    clearTimeout(metadataTimer);
     stallTimer = undefined;
     startTimer = undefined;
     judgeTimer = undefined;
+    metadataTimer = undefined;
   }
 
   /**
@@ -544,6 +551,31 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => fail(new PlaybackError('network', 'The stream did not start'), current),
       START_TIMEOUT_MS,
     );
+    armMetadata(current);
+  }
+
+  /**
+   * With the `metadataTimeoutMs` tuning switch set, a stream auto-play chose
+   * that has not said how long it is by then gives way to the next, as one
+   * that failed would: a server that takes the connection and sends nothing
+   * would otherwise hold the first picture up for the whole start time. Only
+   * when there is a next to go to, so the start time still has the last word,
+   * and never on a stream the viewer picked. Its clock stops, as the start's
+   * does, while the viewer has the stream paused before its first picture.
+   */
+  function armMetadata(current: number) {
+    clearTimeout(metadataTimer);
+    metadataTimer = undefined;
+    const limit = tuning.metadataTimeoutMs;
+    if (!(limit > 0) || !options.autoFailover || handPicked || viewerChose) return;
+    metadataTimer = window.setTimeout(() => {
+      metadataTimer = undefined;
+      if (current !== attempt || destroyed || startedPlaying) return;
+      // Read from the element too: Android's player says so without the event.
+      if (video.readyState >= HAVE_METADATA) return;
+      if (failovers >= MAX_FAILOVERS || !finder.next(tried)) return;
+      fail(new PlaybackError('network', 'The stream sent nothing'), current);
+    }, limit);
   }
 
   const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
@@ -567,7 +599,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     [
       'loadedmetadata',
       () => {
-        if (engine) playMark(finder, 'metadata');
+        if (!engine) return;
+        clearTimeout(metadataTimer);
+        metadataTimer = undefined;
+        playMark(finder, 'metadata');
       },
     ],
     [
@@ -888,7 +923,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       stallTimer = undefined;
       if (!startedPlaying) {
         clearTimeout(startTimer);
+        clearTimeout(metadataTimer);
         startTimer = undefined;
+        metadataTimer = undefined;
       }
       pausedByViewer = true;
       video.pause();
