@@ -15,8 +15,9 @@ permissions:
 # The TV app's checks run side by side: the build, the static checks and unit tests, and the
 # remote-key journeys in four shards on the build. "Check, test and package" waits for all of
 # them, fails unless every one passed, and only then packages the .ipk. It is the check to
-# require. The Android APK waits for it, so no .ipk or APK is uploaded before the checks and
-# every journey passed, as when they all ran in one job.
+# require. The Android TV APK waits for it, so no .ipk or Android TV APK is uploaded before the
+# checks and every journey passed, as when they all ran in one job. The Phone APK does not wait
+# for it: its own phone journeys gate it, as before.
 jobs:
   web:
     name: Build the TV app
