@@ -6,13 +6,14 @@ import {
   createLimiter,
   createQueryCache,
   DEFAULT_ADDONS,
+  InstallError,
   type InstalledAddon,
   installIdForUrl,
   installIdOf,
   MANIFEST_TIMEOUT_MS,
   observeAnswers,
 } from '@bannertv/core';
-import { parseManifest } from '@bannertv/protocol';
+import { type Manifest, normalizeManifestUrl, parseManifest } from '@bannertv/protocol';
 import { fetchJson } from '../platform/http';
 import { isKidsProfile } from './profiles';
 import { storage } from './storage';
@@ -81,6 +82,28 @@ export async function checkAddon(addon: InstalledAddon): Promise<void> {
     return;
   }
   addonHealth.note(id, answerState(undefined, elapsed() - started, MANIFEST_TIMEOUT_MS)!);
+}
+
+/**
+ * The manifest at an address, so a link from outside the app can be asked
+ * about by name ("Add Torrentio?") before anything is added. Nothing is
+ * installed or kept. It fails as an install would, so describeInstallError
+ * reads its errors.
+ */
+export async function addonPreview(input: string): Promise<Manifest> {
+  const url = normalizeManifestUrl(input);
+  if (url === undefined) throw new InstallError('invalid-url', 'This is not an addon address');
+  let json: unknown;
+  try {
+    json = await fetchJson(url, { timeoutMs: MANIFEST_TIMEOUT_MS });
+  } catch {
+    throw new InstallError('unreachable', 'The address did not answer');
+  }
+  try {
+    return parseManifest(json);
+  } catch {
+    throw new InstallError('not-an-addon', 'The address did not answer with an addon');
+  }
 }
 
 /**

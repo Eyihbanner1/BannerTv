@@ -5,13 +5,13 @@ import {
   type SportsSetting,
 } from '@bannertv/core';
 import { addonBaseUrl } from '@bannertv/protocol';
-import { addonCollection, addonHealth, checkAddon } from '@tv/data/addons';
+import { addonCollection, addonHealth, addonPreview, checkAddon } from '@tv/data/addons';
 import { describeInstallError, healthLine, typeLabel } from '@tv/data/describe';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '@tv/data/sports';
 import { syncOn } from '@tv/data/sync-clock';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -23,6 +23,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { addonLinks, takeAddonLink } from '../nav/addon-links';
 import { reportTyping } from '../runtime/whereabouts';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/icons';
@@ -39,8 +40,11 @@ const RESOURCE_LABELS = [
 
 const SPORTS_SETTINGS: readonly SportsSetting[] = ['auto', 'yes', 'no'];
 
-/** What the link box is for: a new addon, or new settings for one already here. */
-type Adding = { kind: 'new' } | { kind: 'settings'; addon: InstalledAddon };
+/**
+ * What the link box is for: a new addon, or new settings for one already here. `offered` is a
+ * link that came from outside the app (nav/addon-links.ts), asked about by name before adding.
+ */
+type Adding = { kind: 'new'; offered?: string } | { kind: 'settings'; addon: InstalledAddon };
 
 function AddonCard({
   addon,
@@ -206,6 +210,45 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
   const health = useSyncExternalStore(addonHealth.subscribe, addonHealth.get);
   // Read again as addons are detected as sports ones, which changes who gets the Sports row.
   useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  // The name of the addon an outside link is for, once its manifest has answered.
+  const [named, setNamed] = useState<{ url: string; name: string } | null>(null);
+  const offered = adding?.kind === 'new' ? adding.offered : undefined;
+  const offeredName =
+    offered !== undefined && named?.url === offered && link.trim() === offered
+      ? named.name
+      : undefined;
+
+  // A link from outside the app fills the box: the new settings when the person went to the
+  // addon's settings page from here, otherwise a new addon, asked about by name.
+  useEffect(() => {
+    const take = () => {
+      const url = takeAddonLink();
+      if (url === undefined) return;
+      setLink(url);
+      setProblem(undefined);
+      setAdding((current) =>
+        current?.kind === 'settings' ? current : { kind: 'new', offered: url },
+      );
+    };
+    take();
+    return addonLinks.subscribe(take);
+  }, []);
+
+  useEffect(() => {
+    if (offered === undefined) return;
+    let live = true;
+    addonPreview(offered).then(
+      (manifest) => {
+        if (live) setNamed({ url: offered, name: manifest.name });
+      },
+      (error: unknown) => {
+        if (live) setProblem(describeInstallError(t, error));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [offered, t]);
 
   const close = () => {
     setAdding(null);
@@ -300,14 +343,22 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
         title={
           adding?.kind === 'settings'
             ? t('addons.configure.title', { name: adding.addon.manifest.name })
-            : t('addons.installTitle')
+            : offeredName
+              ? t('phone.addonLink.confirm', { name: offeredName })
+              : t('addons.installTitle')
         }
         onClose={close}
         scroll={false}
       >
         <View style={styles.form}>
           <Text style={styles.lead}>
-            {adding?.kind === 'settings' ? t('phone.configureLead') : t('phone.addonUrlHint')}
+            {adding?.kind === 'settings'
+              ? t('phone.configureLead')
+              : offeredName
+                ? t('phone.addonLink.lead')
+                : offered !== undefined && !problem
+                  ? t('addons.installing')
+                  : t('phone.addonUrlHint')}
           </Text>
           <TextInput
             value={link}

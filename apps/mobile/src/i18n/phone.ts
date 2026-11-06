@@ -84,6 +84,10 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  addonLink: {
+    confirm: 'Add {{name}}?',
+    lead: 'This link came from another app. Addons are shared by every profile on this phone.',
+  },
 } as const;
 
 const OVERRIDES = {
