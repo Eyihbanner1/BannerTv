@@ -2,7 +2,14 @@ import type { EventSource, InstalledAddon, ItemSource, QueryState } from '@banne
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
-import { BINGE_WAIT_MS, entryKey, isHeavy, SETTLE_AFTER_FIRST_MS, streamFinder } from './finder';
+import {
+  BINGE_WAIT_MS,
+  entryKey,
+  isHeavy,
+  putPlayerFirst,
+  SETTLE_AFTER_FIRST_MS,
+  streamFinder,
+} from './finder';
 
 interface FakeQuery {
   listeners: Set<() => void>;
@@ -20,9 +27,16 @@ const addons = vi.hoisted(() => ({
   // Every stream request made for a sports source, and every one loaded again.
   asked: [] as string[],
   loaded: [] as string[],
+  // The videos put first for a player, and whether each was let go.
+  first: [] as Array<{ videos: Array<{ type: string; id: string }>; released: boolean }>,
 }));
 
 vi.mock('../data/addons', () => ({
+  putVideosFirst: (videos: Array<{ type: string; id: string }>) => {
+    const put = { videos, released: false };
+    addons.first.push(put);
+    return () => (put.released = true);
+  },
   addonCollection: {
     get: () => ({ ready: true, addons: addons.collection }),
     subscribe: () => () => undefined,
@@ -337,6 +351,32 @@ describe('sports events', () => {
     expect(addons.asked).toEqual(['second-x:7']);
     expect(addons.loaded).toEqual(['second-x:7']);
     expect(finder.get().entries).toHaveLength(1);
+  });
+
+  it("puts the player's video and each of the event's sources first, until let go", () => {
+    const [a, b] = [install('a'), install('b', 'org.other.sports')];
+    addons.collection = [a, b];
+    addons.first = [];
+    const release = putPlayerFirst('tv', 'a:first', {
+      key: '0-a-first',
+      sources: [source(a, 'a:first'), source(b, 'b:first', 1)],
+      replay: false,
+    });
+    expect(addons.first).toEqual([
+      {
+        videos: [
+          { type: 'tv', id: 'a:first' },
+          { type: 'tv', id: 'a:first' },
+          { type: 'tv', id: 'b:first' },
+        ],
+        released: false,
+      },
+    ]);
+    release();
+    expect(addons.first[0]!.released).toBe(true);
+
+    putPlayerFirst('movie', 'tt1');
+    expect(addons.first[1]!.videos).toEqual([{ type: 'movie', id: 'tt1' }]);
   });
 
   it('leaves out the sources of addons no longer installed', () => {

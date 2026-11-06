@@ -21,7 +21,7 @@ import {
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
 import type { EventPlay } from '../app/router';
-import { addonClient } from '../data/addons';
+import { addonClient, putVideosFirst } from '../data/addons';
 import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
@@ -417,6 +417,19 @@ export function streamFinder(type: string, videoId: string, event?: EventPlay): 
     finders.delete(oldest);
   }
   return finder;
+}
+
+/**
+ * The player's own requests for this video go ahead of others waiting for a
+ * request slot until the release it returns is called, when the `playFirst`
+ * tuning switch is on: its streams (from each of a sports event's sources)
+ * and its subtitles. Lookups ahead, on Details or for the next episode,
+ * keep their place.
+ */
+export function putPlayerFirst(type: string, videoId: string, event?: EventPlay): () => void {
+  const videos = [{ type, id: videoId }];
+  if (event) itemSources(event.sources).forEach(({ type, id }) => videos.push({ type, id }));
+  return putVideosFirst(videos);
 }
 
 /** Stops any link test, as focus moves on. */

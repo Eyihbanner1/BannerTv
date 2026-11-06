@@ -68,7 +68,7 @@ import { playTrailer } from '../../platform/youtube';
 import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
-import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
+import { entryKey, holdProbing, isHeavy, putPlayerFirst, streamFinder } from '../../player/finder';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
 import {
   createPlaybackSession,
@@ -448,6 +448,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!element) return;
     setVideo(element);
     const releaseProbing = holdProbing();
+    // This video's stream and subtitles requests go first (tuning playFirst).
+    const releaseFirst = putPlayerFirst(type, videoId, sportsEvent);
     // A sports match saves nothing and never resumes; a replay keeps its place
     // like any other video, but never goes on Continue Watching.
     const remember = remembersPlace(props);
@@ -480,6 +482,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       cancelled = true;
       created.destroy();
       releaseProbing();
+      releaseFirst();
     };
     // One session per video: the screen remounts for another episode.
     // eslint-disable-next-line react-hooks/exhaustive-deps

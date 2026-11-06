@@ -105,6 +105,13 @@ export interface Tuning {
    * choose another stream than the full wait would have.
    */
   settleAfterFirstMs: number;
+  /**
+   * The player's own stream and subtitles requests go ahead of every other
+   * request waiting for one of the six request slots, those already waiting
+   * included: Home's rows under the player, Details' extras, and lookups
+   * ahead for other episodes, which keep their order among themselves.
+   */
+  playFirst: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -133,6 +140,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   // Starting playback (speed pass U3).
   prefetchRestMs: 1500,
   settleAfterFirstMs: 2000,
+  playFirst: false,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -181,6 +189,7 @@ export function parseTuning(raw: string | null): Tuning {
     // Starting playback (speed pass U3).
     prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
     settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
+    playFirst: flag(stored.playFirst, d.playFirst),
   };
 }
 
