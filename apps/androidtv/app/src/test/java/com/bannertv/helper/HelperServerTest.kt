@@ -1,4 +1,4 @@
-package com.bannertv.app.helper
+package com.bannertv.helper
 
 import com.sun.net.httpserver.HttpServer
 import java.net.HttpURLConnection

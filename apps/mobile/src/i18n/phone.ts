@@ -92,6 +92,11 @@ const PHONE = {
   },
   avoidHdr: 'Avoid HDR',
   learnLanguages: 'Use player choices for every title',
+  yourTv: 'Your TV',
+  streamHelperDetail: 'Your LG plays some add-on streams through this phone',
+  streamHelperSwitch: 'Use the stream helper',
+  streamHelperNotificationsOff:
+    'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
 } as const;
 
 const OVERRIDES = {
