@@ -135,6 +135,8 @@ jobs:
           path: apps/webos/blob-report/
           retention-days: 1
           if-no-files-found: ignore
+          # A shard run again replaces its results.
+          overwrite: true
 
   journeys-report:
     name: TV journeys report
@@ -175,6 +177,7 @@ jobs:
           path: apps/webos/playwright-report/
           retention-days: 3
           if-no-files-found: error
+          overwrite: true
 
   tv:
     name: Check, test and package
