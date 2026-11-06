@@ -22,6 +22,8 @@ interface MenuProps {
   title: string;
   options: readonly MenuOption[];
   selected: string | undefined;
+  /** Where focus lands when it opens, when not on the option selected: a menu of menus. */
+  landOn?: string;
   returnFocusKey: string;
   onSelect: (value: string) => void;
   onClose: () => void;
@@ -36,17 +38,18 @@ export function Menu({
   title,
   options,
   selected,
+  landOn,
   returnFocusKey,
   onSelect,
   onClose,
 }: MenuProps) {
-  const selectedIndex = Math.max(
+  const landing = Math.max(
     0,
-    options.findIndex((option) => option.value === selected),
+    options.findIndex((option) => option.value === (landOn ?? selected)),
   );
   const lastAnchor = Math.max(0, options.length - VISIBLE);
   const anchorFor = (index: number) => Math.max(0, Math.min(lastAnchor, index - LEAD));
-  const [anchor, setAnchor] = useState(() => anchorFor(selectedIndex));
+  const [anchor, setAnchor] = useState(() => anchorFor(landing));
 
   const first = Math.max(0, anchor - OVERSCAN);
   const last = Math.min(options.length, anchor + VISIBLE + OVERSCAN);
@@ -83,7 +86,7 @@ export function Menu({
     <Overlay
       focusKey={focusKey}
       label={title}
-      defaultFocusKey={`${focusKey}-${selectedIndex}`}
+      defaultFocusKey={`${focusKey}-${landing}`}
       returnFocusKey={returnFocusKey}
       onClose={onClose}
       placement="side"

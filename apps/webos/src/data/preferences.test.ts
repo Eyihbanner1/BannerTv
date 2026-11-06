@@ -25,6 +25,7 @@ describe('readPreferences', () => {
       streamChoice: 'fast',
       probing: 'auto',
       allStreamsOrder: 'addon',
+      streamFilter: {},
       audioLanguage: 'fre',
       subtitleLanguage: null,
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
@@ -77,6 +78,17 @@ describe('readPreferences', () => {
 
   it('keeps "Still watching?" turned off', () => {
     expect(readPreferences(JSON.stringify({ stillWatching: false })).stillWatching).toBe(false);
+  });
+
+  it('keeps the stream filter part by part, and none when it is not one', () => {
+    const read = (streamFilter: unknown) =>
+      readPreferences(JSON.stringify({ streamFilter, tmdb: false }));
+    expect(read({ resolution: '1080p', cached: true, language: 'Spanish' })).toMatchObject({
+      streamFilter: { resolution: '1080p', cached: true },
+      tmdb: false,
+    });
+    expect(read('1080p').streamFilter).toEqual({});
+    expect(read({ addonId: 'org.example' }).streamFilter).toEqual({ addonId: 'org.example' });
   });
 
   it('treats an empty language as not chosen', () => {

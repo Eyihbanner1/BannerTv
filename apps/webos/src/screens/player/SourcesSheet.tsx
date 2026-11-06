@@ -12,8 +12,15 @@ import { Overlay } from '../../components/Overlay';
 import { Pressable } from '../../components/Pressable';
 import { addonNames } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
-import { streamRowText, streamsStatus } from '../../player/describe';
+import { streamRowText } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, type StreamFinder } from '../../player/finder';
+import {
+  filterButtonLabel,
+  filteredStatus,
+  filterKey,
+  shownStreams,
+} from '../../player/stream-filter';
+import { StreamFilterMenu } from '../streams/StreamFilterMenu';
 import { type SheetRow, SheetList } from './SheetList';
 import styles from './SourcesSheet.module.css';
 
@@ -48,8 +55,9 @@ function rememberPlaces() {
 
 /**
  * Every stream the addons offered, over the picture, which keeps playing: the
- * same list and order as All streams, with the stream playing ticked. It asks
- * the addons nothing and tests nothing: the decoder is the film's.
+ * same list, order and filter as All streams, with the stream playing ticked
+ * and listed whatever the filter. It asks the addons nothing and tests
+ * nothing: the decoder is the film's.
  */
 export function SourcesSheet({
   finder,
@@ -77,12 +85,20 @@ export function SourcesSheet({
     preferences.subscribe,
     () => preferences.get().allStreamsOrder,
   );
+  const filter = useSyncExternalStore(preferences.subscribe, () => preferences.get().streamFilter);
+  const [filtering, setFiltering] = useState(false);
   const [stable] = useState(rememberPlaces);
-  const entries = useMemo(
+  // Places are kept for the whole list, so a filter taken off puts rows back where they were.
+  const ordered = useMemo(
     () => stable(order, listOrder(state.entries, order, finder.orderOptions())),
     [stable, state.entries, order, finder],
   );
   const playingKey = playing ? entryKey(playing) : undefined;
+  const shown = useMemo(
+    () => shownStreams(ordered, filter, (entry) => entryKey(entry) === playingKey),
+    [ordered, filter, playingKey],
+  );
+  const entries = shown.entries;
   const seconds = finder.runtimeSeconds();
   // The player draws a few times a second as the film plays: the rows are
   // built again only when the streams, what plays, or their tests change.
@@ -144,6 +160,7 @@ export function SourcesSheet({
   }, [entries, playingKey, reference, probes, seconds, t]);
   const playingRow = rows.find((row) => row.selected)?.focusKey;
   const first = playingRow ?? rows[0]?.focusKey;
+  const filterLabel = filterButtonLabel(t, filter, addonNames());
 
   return (
     <Overlay
@@ -163,10 +180,19 @@ export function SourcesSheet({
         <div className={styles.heading}>
           <span className={styles.kicker}>{t('player.sources')}</span>
           <span className={styles.status} role="status">
-            {streamsStatus(t, state, entries.length)}
+            {filteredStatus(t, state, shown, ordered.length)}
           </span>
         </div>
         <div className={styles.buttons}>
+          <Pressable
+            focusKey={`${SHEET}-filter`}
+            label={filterLabel}
+            className={`${styles.button} ${styles.filter}`}
+            focusedClassName={styles.buttonFocused}
+            onPress={() => setFiltering(true)}
+          >
+            {filterLabel}
+          </Pressable>
           <Pressable
             focusKey={`${SHEET}-sort`}
             label={t('streams.sortBy', { order: t(`streams.order.${order}`) })}
@@ -190,9 +216,9 @@ export function SourcesSheet({
         </div>
       </div>
       {rows.length === 0 && state.settled && <p className={styles.empty}>{t('streams.none')}</p>}
-      {/* Another order starts afresh: its rows register anew. */}
+      {/* Another order or filter starts afresh: its rows register anew. */}
       <SheetList
-        key={order}
+        key={`${order}|${filterKey(filter)}`}
         focusKey={`${SHEET}-list`}
         rows={rows}
         preferred={first}
@@ -200,6 +226,17 @@ export function SourcesSheet({
         visible={VISIBLE}
         rowHeight={ROW_HEIGHT}
       />
+      {/* Over the sheet: Back goes up its levels, then back to the Filter button. */}
+      {filtering && (
+        <StreamFilterMenu
+          focusKey={`${SHEET}-filter-menu`}
+          entries={ordered}
+          filter={filter}
+          names={addonNames()}
+          returnFocusKey={`${SHEET}-filter`}
+          onClose={() => setFiltering(false)}
+        />
+      )}
     </Overlay>
   );
 }
