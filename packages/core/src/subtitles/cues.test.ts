@@ -98,6 +98,41 @@ describe('createCueIndex', () => {
   });
 });
 
+describe('nextChange', () => {
+  it('names the next start or end after a moment, and Infinity after the last cue', () => {
+    const index = createCueIndex([cue(1, 3), cue(2, 4), cue(10, 12)]);
+    expect(index.nextChange(0)).toBe(1);
+    expect(index.nextChange(1)).toBe(2);
+    expect(index.nextChange(2.5)).toBe(3);
+    expect(index.nextChange(3)).toBe(4);
+    expect(index.nextChange(5)).toBe(10);
+    expect(index.nextChange(11)).toBe(12);
+    expect(index.nextChange(12)).toBe(Infinity);
+    expect(index.nextChange(NaN)).toBe(Infinity);
+    expect(createCueIndex([]).nextChange(0)).toBe(Infinity);
+  });
+
+  it('is never at or before the moment asked, and what shows only changes there', () => {
+    const next = random(7);
+    const cues: Cue[] = [];
+    for (let i = 0; i < 300; i++) {
+      const start = Math.round(next() * 6000) / 10;
+      cues.push(cue(start, start + 0.1 + Math.round(next() * 60) / 10, String(i)));
+    }
+    const index = createCueIndex(cues);
+    for (let i = 0; i < 1000; i++) {
+      const time = Math.round(next() * 6200) / 10;
+      const change = index.nextChange(time);
+      expect(change).toBeGreaterThan(time);
+      if (!isFinite(change)) continue;
+      const now = index.at(time).map((c) => c.lines);
+      // Just before the change nothing differs; at it, something does.
+      expect(index.at(change - 1e-6).map((c) => c.lines)).toEqual(now);
+      expect(index.at(change).map((c) => c.lines)).not.toEqual(now);
+    }
+  });
+});
+
 describe('sortByStart', () => {
   it('sorts by start and keeps ties in order, beyond the size where V8 6.8 sorting was unstable', () => {
     const cues = Array.from({ length: 50 }, (_, i) => cue(i % 2 === 0 ? 1 : 0, 5, String(i)));

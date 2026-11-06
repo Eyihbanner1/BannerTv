@@ -9,6 +9,7 @@ import {
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
+import { hashStream } from './stream-hash';
 
 /** A subtitle file the viewer can pick. Never shows its link, which can carry account keys. */
 export interface SubtitleOption {
@@ -142,6 +143,8 @@ function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleO
  * Every subtitle on offer for one stream: the stream's own first, then each
  * subtitles addon's in the collection's order. Addons are asked with the
  * stream's hash, size and file name, so they can match the exact release.
+ * A stream whose addon sent no hash has it read from the file first, for a
+ * few seconds at most; addons are asked without it if it can't be read.
  */
 export function subtitleList(
   type: string,
@@ -158,6 +161,9 @@ export function subtitleList(
   const state = createStore<SubtitleListState>({ options: own, pending: 0 });
   let answers: ReadonlyArray<AddonAnswer<Subtitle[]>> = [];
   let unsubscribe: Array<() => void> = [];
+  // Bumped by stop(), so a hash read that ends after it asks no addon.
+  let run = 0;
+  let hashing = false;
 
   function refresh() {
     const states: Array<QueryState<Subtitle[]>> = answers.map((answer) => answer.query.get());
@@ -174,18 +180,38 @@ export function subtitleList(
     state.set({ options, pending });
   }
 
+  function ask(videoHash: string | undefined, videoSize: number | undefined) {
+    const { filename } = stream.behaviorHints;
+    answers = addonClient.subtitles(type, videoId, { videoHash, videoSize, filename });
+    unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
+    answers.forEach((answer) => answer.query.load());
+    refresh();
+  }
+
   return {
     get: state.get,
     subscribe: state.subscribe,
     start() {
-      if (answers.length > 0) return;
-      const { videoHash, videoSize, filename } = stream.behaviorHints;
-      answers = addonClient.subtitles(type, videoId, { videoHash, videoSize, filename });
-      unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
-      answers.forEach((answer) => answer.query.load());
-      refresh();
+      if (answers.length > 0 || hashing) return;
+      const { videoHash, videoSize } = stream.behaviorHints;
+      const source = stream.source;
+      if (videoHash || source.kind !== 'url') {
+        ask(videoHash, videoSize);
+        return;
+      }
+      const current = ++run;
+      hashing = true;
+      // Still looking: the addons have not been asked yet.
+      state.set({ ...state.get(), pending: Math.max(1, state.get().pending) });
+      void hashStream(source.url, videoSize).then((found) => {
+        if (current !== run) return;
+        hashing = false;
+        ask(found?.videoHash, found?.videoSize ?? videoSize);
+      });
     },
     stop() {
+      run++;
+      hashing = false;
       unsubscribe.forEach((undo) => undo());
       unsubscribe = [];
       // Starting again asks the query cache, which still holds the answers.
