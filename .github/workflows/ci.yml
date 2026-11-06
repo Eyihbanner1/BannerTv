@@ -43,13 +43,14 @@ jobs:
         run: pnpm check:bundle
 
       # The journeys run on this exact build, and the .ipk and the Android APK ship it, rather
-      # than building their own.
+      # than building their own. "Re-run failed jobs" does not run this job again once it has
+      # passed, so the build is kept for as long as a re-run is likely.
       - name: Upload the web build
         uses: actions/upload-artifact@v4
         with:
           name: bannertv-web
           path: apps/webos/dist
-          retention-days: 3
+          retention-days: 14
           if-no-files-found: error
 
   checks:
@@ -134,7 +135,8 @@ jobs:
         with:
           name: blob-report-${{ matrix.shard }}
           path: apps/webos/blob-report/
-          retention-days: 1
+          # As long as the web build, so a late re-run of the report still finds every shard.
+          retention-days: 14
           if-no-files-found: ignore
           # A shard run again replaces its results.
           overwrite: true
