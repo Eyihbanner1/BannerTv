@@ -21,6 +21,7 @@ describe('TUNING_DEFAULTS', () => {
       marks: false,
       idbPrune: 'open',
       idbRelaxed: false,
+      matcherAt: 'launch',
     });
   });
 });
@@ -128,6 +129,7 @@ describe('the launch switches', () => {
   it('default to what shipped before them', () => {
     expect(TUNING_DEFAULTS.idbPrune).toBe('open');
     expect(TUNING_DEFAULTS.idbRelaxed).toBe(false);
+    expect(TUNING_DEFAULTS.matcherAt).toBe('launch');
   });
 
   it('take valid values and keep the default for the rest', () => {
@@ -136,6 +138,8 @@ describe('the launch switches', () => {
     expect(parseTuning('{"idbPrune":true}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"idbRelaxed":true}')).toEqual({ ...TUNING_DEFAULTS, idbRelaxed: true });
     expect(parseTuning('{"idbRelaxed":"yes"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"matcherAt":"idle"}')).toEqual({ ...TUNING_DEFAULTS, matcherAt: 'idle' });
+    expect(parseTuning('{"matcherAt":"later"}')).toEqual(TUNING_DEFAULTS);
   });
 
   it('are listed when changed', () => {

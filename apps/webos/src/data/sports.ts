@@ -158,7 +158,7 @@ function detect(): void {
   }
   sportsState.set(next);
   if (!sameCatalogs(current.catalogs, catalogs)) sportsFeed.setCatalogs(catalogs);
-  if (catalogs.length > 0) loadMatcher();
+  if (catalogs.length > 0 && !matcherHeld) loadMatcher();
 }
 
 function readSettings(value: unknown): Settings {
@@ -411,7 +411,30 @@ export function noteFirstPage(
 }
 
 let matcherRequested = false;
+let matcherHeld = false;
 let markMatcher: (name: string) => void = () => undefined;
+
+/**
+ * Keeps the team and league data back at launch, rather than loading it as
+ * soon as a sports catalog turns up, until wantSportsMatcher(). Building its
+ * maps is one long task; nothing needs them before then, as grouping goes by
+ * what addons say meanwhile. Call before startSports. The phone never does.
+ */
+export function holdSportsMatcher(): void {
+  if (!matcherRequested) matcherHeld = true;
+}
+
+/**
+ * Something needs the team and league data now: a sports screen or search,
+ * focus in the Live sport row, or the launch has settled. Ends a hold made
+ * at launch, and from then on the data loads as soon as a sports catalog
+ * turns up, as it does without a hold. Without a hold it does nothing.
+ */
+export function wantSportsMatcher(): void {
+  if (!matcherHeld) return;
+  matcherHeld = false;
+  if (sportsState.get().catalogs.length > 0) loadMatcher();
+}
 
 /**
  * Tells `mark` as the team and league data is asked for (`matcher:load`),
@@ -621,6 +644,8 @@ export function prepareItems(
   items: readonly MetaPreview[],
 ): () => void {
   const reading = SPORTS_IN_BUILD ? readingOf(addon, catalog) : undefined;
+  // Discover drawing a sports catalog: its matches open with the team names.
+  if (reading) wantSportsMatcher();
   let state = prepared.get(catalog);
   // Discover opening again, before its first page: what was read of the list stays.
   if (reading && items.length === 0) return () => undefined;

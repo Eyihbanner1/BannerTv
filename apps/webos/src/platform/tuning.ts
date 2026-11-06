@@ -85,6 +85,13 @@ export interface Tuning {
    * the last answers written, which are fetched again.
    */
   idbRelaxed: boolean;
+  /**
+   * When the team and league data, with a sports addon installed, is loaded
+   * and its maps built, one long task: as soon as a sports catalog turns up
+   * at launch (`launch`), or once the launch has settled (`idle`), sooner if
+   * a sports screen or search opens or focus enters the Live sport row.
+   */
+  matcherAt: 'launch' | 'idle';
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -108,6 +115,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   // Launch switches (speed pass, U2): what shipped before them.
   idbPrune: 'open',
   idbRelaxed: false,
+  matcherAt: 'launch',
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -151,6 +159,7 @@ export function parseTuning(raw: string | null): Tuning {
     // Launch switches (speed pass, U2).
     idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
     idbRelaxed: flag(stored.idbRelaxed, d.idbRelaxed),
+    matcherAt: oneOf(stored.matcherAt, ['launch', 'idle'], d.matcherAt),
   };
 }
 

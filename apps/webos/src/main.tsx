@@ -12,7 +12,12 @@ import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
-import { startSports, traceSportsMatcher } from './data/sports';
+import {
+  holdSportsMatcher,
+  startSports,
+  traceSportsMatcher,
+  wantSportsMatcher,
+} from './data/sports';
 import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
@@ -20,6 +25,7 @@ import { initNavigation } from './navigation/spatial';
 import { initAndroid } from './platform/android';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { initInputMode } from './platform/input-mode';
+import { afterLaunch } from './platform/launch';
 import { bootMark, mark } from './platform/marks';
 import { applyTuning, changedTuning, tuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
@@ -67,6 +73,10 @@ function start() {
   startLibraryData();
   checkServiceStatus();
   startTrakt();
+  if (tuning.matcherAt === 'idle') {
+    holdSportsMatcher();
+    afterLaunch(wantSportsMatcher);
+  }
   void startSports();
   startSync();
   // After the reads above have started, so watching them changes no order.

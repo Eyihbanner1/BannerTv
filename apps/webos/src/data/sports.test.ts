@@ -497,4 +497,52 @@ describe('the team and league data', () => {
     expect(sports.sportsMatcher.get()?.built).toBe('2026-10-28');
     expect('__BANNERTV_SPORTS_DATA__' in globalThis).toBe(false);
   });
+
+  /** A fresh copy of the module, held back at launch or not, with the collection not read yet. */
+  async function launch(hold: boolean) {
+    vi.resetModules();
+    const sports = await import('./sports');
+    const collection = (await import('./addons')).addonCollection as unknown as Collection;
+    collection.set({ ready: false, addons: [] });
+    if (hold) sports.holdSportsMatcher();
+    await sports.startSports();
+    return { sports, collection };
+  }
+
+  it('held back at launch, waits until something wants it, then loads once', async () => {
+    const { sports, collection } = await launch(true);
+    collection.set({ ready: true, addons: [addon] });
+    expect(sports.sportsState.get().shown).toBe(true);
+    expect(scripts).toEqual([]);
+    sports.wantSportsMatcher();
+    expect(scripts.map((script) => script.src)).toEqual(['./data/sports-data.js']);
+    sports.wantSportsMatcher();
+    collection.set({ ready: true, addons: [] });
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('wanted before any sports catalog, loads as soon as one turns up', async () => {
+    const { sports, collection } = await launch(true);
+    sports.wantSportsMatcher();
+    expect(scripts).toEqual([]);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('is wanted when Discover draws a sports catalog', async () => {
+    const { sports, collection } = await launch(true);
+    collection.set({ ready: true, addons: [addon] });
+    sports.prepareItems(addon, catalogOf(addon, 'football'), matches);
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('without a hold, is not asked again by wanting it after it failed', async () => {
+    const { sports, collection } = await launch(false);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+    scripts[0]!.onerror!();
+    sports.wantSportsMatcher();
+    expect(scripts).toHaveLength(1);
+  });
 });
