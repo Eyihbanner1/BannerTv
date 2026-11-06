@@ -52,8 +52,11 @@ let flowingFrames = 0;
 
 /** The box under the rail that raster mode draws art in, while the rail is drawn. */
 let warmBox: HTMLElement | null = null;
-/** The art drawn there, oldest first, with the number of slides there had been when it was drawn. */
-const warm: { image: HTMLImageElement; slide: number }[] = [];
+/**
+ * The art drawn there, oldest first, with the number of slides there had
+ * been when it was drawn, and whether it was a poster grid's.
+ */
+const warm: { image: HTMLImageElement; slide: number; grid: boolean }[] = [];
 /** Row changes so far: art drawn ahead goes once the view has moved on past the row it was for. */
 let slides = 0;
 /** Art was just drawn under the rail, for this row, and the frames after it have yet to flow. */
@@ -232,7 +235,7 @@ function drawWarm(box: HTMLElement, { image, box: drawn, key }: Next): void {
   copy.style.cssText = `position:absolute;left:0;top:0;right:auto;bottom:auto;width:${drawn.width / scale}px;height:${drawn.height / scale}px;max-width:none;max-height:none`;
   copy.src = image.src;
   box.appendChild(copy);
-  warm.push({ image: copy, slide: slides });
+  warm.push({ image: copy, slide: slides, grid: grid !== null });
   while (warm.length > MAX_WARM) unwarm(warm.shift()!.image);
   // The frame that draws it is this one; wait for those after it to flow.
   warming = true;
@@ -354,9 +357,16 @@ export function decodeAheadOfTiles(track: HTMLElement, key: string, tiles: HTMLE
   schedule();
 }
 
-/** A grid that closes lets go of its tiles; leaving it moves the view on, as a slide does. */
+/**
+ * A grid that closes lets go of its tiles, and its art drawn under the rail
+ * goes at once: no press will show those rows now, and the screen under it
+ * may never slide again. That screen's own art stays, as its view has not
+ * moved: Home's, for the Down after See all closes.
+ */
 export function leaveGrid(track: HTMLElement | null): void {
   if (!grid || grid.track !== track) return;
   grid = null;
-  slid();
+  for (let n = warm.length - 1; n >= 0; n--) {
+    if (warm[n]!.grid) unwarm(warm.splice(n, 1)[0]!.image);
+  }
 }

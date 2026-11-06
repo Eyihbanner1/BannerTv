@@ -631,4 +631,20 @@ describe('gridAhead', () => {
     expect(srcs(box)).toEqual(['https://art/poster/grid/28']);
     expect(FakeImage.decodes).toEqual([]);
   });
+
+  it('with aheadMode raster, a grid that closes takes its art from under the rail, not Home’s', async () => {
+    const ahead = await load({ gridAhead: true, aheadMode: 'raster' });
+    const box = new FakeElement();
+    ahead.warmBoxRef(box as unknown as HTMLElement);
+    const home = stack(posterRow('a', 2), posterRow('b', 2), posterRow('c', 2));
+    slide(ahead, home.track, home.rows[0]!);
+    runFrames(10);
+    // See all opens over Home.
+    const { track, row } = posterGrid(4);
+    handOver(ahead, track, 'grid-0', row(3).slice(0, 2));
+    runFrames(10);
+    expect(box.children).toHaveLength(4);
+    ahead.leaveGrid(track as unknown as HTMLElement);
+    expect(srcs(box)).toEqual(['https://art/poster/c/0', 'https://art/poster/c/1']);
+  });
 });
