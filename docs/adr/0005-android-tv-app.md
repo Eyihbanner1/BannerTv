@@ -27,6 +27,17 @@ Four facts shaped the design:
 9. **Trailers** open in the YouTube app (or a browser) through `openExternal`.
 10. **Android 7.1 and newer.** `minSdk` 25 covers Fire OS 6 and every Android TV still in use; `targetSdk` is 36 and `compileSdk` 37 (AndroidX core 1.19 needs it). The app declares itself a TV app (Leanback launcher, banner, no touchscreen required) and also runs on phones and tablets in landscape, where taps work as the Magic Remote's clicks do. There the 1920x1080 layout is scaled to fit and centred, measured on the root element (`clientWidth`), since a phone's WebView widens `innerWidth` to the page, and the page is held to the screen's size so it never pans.
 11. **Built in CI only.** The CI's new `android` job takes the web build from the `build` job, runs the Kotlin unit tests and builds a debug APK (`com.bannertv.app.debug`, so it can sit beside a release build). With the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` secrets set, it also builds a signed release APK. Both are uploaded as the `bannertv-apk` artifact. The key itself is never in the repository.
+12. **Android TV's own "Continue watching" row.** On Android TV and Google TV from Android 8, the app puts the profile in use's Continue Watching on the system's Watch Next row ("Continue watching" on Google TV), through androidx.tvprovider 1.1.0. The page works out the cards (`apps/webos/src/data/watch-next.ts`) from the same progress and played cards as Home's row, with the kids filter, and sends the whole list with `watchNext(json)`. Android replaces BannerTV's cards with it: it writes only the cards that changed and takes off those that left. The page sends a list once Continue Watching has stayed the same for 10 seconds (while a film plays, its progress is saved every few seconds, so nothing goes out until it stops), and within a second of the player closing or the app leaving the screen. A list the same as the last one is not sent again.
+    - The row belongs to the whole device and anyone at the TV sees it, so it holds one profile's titles at a time. While "Who's watching?" waits for an answer, the row keeps what it had. A profile with a PIN empties it at once. A switch of profile reloads the app, which replaces the row with the new profile's titles.
+    - A card the person takes off the row (the provider marks it not browsable) stays off until the title is watched again.
+    - Cards hold ids, names and http or https artwork addresses only, never an addon's address.
+    - A film or episode left part way is a "continue" card with its place and length. The next episode of a series, which starts from the beginning, is a "next" card.
+    - Fire TV's home screen has no Watch Next row and a phone has no TV home screen, so the app writes nothing on either. It writes only where the device has `FEATURE_LEANBACK` and not `amazon.hardware.fire_tv`.
+13. **Links to a title.** Each card opens `bannertv://open?type=…&meta=…&video=…`, which carries ids only. The card's intent is held to the app's own package, because the phone app answers `bannertv://` links too and a debug build sits beside the release one. The intent filter is not `BROWSABLE`, so a web page cannot send one.
+    - The activity takes the link both when the app was closed and when it was running. It keeps the link until the page takes it with `takeLink()`, and while the app runs it tells the page with `{ "type": "open" }`. An activity that Android restores, or reopens from the recent apps, is handed the intent it first started with, so that link is not opened a second time.
+    - The page takes the link only once someone is watching, so a link survives the reload that asks "Who's watching?". It asks first by the rule a relaunch from the launcher follows: with more than one profile, when the profile in use has a PIN or the picker shows at launch.
+    - The page then opens the title's Details over Home, with Resume focused, so the person sees what plays before it does. Back goes to Home. A link never starts a stream by itself.
+    - Another app on the device can send such a link, so both sides check it: a short lowercase type and ids of 1 to 300 characters with no control characters. Nothing else in the link is read.
 
 ## Protocol (version 1)
 
@@ -40,6 +51,8 @@ Four facts shaped the design:
 | `exit()` | | Leaves the app. |
 | `openExternal(url)` | | Opens an `https:` address in another app. Anything else is ignored. |
 | `player(json)` | | One player command, below. |
+| `watchNext(json)` | | `{ "cards": [ … ] }`: every card for the Watch Next row, below. It replaces BannerTV's cards there, and an empty list empties the row. Ignored where the device has no row. Added later (see "Additions"). |
+| `takeLink()` | string | The link the app was opened with, as JSON (`{ "type", "meta", "video" }`), once; `""` when there is none. Added later. |
 
 Player commands:
 
@@ -51,6 +64,17 @@ Player commands:
 { "op": "release" }                                              stop, and free the decoder
 ```
 
+A Watch Next card, newest first by `watchedAt`:
+
+```text
+{ "type": "series", "meta": "tt8000001", "video": "tt8000001:1:2",
+  "title": "Morevna Project S1:E2", "episodeTitle": "…", "season": 1, "episode": 2,
+  "description": "…", "landscape": "https://…", "poster": "https://…",
+  "position": 0, "duration": 0, "next": true, "watchedAt": 1730000000000 }
+    position and duration in seconds, 0 while unknown; watchedAt in milliseconds since 1970;
+    episodeTitle, season, episode, description, landscape and poster only where known
+```
+
 ### Android to page: `window.__bannerAndroid.event(object)`
 
 ```text
@@ -58,6 +82,7 @@ Player commands:
                  | "MediaFastForward" | "MediaRewind" | "Red" | "Green" | "Yellow" | "Blue", "repeat": false }
 { "type": "keyboard", "visible": true }       the on-screen keyboard opened or closed
 { "type": "relaunch" }                        opened again from the launcher while running
+{ "type": "open" }                            opened from a link while running: takeLink() has it
 { "type": "player", "event": "state", "playWhenReady", "playing", "buffering", "ready", "ended",
   "position", "duration", "live" }            duration: seconds, null while unknown, -1 when live
 { "type": "player", "event": "time", "position", "duration" }    every 250 ms while playing
@@ -75,10 +100,15 @@ Android's error codes map to the kinds the session already acts on: network erro
 
 `live` is true only on a real live timeline. While a stream opens ExoPlayer stands in a placeholder timeline that has no length and could pass for a broadcast, and the session clears a film's resume point for a broadcast, so the page also takes `live` only from a state that is `ready`. A file whose length Android cannot read reads as `Infinity` once it plays, as on the TV, so its progress is kept against the film's running time.
 
+### Additions
+
+`watchNext(json)`, `takeLink()` and the `open` event came after version 1 first shipped, and joined it without a new version number. A method added later is optional. The page checks that it is there before calling it (`typeof BannerAndroid.watchNext === 'function'`), so an older app keeps working, and so does the phone app's player, which speaks the same protocol (`apps/mobile/src/player/phone-host.ts`) without these methods. The page ignores an event it does not know. The version number changes only when something already in the protocol changes its meaning.
+
 ## Consequences
 
 - One codebase for the LG and Android: every screen, fix and addon feature lands on both. Android-only code is the Kotlin shell, `platform/android.ts` and the Android engine.
 - Streams the LG plays through its own pipeline (Matroska, Dolby sound, HEVC, HDR) play on Android through ExoPlayer, with sound passed through to a receiver where the device allows.
 - Subtitles inside a file follow Android's own style, not the app's subtitle style setting, until cues are sent to the page.
 - The APK cannot be built on the cloud machines that write the code (Google's Maven is not reachable there), so every Kotlin change is checked by CI.
-- Not in this first version: a Play Store or Amazon Appstore listing, Android TV's home-screen channels and Continue Watching row, voice search, picture-in-picture, and downloads (phones only, later).
+- The system's "Continue watching" row shows one profile's titles, those of the profile last in use, to anyone at the TV. A profile with a PIN keeps its titles off the row.
+- Not in this first version: a Play Store or Amazon Appstore listing, Android TV's home-screen channels (rows of the app's own beside Watch Next), voice search, picture-in-picture, and downloads (phones only, later).
