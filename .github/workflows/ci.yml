@@ -338,7 +338,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Touch journeys on the web build with the TV journeys' fake addons, before the long
-      # Android build: every screen opens and a film plays.
+      # Android build: every screen opens and a film plays. Here rather than in a job of their
+      # own, so no phone APK is uploaded unless they passed.
       - name: Phone journeys
         working-directory: apps/mobile
         run: |
@@ -359,7 +360,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # On a pull request setup-gradle only reads the cache unless told otherwise, and this job is
+      # not on main yet, so nothing was ever saved for it. Saved here, the Gradle wrapper,
+      # dependencies and transforms come back on the pull request's next run. The C++ builds
+      # are not cached by Gradle at all.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Generate the Android project
         working-directory: apps/mobile
@@ -369,10 +376,15 @@ jobs:
 
       # A release build, so the JavaScript is inside the APK and it runs without a computer
       # attached. Signed with the debug key the Expo template ships, which is the same on every
-      # run, so each test APK installs over the last. Not for the store.
+      # run, so each test APK installs over the last. Not for the store. 64-bit Arm only, the
+      # phones it is tested on (a Galaxy S25 Ultra runs nothing else): each architecture's C++
+      # is built in full, and 32-bit Arm cost about 7 to 10 of the build's 32 minutes. Add
+      # armeabi-v7a back to PHONE_ABIS (comma-separated) for a 32-bit-only phone.
       - name: Build
         working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        env:
+          PHONE_ABIS: arm64-v8a
+        run: ./gradlew --no-daemon assembleRelease "-PreactNativeArchitectures=$PHONE_ABIS"
 
       - name: Collect the APK
         run: |
