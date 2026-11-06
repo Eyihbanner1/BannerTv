@@ -69,7 +69,7 @@ const AddonSearchRow = memo(function AddonSearchRow({
   source: CatalogSource;
   term: string;
   view: ViewOptions;
-  /** How many matches the addon found; 0 while it is asked or when it failed. */
+  /** How many matches the addon found: -1 while it is asked, 1 when it failed (its row shows). */
   onFound: (key: string, count: number) => void;
 }) {
   const { t } = useTranslation();
@@ -84,9 +84,10 @@ const AddonSearchRow = memo(function AddonSearchRow({
     () => (state.data ? eventsFromItems(addon, catalog, state.data).slice(0, MAX_RESULTS) : null),
     [state.data, addon, catalog],
   );
-  const count = events?.length ?? 0;
-  useEffect(() => onFound(source.key, count), [onFound, source.key, count]);
   const failed = state.status === 'error' && !events;
+  // A row asked or failed is still something on screen, as on the TV.
+  const count = failed ? 1 : (events?.length ?? -1);
+  useEffect(() => onFound(source.key, count), [onFound, source.key, count]);
   if (events && events.length === 0) return null;
   return (
     <EventRow
@@ -139,7 +140,7 @@ export function SportsResults({
   const onFound = useCallback((key: string, count: number) => {
     setCounts((current) => (current[key] === count ? current : { ...current, [key]: count }));
   }, []);
-  const fromAddons = Object.keys(counts).some((key) => (counts[key] ?? 0) > 0);
+  const fromAddons = Object.keys(counts).some((key) => counts[key] !== 0);
   const has = found.length > 0 || fromAddons;
   useEffect(() => onContent(has), [onContent, has]);
 

@@ -175,6 +175,9 @@ const PlannedSection = memo(function PlannedSection({
 }) {
   const { t } = useTranslation();
   const title = plannedTitle(t, row);
+  // The catalog screen checks a kids profile's titles only as loosely as a Family
+  // catalog needs: so a kids profile gets See all on Family rows alone.
+  const seeAll = !isKidsProfile() || row.family;
   const rowItems = useMemo<RowItem[] | null>(
     () => items?.map((item, index) => ({ item, key: `${index}:${item.id}` })) ?? null,
     [items],
@@ -187,7 +190,7 @@ const PlannedSection = memo(function PlannedSection({
       shape="poster"
       onPress={(entry) => onPress(entry.item)}
       seeAllLabel={t('home.seeAll')}
-      {...(items && items.length > 0
+      {...(items && items.length > 0 && seeAll
         ? { onSeeAll: () => openCatalog({ ...plannedCatalog(row), title }) }
         : {})}
     />
@@ -400,12 +403,14 @@ function Results({
   };
   const searchFound = searched.some((index) => (results[index]?.length ?? 0) > 0);
   const plannedFound = rows.some((index) => (plannedItems[index]?.length ?? 0) > 0);
-  const found = searchFound || plannedFound || sportsFound;
+  // Only while the group is there: it says nothing as it goes.
+  const found = searchFound || plannedFound || (sportsSources !== null && sportsFound);
   const done =
     searched.every((index) => results[index] != null) &&
     rows.every((index) => plannedItems[index] !== null || rowFailed(index));
   const someFailed = searched.some((index) => failed[index] === true);
-  const allFailed = done && !found && searched.length > 0 && searched.every((i) => failed[i]);
+  // Every addon, whatever the chip: one of another type answering means the connection works.
+  const allFailed = done && !found && sources.length > 0 && failed.every(Boolean);
   const nothing = done && !found && !allFailed;
   const help = useMemo(
     () => (nothing ? searchHelp(term, discover) : undefined),
@@ -424,7 +429,9 @@ function Results({
   // Until Top results is decided, the addons' sections wait behind the fold, so the list
   // only grows: they never fold away under the finger.
   const waiting = top.status === 'waiting';
-  if (waiting && searched.length > 0) sections.push({ key: 'waiting', kind: 'waiting' });
+  if (waiting && searched.length > 0 && !nothing && !allFailed) {
+    sections.push({ key: 'waiting', kind: 'waiting' });
+  }
   if (topItems.length > 0) sections.push({ key: 'top', kind: 'top', items: topItems });
   for (const index of rows) {
     const items = plannedItems[index];

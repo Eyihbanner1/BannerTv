@@ -169,6 +169,9 @@ const PlannedResultRow = memo(function PlannedResultRow({
   useHandOff(focusKey, count === 0, onGone);
   const onFocus = useCallback(() => onItemFocus(focusKey), [onItemFocus, focusKey]);
   const onSeeAll = useCallback(() => push({ name: 'catalog', ...plannedCatalog(row) }), [row]);
+  // A kids profile's Discover shows Family catalogs only, so See all would not open
+  // this row's genre: a kids profile gets it on Family rows alone.
+  const seeAll = !isKidsProfile() || row.family;
   if (count === 0) return null;
   return (
     <Row
@@ -179,7 +182,7 @@ const PlannedResultRow = memo(function PlannedResultRow({
       items={items}
       onItemFocus={onFocus}
       onItemPress={onItemPress}
-      onSeeAll={onSeeAll}
+      onSeeAll={seeAll ? onSeeAll : undefined}
     />
   );
 });
