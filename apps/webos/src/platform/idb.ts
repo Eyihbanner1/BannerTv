@@ -49,9 +49,23 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * A transaction that writes to the cache. The cache holds only addon answers
+ * that can be fetched again, so with `idbRelaxed` its writes commit without
+ * waiting for the disk, as Chromium does by default only from version 121:
+ * webOS 22's Chromium 87 waits on every one. Older engines ignore the option.
+ * The key-value store, where profiles, progress and the account live, always
+ * waits.
+ */
+function writeCache(db: IDBDatabase): IDBTransaction {
+  return tuning.idbRelaxed
+    ? db.transaction(CACHE, 'readwrite', { durability: 'relaxed' })
+    : db.transaction(CACHE, 'readwrite');
+}
+
 /** Deletes the oldest cache entries until at most `max` are left. */
 async function prune(db: IDBDatabase, max: number): Promise<void> {
-  const store = db.transaction(CACHE, 'readwrite').objectStore(CACHE);
+  const store = writeCache(db).objectStore(CACHE);
   let excess = (await done(store.count())) - max;
   if (excess <= 0) return;
   await new Promise<void>((resolve, reject) => {
@@ -144,7 +158,7 @@ export function createStorage(): Storage {
       async write(key, record) {
         const database = await db;
         if (!database) return fallbackCache.write(key, record);
-        await done(database.transaction(CACHE, 'readwrite').objectStore(CACHE).put(record, key));
+        await done(writeCache(database).objectStore(CACHE).put(record, key));
         if (++writes % PRUNE_EVERY_WRITES === 0) await prune(database, MAX_CACHE_ENTRIES);
       },
     },

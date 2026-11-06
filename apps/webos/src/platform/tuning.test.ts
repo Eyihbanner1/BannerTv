@@ -20,6 +20,7 @@ describe('TUNING_DEFAULTS', () => {
       heroFade: false,
       marks: false,
       idbPrune: 'open',
+      idbRelaxed: false,
     });
   });
 });
@@ -126,15 +127,21 @@ describe('applyTuning', () => {
 describe('the launch switches', () => {
   it('default to what shipped before them', () => {
     expect(TUNING_DEFAULTS.idbPrune).toBe('open');
+    expect(TUNING_DEFAULTS.idbRelaxed).toBe(false);
   });
 
   it('take valid values and keep the default for the rest', () => {
     expect(parseTuning('{"idbPrune":"later"}')).toEqual({ ...TUNING_DEFAULTS, idbPrune: 'later' });
     expect(parseTuning('{"idbPrune":"never"}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"idbPrune":true}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"idbRelaxed":true}')).toEqual({ ...TUNING_DEFAULTS, idbRelaxed: true });
+    expect(parseTuning('{"idbRelaxed":"yes"}')).toEqual(TUNING_DEFAULTS);
   });
 
   it('are listed when changed', () => {
-    expect(changedTuning({ ...TUNING_DEFAULTS, idbPrune: 'later' })).toEqual({ idbPrune: 'later' });
+    expect(changedTuning({ ...TUNING_DEFAULTS, idbPrune: 'later', idbRelaxed: true })).toEqual({
+      idbPrune: 'later',
+      idbRelaxed: true,
+    });
   });
 });

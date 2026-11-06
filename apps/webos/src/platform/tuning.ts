@@ -78,6 +78,13 @@ export interface Tuning {
    * trim every 50 writes is the same either way.
    */
   idbPrune: 'open' | 'later';
+  /**
+   * Writes to the cache of addon answers commit without waiting for the
+   * disk, so a refresh does not hold up the reads after it. Only that cache:
+   * profiles, progress and the account always wait. A power cut may lose
+   * the last answers written, which are fetched again.
+   */
+  idbRelaxed: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -100,6 +107,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   marks: false,
   // Launch switches (speed pass, U2): what shipped before them.
   idbPrune: 'open',
+  idbRelaxed: false,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -142,6 +150,7 @@ export function parseTuning(raw: string | null): Tuning {
     marks: flag(stored.marks, d.marks),
     // Launch switches (speed pass, U2).
     idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
+    idbRelaxed: flag(stored.idbRelaxed, d.idbRelaxed),
   };
 }
 

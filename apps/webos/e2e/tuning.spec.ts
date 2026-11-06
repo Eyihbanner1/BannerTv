@@ -479,6 +479,22 @@ test('launch marks follow the start to Home’s first focus and rows, and say wh
   expect((await readBoot(page)).launch).toBe('reload');
 });
 
+test('with the cache trimmed later and written without waiting, Home’s rows still come back from it', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  await tune(page, { idbPrune: 'later', idbRelaxed: true, marks: true });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-network');
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-cached');
+  expect(errors).toEqual([]);
+});
+
 test('by default art is decoded ahead, nothing is marked, the rows box has no layer, and the hero does not fade', async ({
   page,
 }) => {

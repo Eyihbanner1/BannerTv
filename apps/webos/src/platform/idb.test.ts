@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const switches = vi.hoisted(() => ({ idbPrune: 'open' as 'open' | 'later' }));
+const switches = vi.hoisted(() => ({ idbPrune: 'open' as 'open' | 'later', idbRelaxed: false }));
 const launched = vi.hoisted(() => [] as Array<() => void>);
 vi.mock('./tuning', () => ({ tuning: switches }));
 vi.mock('./marks', () => ({ bootMark: () => undefined }));
@@ -57,6 +57,7 @@ beforeEach(() => {
 
 afterEach(() => {
   switches.idbPrune = 'open';
+  switches.idbRelaxed = false;
   vi.unstubAllGlobals();
 });
 
@@ -98,5 +99,36 @@ describe('the cache trim at launch', () => {
     const writing = transactions.filter(([name, mode]) => name === 'cache' && mode === 'readwrite');
     // 50 puts, and the trim after the 50th.
     expect(writing).toHaveLength(51);
+  });
+});
+
+describe('cache writes', () => {
+  const relaxed = { durability: 'relaxed' };
+
+  it('wait for the disk as they always have, by default', async () => {
+    const storage = await open();
+    await storage.cache.write('catalog', record);
+    expect(transactions).toEqual([
+      ['cache', 'readwrite'],
+      ['cache', 'readwrite'],
+    ]);
+  });
+
+  it('with idbRelaxed, commit without waiting, the trim too, and only in the cache', async () => {
+    switches.idbRelaxed = true;
+    const storage = await open();
+    await storage.cache.write('catalog', record);
+    await storage.cache.read('catalog');
+    await storage.kv.set('addons', []);
+    await storage.kv.get('addons');
+    await storage.kv.delete!('addons');
+    expect(transactions).toEqual([
+      ['cache', 'readwrite', relaxed],
+      ['cache', 'readwrite', relaxed],
+      ['cache', 'readonly'],
+      ['kv', 'readwrite'],
+      ['kv', 'readonly'],
+      ['kv', 'readwrite'],
+    ]);
   });
 });
