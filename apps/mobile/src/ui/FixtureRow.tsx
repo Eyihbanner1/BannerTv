@@ -1,5 +1,5 @@
 import type { FixtureText } from '@tv/screens/sports/fixture';
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, space, type } from './theme';
 
@@ -55,31 +55,55 @@ export const FixtureCard = memo(function FixtureCard({
 /** A titled, side-scrolling row of fixture cards. */
 export function FixtureRow({
   title,
+  tag,
   fixtures,
   onPress,
+  footer,
 }: {
   title: string;
-  fixtures: readonly FixtureText[];
+  /** Who the row is from, after the title: an addon's name. */
+  tag?: string;
+  /** Null while the matches are asked: grey cards stand in. */
+  fixtures: readonly FixtureText[] | null;
   onPress: (index: number) => void;
+  /** Shown instead of cards: an error with Try again, for example. */
+  footer?: ReactNode;
 }) {
   return (
     <View style={styles.row}>
-      <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
-        {title}
-      </Text>
-      <FlatList
-        horizontal
-        data={fixtures}
-        keyExtractor={(fixture) => fixture.key}
-        renderItem={({ item, index }) => (
-          <FixtureCard fixture={item} onPress={() => onPress(index)} />
-        )}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.list}
-        ItemSeparatorComponent={Separator}
-        initialNumToRender={3}
-        windowSize={3}
-      />
+      <View style={styles.header}>
+        <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
+          {title}
+        </Text>
+        {tag ? (
+          <Text style={styles.tag} numberOfLines={1}>
+            {tag}
+          </Text>
+        ) : null}
+      </View>
+      {footer ? (
+        footer
+      ) : fixtures === null ? (
+        <View style={styles.placeholders}>
+          {[0, 1].map((index) => (
+            <View key={index} style={[styles.card, styles.placeholder]} />
+          ))}
+        </View>
+      ) : (
+        <FlatList
+          horizontal
+          data={fixtures}
+          keyExtractor={(fixture) => fixture.key}
+          renderItem={({ item, index }) => (
+            <FixtureCard fixture={item} onPress={() => onPress(index)} />
+          )}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.list}
+          ItemSeparatorComponent={Separator}
+          initialNumToRender={3}
+          windowSize={3}
+        />
+      )}
     </View>
   );
 }
@@ -90,7 +114,16 @@ function Separator() {
 
 const styles = StyleSheet.create({
   row: { paddingTop: space.l, gap: space.s },
-  title: { ...type.heading, color: colors.text, paddingHorizontal: space.l },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: space.s,
+    paddingHorizontal: space.l,
+  },
+  title: { ...type.heading, color: colors.text, flexShrink: 1 },
+  tag: { ...type.small, color: colors.textSubtle, flexShrink: 1 },
+  placeholders: { flexDirection: 'row', gap: space.m, paddingHorizontal: space.l },
+  placeholder: { opacity: 0.6 },
   list: { paddingHorizontal: space.l },
   separator: { width: space.m },
   card: {

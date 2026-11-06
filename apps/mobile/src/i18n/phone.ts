@@ -83,6 +83,11 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  // Search: what only the phone's list needs.
+  search: {
+    /** The line that opens each addon's own results, under Top results. */
+    eachAddon: 'Results from each addon',
+  },
 } as const;
 
 const OVERRIDES = {
