@@ -5,13 +5,20 @@ import {
   type SportsSetting,
 } from '@bannertv/core';
 import { addonBaseUrl } from '@bannertv/protocol';
-import { addonCollection, addonHealth, addonPreview, checkAddon } from '@tv/data/addons';
+import {
+  addonHealth,
+  addonPreview,
+  addonSwitches,
+  allAddons,
+  checkAddon,
+  switchAddon,
+} from '@tv/data/addons';
 import { describeInstallError, healthLine, typeLabel } from '@tv/data/describe';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '@tv/data/sports';
 import { syncOn } from '@tv/data/sync-clock';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -19,6 +26,7 @@ import {
   Linking,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -51,6 +59,7 @@ function AddonCard({
   index,
   count,
   health,
+  off,
   onSettings,
   onSports,
 }: {
@@ -59,6 +68,8 @@ function AddonCard({
   count: number;
   /** How it last answered, when this phone has asked it. */
   health: AddonHealth | undefined;
+  /** Switched off: installed, with its settings, but asked nothing. */
+  off: boolean;
   onSettings: (addon: InstalledAddon) => void;
   /** "Show in Sports", for an addon that could hold sport. */
   onSports?: (addon: InstalledAddon) => void;
@@ -74,7 +85,8 @@ function AddonCard({
     .join(' · ');
   const [from, to] = fallbackArt(manifest.id);
   const [checking, setChecking] = useState(false);
-  const answering = checking ? t('addonState.checking') : healthLine(t, health);
+  // An addon switched off is asked nothing, so how it last answered is no news.
+  const answering = off ? undefined : checking ? t('addonState.checking') : healthLine(t, health);
   const check = () => {
     if (checking) return;
     setChecking(true);
@@ -88,20 +100,21 @@ function AddonCard({
       {
         text: t('addons.remove'),
         style: 'destructive',
-        onPress: () => addonCollection.remove(addon.transportUrl),
+        // Its switch goes with it (createAddonSwitches follows removals).
+        onPress: () => allAddons.remove(addon.transportUrl),
       },
     ]);
   return (
     <View style={styles.card}>
       <View style={styles.cardTop}>
-        <View style={[styles.logo, { backgroundColor: from, borderColor: to }]}>
+        <View style={[styles.logo, { backgroundColor: from, borderColor: to }, off && styles.dim]}>
           {manifest.logo ? (
             <Image source={manifest.logo} style={styles.logoImage} contentFit="contain" />
           ) : (
             <Text style={styles.logoLetter}>{manifest.name.slice(0, 1).toUpperCase()}</Text>
           )}
         </View>
-        <View style={styles.cardText}>
+        <View style={[styles.cardText, off && styles.dim]}>
           <Text style={styles.name} numberOfLines={2}>
             {manifest.name}
           </Text>
@@ -114,13 +127,22 @@ function AddonCard({
               .join(' · ')}
           </Text>
         </View>
+        {/* Off keeps the addon, its settings and its place; on again, it answers as before. */}
+        <Switch
+          value={!off}
+          onValueChange={(on) => switchAddon(addon, !on)}
+          trackColor={{ true: colors.action, false: colors.surface3 }}
+          thumbColor={colors.text}
+          accessibilityLabel={t('addonState.switchLabel', { name: manifest.name })}
+        />
       </View>
-      {summary ? <Text style={styles.summary}>{summary}</Text> : null}
+      {summary ? <Text style={[styles.summary, off && styles.dim]}>{summary}</Text> : null}
       {manifest.description ? (
-        <Text style={styles.description} numberOfLines={4}>
+        <Text style={[styles.description, off && styles.dim]} numberOfLines={4}>
           {manifest.description}
         </Text>
       ) : null}
+      {off ? <Text style={styles.health}>{t('addonState.offLine')}</Text> : null}
       {answering ? (
         <View style={styles.healthRow}>
           <Text
@@ -156,7 +178,7 @@ function AddonCard({
       ) : null}
       <View style={styles.actions}>
         <Pressable
-          onPress={() => addonCollection.move(addon.transportUrl, -1)}
+          onPress={() => allAddons.move(addon.transportUrl, -1)}
           disabled={index === 0}
           hitSlop={8}
           accessibilityRole="button"
@@ -166,7 +188,7 @@ function AddonCard({
           <Icon name="up" />
         </Pressable>
         <Pressable
-          onPress={() => addonCollection.move(addon.transportUrl, 1)}
+          onPress={() => allAddons.move(addon.transportUrl, 1)}
           disabled={index === count - 1}
           hitSlop={8}
           accessibilityRole="button"
@@ -200,7 +222,9 @@ function AddonCard({
  */
 export function AddonsScreen({ startAdding = false }: { startAdding?: boolean }) {
   const { t } = useTranslation();
-  const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  // Every install, those switched off included: this is where they are switched on again.
+  const collection = useSyncExternalStore(allAddons.subscribe, allAddons.get);
+  const { off } = useSyncExternalStore(addonSwitches.subscribe, addonSwitches.get);
   const [adding, setAdding] = useState<Adding | null>(startAdding ? { kind: 'new' } : null);
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
@@ -208,6 +232,8 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
   const [notice, setNotice] = useState<string | undefined>();
   const [sportsFor, setSportsFor] = useState<InstalledAddon | null>(null);
   const health = useSyncExternalStore(addonHealth.subscribe, addonHealth.get);
+  // What the cards show that the list itself does not hold.
+  const cards = useMemo(() => ({ health, off }), [health, off]);
   // Read again as addons are detected as sports ones, which changes who gets the Sports row.
   useSyncExternalStore(sportsState.subscribe, sportsState.get);
   // The name of the addon an outside link is for, once its manifest has answered.
@@ -272,7 +298,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
     setProblem(undefined);
     const before = collection.addons.map((addon) => addon.transportUrl);
     try {
-      const addon = await addonCollection.install(
+      const addon = await allAddons.install(
         link.trim(),
         adding.kind === 'settings' ? { replaces: adding.addon.transportUrl } : undefined,
       );
@@ -310,8 +336,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
       <FlatList
         data={collection.addons}
         keyExtractor={(addon) => addon.transportUrl}
-        // The cards also show how each addon answers, which the list itself does not hold.
-        extraData={health}
+        extraData={cards}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -333,6 +358,7 @@ export function AddonsScreen({ startAdding = false }: { startAdding?: boolean })
             index={index}
             count={collection.addons.length}
             health={health.get(installIdOf(item))}
+            off={off.has(installIdOf(item))}
             onSettings={openSettings}
             {...(mayHoldSports(item) ? { onSports: setSportsFor } : {})}
           />
@@ -449,6 +475,7 @@ const styles = StyleSheet.create({
   logoImage: { width: 44, height: 44 },
   logoLetter: { ...type.title, color: colors.text },
   cardText: { flex: 1, gap: 2 },
+  dim: { opacity: 0.45 },
   name: { ...type.heading, color: colors.text },
   small: { ...type.small, color: colors.textMuted },
   summary: { ...type.label, color: colors.accent },

@@ -13,7 +13,7 @@ import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Menu } from '../../components/Menu';
 import { fallbackArt } from '../../components/Tile';
-import { addonCollection, addonHealth, checkAddon } from '../../data/addons';
+import { addonHealth, addonSwitches, allAddons, checkAddon, switchAddon } from '../../data/addons';
 import { addonFocusId, healthLine, typeLabel } from '../../data/describe';
 import { PAIR_SERVICE } from '../../data/pairing';
 import { mayHoldSports, setSportsSetting, sportsSetting, sportsState } from '../../data/sports';
@@ -60,12 +60,15 @@ interface AddonCardProps {
   /** Check now is asking it. */
   checking: boolean;
   onCheck: () => void;
+  /** Switched off: installed, with its settings, but asked nothing. */
+  off: boolean;
+  onSwitch: () => void;
   onRemove: () => void;
 }
 
 function AddonCard(props: AddonCardProps) {
   const { addon, index, count, onFocus, onMove, onSettings, onSports, onRemove } = props;
-  const { health, checking, onCheck } = props;
+  const { health, checking, onCheck, off, onSwitch } = props;
   const { t } = useTranslation();
   const { manifest } = addon;
   const id = addonFocusId(addon.transportUrl);
@@ -76,12 +79,16 @@ function AddonCard(props: AddonCardProps) {
   const summary = [types.join(t('common.listSeparator')), gives.join(t('common.listSeparator'))]
     .filter(Boolean)
     .join(' · ');
-  // Not answering or slow takes the description's line, so the card keeps its height.
-  const answering = checking ? t('addonState.checking') : healthLine(t, health);
+  // Not answering or slow takes the description's line, so the card keeps its height. An addon
+  // switched off is asked nothing, so how it last answered is no news.
+  const answering = off ? undefined : checking ? t('addonState.checking') : healthLine(t, health);
   const failed = !checking && health?.state === 'failed';
 
   return (
-    <div className={styles.card} style={{ top: index * CARD_STEP }}>
+    <div
+      className={off ? `${styles.card} ${styles.off}` : styles.card}
+      style={{ top: index * CARD_STEP }}
+    >
       <div className={styles.logo} style={{ backgroundImage: fallbackArt(index, 135) }}>
         <Artwork
           key={manifest.logo}
@@ -99,7 +106,9 @@ function AddonCard(props: AddonCardProps) {
           {addon.official && <span className={styles.badge}>{t('addons.default')}</span>}
         </p>
         {summary && <p className={styles.summary}>{summary}</p>}
-        {answering ? (
+        {off ? (
+          <p className={styles.state}>{t('addonState.offLine')}</p>
+        ) : answering ? (
           <p className={failed ? styles.failing : styles.state} role="status">
             {answering}
           </p>
@@ -108,6 +117,17 @@ function AddonCard(props: AddonCardProps) {
         )}
       </div>
       <div className={styles.actions}>
+        {/* First, so every other button keeps its place and the way to it. */}
+        <Button
+          focusKey={`${id}-switch`}
+          label={t(off ? 'addonState.switchOnLabel' : 'addonState.switchOffLabel', {
+            name: manifest.name,
+          })}
+          onFocus={onFocus}
+          onPress={onSwitch}
+        >
+          {t(off ? 'common.off' : 'common.on')}
+        </Button>
         <Button
           focusKey={`${id}-up`}
           label={t('addons.moveUp', { name: manifest.name })}
@@ -178,7 +198,9 @@ function AddonCard(props: AddonCardProps) {
  */
 export function AddonsScreen() {
   const { t } = useTranslation();
-  const { ready, addons } = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  // Every install, those switched off included: this is where they are switched on again.
+  const { ready, addons } = useSyncExternalStore(allAddons.subscribe, allAddons.get);
+  const { off } = useSyncExternalStore(addonSwitches.subscribe, addonSwitches.get);
   const [focusedUrl, setFocusedUrl] = useState<string | null>(null);
   const [installing, setInstalling] = useState(installRequested);
   const [removing, setRemoving] = useState<InstalledAddon | null>(null);
@@ -211,7 +233,7 @@ export function AddonsScreen() {
   const anchor = Math.max(0, Math.min(focusedIndex - 1, addons.length - VISIBLE_CARDS));
 
   const move = (addon: InstalledAddon, offset: number, key: string) => {
-    addonCollection.move(addon.transportUrl, offset);
+    allAddons.move(addon.transportUrl, offset);
     // React moves the card's element, which drops DOM focus; give it back.
     void setFocus(key);
   };
@@ -241,11 +263,29 @@ export function AddonsScreen() {
     });
   };
 
+  /**
+   * Switches the addon off, keeping its settings and its place, or back on,
+   * and says what that does. In an account it reaches every screen, as the
+   * addons do.
+   */
+  const toggle = (addon: InstalledAddon) => {
+    const name = addon.manifest.name;
+    const switchingOff = !off.has(installIdOf(addon));
+    switchAddon(addon, switchingOff);
+    if (!switchingOff) setNotice(t('addonState.switchedOn', { name }));
+    else {
+      setNotice(
+        t(syncOn() ? 'addonState.switchedOffEverywhere' : 'addonState.switchedOff', { name }),
+      );
+    }
+  };
+
   const confirmRemove = (addon: InstalledAddon) => {
     const index = addons.indexOf(addon);
     const next = addons[index + 1] ?? addons[index - 1];
     afterRemove.current = next ? removeKey(next) : ADD_BUTTON;
-    addonCollection.remove(addon.transportUrl);
+    // Its switch goes with it (createAddonSwitches follows removals).
+    allAddons.remove(addon.transportUrl);
     setNotice(t('addons.removed', { name: addon.manifest.name }));
     setRemoving(null);
   };
@@ -293,6 +333,8 @@ export function AddonsScreen() {
                   health={health.get(installIdOf(addon))}
                   checking={checking.indexOf(installIdOf(addon)) !== -1}
                   onCheck={() => check(addon)}
+                  off={off.has(installIdOf(addon))}
+                  onSwitch={() => toggle(addon)}
                   onRemove={() => setRemoving(addon)}
                 />
               ))}

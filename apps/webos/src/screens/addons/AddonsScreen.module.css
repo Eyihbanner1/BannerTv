@@ -141,6 +141,12 @@
   color: #ffb4c4;
 }
 
+/* Switched off: dimmed, its buttons as they are, so it can be switched on again. */
+.off .logo,
+.off .text {
+  opacity: 0.45;
+}
+
 .actions {
   flex: none;
   white-space: nowrap;

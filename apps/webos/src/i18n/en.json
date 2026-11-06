@@ -187,7 +187,14 @@
     "checkNowLabel": "Check {{name}} now",
     "answering": "{{name}} is answering.",
     "answeringSlowly": "{{name}} answered, but slowly.",
-    "stillNotAnswering": "{{name}} still isn't answering."
+    "stillNotAnswering": "{{name}} still isn't answering.",
+    "switchOffLabel": "{{name}} is on. Switch it off",
+    "switchOnLabel": "{{name}} is off. Switch it on",
+    "switchLabel": "Use {{name}}",
+    "offLine": "Off: its settings are kept",
+    "switchedOff": "{{name}} is off: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOffEverywhere": "{{name}} is off on every screen in your BannerTV account: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOn": "{{name}} is on again."
   },
   "meta": {
     "rating": "IMDb {{rating}}"

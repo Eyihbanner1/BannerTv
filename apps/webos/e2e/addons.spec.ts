@@ -8,7 +8,8 @@ import {
   mockAddons,
   PLAIN_ADDON_URL,
 } from './addons';
-import { mockPlayback, seedStreamAddon } from './play';
+import { mockPlayback, readKv, seedStreamAddon } from './play';
+import { fakeSync, mockSync, openAccount, openSettings, shownCode, typeInto } from './sync';
 import {
   APP_URL,
   expectFocus,
@@ -291,4 +292,120 @@ test('the player names the addon that did not answer', async ({ page }) => {
   await expect(page.getByText('No stream could play')).toBeVisible({ timeout: 20000 });
   await expect(page.getByText("Test Streams didn't answer.")).toBeVisible();
   await expectFocus(page, 'player-problem-streams');
+});
+
+test('an addon switched off leaves Home but keeps its settings, until it is switched on', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await press(page, 'ArrowUp', 'addons-add');
+  await press(page, 'Enter', 'install-field');
+  await page.locator('input[aria-label="Addon address"]').fill(EXTRA_ADDON_URL);
+  await pressTo(page, 'ArrowDown', 'Add');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Move Open Shorts up');
+  await settle(page);
+
+  // The switch is the card's first button, so the others keep their places.
+  await pressTo(page, 'ArrowLeft', 'Open Shorts is on. Switch it off');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Open Shorts is off. Switch it on');
+  await expect(page.getByText(/^Open Shorts is off: it gives no rows/)).toBeVisible();
+  await expect(page.getByText('Off: its settings are kept')).toHaveCount(1);
+  const cards = page.locator('main p:has(> span)');
+  await expect(cards).toHaveCount(3);
+  // Kept by the install's name, never by its address.
+  await expect.poll(() => readKv(page, 'addons.off')).toHaveLength(1);
+  expect(JSON.stringify(await readKv(page, 'addons.off'))).not.toContain('addon.example.com');
+
+  // Home leaves its row out, and still does after a restart.
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('h2', { hasText: 'Trending shorts' })).toHaveCount(0);
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('h2', { hasText: 'Trending shorts' })).toHaveCount(0);
+
+  // Switched on again, its row is back.
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await expect(cards).toHaveCount(3);
+  await page.keyboard.press('ArrowDown');
+  await settle(page);
+  await page.keyboard.press('ArrowDown');
+  await settle(page);
+  await walkTo(page, 'ArrowLeft', 'Open Shorts is off. Switch it on');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Open Shorts is on again.')).toBeVisible();
+  await expect(page.getByText('Off: its settings are kept')).toHaveCount(0);
+  await expect.poll(() => readKv(page, 'addons.off')).toEqual([]);
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('h2', { hasText: 'Trending shorts' })).toHaveCount(1);
+
+  // Removing an addon switched off takes its switch with it.
+  await openSection(page, 'addons');
+  await page.keyboard.press('ArrowDown');
+  await settle(page);
+  await page.keyboard.press('ArrowDown');
+  await settle(page);
+  await walkTo(page, 'ArrowLeft', 'Open Shorts is on. Switch it off');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => readKv(page, 'addons.off')).toHaveLength(1);
+  await walkTo(page, 'ArrowRight', 'Remove Open Shorts');
+  await press(page, 'Enter', 'remove-addon-cancel');
+  await press(page, 'ArrowLeft', 'remove-addon-confirm');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Removed Open Shorts.')).toBeVisible();
+  await expect(cards).toHaveCount(2);
+  await expect.poll(() => readKv(page, 'addons.off')).toEqual([]);
+});
+
+test('in a BannerTV account, switching an addon off and removing one say they reach every screen', async ({
+  page,
+}) => {
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  await press(page, 'Enter', 'account-code-saved');
+  const code = await shownCode(page);
+  await press(page, 'Enter', 'account-check-field');
+  await typeInto(page, 'Last four characters of the code', code.slice(-4));
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('This screen is in your account.')).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, 'settings-account');
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  await pressTo(page, 'ArrowDown', 'Move OpenSubtitles v3 up');
+  await pressTo(page, 'ArrowLeft', 'OpenSubtitles v3 is on. Switch it off');
+  const pushes = () => sync.requests.filter((request) => request === 'POST /v1/push').length;
+  const before = pushes();
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByText(/^OpenSubtitles v3 is off on every screen in your BannerTV account: /),
+  ).toBeVisible();
+  // The switch goes to the account like any other change.
+  await expect.poll(pushes, { timeout: 15000 }).toBeGreaterThan(before);
+
+  await walkTo(page, 'ArrowRight', 'Remove OpenSubtitles v3');
+  await press(page, 'Enter', 'remove-addon-cancel');
+  await expect(
+    page.getByText(
+      'Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address.',
+    ),
+  ).toBeVisible();
+  await pressBack(page);
+  await expectFocusLabel(page, 'Remove OpenSubtitles v3');
 });

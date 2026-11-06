@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mockAddons } from '../../webos/e2e/addons.ts';
+import { EXTRA_ADDON_URL, mockAddons } from '../../webos/e2e/addons.ts';
 import { mockPlayback, STREAM_ADDON_URL } from '../../webos/e2e/play.ts';
 
 /*
@@ -92,5 +92,42 @@ test('a later launch opens on Home, and Settings shows playback and the build', 
   await page.getByRole('tab', { name: 'Settings' }).click();
   await expect(page.getByText('Auto-play picks')).toBeVisible();
   await expect(page.getByText(/BannerTV for phones/)).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('an addon switched off in Addons leaves Home, and comes back when switched on', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await openApp(page);
+  await page.getByRole('tab', { name: 'Settings' }).click();
+  await page.getByText('Addons', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add an addon' }).last().click();
+  await page.getByLabel('Addon address').fill(EXTRA_ADDON_URL);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.getByText('Added Open Shorts.', { exact: false })).toBeVisible();
+
+  const use = page.getByRole('switch', { name: 'Use Open Shorts' });
+  await expect(use).toBeChecked();
+  await use.click();
+  await expect(use).not.toBeChecked();
+  await expect(page.getByText('Off: its settings are kept')).toBeVisible();
+  await page.getByLabel('Back').first().click();
+  // Still installed: Settings counts it.
+  await expect(page.getByText('3 installed')).toBeVisible();
+  await page.getByRole('tab', { name: 'Home' }).click();
+  // Cinemeta's rows are there, by their titles as the phone shows them.
+  await expect(page.getByText('Popular', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Trending shorts')).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Settings' }).click();
+  await page.getByText('Addons', { exact: true }).click();
+  await use.click();
+  await expect(use).toBeChecked();
+  await expect(page.getByText('Off: its settings are kept')).toHaveCount(0);
+  await page.getByLabel('Back').first().click();
+  await page.getByRole('tab', { name: 'Home' }).click();
+  await expect(page.getByText('Trending shorts')).toBeVisible();
   expect(errors).toEqual([]);
 });
