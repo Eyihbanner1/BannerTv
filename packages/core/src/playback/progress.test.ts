@@ -183,6 +183,19 @@ describe('createProgressStore', () => {
     expect(progress.resumeFrom('tt1')).toBeUndefined();
   });
 
+  it('never leads a resume in below where resumes begin, so leaving at once keeps it resumable', async () => {
+    let time = 1_000_000;
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => time });
+    await progress.load();
+    progress.record(movie(MIN_RESUME_SECONDS + 2));
+    time += AWAY_MS;
+    expect(progress.resumeFrom('tt1')).toBe(MIN_RESUME_SECONDS);
+    // The player saves its first reading there, and it still resumes.
+    progress.record(movie(MIN_RESUME_SECONDS));
+    expect(progress.resumeAt('tt1')).toBe(MIN_RESUME_SECONDS);
+    expect(progress.resumeFrom('tt1')).toBe(MIN_RESUME_SECONDS);
+  });
+
   it('never starts a resume before 0, and a clock set back is no time away', () => {
     expect(resumeLeadIn(3, 0, 0)).toBe(0);
     expect(resumeLeadIn(600, 5000, 1000)).toBe(600 - RESUME_LEAD_IN_S);

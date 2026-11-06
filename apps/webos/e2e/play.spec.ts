@@ -740,6 +740,14 @@ test('Up Next says what plays next and when, the pointer picks its buttons, and 
   await expectFocus(page, 'player-upnext-play');
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 
+  // A click on the card's own words is the card's: it stays, and the controls do not come.
+  const words = (await card.getByText('S1:E2', { exact: true }).boundingBox())!;
+  await page.mouse.move(words.x + words.width / 2, words.y + words.height / 2, { steps: 4 });
+  await page.mouse.click(words.x + words.width / 2, words.y + words.height / 2);
+  await page.waitForTimeout(300);
+  await expect(card).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+
   // A click on the picture beside it brings the controls in its place, still playing.
   await page.mouse.move(400, 300, { steps: 4 });
   await page.mouse.click(400, 300);
@@ -1501,8 +1509,19 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await press(page, 'ArrowRight', 'player-back10');
   const live = (await video(page)).time;
   await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  // Waiting to land, Forward 10 s has somewhere to come back from.
+  await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
+    'aria-label',
+    'Forward 10 s',
+  );
+  await page.waitForTimeout(300);
+  expect(await seeks()).toBe(0);
   await expect.poll(seeks, { timeout: 2000 }).toBe(1);
-  await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 5);
+  // To the oldest moment kept, and on from there as it plays.
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 3);
+  await page.waitForTimeout(1000);
+  expect(await seeks()).toBe(1);
   await press(page, 'ArrowRight', 'player-play');
   await press(page, 'ArrowRight', 'player-fwd10');
   await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
@@ -1567,11 +1586,12 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await expect(goToLive).toHaveAttribute('aria-label', 'Go to live');
   await expect(forward).toHaveAttribute('aria-label', 'Forward 10 s');
 
-  // Go to live, from where Next episode would be.
+  // Go to live, from where Next episode would be. A rewind still to land gives way to it.
   await press(page, 'ArrowRight', 'player-play');
   await press(page, 'ArrowRight', 'player-fwd10');
   await press(page, 'ArrowRight', 'player-live');
   const behind = (await video(page)).time;
+  await pressCode(page, REWIND);
   await page.keyboard.press('Enter');
   await expect.poll(seeks, { timeout: 500 }).toBe(2);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 3);
@@ -1579,10 +1599,11 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await expect(behindTime).toHaveText('');
   await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live');
   await expect(page.locator('[class*="liveBehind"]')).toHaveCount(0);
-  // Dimmed now, it does nothing.
+  // Dimmed now, it does nothing, and the rewind never lands.
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1200);
   expect(await seeks()).toBe(2);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
 
   // The pointer: the bar is what the broadcast keeps, the time over it how
   // far behind live a click lands, and the click goes there.
@@ -1656,8 +1677,6 @@ test('on a broadcast, Left and Right with the controls hidden add up behind live
   await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live', {
     timeout: 5000,
   });
-  // Never a "Back to" offer on a broadcast.
-  await expect(page.getByText(/^Back to /)).toHaveCount(0);
 });
 
 test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({

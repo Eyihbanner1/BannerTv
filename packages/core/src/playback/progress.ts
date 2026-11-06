@@ -102,7 +102,8 @@ export interface ProgressStore {
   resumeAt(videoId: string): number | undefined;
   /**
    * Where playing from saved progress starts: resumeAt, a few seconds early
-   * (resumeLeadIn). Undefined when it starts from the beginning. What Details
+   * (resumeLeadIn), but never before MIN_RESUME_SECONDS. Undefined when it
+   * starts from the beginning. What Details
    * says ("Resume from 42:10") stays resumeAt; a switch of stream keeps its
    * exact place and never asks this.
    */
@@ -395,7 +396,10 @@ export function createProgressStore(options: {
     resumeFrom(videoId, at = now()) {
       const entry = entries.get(videoId);
       const place = resumeAt(entry);
-      return place === undefined || !entry ? undefined : resumeLeadIn(place, entry.updatedAt, at);
+      if (place === undefined || !entry) return undefined;
+      // Never led in below where a resume begins: the first reading is saved
+      // at once, and one under that would drop the video from Continue Watching.
+      return Math.max(MIN_RESUME_SECONDS, resumeLeadIn(place, entry.updatedAt, at));
     },
     version: () => changes,
     subscribe(listener) {

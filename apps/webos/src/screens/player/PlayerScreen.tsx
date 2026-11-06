@@ -124,6 +124,11 @@ const BACK_AFTER_HIDE_MS = 2000;
 const LEAVE_HINT_MS = 3000;
 /** What the pointer can press in the player; anywhere else is the picture. */
 const CONTROL = '[role="button"], [role="slider"]';
+/**
+ * A corner card over the picture: Up Next, Skip intro, the sleep timer's
+ * warning. Sheets are dialogs too, but while one is open the picture takes no clicks.
+ */
+const CARD = '[role="dialog"]';
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
 /** A minutes sleep timer is read again at least this often: does it run out before the next episode? */
@@ -220,6 +225,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const pointerOnChrome = useRef(false);
   // Whether it rests on a control, whose OK is that control's; elsewhere it is the picture's.
   const pointerOnControl = useRef(false);
+  // Whether it rests on a corner card (Up Next, Skip intro, the sleep timer's warning).
+  const pointerOnCard = useRef(false);
   // Whether the wheel has moved focus since the pointer last moved: OK is then the focused control's.
   const wheelMovedFocus = useRef(false);
   const lastAutoHide = useRef(0);
@@ -834,6 +841,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const target = event.target instanceof Element ? event.target : null;
     pointerOnChrome.current = target?.closest('[data-player-chrome]') != null;
     pointerOnControl.current = target?.closest(CONTROL) != null;
+    pointerOnCard.current = target?.closest(CARD) != null;
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
     // Behind the problem box, or while a stream opens, the controls would not
@@ -900,6 +908,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const onPictureClick = (event: MouseEvent) => {
     if (clickCameWithOk()) return;
     if (event.target instanceof Element && event.target.closest(CONTROL)) return;
+    // A corner card's own edge, picture or words are the card's, not the picture's.
+    if (event.target instanceof Element && event.target.closest(CARD)) return;
     if (!picturePressable()) return;
     if (chrome && wheelMovedFocus.current) pressFocused();
     else pressPicture();
@@ -914,8 +924,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (event.keyCode !== KeyCode.Ok || inputMode.get() !== 'pointer') return;
     // A control the pointer rests on is the picture while the controls are hidden.
     if (chrome && (pointerOnControl.current || wheelMovedFocus.current)) return;
-    // A corner card's button under the pointer has focus from it, and takes its OK.
-    if (card && pointerOnControl.current) return;
+    // A corner card under the pointer is the card's: its button has focus
+    // from the pointer, or keeps the focus it had, and takes the OK.
+    if (card && (pointerOnControl.current || pointerOnCard.current)) return;
     if (!picturePressable()) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1192,9 +1203,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   // Two tiers with fixed places: nothing comes or goes while the video plays.
   // What can't be used now stays, dimmed, and says why when focused.
+  // Playing live with nothing waiting to land: Forward 10 s and Go to live
+  // have nowhere to go. A rewind still adding up has somewhere to come back from.
+  const liveNow = atLive && scrubTo === null;
   function skipButton(direction: -1 | 1) {
     if (!session || waiting) return;
-    if (direction === 1 && atLive) return;
+    if (direction === 1 && liveNow) return;
     if (state.live && !session.liveWindow()) {
       // As Rewind on a broadcast whose window nobody can tell: at once.
       const at = session.trustedPosition() ?? state.position;
@@ -1204,6 +1218,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
   function goToLive() {
     if (!session || waiting) return;
+    // A rewind still to land would undo it.
+    cancelScrub();
     session.goToLive();
     armHide();
   }
@@ -1238,7 +1254,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-fwd10',
       icon: 'fwd10',
       label: t('player.forward10'),
-      unavailable: atLive ? t('player.atLive') : undefined,
+      unavailable: liveNow ? t('player.atLive') : undefined,
       onPress: () => skipButton(1),
     },
     // A broadcast has Go to live in Next episode's place; anything with an
@@ -1250,7 +1266,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           label: t('player.goToLive'),
           unavailable: !state.liveWindow
             ? t('player.liveUnknownPoint')
-            : atLive
+            : liveNow
               ? t('player.atLive')
               : undefined,
           onPress: goToLive,
