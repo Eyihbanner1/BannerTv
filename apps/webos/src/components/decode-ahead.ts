@@ -40,8 +40,9 @@ let movedUp = false;
  * With `gridAhead`, the tiles of a poster grid that its next press brings
  * into view, nearest first, standing in for the rows after the current one.
  * The grid hands them over each time it moves and lets go when it closes;
- * a stack of rows that slides again takes over from them, as Home does when
- * See all closes over it.
+ * a stack of rows that moves to another row takes over from them. One that
+ * only lays out again where it was does not: Home does that under See all
+ * when Continue Watching or the live row changes.
  */
 let grid: { track: HTMLElement; key: string; tiles: HTMLElement[] } | null = null;
 let decoding = false;
@@ -316,9 +317,9 @@ export function warmBoxRef(element: HTMLElement | null): void {
  */
 export function decodeAheadOf(track: HTMLElement, row: HTMLElement | null): void {
   if (!canGetReady()) return;
-  grid = null;
   const key = row ? row.getAttribute('data-row-key') : null;
   if (key !== currentKey) {
+    grid = null;
     const before = rowElement(currentKey);
     movedUp = !!(
       row &&

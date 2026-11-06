@@ -543,9 +543,9 @@ describe('gridAhead', () => {
     expect(page.marks.filter((name) => !/^ahead(-done)?:grid-1$/.test(name))).toEqual([]);
   });
 
-  it('gives way to a stack of rows that slides again, as Home does under See all', async () => {
+  it('gives way to a stack of rows that moves to another row', async () => {
     const ahead = await load({ gridAhead: true, marks: true });
-    const home = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    const home = stack(posterRow('a'), posterRow('b'), posterRow('c'), posterRow('d'));
     slide(ahead, home.track, home.rows[0]!);
     const { track, row } = posterGrid(4);
     handOver(ahead, track, 'grid-0', row(3));
@@ -553,9 +553,28 @@ describe('gridAhead', () => {
     // The grid's tiles, not Home's row after next.
     expect(decodedSrcs()).toEqual(['https://art/poster/grid/21']);
     await settleDecodes();
+    slide(ahead, home.track, home.rows[1]!);
+    runFrames(3);
+    expect(decodedSrcs()).toEqual(['https://art/poster/d/0']);
+  });
+
+  it('keeps the grid’s tiles while a stack under it only lays out again where it was', async () => {
+    const ahead = await load({ gridAhead: true });
+    const home = stack(posterRow('a'), posterRow('b'), posterRow('c'));
+    slide(ahead, home.track, home.rows[0]!);
+    const { track, row } = posterGrid(4);
+    handOver(ahead, track, 'grid-0', row(3));
+    runFrames(3);
+    expect(decodedSrcs()).toEqual(['https://art/poster/grid/21']);
+    await settleDecodes();
+    // Home under See all, as Continue Watching or the live row changes.
     slide(ahead, home.track, home.rows[0]!);
     runFrames(3);
-    expect(decodedSrcs()).toEqual(['https://art/poster/c/0']);
+    expect(decodedSrcs()).toEqual(['https://art/poster/grid/22']);
+    await decodeAll();
+    // All seven of the grid's, and none of Home's row after next.
+    const asked = page.marks.filter((name) => name.indexOf('ahead:') === 0);
+    expect(asked).toEqual(row(3).map(() => 'ahead:grid-0'));
   });
 
   it('lets go of the tiles of a grid that closes, and only of that grid', async () => {
