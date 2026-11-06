@@ -41,6 +41,11 @@ export interface ProgressEntry {
    * the video here drops it.
    */
   from?: 'trakt';
+  /**
+   * When the viewer last marked this video not watched, kept on later saves:
+   * the account's watched ticks older than it don't count (sync/merge.ts).
+   */
+  unmarkedAt?: number;
 }
 
 /** What the BannerTV account changes in progress. */
