@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
 import { subtitleOffsets } from '../../data/library';
+import { mark } from '../../platform/marks';
 import { chooseSubtitleLanguage, wantedSubtitle } from '../../data/tracks';
 import { streamTitle } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
@@ -148,6 +149,8 @@ export function useSubtitles(
     // The session tells of every clock reading, which changes nothing a decision reads.
     const nothingNew = sameAsLast();
     const settle = (next: SubtitleChoice) => {
+      // For a trace of starting a video: when the subtitles were settled, and how.
+      mark(`sub:chosen:${next ? next.kind : 'off'}`);
       decided.current = { entry, choice: next, auto: true };
       setChosen({ entry, choice: next });
     };

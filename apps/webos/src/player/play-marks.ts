@@ -3,7 +3,8 @@ import { tuning } from '../platform/tuning';
 
 /**
  * The stages from Play to the first picture, in order, each marked as
- * `play:<stage>` when the `marks` tuning switch is on.
+ * `play:<stage>` when the `marks` tuning switch is on. The subtitles' own
+ * choice is marked apart, as `sub:chosen:track|file|off`.
  */
 export const PLAY_STAGES = [
   /** Play was pressed, or the player replaced for the next episode. */
