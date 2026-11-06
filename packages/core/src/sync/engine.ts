@@ -2,6 +2,7 @@ import { MAIN_PROFILE_ID, MAX_PROFILES } from '../profiles/profiles';
 import type { KeyValueStore } from '../storage';
 import { createStore, type Listener } from '../store';
 import type { Timers } from '../timers';
+import { type AsideCopy, asideProfileIds, describeAside } from './aside';
 import type { AccountClock } from './clock';
 import { newAccountCode, readAccountCode } from './code';
 import type { SyncCrypto } from './crypto';
@@ -14,18 +15,23 @@ import {
   type Items,
   itemAt,
   type LiveItem,
+  newItems,
 } from './items';
 import { type AccountKeys, deriveAccountKeys, wireName } from './keys';
 import {
   ASIDE_KEY,
+  type AsideItem,
   asideUntil,
   deleteSyncKeys,
   type DocumentBase,
+  dropAside,
   expireAside,
   type JoinMode,
+  loadAside,
   loadBase,
   loadPending,
   loadSyncState,
+  saveAside,
   saveBase,
   savePending,
   saveSyncState,
@@ -90,9 +96,12 @@ export interface SyncStatus {
  * again carries on where it stopped. `closed`: no new accounts now.
  * `exists`: the new code was taken (try again). `key`: making an account
  * needs the service's setup key, and it was missing or wrong. `profiles`:
- * Bring would pass six profiles. `signed-in`: this screen already has an
- * account. `not-started`: start() has not run or could not read what the
- * engine kept, or confirmCreate() came before create().
+ * Bring, or bringing back what Use set aside, would pass six profiles.
+ * `signed-in`: this screen already has an account, or, for bringBack(), is
+ * part way into one or its account was deleted elsewhere. `none`: there is
+ * no set-aside copy to bring back: it ran out, was brought back already, or
+ * was never kept. `not-started`: start() has not run or could not read what
+ * the engine kept, or confirmCreate() came before create().
  */
 export type SetupProblem =
   | 'invalid'
@@ -103,6 +112,7 @@ export type SetupProblem =
   | 'key'
   | 'profiles'
   | 'signed-in'
+  | 'none'
   | 'not-started';
 
 export class SyncSetupError extends Error {
@@ -122,6 +132,12 @@ export type CodeCheck = 'ok' | 'invalid' | 'unknown' | 'offline';
 export interface CreateOptions {
   /** The service's setup key, when its status says making an account needs one (`key`). */
   key?: string;
+}
+
+/** What bringing back the set-aside copy changed. */
+export interface BroughtBack {
+  /** Profiles came back onto this screen's list: the app starts again, as after a join. */
+  profiles: boolean;
 }
 
 /** The profile in use and its parts: the core's (profileParts) and the app's preferences part. */
@@ -159,6 +175,12 @@ export interface SyncEngineOptions {
    * service: the app reloads.
    */
   onJoined?: () => void;
+  /**
+   * Called when bringing back the set-aside copy, carried on at a later
+   * launch because the one that started it was interrupted, has put profiles
+   * back on this screen's list: the app reloads.
+   */
+  onBroughtBack?: () => void;
 }
 
 export interface SyncEngine {
@@ -224,6 +246,25 @@ export interface SyncEngine {
    * another call gets the same promise.
    */
   deleteAccount(): Promise<void>;
+  /**
+   * What the copy a join with Use kept of this screen holds, while it lasts:
+   * undefined when there is none, it ran out, or it could not be read.
+   */
+  asideCopy(): Promise<AsideCopy | undefined>;
+  /**
+   * Brings back what a join with Use set aside (ADR 0006, decision 12), then
+   * throws the copy away. Signed in, it is a late Bring: the copy's profiles
+   * come back into the account, the account's settings win where both have
+   * one, My List and Continue Watching keep their own times, and addons the
+   * account has nowhere come back; the service must answer, as for a join.
+   * Signed out, the same against what the screen holds now. Nothing is ever
+   * removed. Refused (`profiles`) when the profiles would pass six, and
+   * (`none`) when there is no copy. Runs one at a time with create, confirm,
+   * join, leave and delete, and while it runs another call gets the same
+   * promise. Safe to interrupt: the copy is marked first, and a launch that
+   * finds the mark carries it on, which changes nothing a second time.
+   */
+  bringBack(): Promise<BroughtBack>;
 }
 
 const PUSH_DELAY_MS = 3 * 1000;
@@ -1317,16 +1358,21 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     );
   }
 
-  /** Whether the account already has an addon at the address of `value`. */
-  function addonAt(doc: Doc, value: unknown): boolean {
+  /** Whether `items` hold a live addon at the address of `value`. */
+  function addonIn(items: Items, value: unknown): boolean {
     if (!isObject(value) || typeof value.u !== 'string') return false;
-    for (const key of Object.keys(doc.base.items)) {
-      const item = doc.base.items[key]!;
+    for (const key of Object.keys(items)) {
+      const item = items[key]!;
       if (key.indexOf('a/') === 0 && !isRemoval(item) && isObject(item.v) && item.v.u === value.u) {
         return true;
       }
     }
     return false;
+  }
+
+  /** Whether the account already has an addon at the address of `value`. */
+  function addonAt(doc: Doc, value: unknown): boolean {
+    return addonIn(doc.base.items, value);
   }
 
   async function writeAside(parts: readonly SyncPart[]): Promise<void> {
@@ -1403,6 +1449,246 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     await request(true, false);
   }
 
+  /** The profiles on this screen's list, as one text, to tell whether bringing back changed it. */
+  function profilesHere(): string {
+    const ids: string[] = [];
+    for (const part of accountParts) {
+      if (part.document !== 'profiles') continue;
+      part.snapshot().forEach((item, key) => {
+        if (key.indexOf('/') === -1) ids.push(key);
+      });
+    }
+    return ids.sort().join(' ');
+  }
+
+  /** The copy's items that `part` owns, without Trakt's: Use never took those away. */
+  function asideItems(aside: SyncAside, part: SyncPart): Array<[string, AsideItem]> {
+    const kept = Object.prototype.hasOwnProperty.call(aside.documents, part.document)
+      ? aside.documents[part.document]!
+      : [];
+    return kept.filter(([key, item]) => !item.trakt && partOwns(part, key));
+  }
+
+  /**
+   * Puts the copy's items into `sync/pend` as a late Bring would: where the
+   * account has an item (a setting, a profile's name, an addon taken off)
+   * it wins, values with times of their own (My List, Continue Watching)
+   * merge by those times, and an addon comes back only where the account
+   * has none at its address. Nothing is removed. Done again, it finds
+   * nothing more to add.
+   */
+  async function seedAside(aside: SyncAside, parts: readonly SyncPart[]): Promise<void> {
+    const touched = new Set<Doc>();
+    // Values with no time of their own are stamped one after another, so the profiles that
+    // come back keep the copy's order.
+    let stamped: number | undefined;
+    for (const part of parts) {
+      const doc = await ensureDoc(part.document);
+      if (doc.newer || profileRemoved(doc.name)) continue;
+      for (const [key, kept] of asideItems(aside, part)) {
+        const current = viewItem(doc, key);
+        let edit: Item;
+        if (kept.t !== undefined) {
+          edit = { t: kept.t, v: kept.v };
+        } else {
+          if (current) continue;
+          const view = () => mergeItems(doc.name, doc.base.items, doc.pend);
+          if (doc.name === 'addons' && key.indexOf('a/') === 0 && addonIn(view(), kept.v)) {
+            continue;
+          }
+          stamped = clock.stamp(stamped);
+          edit = { t: stamped, v: kept.v };
+        }
+        if (!changesItem(doc.name, key, current, edit)) continue;
+        doc.pend[key] = edit;
+        touched.add(doc);
+      }
+    }
+    await Promise.all(Array.from(touched).map(savePendLater));
+  }
+
+  /**
+   * Puts the copy's items back into a store on a screen without an account,
+   * by seedAside's rules against what the store holds now: what it has wins,
+   * except a title or a video the copy has a newer time for.
+   */
+  async function adoptAside(aside: SyncAside, part: SyncPart, stamp: () => number): Promise<void> {
+    const here = part.snapshot();
+    const set = new Map<string, LiveItem>();
+    for (const [key, kept] of asideItems(aside, part)) {
+      const mine = here.get(key);
+      if (kept.t === undefined) {
+        if (mine) continue;
+        if (part.document === 'addons' && key.indexOf('a/') === 0) {
+          const taken: Items = newItems();
+          here.forEach((item, other) => (taken[other] = { t: 0, v: item.v }));
+          if (addonIn(taken, kept.v)) continue;
+        }
+        set.set(key, { t: stamp(), v: kept.v });
+        continue;
+      }
+      // A store whose values have no times of their own keeps what it has.
+      if (mine && mine.t === undefined) continue;
+      const current: Item | undefined = mine ? { t: mine.t!, v: mine.v } : undefined;
+      const edit: LiveItem = { t: kept.t, v: kept.v };
+      if (!changesItem(part.document, key, current, edit)) continue;
+      const merged = mergeItem(part.document, key, current, edit);
+      if (merged && !isRemoval(merged)) set.set(key, merged);
+    }
+    if (set.size > 0) await part.adopt({ set, remove: [] });
+  }
+
+  /** Marks the copy as being brought back, so an interrupted launch has the next one carry it on. */
+  async function markBack(aside: SyncAside): Promise<void> {
+    if (aside.back) return;
+    try {
+      await saveAside(storage, { ...aside, back: true });
+    } catch {
+      // Unmarked, an interrupted bringing back waits for the person to ask again: done twice,
+      // it changes nothing the second time.
+    }
+  }
+
+  /** Lets an account the service no longer knows end on this screen, then says why bringing back stopped. */
+  async function bringBackStopped(error: unknown): Promise<SyncSetupError> {
+    if (error instanceof Stop && (error.reason === 'gone' || error.reason === 'denied')) {
+      await becomeGone();
+      return new SyncSetupError('signed-in');
+    }
+    return setupError(error);
+  }
+
+  /** Brings the copy back into the account: a late Bring, then a push. */
+  async function bringBackIntoAccount(aside: SyncAside, ids: readonly string[]): Promise<void> {
+    await loadParts(accountParts);
+    // The account as it is now decides what wins: after any sync that is under way.
+    if (running) await running;
+    try {
+      await pull(ACCOUNT_DOCUMENTS);
+    } catch (error) {
+      throw await bringBackStopped(error);
+    }
+    const profiles = docs.get('profiles')!;
+    const view = mergeItems('profiles', profiles.base.items, profiles.pend);
+    const accountIds = liveProfiles(view);
+    if (accountIds.indexOf(MAIN_PROFILE_ID) === -1) accountIds.push(MAIN_PROFILE_ID);
+    // A profile deleted in the account stays deleted (ADR 0006, decision 2).
+    const back = ids.filter((id) => {
+      const item = itemAt(view, id);
+      return !item || !isRemoval(item);
+    });
+    const all = accountIds.slice();
+    back.forEach((id) => {
+      if (all.indexOf(id) === -1) all.push(id);
+    });
+    if (all.length > MAX_PROFILES) throw new SyncSetupError('profiles');
+    // The documents of the profiles both have, so the account's settings win as they are now.
+    const documents: string[] = [];
+    back.forEach((id) => {
+      if (accountIds.indexOf(id) !== -1) documents.push(...profileDocuments(id));
+    });
+    try {
+      await pull(documents);
+    } catch (error) {
+      throw await bringBackStopped(error);
+    }
+    await markBack(aside);
+    await seedAside(aside, await everyPart(back));
+    // The stores then match the account with what came back in it: the profile in use's and
+    // the account's own through their watches, the others' as a join writes them.
+    await applyActive();
+    for (const id of back) {
+      if (active && id === active.id) continue;
+      for (const part of partsOf(id)) {
+        await apply({ part, seen: new Map(), adopting: 0, live: false });
+      }
+    }
+    await dropAsideOnce();
+    updateStatus();
+    await request(true, false);
+  }
+
+  /** Puts the copy back on a screen without an account. Nothing is sent anywhere. */
+  async function bringBackHere(aside: SyncAside, ids: readonly string[]): Promise<void> {
+    const all = localProfileIds().filter(usableProfileId);
+    ids.forEach((id) => {
+      if (all.indexOf(id) === -1) all.push(id);
+    });
+    if (all.length > MAX_PROFILES) throw new SyncSetupError('profiles');
+    await markBack(aside);
+    const parts = await everyPart(ids);
+    let stamped: number | undefined;
+    const stamp = () => (stamped = clock.stamp(stamped));
+    for (const part of parts) await adoptAside(aside, part, stamp);
+    await dropAsideOnce();
+  }
+
+  /** The copy has been brought back. Left there, it is still marked: the next launch finds nothing more to do, and drops it. */
+  async function dropAsideOnce(): Promise<void> {
+    try {
+      await dropAside(storage);
+    } catch {
+      // As the comment above says.
+    }
+  }
+
+  /**
+   * Brings back what Use set aside, signed in or out (see bringBack). The
+   * checks come before anything changes, so a refusal leaves the screen,
+   * the account and the copy as they were.
+   */
+  async function bringBackAside(): Promise<BroughtBack> {
+    let aside: SyncAside | undefined;
+    try {
+      aside = await loadAside(storage, timers);
+    } catch {
+      throw new SyncSetupError('not-started');
+    }
+    // One being brought back is finished even past its 30 days: it was asked for within them.
+    if (!aside || (!aside.back && aside.until <= clock.local())) {
+      if (aside) await dropAsideOnce();
+      throw new SyncSetupError('none');
+    }
+    if (state && state.phase !== 'ready') throw new SyncSetupError('signed-in');
+    const before = profilesHere();
+    const ids = asideProfileIds(aside);
+    if (state) await bringBackIntoAccount(aside, ids);
+    else await bringBackHere(aside, ids);
+    return { profiles: profilesHere() !== before };
+  }
+
+  /**
+   * At launch: a bringing back that an earlier launch started and did not
+   * finish carries on. Out of reach, it waits for the next launch, or for
+   * the person to ask again; refused, its mark goes, and the copy runs out
+   * as it would have.
+   */
+  function carryBack(): void {
+    void loadAside(storage, timers).then(
+      async (aside) => {
+        if (!aside || !aside.back) return;
+        try {
+          const done = await once(bringing, bringBackAside);
+          if (done.profiles) options.onBroughtBack?.();
+        } catch (error) {
+          const problem = setupError(error).problem;
+          if (problem === 'offline' || problem === 'not-started' || problem === 'none') return;
+          try {
+            const now = await loadAside(storage, timers);
+            if (now && now.back) {
+              delete now.back;
+              await saveAside(storage, now);
+            }
+          } catch {
+            // Tried again at the next launch.
+          }
+        }
+      },
+      // Unread: the next launch looks again.
+      () => undefined,
+    );
+  }
+
   /**
    * A create or join interrupted at an earlier launch, or a join the person
    * started that could not reach the service, carried on until it gets through.
@@ -1474,6 +1760,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   const joining: Running<void> = {};
   const leaving: Running<void> = {};
   const deleting: Running<void> = {};
+  const bringing: Running<BroughtBack> = {};
   /** The last of them asked for, settled or not: they run one at a time, each after it. */
   let lastSetup: Promise<unknown> = Promise.resolve();
 
@@ -1547,6 +1834,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           throw error;
         }
         updateStatus();
+        // Bringing back what Use set aside, interrupted at an earlier launch, carries on.
+        if (!state || state.phase === 'ready') carryBack();
         if (!state) return;
         if (state.phase === 'ready') {
           scheduleFirstPull();
@@ -1729,6 +2018,34 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
           }
         }
         await forget();
+      });
+    },
+
+    async asideCopy() {
+      // After the start has thrown away a copy past its 30 days, and after a bringing back.
+      if (starting) await starting.catch(() => undefined);
+      await lastSetup;
+      let aside: SyncAside | undefined;
+      try {
+        aside = await loadAside(storage);
+      } catch {
+        return undefined;
+      }
+      if (!aside || (!aside.back && aside.until <= clock.local())) return undefined;
+      return describeAside(aside);
+    },
+
+    bringBack() {
+      return once(bringing, async () => {
+        // A create or join being carried on is left to carry on: bringing back refuses it.
+        if (!starting) throw new SyncSetupError('not-started');
+        try {
+          await starting;
+        } catch {
+          throw new SyncSetupError('not-started');
+        }
+        if (carrying) await carrying;
+        return bringBackAside();
       });
     },
   };
