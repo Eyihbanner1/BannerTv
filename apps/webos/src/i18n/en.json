@@ -592,7 +592,11 @@
     "show": "Show",
     "hideLabel": "Hide {{name}} from Home",
     "showLabel": "Show {{name}} on Home",
-    "hiddenFrom": "Hidden · {{addon}}"
+    "hiddenFrom": "Hidden · {{addon}}",
+    "hidden": "Hidden",
+    "continueNote": "Always first",
+    "myListNote": "Your list, newest first",
+    "liveSportNote": "Matches live now on your sports addons"
   },
   "library": {
     "show": "Show",

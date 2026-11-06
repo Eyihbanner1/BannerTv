@@ -1,8 +1,17 @@
-import { type BoardRow, buildBoard, kidsTitleAllowed, type ContinueItem } from '@bannertv/core';
+import {
+  type BoardRow,
+  buildBoard,
+  CONTINUE_LINE,
+  kidsTitleAllowed,
+  type ContinueItem,
+  libraryPreview,
+  LIVE_SPORT_LINE,
+  MY_LIST_LINE,
+} from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { addonClient, addonCollection } from '@tv/data/addons';
 import { describeAddonError, typeLabel } from '@tv/data/describe';
-import { useHomeBoard } from '@tv/data/home-board';
+import { useHomeBoard, useOwnLinePlaces } from '@tv/data/home-board';
 import { library } from '@tv/data/library';
 import { leaveContinueWatching } from '@tv/data/marks';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
@@ -12,8 +21,10 @@ import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore }
 import { useTranslation } from 'react-i18next';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { phoneOwnLines } from '../data/home-lines';
 import { useContinueItems } from '../data/use-continue';
 import { LiveSportRow } from './sports/LiveSportRow';
+import { useSportsShown } from './sports/use-sports';
 import { openBrowse, openCatalog, openPlayer, openTitle } from '../nav/routes';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
@@ -135,6 +146,34 @@ const HomeRow = memo(function HomeRow({
   );
 });
 
+/** One line of Home's list: an addon's row, or Live sport or My List where Home rows puts them. */
+type HomeListLine =
+  | { key: string; kind: 'row'; row: BoardRow }
+  | { key: string; kind: 'live' }
+  | { key: string; kind: 'my-list' };
+
+/** Home's My List row: the profile's list, newest first. It asks no addon for anything. */
+function MyListRow() {
+  const { t } = useTranslation();
+  const list = useSyncExternalStore(library.subscribe, library.items);
+  const items = useMemo(
+    () =>
+      list.slice(0, MAX_ROW_ITEMS).map((entry) => ({ item: libraryPreview(entry), key: entry.id })),
+    [list],
+  );
+  if (items.length === 0) return null;
+  return (
+    <Row
+      title={t('library.myList')}
+      shape="poster"
+      items={items}
+      onPress={(entry) => openTitle(entry.item)}
+      seeAllLabel={t('home.seeAll')}
+      onSeeAll={() => router.navigate('/library')}
+    />
+  );
+}
+
 export function HomeScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -145,6 +184,11 @@ export function HomeScreen() {
   // board waits for sport to be settled, so a sports catalog is never drawn for a moment.
   const board = useHomeBoard(collection.addons, ready, sports.homeLeaveOut);
   const continueItems = useContinueItems();
+  // Continue Watching, My List and Live sport sit where Settings > Home rows puts them.
+  const sportShown = useSportsShown();
+  const own = useMemo(() => phoneOwnLines(sportShown), [sportShown]);
+  const places = useOwnLinePlaces(collection.addons, ready, own, sports.homeLeaveOut);
+  const continueShown = places.has(CONTINUE_LINE);
   // The Continue Watching title long-pressed, while its sheet shows.
   const [held, setHeld] = useState<MetaPreview | null>(null);
   useSyncExternalStore(library.subscribe, library.version);
@@ -171,7 +215,29 @@ export function HomeScreen() {
   }, []);
 
   const rows = useMemo(() => (board ?? []).filter((row) => !empty.has(row.key)), [board, empty]);
-  const continueRow = continueItems ?? [];
+  const lines = useMemo(() => {
+    const list: HomeListLine[] = [];
+    const own: Array<{ at: number; line: HomeListLine }> = [];
+    for (const [id, place] of places) {
+      if (id !== LIVE_SPORT_LINE && id !== MY_LIST_LINE) continue;
+      // Rows found empty are not counted.
+      const at = (board ?? []).slice(0, place).filter((row) => !empty.has(row.key)).length;
+      own.push({
+        at,
+        line: id === LIVE_SPORT_LINE ? { key: id, kind: 'live' } : { key: id, kind: 'my-list' },
+      });
+    }
+    const pushOwn = (index: number) => {
+      for (const entry of own) if (entry.at === index) list.push(entry.line);
+    };
+    rows.forEach((row, index) => {
+      pushOwn(index);
+      list.push({ key: row.key, kind: 'row', row });
+    });
+    pushOwn(rows.length);
+    return list;
+  }, [places, board, empty, rows]);
+  const continueRow = (continueShown ? continueItems : null) ?? [];
   const heroContinue = continueRow[0];
   const heroRow = rows.find((row) => !failed.has(row.key) && firsts[row.key]);
   const heroItem =
@@ -255,7 +321,6 @@ export function HomeScreen() {
           onLongPress={(entry) => setHeld(entry.item)}
         />
       ) : null}
-      <LiveSportRow />
       {noRows ? (
         <Message
           title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
@@ -290,18 +355,24 @@ export function HomeScreen() {
     <>
       <FlatList
         style={styles.screen}
-        data={rows}
-        keyExtractor={(row) => row.key}
+        data={lines}
+        keyExtractor={(line) => line.key}
         ListHeaderComponent={header}
-        renderItem={({ item: row, index }) => (
-          <HomeRow
-            row={row}
-            enabled={index <= loadUpTo}
-            onFirst={onFirst}
-            onEmpty={onEmpty}
-            onFailed={onFailed}
-          />
-        )}
+        renderItem={({ item: line, index }) =>
+          line.kind === 'live' ? (
+            <LiveSportRow />
+          ) : line.kind === 'my-list' ? (
+            <MyListRow />
+          ) : (
+            <HomeRow
+              row={line.row}
+              enabled={index <= loadUpTo}
+              onFirst={onFirst}
+              onEmpty={onEmpty}
+              onFailed={onFailed}
+            />
+          )
+        }
         onViewableItemsChanged={onViewable}
         viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
         contentContainerStyle={{ paddingBottom: space.xxl }}

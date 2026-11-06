@@ -20,6 +20,17 @@ export {
   setRowHidden,
 } from './addons/layout';
 export {
+  CONTINUE_LINE,
+  type HomeLine,
+  homeLines,
+  LIVE_SPORT_LINE,
+  MY_LIST_LINE,
+  moveLine,
+  type OwnLine,
+  ownLinePlaces,
+  setLineHidden,
+} from './addons/home-lines';
+export {
   type AddonAnswer,
   type AddonClient,
   BROWSE_TIMEOUT_MS,
