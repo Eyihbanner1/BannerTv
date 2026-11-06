@@ -298,6 +298,48 @@ test.describe('on a 4K TV', () => {
     await expect.poll(() => decodedTiles(page, FEATURED_MOVIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
     expect((await decodes(page)).mostPending).toBe(1);
   });
+
+  // Wide tiles are drawn at 768x432 device px. The browser draws 1920x1080
+  // art from a half-size copy, and anything between that and the drawn size,
+  // or cropped to fill the tile, from its full-size copy.
+  for (const [backdrop, oversize, decoded] of [
+    [[1280, 720], 1.5, false],
+    [[1280, 720], 2, true],
+    [[1920, 1080], 2, false],
+    [[1920, 1200], 2, true],
+  ] as const) {
+    test(`with aheadOversize ${oversize}, ${backdrop.join('x')} wide art is ${decoded ? '' : 'not '}decoded ahead`, async ({
+      page,
+    }) => {
+      const art = {
+        poster: png(500, 750),
+        logo: png(500, 150),
+        background: png(backdrop[0], backdrop[1]),
+      };
+      await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+        }),
+      );
+      // 1.5 is the default: tune nothing for it.
+      await tune(page, oversize === 2 ? { aheadOversize: 2 } : {});
+      await recordDecodes(page);
+      await page.goto(APP_URL);
+      await expectFocus(page, `${FIRST_ROW}-tile-0`);
+      await expect.poll(() => decodedTiles(page, FEATURED_MOVIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
+      await page.waitForTimeout(300);
+      expect(await decodedTiles(page, FEATURED_MOVIES, 'background')).toEqual(
+        decoded ? [0, 1, 2, 3, 4] : [],
+      );
+      // Posters 500 wide drawn at 440 are taken either way.
+      await pressToRow(page, 'ArrowDown', SERIES_ROW);
+      await pressToRow(page, 'ArrowDown', FEATURED_MOVIES);
+      await expect.poll(() => decodedTiles(page, ACTION)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+      expect((await decodes(page)).mostPending).toBe(1);
+    });
+  }
 });
 
 test('art that loads after its row was reached is decoded as it arrives', async ({ page }) => {

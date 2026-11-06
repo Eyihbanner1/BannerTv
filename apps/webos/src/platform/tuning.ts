@@ -131,6 +131,16 @@ export interface Tuning {
    * included, between presses. At most 10 are kept drawn there.
    */
   aheadMode: 'decode' | 'raster';
+  /**
+   * Which art `decode` mode leaves out as too big for its tile, whose
+   * full-size copy drawing it would not use. 1.5: art over 1.5 times its
+   * drawn width. 2: the browser's own rule, which draws from a half-size
+   * copy only when that copy still covers the drawn size both ways, and
+   * never for art cropped to fill its tile, so any other art is decoded at
+   * full size anyway and costs no more decoded ahead. Raster mode needs
+   * neither: drawing picks its copy itself.
+   */
+  aheadOversize: 1.5 | 2;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -164,9 +174,10 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
 
   // Decoding ahead, second round.
   aheadMode: 'decode',
+  aheadOversize: 1.5,
 };
 
-function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+function oneOf<T extends string | number>(value: unknown, options: readonly T[], fallback: T): T {
   return options.indexOf(value as T) >= 0 ? (value as T) : fallback;
 }
 
@@ -217,6 +228,7 @@ export function parseTuning(raw: string | null): Tuning {
 
     // Decoding ahead, second round.
     aheadMode: oneOf(stored.aheadMode, ['decode', 'raster'], d.aheadMode),
+    aheadOversize: oneOf(stored.aheadOversize, [1.5, 2], d.aheadOversize),
   };
 }
 

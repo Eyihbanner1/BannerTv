@@ -408,3 +408,73 @@ describe('aheadMode raster', () => {
     expect(box.children).toHaveLength(1);
   });
 });
+
+describe('aheadOversize', () => {
+  const size = (width: number, height: number) => ({ width, height });
+
+  it('at 1.5, the default, takes art up to 1.5 times its drawn width, whatever its height', async () => {
+    const { worthDecodingAt } = await load();
+    expect(worthDecodingAt(size(1152, 9999), size(768, 432), 1.5, false)).toBe(true);
+    expect(worthDecodingAt(size(1153, 1), size(768, 432), 1.5, false)).toBe(false);
+    // Cropping makes no difference to it.
+    expect(worthDecodingAt(size(1920, 1200), size(768, 432), 1.5, true)).toBe(false);
+  });
+
+  it('at 2, leaves out only art whose half-size copy still covers its drawn size both ways', async () => {
+    const { worthDecodingAt } = await load();
+    // Metahub's wide art on a wide tile, 768x432 device px: drawn from a 960x540 copy.
+    expect(worthDecodingAt(size(1920, 1080), size(768, 432), 2, false)).toBe(false);
+    // Its smaller medium art, 1.67 times as wide: drawn at full size, so decoded ahead.
+    expect(worthDecodingAt(size(1280, 720), size(768, 432), 2, false)).toBe(true);
+    // Half rounds up: 1535 halves to 768, which covers 768; 1534 halves to 767, which does not.
+    expect(worthDecodingAt(size(1535, 864), size(768, 432), 2, false)).toBe(false);
+    expect(worthDecodingAt(size(1534, 864), size(768, 432), 2, false)).toBe(true);
+    // Either way short is enough, and the drawn size rounds up too.
+    expect(worthDecodingAt(size(4000, 862), size(768, 432), 2, false)).toBe(true);
+    expect(worthDecodingAt(size(1536, 864), size(767.5, 431.5), 2, false)).toBe(false);
+    expect(worthDecodingAt(size(1536, 864), size(768.5, 432), 2, false)).toBe(true);
+    // Cropped art is always drawn from its full-size copy.
+    expect(worthDecodingAt(size(3840, 2400), size(768, 432), 2, true)).toBe(true);
+  });
+
+  it('works out where art lands in its box, and whether it is cropped', async () => {
+    const { fitArt } = await load();
+    expect(fitArt('cover', size(1920, 1080), size(768, 432))).toEqual({
+      drawn: size(768, 432),
+      cropped: false,
+    });
+    // 16:10 art in a 16:9 tile loses 48 device px top and bottom.
+    expect(fitArt('cover', size(1920, 1200), size(768, 432))).toEqual({
+      drawn: size(768, 432),
+      cropped: true,
+    });
+    // Less than half a pixel over, once drawn: not cropped.
+    expect(fitArt('cover', size(1921, 1080), size(768, 432)).cropped).toBe(false);
+    expect(fitArt('contain', size(500, 150), size(476.2, 164))).toEqual({
+      drawn: size(476, 143),
+      cropped: false,
+    });
+    expect(fitArt('fill', size(500, 150), size(476.2, 164))).toEqual({
+      drawn: size(476, 164),
+      cropped: false,
+    });
+  });
+
+  it('at 2, decoding ahead takes wide art the browser would draw at full size', async () => {
+    const cases: [[number, number], 1.5 | 2, boolean][] = [
+      [[1280, 720], 1.5, false],
+      [[1280, 720], 2, true],
+      [[1920, 1080], 2, false],
+      [[1920, 1200], 2, true],
+    ];
+    for (const [backdrop, oversize, wide] of cases) {
+      FakeImage.decodes = [];
+      root = new FakeElement();
+      const ahead = await load({ aheadOversize: oversize });
+      const { track, rows } = stack(posterRow('a'), posterRow('b'), featuredRow('c', backdrop));
+      slide(ahead, track, rows[0]!);
+      runFrames(3);
+      expect(decodedSrcs()).toEqual([wide ? 'https://art/background/c/0' : 'https://art/logo/c/0']);
+    }
+  });
+});

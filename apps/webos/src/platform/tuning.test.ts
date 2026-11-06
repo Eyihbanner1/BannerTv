@@ -28,6 +28,7 @@ describe('TUNING_DEFAULTS', () => {
       playFirst: false,
       metadataTimeoutMs: 0,
       aheadMode: 'decode',
+      aheadOversize: 1.5,
     });
   });
 });
@@ -81,10 +82,12 @@ describe('parseTuning', () => {
     expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
   it('takes the second round of decoding-ahead switches', () => {
-    expect(parseTuning('{"aheadMode":"raster"}')).toEqual({
+    expect(parseTuning('{"aheadMode":"raster","aheadOversize":2}')).toEqual({
       ...TUNING_DEFAULTS,
       aheadMode: 'raster',
+      aheadOversize: 2,
     });
+    expect(parseTuning('{"aheadOversize":1.5}')).toEqual(TUNING_DEFAULTS);
     // Stored before these switches came, decodeAhead keeps its meaning.
     expect(parseTuning('{"decodeAhead":false}')).toEqual({
       ...TUNING_DEFAULTS,
@@ -101,6 +104,9 @@ describe('parseTuning', () => {
     expect(parseTuning('{"rowsAround":0,"overscan":0}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"aheadMode":"upload"}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"aheadMode":true}')).toEqual(TUNING_DEFAULTS);
+    // Only the two rules there are: 1.5 times the width, or the browser's.
+    expect(parseTuning('{"aheadOversize":3}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadOversize":"2"}')).toEqual(TUNING_DEFAULTS);
   });
 });
 
@@ -161,7 +167,7 @@ describe('applyTuning', () => {
     expect(classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true })).toEqual(
       classesFor({ ...TUNING_DEFAULTS }),
     );
-    expect(classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster' })).toEqual(
+    expect(classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster', aheadOversize: 2 })).toEqual(
       classesFor({ ...TUNING_DEFAULTS }),
     );
     expect(

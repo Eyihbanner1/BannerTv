@@ -7,6 +7,7 @@ import { tuning } from '../platform/tuning';
  * ahead decodes at full size; a tile drawn at about full size (posters,
  * logos) then draws from that same copy, but wide art, drawn at 0.4 of its
  * 1920 px, would cost a full-size copy where drawing it keeps a half-size one.
+ * With `aheadOversize` 2 the browser's own rule decides instead.
  */
 const MAX_OVERSIZE = 1.5;
 /** No decode starts until the remote has been still this long, so a press's own frames go first. */
@@ -49,6 +50,53 @@ let slides = 0;
 /** Art was just drawn under the rail, for this row, and the frames after it have yet to flow. */
 let warming = false;
 let warmingKey: string | null = null;
+
+interface Size {
+  width: number;
+  height: number;
+}
+
+/**
+ * Whether art of its natural size, drawn at `drawn` device px, is worth
+ * decoding ahead at full size. With `aheadOversize` 1.5, art up to 1.5 times
+ * its drawn width. With 2, the browser's own rule: it draws from a half-size
+ * copy only when that copy, rounded up, still covers the drawn size, also
+ * rounded up, both ways, and from the full-size copy whenever the art is
+ * cropped. Any other art is decoded at full size when drawn anyway.
+ */
+export function worthDecodingAt(
+  natural: Size,
+  drawn: Size,
+  oversize: 1.5 | 2,
+  cropped: boolean,
+): boolean {
+  if (oversize !== 2) return natural.width <= drawn.width * MAX_OVERSIZE;
+  return (
+    cropped ||
+    Math.ceil(natural.width / 2) < Math.ceil(drawn.width) ||
+    Math.ceil(natural.height / 2) < Math.ceil(drawn.height)
+  );
+}
+
+/**
+ * Where art lands in its box, by its object-fit, in whole device px as the
+ * page is drawn: `cover` fills the box and crops what is left over, if any
+ * is once rounded; `contain` fits inside it; anything else fills it.
+ */
+export function fitArt(fit: string, natural: Size, box: Size): { drawn: Size; cropped: boolean } {
+  const edge = whole(box);
+  if (fit !== 'cover' && fit !== 'contain') return { drawn: edge, cropped: false };
+  const across = box.width / natural.width;
+  const down = box.height / natural.height;
+  const scale = fit === 'cover' ? Math.max(across, down) : Math.min(across, down);
+  const drawn = whole({ width: natural.width * scale, height: natural.height * scale });
+  const cropped = fit === 'cover' && (drawn.width > edge.width || drawn.height > edge.height);
+  return { drawn: cropped ? edge : drawn, cropped };
+}
+
+function whole(size: Size): Size {
+  return { width: Math.round(size.width), height: Math.round(size.height) };
+}
 
 /** Art is got ready by drawing it under the rail, which App then draws a box for. */
 export const RASTER_AHEAD = tuning.decodeAhead && tuning.aheadMode === 'raster';
@@ -93,17 +141,20 @@ function noteAsked(src: string, now: number): void {
 /**
  * Where the art is drawn, if it is loaded, drawn across the screen (not a
  * tile drawn past the row's edge), and worth getting ready. Decoding takes
- * art about its drawn size; drawing it under the rail takes any, as the
- * browser draws that from the copy its size needs.
+ * art about its drawn size (see `aheadOversize`); drawing it under the rail
+ * takes any, as the browser draws that from the copy its size needs.
  */
 function drawnBox(image: HTMLImageElement, now: number): DOMRect | null {
   if (!image.complete || image.naturalWidth === 0 || wasAsked(image.src, now)) return null;
   const box = image.getBoundingClientRect();
   if (box.width === 0 || box.right <= 0 || box.left >= window.innerWidth) return null;
   if (RASTER_AHEAD) return box;
-  return image.naturalWidth <= box.width * (window.devicePixelRatio || 1) * MAX_OVERSIZE
-    ? box
-    : null;
+  const ratio = window.devicePixelRatio || 1;
+  const natural = { width: image.naturalWidth, height: image.naturalHeight };
+  const shown = { width: box.width * ratio, height: box.height * ratio };
+  if (tuning.aheadOversize !== 2) return worthDecodingAt(natural, shown, 1.5, false) ? box : null;
+  const { drawn, cropped } = fitArt(getComputedStyle(image).objectFit, natural, shown);
+  return worthDecodingAt(natural, drawn, 2, cropped) ? box : null;
 }
 
 interface Next {
