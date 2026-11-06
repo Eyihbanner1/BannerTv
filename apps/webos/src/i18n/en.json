@@ -100,7 +100,7 @@
     "noCatalogs": "None of your addons has a catalog to browse. Add one, such as Cinemeta, in Addons."
   },
   "addons": {
-    "lead": "Addons give BannerTV its catalogs and titles, and in Phase 2 its streams. Higher addons answer first, and their rows come first on Home.",
+    "lead": "Addons give BannerTV its catalogs, titles, streams and subtitles. Higher addons answer first, and their rows come first on Home.",
     "add": "Add an addon",
     "none": "You have no addons, so Home is empty. Add one, such as Cinemeta, with its address.",
     "version": "v{{version}}",

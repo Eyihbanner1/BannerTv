@@ -50,7 +50,8 @@ const PHONE = {
   whoIsWatching: "Who's watching?",
   pinFor: 'Enter the PIN for {{name}}',
   addons: 'Addons',
-  addonsLead: 'Addons are shared by every profile on this phone.',
+  addonsLead:
+    'Addons give BannerTV its catalogs, titles, streams and subtitles, for every profile on this phone. Higher addons answer first, and their rows come first on Home.',
   addAddon: 'Add an addon',
   addonUrl: 'Addon link',
   addonUrlHint: 'Paste the link to an addon’s manifest.json',
