@@ -15,13 +15,14 @@ import { useHomeBoard, useOwnLinePlaces } from '@tv/data/home-board';
 import { library } from '@tv/data/library';
 import { leaveContinueWatching } from '@tv/data/marks';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
-import { noteFirstPage, sportsState } from '@tv/data/sports';
+import { noteFirstPage, sportsFeed, sportsState } from '@tv/data/sports';
 import { useQuery } from '@tv/data/use-query';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { phoneOwnLines } from '../data/home-lines';
+import { syncForRefresh } from '../data/refresh';
 import { useContinueItems } from '../data/use-continue';
 import { LiveSportRow } from './sports/LiveSportRow';
 import { useSportsShown } from './sports/use-sports';
@@ -35,6 +36,7 @@ import { PrismMark } from '../ui/PrismMark';
 import { Row, type RowItem } from '../ui/Row';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, gutter, space, touch, type } from '../ui/theme';
+import { usePullRefresh } from '../ui/use-pull-refresh';
 import { router } from 'expo-router';
 
 const MAX_ROW_ITEMS = 40;
@@ -245,6 +247,27 @@ export function HomeScreen() {
       ? null
       : (heroContinue?.preview ?? (heroRow ? firsts[heroRow.key]! : null));
 
+  // Pull to refresh: rows found empty come back, the rows loaded so far and any that failed ask
+  // their addons again, Live sport looks again, and the account and Trakt sync. Home still
+  // never asks for streams.
+  const refreshControl = usePullRefresh(() => {
+    const again = new Set([...empty, ...failed]);
+    lines.forEach((line, index) => {
+      if (line.kind === 'row' && index <= loadUpTo) again.add(line.row.key);
+    });
+    emptyRows.clear();
+    setEmpty(new Set());
+    for (const row of board ?? []) {
+      if (again.has(row.key))
+        addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra).retry();
+    }
+    if (sportShown) {
+      sportsFeed.retry();
+      sportsFeed.refresh();
+    }
+    return syncForRefresh();
+  });
+
   // FlatList wants the same function for its whole life.
   const onViewable = useCallback(
     ({ viewableItems }: { viewableItems: Array<{ index?: number | null }> }) => {
@@ -373,6 +396,7 @@ export function HomeScreen() {
             />
           )
         }
+        refreshControl={refreshControl}
         onViewableItemsChanged={onViewable}
         viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
         contentContainerStyle={{ paddingBottom: space.xxl }}

@@ -13,11 +13,13 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { syncForRefresh } from '../data/refresh';
 import { openTitle } from '../nav/routes';
 import { Chip } from '../ui/Chip';
 import { Grid } from '../ui/Grid';
 import { Message } from '../ui/Message';
 import { colors, gutter, space, type } from '../ui/theme';
+import { usePullRefresh } from '../ui/use-pull-refresh';
 
 type Show = 'list' | 'history';
 
@@ -61,6 +63,14 @@ export function LibraryScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, kind, version]);
 
+  // Pull to refresh brings in what other screens and Trakt have, then asks for the artwork of
+  // what came. The tab's own watch above keeps that going; this one only queues it.
+  const refreshControl = usePullRefresh(() =>
+    syncForRefresh().then(() => {
+      if (loaded) fillLibraryCards(show)();
+    }),
+  );
+
   const header = (
     <View style={[styles.header, { paddingTop: insets.top + space.m }]}>
       <Text style={styles.title} accessibilityRole="header">
@@ -96,7 +106,7 @@ export function LibraryScreen() {
 
   return (
     <View style={styles.screen}>
-      <Grid items={items} onPress={openTitle} header={header} />
+      <Grid items={items} onPress={openTitle} header={header} refreshControl={refreshControl} />
     </View>
   );
 }
