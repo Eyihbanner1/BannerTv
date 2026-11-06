@@ -150,6 +150,8 @@ function readReminders(saved: unknown): readonly Reminder[] {
 
 export interface Reminders {
   load(): Promise<void>;
+  /** Whether the saved reminders have been read (or found missing or unreadable). */
+  loaded(): boolean;
   /** Every reminder, the soonest kick-off first: the same array until they change. */
   list(): readonly Reminder[];
   has(key: string): boolean;
@@ -182,6 +184,7 @@ export function createReminders(options: { storage: KeyValueStore }): Reminders 
   });
   return {
     load: state.load,
+    loaded: state.loaded,
     list: () => state.get(),
     has: (key) => state.get().some((reminder) => reminder.key === key),
     async add(given) {

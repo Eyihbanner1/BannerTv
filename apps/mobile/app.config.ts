@@ -48,6 +48,15 @@ const config: ExpoConfig = {
     'expo-sqlite',
     ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: false }],
     [
+      // Match reminders are local notifications: nothing is pushed, so no push service is set up.
+      'expo-notifications',
+      {
+        icon: './assets/images/android-icon-foreground.png',
+        color: '#6A3BF0',
+        enableRemoteNotifications: false,
+      },
+    ],
+    [
       'expo-font',
       {
         android: {

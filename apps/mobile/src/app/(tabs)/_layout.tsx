@@ -2,6 +2,7 @@ import { activeProfileId } from '@tv/data/profiles';
 import { Tabs } from 'expo-router';
 import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useMatchReminders } from '../../data/match-reminders';
 import { useSportsShown } from '../../screens/sports/use-sports';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OutlineIcon, type OutlineName } from '../../ui/icons';
@@ -26,6 +27,8 @@ export default function TabsLayout() {
   // Read again when the profile is chosen at launch: kids have no Sports.
   useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
   const sportsShown = useSportsShown();
+  // Match reminders' notifications, and a tapped one opening its match.
+  useMatchReminders();
   const insets = useSafeAreaInsets();
   return (
     <Tabs

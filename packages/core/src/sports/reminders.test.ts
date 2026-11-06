@@ -142,7 +142,9 @@ describe('createReminders', () => {
   it('sets, sets again and takes off reminders, the soonest first, and keeps them', async () => {
     const storage = memoryKeyValueStore();
     const reminders = createReminders({ storage });
+    expect(reminders.loaded()).toBe(false);
     await reminders.load();
+    expect(reminders.loaded()).toBe(true);
     const changes: number[] = [];
     reminders.subscribe(() => changes.push(reminders.list().length));
     expect(await reminders.add({ key: 'b', name: 'Later', at: NOW + 2 * HOUR })).toBe(true);
