@@ -24,6 +24,7 @@ describe('TUNING_DEFAULTS', () => {
       matcherAt: 'launch',
       // Starting playback (speed pass U3): what shipped before each switch.
       prefetchRestMs: 1500,
+      settleAfterFirstMs: 2000,
     });
   });
 });
@@ -67,6 +68,10 @@ describe('parseTuning', () => {
     expect(parseTuning('{"prefetchRestMs":-1}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"prefetchRestMs":60000}')).toEqual(TUNING_DEFAULTS);
     expect(parseTuning('{"prefetchRestMs":"500"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"settleAfterFirstMs":1000}').settleAfterFirstMs).toBe(1000);
+    expect(parseTuning('{"settleAfterFirstMs":0}').settleAfterFirstMs).toBe(0);
+    expect(parseTuning('{"settleAfterFirstMs":-1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"settleAfterFirstMs":true}')).toEqual(TUNING_DEFAULTS);
   });
 
   it('ignores values out of range or of the wrong kind', () => {

@@ -99,6 +99,12 @@ export interface Tuning {
    * there moves focus.
    */
   prefetchRestMs: number;
+  /**
+   * Once one stream could play, how much longer slower addons get to offer
+   * a better one before auto-play chooses. Shorter starts sooner, but can
+   * choose another stream than the full wait would have.
+   */
+  settleAfterFirstMs: number;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -126,6 +132,7 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
 
   // Starting playback (speed pass U3).
   prefetchRestMs: 1500,
+  settleAfterFirstMs: 2000,
 };
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -173,6 +180,7 @@ export function parseTuning(raw: string | null): Tuning {
 
     // Starting playback (speed pass U3).
     prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
+    settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
   };
 }
 
