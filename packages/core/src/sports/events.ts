@@ -287,6 +287,20 @@ function competitionSport(members: readonly Combined[]): Sport | undefined {
   return best?.sport;
 }
 
+/**
+ * Whether a fight the addon tagged with a word for any fight sport ("Fight",
+ * read as boxing) names an MMA competition the dictionary knows: "ONE
+ * Championship" in a Fight catalog is MMA, and gets its row there.
+ */
+function namesMma(members: readonly Combined[], matcher: Matcher): boolean {
+  for (const member of members) {
+    for (const { text } of member.competitions) {
+      if (matcher.competition(text, 'mma')) return true;
+    }
+  }
+  return false;
+}
+
 function compatibleTimes(a: KickOff | undefined, b: KickOff | undefined): boolean {
   if (!a || !b) return true;
   if (a.at !== undefined && b.at !== undefined) {
@@ -558,18 +572,57 @@ const US_LEAGUES: Record<string, Sport> = {
 };
 
 /**
- * Competition rows are for football and the four US leagues; every other
- * sport is one row per sport, and the rest of American football, basketball,
- * ice hockey and baseball goes in its "Other" row (Eyitayo, 28 October 2026).
- * What the addon called the competition stays on the tile as a note.
+ * Sports whose competitions get a row of their own wherever the dictionary
+ * names them, so the Six Nations no longer sits with club rugby (Eyitayo, 6
+ * November 2026). What the dictionary does not know stays in the sport's row.
+ */
+const NAMED_ROW_SPORTS: ReadonlySet<Sport> = new Set<Sport>([
+  'rugby',
+  'cricket',
+  'motorsport',
+  'mma',
+  'boxing',
+]);
+
+// Keys BannerTV makes up for rows that are not one competition.
+const MADE_UP_KEY = /^(?:text|country|group|other|sport):/;
+
+/**
+ * Whether a competition is a row of the bundled dictionary, whose id is the
+ * same on every screen with the same data, rather than a name an addon gave
+ * or a group BannerTV made up.
+ */
+export function isDictionaryCompetition(competition: Pick<Competition, 'key' | 'source'>): boolean {
+  return !MADE_UP_KEY.test(competition.key) && isNamed(competition);
+}
+
+/** A competition the items named, as against a group BannerTV made up from the teams. */
+function isNamed(competition: Pick<Competition, 'source'>): boolean {
+  return competition.source !== 'country' && competition.source !== 'other';
+}
+
+/**
+ * Competition rows are for football, the four US leagues, and the
+ * competitions of rugby, cricket, motor racing and fight sports that the
+ * dictionary names (Eyitayo, 28 October and 6 November 2026). Every other
+ * sport is one row per sport, as are those four's competitions the
+ * dictionary does not know, and the rest of American football, basketball,
+ * ice hockey and baseball goes in its "Other" row. What the addon called the
+ * competition stays on the tile as a note.
  */
 function rowCompetition(
   competition: Competition,
   sport: Sport,
 ): { competition: Competition; note?: string } {
   if (sport === 'football') return { competition };
-  const named = competition.source !== 'country' && competition.source !== 'other';
-  const note = named ? competition.name : undefined;
+  if (
+    NAMED_ROW_SPORTS.has(sport) &&
+    competition.sport === sport &&
+    isDictionaryCompetition(competition)
+  ) {
+    return { competition };
+  }
+  const note = isNamed(competition) ? competition.name : undefined;
   const textKey = /^text:[^:]+:(nfl|nba|nhl|mlb)$/.exec(competition.key);
   const league = textKey ? textKey[1]! : competition.key;
   if (US_LEAGUES[league] !== undefined) {
@@ -593,6 +646,37 @@ function rowCompetition(
     'other',
   );
   return note === undefined ? { competition: bySport } : { competition: bySport, note };
+}
+
+// The format a stage names: a Test, a one-day or a T20 international, each its own row.
+const CRICKET_FORMATS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\btests?\b/i, 'cricket.test'],
+  [/\bodis?\b/i, 'cricket.odi'],
+  [/\bt20is?\b/i, 'cricket.t20i'],
+];
+
+/**
+ * The competition a cricket stage names when the item names none: "T20
+ * World Cup", or the format of "4th T20I" and "1st Test Day 2", which only
+ * national sides play. Not over youth or women's sides, whose competitions
+ * the dictionary keeps apart.
+ */
+function cricketFormat(
+  round: string,
+  sides: [Side, Side] | undefined,
+  matcher: Matcher,
+): Competition | undefined {
+  if (sides?.some((side) => side.marks.youth || side.marks.reserve || side.marks.women)) {
+    return undefined;
+  }
+  const named = matcher.competition(round, 'cricket');
+  if (named) return competitionFromEntry(named, 'name-suffix');
+  for (const [pattern, id] of CRICKET_FORMATS) {
+    if (!pattern.test(round)) continue;
+    const entry = matcher.competitionById(id);
+    return entry ? competitionFromEntry(entry, 'name-suffix') : undefined;
+  }
+  return undefined;
 }
 
 function otherCompetition(sport: Sport): Competition {
@@ -669,6 +753,7 @@ export function buildEvents(
     if (namedSport !== undefined && namedSport !== sport && !closedLeaguePair(known)) {
       sport = namedSport;
     }
+    if (sport === 'boxing' && matcher && namesMma(members, matcher)) sport = 'mma';
     const { kickOff, from } = chooseKickOff(members);
     // Home and away: an "Away at Home" listing knows best, then the one the time came from.
     const sided =
@@ -682,9 +767,13 @@ export function buildEvents(
       undefined,
     ];
 
+    const round = members.find((m) => m.round)?.round;
     let named =
       namedCompetition(members, sport, teams, matcher) ??
       (matcher ? teamCompetition(members, sport, kickOff, matcher) : undefined);
+    if (sport === 'cricket' && matcher && round && (!named || !isNamed(named))) {
+      named = cricketFormat(round, sided?.sides, matcher) ?? named;
+    }
     // "English Premier League" over two U18 sides is their league, not the Premier League.
     if (named && matcher && sided?.sides && wrongLevel(named, sided.sides, matcher)) {
       named =
@@ -701,7 +790,6 @@ export function buildEvents(
     if (sport === 'other' && named && named.sport !== 'other') sport = named.sport;
     const resolved = rowCompetition(named ?? otherCompetition(sport), sport);
     const competition = resolved.competition;
-    const round = members.find((m) => m.round)?.round;
     if (round) competition.round = round;
 
     let key = `${lead.listing.source.addonIndex}-${slugOf(lead.listing.source.id)}`;

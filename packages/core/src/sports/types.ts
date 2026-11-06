@@ -36,7 +36,10 @@ export type CompetitionSource =
   | 'description'
   /** `Competition: Home vs Away` or `Country - Competition : Home vs Away`. */
   | 'name-prefix'
-  /** ` - Competition` after the teams, only when the dictionary knows it. */
+  /**
+   * ` - Competition` after the teams, `Competition: ` before a title with no
+   * teams, or a cricket stage's format; only when the dictionary knows it.
+   */
   | 'name-suffix'
   /** A second genre that is not the sport. */
   | 'genre'
