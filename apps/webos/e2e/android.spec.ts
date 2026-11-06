@@ -166,6 +166,11 @@ test('a stream Android cannot play moves on to the next, as on the TV', async ({
   await openAsAndroid(page);
   await page.goto(ANDROID_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // OK on a tile still loading opens nothing: on a slow machine the row can come a moment after focus.
+  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"]`)).not.toHaveAttribute(
+    'aria-label',
+    'Loading',
+  );
   await press(page, 'Enter', 'details-watch');
   await press(page, 'Enter', 'player-surface');
   await expect

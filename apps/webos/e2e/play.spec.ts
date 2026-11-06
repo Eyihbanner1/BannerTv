@@ -75,6 +75,11 @@ async function routeDemoFilms(page: Page) {
 async function openMovie(page: Page) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // OK on a tile still loading opens nothing: on a slow machine the row can come a moment after focus.
+  await expect(page.locator(`[data-focus-key="${FIRST_ROW}-tile-0"]`)).not.toHaveAttribute(
+    'aria-label',
+    'Loading',
+  );
   await press(page, 'Enter', 'details-watch');
   await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
 }
@@ -1430,12 +1435,14 @@ test('a live broadcast plays with no end shown, and saves nothing to resume or c
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect((await video(page)).src).toMatch(/^blob:/);
 
-  // Rewind jumps back within the broadcast at once, and the controls show where it is.
+  // Rewind goes back within the broadcast as on a film: it lands a moment
+  // later, and the note says how far behind live. The controls stay hidden.
   // hls.js joins a few seconds behind the live edge of the 10 s window, so there is room.
   const before = (await video(page)).time;
   await pressCode(page, REWIND);
+  await expect(page.locator('[class*="skipNote"]').getByText(/^0:0\d behind live$/)).toBeVisible();
   await expect.poll(async () => (await video(page)).time).toBeLessThan(before);
-  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 
   // The controls give no length to a broadcast: on the right is how far behind live it is.
   await press(page, 'ArrowUp', 'player-play');
@@ -2368,6 +2375,8 @@ test('the pointer brings the controls up, shows the time over the bar, and a cli
   await expect(bar.getByText('0:20', { exact: true })).toBeVisible();
 
   // The Magic Remote's OK there comes as a key press and a click: it jumps, and the film plays on.
+  // Well after the OK that pressed Watch: a click within 400 ms of an answered OK is that OK's.
+  await page.waitForTimeout(500);
   await page.mouse.move(box.x + box.width / 4, box.y + box.height / 2, { steps: 3 });
   await page.keyboard.press('Enter');
   await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
