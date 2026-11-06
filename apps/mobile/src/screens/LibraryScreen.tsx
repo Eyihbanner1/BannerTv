@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { libraryWatch } from '../data/library-watch';
 import { openTitle } from '../nav/routes';
 import { CalendarList } from '../ui/CalendarList';
 import { Chip } from '../ui/Chip';
@@ -16,24 +17,23 @@ import { colors, gutter, space, type } from '../ui/theme';
 
 type Show = 'list' | 'history' | 'calendar';
 
-const subscribeAll = (listener: () => void) => {
-  const undo = [
-    library.subscribe(listener),
-    progress.subscribe(listener),
-    playedVideos.subscribe(listener),
-  ];
-  return () => undo.forEach((stop) => stop());
-};
-const versions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
+// My List follows the list alone, so the tab (which stays mounted under the player) is left as
+// it is while a video saves its place every 10 seconds; History follows its stores too.
+const watches = {
+  list: libraryWatch('list', library, []),
+  history: libraryWatch('history', library, [progress, playedVideos]),
+} as const;
 
 export function LibraryScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const version = useSyncExternalStore(subscribeAll, versions);
   const [loaded, setLoaded] = useState(false);
   const [show, setShow] = useState<Show>('list');
   const [kind, setKind] = useState<LibraryKind>('all');
   const calendar = useCalendar(kind, show === 'calendar');
+  // The calendar keeps its own list, so it follows My List's stores, which it never reads.
+  const watch = watches[show === 'history' ? 'history' : 'list'];
+  const version = useSyncExternalStore(watch.subscribe, watch.version);
 
   useEffect(() => {
     void Promise.all([library.load(), progress.load(), playedVideos.load()])

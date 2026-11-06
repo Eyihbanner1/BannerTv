@@ -206,6 +206,25 @@ test('Down reaches the last row while rows are still loading', async ({ page }) 
   await expect(page.locator('section[aria-label="Blender Today"]:visible')).toBeVisible();
 });
 
+test('OK in a journey waits for a loading tile under focus to show its title', async ({ page }) => {
+  // The first catalog answers only once focus rests on its placeholder, where OK opens nothing.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/catalog\/movie\/top\.json$/, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expectFocusLabel(page, 'Loading');
+
+  const pressed = press(page, 'Enter', 'details-watch');
+  await page.waitForTimeout(500);
+  release();
+  await pressed;
+  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
+});
+
 test('a row that turns out empty under focus hands focus to the row below', async ({ page }) => {
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
@@ -524,8 +543,11 @@ test('one pointer move straight from 5-way mode focuses the tile under it', asyn
 test('a pointer click opens details, and Back returns to the clicked tile', async ({ page }) => {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  // A click with no hover before it, which the Magic Remote can send.
-  await page.locator(`[data-focus-key="${SERIES_ROW}-tile-2"]`).dispatchEvent('click');
+  // A click with no hover before it, which the Magic Remote can send, once the tile shows its
+  // title: a click on a tile still loading opens nothing.
+  const tile = page.locator(`[data-focus-key="${SERIES_ROW}-tile-2"]`);
+  await expect(tile).not.toHaveAttribute('aria-label', 'Loading');
+  await tile.dispatchEvent('click');
   await expectFocus(page, 'details-episodes-0');
 
   await pressBack(page);

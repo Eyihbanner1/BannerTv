@@ -5,6 +5,18 @@
   overflow: hidden;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: art drawn ahead of the press,
+   1 px at the bottom left, so the rail painted after it covers it. */
+.warm {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .content {
   position: absolute;
   top: 0;

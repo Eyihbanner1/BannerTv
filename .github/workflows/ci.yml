@@ -12,11 +12,51 @@ concurrency:
 permissions:
   contents: read
 
+# The TV app's checks run side by side: the build, the static checks and unit tests, and the
+# remote-key journeys in four shards on the build. "Check, test and package" waits for all of
+# them, fails unless every one passed, and only then packages the .ipk. It is the check to
+# require. The Android TV APK waits for it, so no .ipk or Android TV APK is uploaded before the
+# checks and every journey passed, as when they all ran in one job. The Phone APK does not wait
+# for it: its own phone journeys gate it, as before.
 jobs:
-  build:
-    name: Check, test and package
+  web:
+    name: Build the TV app
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check the build for webOS 5.0
+        run: pnpm check:bundle
+
+      # The journeys run on this exact build, and the .ipk and the Android APK ship it, rather
+      # than building their own. "Re-run failed jobs" does not run this job again once it has
+      # passed, so the build is kept for as long as a re-run is likely.
+      - name: Upload the web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
+          retention-days: 14
+          if-no-files-found: error
+
+  checks:
+    name: Format, lint, typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -45,26 +85,135 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+  journeys:
+    name: TV journeys ${{ matrix.shard }}/${{ strategy.job-total }}
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Every shard runs to the end, so one run shows every journey that fails.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v5
 
-      - name: Check the build for webOS 5.0
-        run: pnpm check:bundle
+      - uses: pnpm/action-setup@v4
 
-      # The Android job ships this exact build inside its APK rather than building its own.
-      - name: Upload the web build
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the web build
+        uses: actions/download-artifact@v4
         with:
           name: bannertv-web
           path: apps/webos/dist
-          retention-days: 3
-          if-no-files-found: error
 
       - name: Install Playwright's Chromium
         run: pnpm --filter @bannertv/webos exec playwright install --with-deps chromium
 
+      # Playwright splits the journeys by count, a quarter each. One worker, as on the 2-vCPU
+      # runner before the split, so every journey keeps the timing it was written for. The blob
+      # reporter's results come together in "TV journeys report".
       - name: Remote-key journeys
-        run: pnpm e2e
+        run: >-
+          pnpm --filter @bannertv/webos exec playwright test
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --workers=1
+          --reporter=github,blob
+
+      # Kept whether the journeys passed or not: a journey that failed and then passed on retry
+      # leaves the job green, and its failed try's trace is only here.
+      - name: Upload the journeys' results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: apps/webos/blob-report/
+          # As long as the web build, so a late re-run of the report still finds every shard.
+          retention-days: 14
+          if-no-files-found: ignore
+          # A shard run again replaces its results.
+          overwrite: true
+
+  journeys-report:
+    name: TV journeys report
+    needs: journeys
+    # Also after a failed shard, which is when the report matters most.
+    if: ${{ !cancelled() && needs.journeys.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the shards' results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: blob-report-*
+          path: apps/webos/blob-reports
+          merge-multiple: true
+
+      - name: Merge them into one report
+        run: pnpm --filter @bannertv/webos exec playwright merge-reports --reporter html blob-reports
+
+      # On every run, not only on failure, with the trace of each try that failed, including
+      # the first try of a journey that passed on retry (trace: 'retain-on-failure').
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/webos/playwright-report/
+          retention-days: 3
+          if-no-files-found: error
+          overwrite: true
+
+  tv:
+    name: Check, test and package
+    needs: [web, checks, journeys]
+    # Runs even when one of them failed or the run was cancelled, so that this check fails rather
+    # than being skipped: a required check that was skipped counts as passed.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every check passed
+        if: ${{ always() && (needs.web.result != 'success' || needs.checks.result != 'success' || needs.journeys.result != 'success') }}
+        run: |
+          echo "::error::Build: ${{ needs.web.result }}. Checks: ${{ needs.checks.result }}. Journeys: ${{ needs.journeys.result }}."
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the web build
+        uses: actions/download-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
 
       - name: Package .ipk
         run: pnpm package
@@ -76,19 +225,11 @@ jobs:
           path: out/*.ipk
           if-no-files-found: error
 
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            apps/webos/playwright-report/
-            apps/webos/test-results/
-          if-no-files-found: ignore
-
   android:
     name: Android APK
-    needs: build
+    # Only once "Check, test and package" passed, so every APK here passed the TV checks and
+    # journeys. It ships the web build those journeys ran on.
+    needs: tv
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -203,7 +344,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Touch journeys on the web build with the TV journeys' fake addons, before the long
-      # Android build: every screen opens and a film plays.
+      # Android build: every screen opens and a film plays. Here rather than in a job of their
+      # own, so no phone APK is uploaded unless they passed.
       - name: Phone journeys
         working-directory: apps/mobile
         run: |
@@ -224,7 +366,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # On a pull request setup-gradle only reads the cache unless told otherwise, and this job is
+      # not on main yet, so nothing was ever saved for it. Saved here, the Gradle wrapper,
+      # dependencies and transforms come back on the pull request's next run. The C++ builds
+      # are not cached by Gradle at all.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Generate the Android project
         working-directory: apps/mobile
@@ -234,10 +382,15 @@ jobs:
 
       # A release build, so the JavaScript is inside the APK and it runs without a computer
       # attached. Signed with the debug key the Expo template ships, which is the same on every
-      # run, so each test APK installs over the last. Not for the store.
+      # run, so each test APK installs over the last. Not for the store. 64-bit Arm only, the
+      # phones it is tested on (a Galaxy S25 Ultra runs nothing else): each architecture's C++
+      # is built in full, and 32-bit Arm cost about 7 to 10 of the build's 32 minutes. Add
+      # armeabi-v7a back to PHONE_ABIS (comma-separated) for a 32-bit-only phone.
       - name: Build
         working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        env:
+          PHONE_ABIS: arm64-v8a
+        run: ./gradlew --no-daemon assembleRelease "-PreactNativeArchitectures=$PHONE_ABIS"
 
       - name: Collect the APK
         run: |

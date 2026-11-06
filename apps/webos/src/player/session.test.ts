@@ -1,9 +1,11 @@
 import type { LiveWindow, Resolution, StreamEntry } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
+import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  clockShows,
   LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
@@ -46,6 +48,19 @@ const kept = vi.hoisted(() => ({
     subscribe: () => () => undefined,
   },
 }));
+
+// The tester's switches, which a test can change.
+const tuned = vi.hoisted(() => ({}) as Tuning);
+
+vi.mock(import('../platform/tuning'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, tuning: Object.assign(tuned, actual.TUNING_DEFAULTS) };
+});
+
+// The play stage marks the session sets, by the finder they belong to.
+const marks = vi.hoisted(() => ({ playMark: vi.fn() }));
+
+vi.mock('./play-marks', () => ({ playMark: marks.playMark }));
 
 vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
@@ -97,6 +112,8 @@ class FakeVideo extends EventTarget {
   playbackRate = 1;
   // A two-hour film, so the bitrates below follow from the sizes.
   duration = 7200;
+  // Left out unless a test says the stream has told its length (HAVE_METADATA is 1).
+  readyState?: number;
 
   play() {
     if (this.paused) {
@@ -250,6 +267,8 @@ beforeEach(() => {
   kept.sourceMemory.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
+  marks.playMark.mockClear();
+  Object.assign(tuned, TUNING_DEFAULTS);
 });
 
 afterEach(() => {
@@ -1294,5 +1313,178 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('play stage marks', () => {
+  it("marks each stream's load and metadata, and the first picture once", async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    video.fire('loadedmetadata');
+    void video.play();
+    video.fire('playing');
+    video.fire('pause');
+    void video.play();
+    video.fire('playing');
+    expect(marks.playMark.mock.calls.map(([, stage, label]) => [stage, label])).toEqual([
+      ['load', 'hls.js'],
+      ['metadata', undefined],
+      ['first-frame', undefined],
+    ]);
+    // All of them the finder's, which names the video.
+    expect(new Set(marks.playMark.mock.calls.map(([finder]) => finder)).size).toBe(1);
+    session.destroy();
+  });
+});
+
+describe('the media clock', () => {
+  const at = (position: number, duration = 7200) => ({
+    position,
+    duration,
+    liveWindow: null,
+    behind: 0,
+  });
+
+  it('renders again only for a reading that changes what shows', () => {
+    // A film: the times show whole seconds, and the bar moves under a pixel a second.
+    expect(clockShows(at(10.05), at(10.3))).toBe(false);
+    expect(clockShows(at(10.8), at(11.05))).toBe(true);
+    expect(clockShows(at(11.05), at(10.9))).toBe(true);
+    expect(clockShows(at(10.05), at(10.3, 7300))).toBe(true);
+    // A short clip: a thousandth of its bar is less than a second.
+    expect(clockShows(at(10.05, 30), at(10.3, 30))).toBe(true);
+    expect(clockShows(at(10.05, 30), at(10.06, 30))).toBe(false);
+  });
+
+  it("counts a broadcast's window and how far behind live it is", () => {
+    const window = { start: 7000, live: 7200, slack: 6 };
+    const live = (position: number, behind: number, kept = window) => ({
+      position,
+      duration: 0,
+      liveWindow: kept,
+      behind,
+    });
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.3, 99.7))).toBe(true);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window }))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window, live: 7206 }))).toBe(
+      true,
+    );
+    expect(clockShows(live(7100.05, 0), { ...live(7100.1, 0), liveWindow: null })).toBe(true);
+  });
+
+  it('tells the player about whole seconds of playback, not every reading', async () => {
+    const { video, session } = setup();
+    await start(session, video, first);
+    const heard = vi.fn();
+    session.subscribe(heard);
+    for (const time of [1, 1.25, 1.5, 1.75, 2, 2.25]) {
+      video.currentTime = time;
+      video.fire('timeupdate');
+    }
+    expect(heard).toHaveBeenCalledTimes(2);
+    expect(session.get().position).toBe(2);
+    // A pause tells it at once, and the next reading brings the clock up to date.
+    video.pause();
+    video.currentTime = 2.4;
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ status: 'paused', position: 2.4 });
+    session.destroy();
+  });
+});
+
+describe('a stream that says nothing of itself', () => {
+  const METADATA_MS = 12000;
+
+  beforeEach(() => {
+    tuned.metadataTimeoutMs = METADATA_MS;
+  });
+
+  it('gives way to the next once the metadataTimeoutMs switch has run out', async () => {
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS - 1);
+    expect(session.get().entry).toBe(first);
+    vi.advanceTimersByTime(1);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get()).toMatchObject({ entry: second, status: 'loading', failedOver: true });
+    session.destroy();
+  });
+
+  it('waits the start time as before with the switch off', async () => {
+    tuned.metadataTimeoutMs = 0;
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(START_TIMEOUT_MS - 1);
+    expect(markFailed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(session.get().entry).toBe(second);
+    session.destroy();
+  });
+
+  it('keeps a stream that told its length, by the event or on the element', async () => {
+    for (const told of ['event', 'element']) {
+      const { video, session, markFailed } = setup();
+      session.play(first, 0);
+      await settle();
+      video.readyState = 1;
+      if (told === 'event') video.fire('loadedmetadata');
+      vi.advanceTimersByTime(METADATA_MS);
+      expect(markFailed).not.toHaveBeenCalled();
+      expect(session.get().entry).toBe(first);
+      // The first picture still has the start time.
+      vi.advanceTimersByTime(START_TIMEOUT_MS - METADATA_MS);
+      expect(markFailed).toHaveBeenCalledWith(first);
+      session.destroy();
+    }
+  });
+
+  it('never gives up early on a stream the viewer picked', async () => {
+    for (const picked of [{ chosen: true }, { handPicked: true }]) {
+      const { session, markFailed } = setup();
+      session.play(first, 0, picked);
+      await settle();
+      vi.advanceTimersByTime(METADATA_MS);
+      expect(markFailed).not.toHaveBeenCalled();
+      session.destroy();
+    }
+    const { session, markFailed } = setup({ autoFailover: false });
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).not.toHaveBeenCalled();
+    session.destroy();
+  });
+
+  it('leaves the last stream the start time, with nowhere else to go', async () => {
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(session.get().entry).toBe(second);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).toHaveBeenCalledTimes(1);
+    expect(session.get().status).toBe('loading');
+    vi.advanceTimersByTime(START_TIMEOUT_MS - METADATA_MS);
+    expect(session.get().status).toBe('failed');
+    session.destroy();
+  });
+
+  it('does not run out while the viewer has it paused before its first picture', async () => {
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    session.pause();
+    vi.advanceTimersByTime(START_TIMEOUT_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+    session.resume();
+    expect(video.paused).toBe(false);
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    session.destroy();
   });
 });

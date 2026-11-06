@@ -22,15 +22,20 @@ import {
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
 import type { EventPlay } from '../app/router';
-import { addonClient } from '../data/addons';
+import { addonClient, putVideosFirst } from '../data/addons';
 import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
+import { tuning } from '../platform/tuning';
+import { playMark } from './play-marks';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
 import { noteRequestHeaders } from './request-headers';
 
-/** Once one stream could play, slower addons get this much longer to offer a better one. */
+/**
+ * Once one stream could play, slower addons get this much longer to offer a
+ * better one, unless the `settleAfterFirstMs` tuning switch says otherwise.
+ */
 export const SETTLE_AFTER_FIRST_MS = 2000;
 /**
  * After the rest have settled, how much longer the addon whose release was
@@ -206,19 +211,22 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     const failed = answers.filter((_, i) => states[i]!.status === 'error').map((a) => a.addon);
     const entries = buildEntries(answers, knownCapabilities());
     const candidates = rank(entries);
+    const settleAfterFirst = tuning.settleAfterFirstMs;
     if (candidates.length > 0 && firstPlayableAt === null) {
       firstPlayableAt = Date.now();
-      settleTimer = window.setTimeout(refresh, SETTLE_AFTER_FIRST_MS);
+      settleTimer = window.setTimeout(refresh, settleAfterFirst);
+      playMark(finder, 'first-stream');
     }
     const settled =
       dropped ||
       (started &&
         (pending === 0 ||
-          (firstPlayableAt !== null && Date.now() - firstPlayableAt >= SETTLE_AFTER_FIRST_MS)));
+          (firstPlayableAt !== null && Date.now() - firstPlayableAt >= settleAfterFirst)));
     if (settled && settleTimer !== undefined) {
       clearTimeout(settleTimer);
       settleTimer = undefined;
     }
+    if (settled && !state.get().settled) playMark(finder, 'settled');
     state.set({ pending, failed, entries, candidates, probes: { ...probes }, settled });
   }
 
@@ -264,6 +272,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       }
       started = true;
       dropped = false;
+      playMark(finder, 'finder-start');
       // A sports event asks only the addons that listed it, once per source.
       answers = sources ? addonClient.streamsFrom(sources) : addonClient.streams(type, videoId);
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
@@ -423,6 +432,19 @@ export function streamFinder(type: string, videoId: string, event?: EventPlay): 
     finders.delete(oldest);
   }
   return finder;
+}
+
+/**
+ * The player's own requests for this video go ahead of others waiting for a
+ * request slot until the release it returns is called, when the `playFirst`
+ * tuning switch is on: its streams (from each of a sports event's sources)
+ * and its subtitles. Lookups ahead, on Details or for the next episode,
+ * keep their place.
+ */
+export function putPlayerFirst(type: string, videoId: string, event?: EventPlay): () => void {
+  const videos = [{ type, id: videoId }];
+  if (event) itemSources(event.sources).forEach(({ type, id }) => videos.push({ type, id }));
+  return putVideosFirst(videos);
 }
 
 /** Stops any link test, as focus moves on. */

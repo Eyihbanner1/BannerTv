@@ -15,6 +15,7 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useRowFillMarks } from '../../app/boot-marks';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { RAIL_FOCUS_KEY } from '../../components/Rail';
@@ -30,6 +31,7 @@ import { activityGap } from '../../navigation/activity';
 import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide, inputMode } from '../../platform/input-mode';
+import { noteHomeFocused } from '../../platform/launch';
 import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
@@ -95,10 +97,12 @@ const HomeRow = memo(function HomeRow({
 }: HomeRowProps) {
   const { t } = useTranslation();
   const query = useMemo(
-    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
+    // A refreshed row equal to the one shown keeps its items, so no tile draws again.
+    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra, { keepEqual: true }),
     [row.addon, row.type, row.catalog.id, row.extra],
   );
   const state = useQuery(query, near);
+  useRowFillMarks(query, state);
   const items = useMemo(() => {
     if (!state.data) return null;
     // A kids row asked its catalog for Family titles; this keeps out any that are not for children.
@@ -210,7 +214,7 @@ export function HomeScreen() {
   // A tile the pointer moved onto while Home waited for that keeps focus.
   // With no rows at all, the rail takes focus, so the remote still works.
   const focusReady = ready && arranged !== null && continueItems !== null;
-  useScreenFocus(firstRowKey ?? RAIL_FOCUS_KEY, focusReady, true, pointedAt);
+  useScreenFocus(firstRowKey ?? RAIL_FOCUS_KEY, focusReady, true, pointedAt, noteHomeFocused);
 
   // The hero starts on the first title focus will land on.
   useEffect(() => {
