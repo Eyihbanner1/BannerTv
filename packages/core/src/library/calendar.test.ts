@@ -103,6 +103,20 @@ describe('calendarEntries', () => {
     expect(calendarEntries(meta('tt3', 'movie', { released: at(-40) }), NOW)).toEqual([]);
     expect(calendarEntries(meta('tt4', 'movie', { released: 'soon' }), NOW)).toEqual([]);
   });
+
+  it("dates a film by its home release when it is known, over the addon's cinema date", () => {
+    const film = meta('tt2', 'movie', { released: at(-30) });
+    const home = Date.parse(at(20));
+    expect(calendarEntries(film, NOW, undefined, home)).toEqual([
+      expect.objectContaining({ kind: 'movie', at: home, atHome: true }),
+    ]);
+    // Out at home long ago: nothing, even with the cinema date inside the window.
+    const old = meta('tt5', 'movie', { released: at(5) });
+    expect(calendarEntries(old, NOW, undefined, Date.parse(at(-90)))).toEqual([]);
+    // A series is never dated so.
+    const show = meta('tt1', 'series', { videos: [episode('tt1', 1, 1, at(3))] });
+    expect(calendarEntries(show, NOW, undefined, home)[0]).not.toHaveProperty('atHome');
+  });
 });
 
 describe('calendarDays', () => {
@@ -136,6 +150,13 @@ describe('calendarDays', () => {
     expect(calendarView([z, y], NOW)[0]!.entries.map((e) => e.title.name)).toEqual(['Why', 'Zed']);
     expect(calendarView([z, y], NOW, 'movie')[0]!.entries.map((e) => e.kind)).toEqual(['movie']);
     expect(calendarView([z, y], NOW, 'series')[0]!.entries.map((e) => e.kind)).toEqual(['episode']);
+  });
+
+  it('takes home release dates by the meta id, for films only', () => {
+    const film = meta('tt2', 'movie', { released: at(1) });
+    const days = calendarView([film], NOW, 'all', undefined, new Map([['tt2', Date.parse(at(9))]]));
+    expect(days.map((day) => day.offset)).toEqual([9]);
+    expect(days[0]!.entries[0]).toMatchObject({ videoId: 'tt2', atHome: true });
   });
 
   it('opens on the last day when everything has passed, and on 0 when empty', () => {

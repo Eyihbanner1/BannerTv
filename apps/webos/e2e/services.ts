@@ -28,6 +28,8 @@ export interface ServicesOptions {
   tmdb?: boolean;
   /** The UK rating TMDB gives every film. Default U. */
   certificate?: string;
+  /** When TMDB says every film comes out to watch at home in the UK. None by default. */
+  homeRelease?: string;
 }
 
 /** A Trakt sign-in as the app keeps it, for a profile already signed in. */
@@ -152,7 +154,7 @@ function traktAnswer(path: string, approved: boolean): { status: number; data: u
 }
 
 /** TMDB's film answer, the same for every film: a logo, a textless backdrop, cast and a rating. */
-function tmdbMovie(id: number, certificate: string) {
+function tmdbMovie(id: number, certificate: string, homeRelease?: string) {
   return {
     id,
     tagline: 'An open movie.',
@@ -170,7 +172,15 @@ function tmdbMovie(id: number, certificate: string) {
       ],
     },
     release_dates: {
-      results: [{ iso_3166_1: 'GB', release_dates: [{ certification: certificate, type: 3 }] }],
+      results: [
+        {
+          iso_3166_1: 'GB',
+          release_dates: [
+            { certification: certificate, type: 3 },
+            ...(homeRelease ? [{ certification: '', type: 4, release_date: homeRelease }] : []),
+          ],
+        },
+      ],
     },
   };
 }
@@ -212,7 +222,12 @@ export async function mockServices(
       return json(route, { movie_results: [{ id }], tv_results: [] });
     }
     const movie = /^movie\/(\d+)$/.exec(path);
-    if (movie) return json(route, tmdbMovie(Number(movie[1]), options.certificate ?? 'U'));
+    if (movie) {
+      return json(
+        route,
+        tmdbMovie(Number(movie[1]), options.certificate ?? 'U', options.homeRelease),
+      );
+    }
     return json(route, { status_message: 'not found' }, 404);
   });
   await page.route(/^https:\/\/image\.tmdb\.org\//, (route) =>
