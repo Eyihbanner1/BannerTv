@@ -10,7 +10,22 @@ export {
   type SportsSetting,
 } from './detect';
 export { createMatcher, type Matcher } from './dictionary';
-export { buildEvents, replayedKeys, sportWord } from './events';
+export { buildEvents, isSport, replayedKeys, sportWord } from './events';
+export {
+  createFollows,
+  type Follow,
+  followableCompetition,
+  followableTeams,
+  followDocumentKey,
+  type FollowKind,
+  type Follows,
+  type FollowSet,
+  followsPart,
+  type FollowTarget,
+  isFollowed,
+  MAX_FOLLOWS,
+  NO_FOLLOWS,
+} from './follows';
 export {
   createSportsFeed,
   type SportsFeed,

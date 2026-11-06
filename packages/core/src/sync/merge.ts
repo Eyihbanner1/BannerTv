@@ -42,6 +42,8 @@ export const DOCUMENT_CAPS = {
   offset: 300,
   /** Home row ids in `home/order` and `home/hidden`. */
   rows: 300,
+  /** Followed teams and competitions, `follow/team/*` and `follow/comp/*` together. */
+  follows: 100,
 } as const;
 
 /** A profile's existence item (`<id>`), as against one of its fields (`<id>/name`). */
@@ -239,14 +241,17 @@ export function tidyItems(document: string, items: Items, now: number): Items {
   } else if (kind === 'settings') {
     const tracks: string[] = [];
     const offsets: string[] = [];
+    const follows: string[] = [];
     for (const key of keys) {
       if (key.indexOf('track/') === 0) tracks.push(key);
       else if (key.indexOf('offset/') === 0) offsets.push(key);
+      else if (key.indexOf('follow/') === 0) follows.push(key);
       else if (key === 'home/order' || key === 'home/hidden') kept[key] = cutList(working[key]!);
       else kept[key] = working[key]!;
     }
     cap(working, tracks, DOCUMENT_CAPS.track, kept);
     cap(working, offsets, DOCUMENT_CAPS.offset, kept);
+    cap(working, follows, DOCUMENT_CAPS.follows, kept);
   } else if (kind === 'profiles') {
     for (const key of keys) {
       const slash = key.indexOf('/');

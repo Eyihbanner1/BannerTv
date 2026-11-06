@@ -162,18 +162,27 @@ export interface SportEvent {
   awayLogo?: string;
   /**
    * The competition the addon named, when the row groups by sport instead
-   * (every sport but football and the four US leagues): "IPL", "ATP Paris".
+   * (tennis, golf, darts, competitions the dictionary does not know):
+   * "ATP Paris", "EuroLeague".
    */
   note?: string;
+  /** The key of the competition `note` names, a dictionary id or a `text:` key, for following it. */
+  noteKey?: string;
+  /**
+   * Each side's key for following it, home first ("football:arsenal:women"):
+   * for team sports only, where a side is a club or a country.
+   */
+  followKeys?: [string, string];
 }
 
 export interface SportsGroup {
   /** Stable while the day and competition are the same; [a-z0-9-] only, safe for focus keys. */
   key: string;
   competition: Competition;
-  /** What the heading says: the competition, or "Earlier today", "Replays" and so on. */
+  /** What the heading says: the competition, or "Following", "Earlier today", "Replays" and so on. */
   title: string;
-  kind: 'competition' | 'earlier' | 'replays' | 'unknown-live';
+  /** `following` holds the matches of the teams and competitions the profile follows, first. */
+  kind: 'following' | 'competition' | 'earlier' | 'replays' | 'unknown-live';
   events: SportEvent[];
   /** How many of `events` are live now, for "2 live of 5". */
   live: number;
