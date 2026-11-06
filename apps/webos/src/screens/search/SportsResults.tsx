@@ -125,7 +125,7 @@ interface SportsResultsProps {
   /** Sports addons' own searches, asked only when the viewer asks. */
   sources: readonly CatalogSource[];
   onFocusRow: (rowKey: string) => void;
-  /** Whether this group shows anything, so Search can say when nothing at all was found. */
+  /** Whether this group found any match, so Search can say when nothing at all was found. */
   onContent: (has: boolean) => void;
   /** A row of the group came or went, so the rows under it have moved. */
   onLayout: () => void;
@@ -194,7 +194,8 @@ export function SportsResults({
   }, [asked, handOff]);
 
   const fromAddons = Object.keys(addonCounts).some((key) => addonCounts[key] !== 0);
-  const has = found.length > 0 || sources.length > 0 || fromAddons;
+  // Matches only: the button alone is not something found, so Nothing found still helps.
+  const has = found.length > 0 || fromAddons;
   useEffect(() => onContent(has), [onContent, has]);
   const none = found.length === 0;
   const addonRows = asked ? sources.filter((source) => addonCounts[source.key] !== 0).length : 0;

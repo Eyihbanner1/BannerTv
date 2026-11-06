@@ -1,12 +1,16 @@
 import {
   type CatalogSource,
+  type DiscoverSource,
+  discoverSources,
   kidsSearchSources,
-  kidsTitleAllowed,
+  type PlannedRow,
+  type Query,
   searchSources,
 } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -16,18 +20,29 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Row } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { TextField } from '../../components/TextField';
-import { addonClient, addonCollection } from '../../data/addons';
+import { addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { isKidsProfile } from '../../data/profiles';
 import { loadRecentSearches, recentSearches } from '../../data/search';
+import {
+  plannedCatalog,
+  plannedQuery,
+  plannedTitle,
+  type SearchHelp,
+  searchHelp,
+  useSmartSearch,
+  visibleTitles,
+} from '../../data/search-results';
 import { sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { forgetFocus } from '../../navigation/focus-memory';
+import { focusedKey } from '../../navigation/spatial';
 import { canSlide } from '../../platform/input-mode';
 import { openDetails } from '../home/Hero';
 import { SportsResults } from './SportsResults';
@@ -38,7 +53,16 @@ const TYPING_PAUSE_MS = 500;
 /** Shorter terms match too much to be useful. */
 const MIN_TERM_LENGTH = 2;
 const RESULT_PREFIX = 'search-res-';
+/** Rows of what the words mean. Not search-res-sports-, which is the Sports group's. */
+const PLANNED_PREFIX = `${RESULT_PREFIX}u-`;
+const TOP_KEY = `${RESULT_PREFIX}top`;
+const HELP_PREFIX = `${RESULT_PREFIX}help-`;
+const HELP_MEANT = `${HELP_PREFIX}meant`;
+const HELP_RETRY = `${HELP_PREFIX}retry`;
+const HELP_SLOT = 'help';
+const NO_HELP: SearchHelp = { chips: [] };
 const NO_SOURCES: readonly CatalogSource[] = [];
+const NO_DISCOVER: readonly DiscoverSource[] = [];
 
 export const SEARCH_FIELD = 'search-field';
 
@@ -50,75 +74,199 @@ function termOf(text: string): string {
   return term.length >= MIN_TERM_LENGTH ? term : '';
 }
 
+type Items = readonly MetaPreview[];
+
+/** A row about to go while focus is in it says so, before its tiles unregister. */
+function useHandOff(focusKey: string, gone: boolean, onGone: (rowKey: string) => void) {
+  useLayoutEffect(() => {
+    if (gone && focusedKey().indexOf(`${focusKey}-`) === 0) onGone(focusKey);
+  }, [gone, focusKey, onGone]);
+}
+
 interface ResultRowProps {
   source: CatalogSource;
-  term: string;
+  query: Query<MetaPreview[]>;
+  /** Null while the addon is asked. */
+  items: Items | null;
+  /** The addon failed with nothing to show: its row says so, with Try again. */
+  failed: boolean;
+  error: Error | undefined;
+  /** Every addon failed: one message says so instead of a row each. */
+  hidden: boolean;
   tag: string;
-  onEmpty: (key: string) => void;
+  onGone: (rowKey: string) => void;
   onItemFocus: (rowKey: string) => void;
   onItemPress: (item: MetaPreview) => void;
 }
 
-function ResultRow({ source, term, tag, onEmpty, onItemFocus, onItemPress }: ResultRowProps) {
+/** One addon's own search results, titled by type and tagged with the addon. */
+const ResultRow = memo(function ResultRow({
+  source,
+  query,
+  items,
+  failed,
+  error,
+  hidden,
+  tag,
+  onGone,
+  onItemFocus,
+  onItemPress,
+}: ResultRowProps) {
   const { t } = useTranslation();
   const { addon, catalog } = source;
-  const query = useMemo(
-    () =>
-      addonClient.catalog(addon, catalog.type, catalog.id, [['search', term]], { persist: false }),
-    [addon, catalog, term],
-  );
-  const state = useQuery(query);
-  // A kids profile sees only results that name themselves as for children.
-  const items = useMemo(
-    () =>
-      state.data && isKidsProfile()
-        ? state.data.filter((item) => kidsTitleAllowed(item))
-        : state.data,
-    [state.data],
-  );
-  const empty = state.status === 'success' && items !== undefined && items.length === 0;
   const focusKey = `${RESULT_PREFIX}${source.key}`;
-
-  useEffect(() => {
-    if (empty) onEmpty(source.key);
-  }, [empty, onEmpty, source.key]);
-
-  if (empty) return null;
+  const gone = hidden || (!failed && items !== null && items.length === 0);
+  useHandOff(focusKey, gone, onGone);
+  const onFocus = useCallback(() => onItemFocus(focusKey), [onItemFocus, focusKey]);
+  const onRetry = useCallback(() => query.retry(), [query]);
+  if (gone) return null;
   return (
     <Row
       focusKey={focusKey}
       title={typeLabel(t, catalog.type)}
       tag={tag}
       shape="poster"
-      items={state.status === 'error' ? [] : (items ?? null)}
-      error={
-        state.status === 'error'
-          ? describeAddonError(t, state.error, addon.manifest.name)
-          : undefined
-      }
-      onRetry={() => query.retry()}
-      onItemFocus={() => onItemFocus(focusKey)}
+      items={failed ? [] : items}
+      error={failed ? describeAddonError(t, error, addon.manifest.name) : undefined}
+      onRetry={onRetry}
+      onItemFocus={onFocus}
       onItemPress={onItemPress}
     />
   );
+});
+
+interface PlannedResultRowProps {
+  row: PlannedRow;
+  /** How many titles the row shows: -1 while it is asked, 0 when it found none or failed. */
+  onCount: (key: string, count: number) => void;
+  onGone: (rowKey: string) => void;
+  onItemFocus: (rowKey: string) => void;
+  onItemPress: (item: MetaPreview) => void;
+}
+
+/**
+ * A row for what the words mean, such as "Comedy films": the catalog Home and
+ * Discover ask, so it shares their copy. See all opens it in Discover.
+ */
+const PlannedResultRow = memo(function PlannedResultRow({
+  row,
+  onCount,
+  onGone,
+  onItemFocus,
+  onItemPress,
+}: PlannedResultRowProps) {
+  const { t } = useTranslation();
+  const query = useMemo(() => plannedQuery(row), [row]);
+  const state = useQuery(query);
+  const items = useMemo(
+    () => (state.data ? visibleTitles(state.data, row.family) : null),
+    [state.data, row.family],
+  );
+  // It only adds to what the addons found, so it goes quietly when it has nothing.
+  const count = items ? items.length : state.status === 'error' ? 0 : -1;
+  const focusKey = `${PLANNED_PREFIX}${row.key}`;
+  useLayoutEffect(() => onCount(row.key, count), [onCount, row.key, count]);
+  useHandOff(focusKey, count === 0, onGone);
+  const onFocus = useCallback(() => onItemFocus(focusKey), [onItemFocus, focusKey]);
+  const onSeeAll = useCallback(() => push({ name: 'catalog', ...plannedCatalog(row) }), [row]);
+  if (count === 0) return null;
+  return (
+    <Row
+      focusKey={focusKey}
+      title={plannedTitle(t, row)}
+      tag={row.source.addon.manifest.name}
+      shape="poster"
+      items={items}
+      onItemFocus={onFocus}
+      onItemPress={onItemPress}
+      onSeeAll={onSeeAll}
+    />
+  );
+});
+
+interface HelpProps {
+  /** Every addon failed: only Try again is offered. */
+  allFailed: boolean;
+  /** Some addons failed: a note says there may be more. */
+  someFailed: boolean;
+  help: SearchHelp;
+  onPick: (term: string) => void;
+  onRetry: () => void;
+}
+
+/** Under "Nothing found": a likely spelling, genres to look through, or Try again. */
+function Help({ allFailed, someFailed, help, onPick, onRetry }: HelpProps) {
+  const { t } = useTranslation();
+  if (allFailed) {
+    return (
+      <div className={styles.help}>
+        <Button focusKey={HELP_RETRY} label={t('common.tryAgain')} onPress={onRetry} />
+      </div>
+    );
+  }
+  const meant = help.didYouMean;
+  return (
+    <div className={styles.help}>
+      {someFailed && <p className={styles.helpNote}>{t('search.someNoAnswer')}</p>}
+      {meant !== undefined && (
+        <div className={styles.helpLine}>
+          <Button
+            focusKey={HELP_MEANT}
+            label={t('search.didYouMean', { term: meant })}
+            onPress={() => onPick(meant)}
+          />
+        </div>
+      )}
+      {help.chips.length > 0 && (
+        <>
+          <h2 className={styles.heading}>{t('search.tryGenres')}</h2>
+          {help.chips.map((chip, index) => (
+            <div key={chip.label} className={styles.chip}>
+              <Button
+                focusKey={`${HELP_PREFIX}genre-${index}`}
+                label={chip.label}
+                onPress={() => onPick(chip.query)}
+              />
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The help's first button, which focus goes to when it is all there is. */
+function firstHelpKey(allFailed: boolean, help: SearchHelp | undefined): string | undefined {
+  if (allFailed) return HELP_RETRY;
+  if (!help) return undefined;
+  if (help.didYouMean !== undefined) return HELP_MEANT;
+  return help.chips.length > 0 ? `${HELP_PREFIX}genre-0` : undefined;
 }
 
 interface ResultsProps {
   term: string;
   sources: readonly CatalogSource[];
+  /** Catalogs that can answer what the words mean. */
+  discover: readonly DiscoverSource[];
   /** With sport installed: the Sports group's searches, or null without sport. */
   sportsSources: readonly CatalogSource[] | null;
+  /** A spelling or genre from the help: search for it instead. */
+  onPick: (term: string) => void;
 }
 
-function Results({ term, sources, sportsSources }: ResultsProps) {
+/**
+ * Search results, top to bottom: Sports, Top results across the addons, rows
+ * for what the words mean ("Comedy films"), then each addon's own results.
+ */
+function Results({ term, sources, discover, sportsSources, onPick }: ResultsProps) {
   const { t } = useTranslation();
-  const [empty, setEmpty] = useState<ReadonlySet<string>>(() => new Set());
+  const smart = useSmartSearch(term, sources, discover);
+  const { planned, queries, states, results, failed, top } = smart;
+  const [counts, setCounts] = useState<Readonly<Record<string, number>>>({});
   const [sportsContent, setSportsContent] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
-  const latest = useRef({ sources, empty });
-  useLayoutEffect(() => {
-    latest.current = { sources, empty };
-  });
+  // A row that went while focused, to hand focus on from once the rows have drawn again.
+  const handOff = useRef<string | undefined>(undefined);
 
   // Two catalogs of one addon and type need the catalog name to tell them apart.
   const tags = useMemo(
@@ -136,25 +284,80 @@ function Results({ term, sources, sportsSources }: ResultsProps) {
     [sources],
   );
 
-  useLayoutEffect(() => slideTrack(trackRef.current, memory.slideRow), [empty]);
+  const plannedEmpty = planned.every((row) => counts[row.key] === 0);
+  const allFailed = sources.length > 0 && failed.every(Boolean) && plannedEmpty && !sportsContent;
+  const someFailed = failed.some(Boolean);
+  const nothing =
+    !allFailed &&
+    smart.settled &&
+    results.every((items) => items !== null && items.length === 0) &&
+    plannedEmpty &&
+    !sportsContent;
+  const help = useMemo(
+    () => (nothing ? searchHelp(term, discover) : undefined),
+    [nothing, term, discover],
+  );
+  const helpKey = nothing || allFailed ? firstHelpKey(allFailed, help) : undefined;
+
+  // Every place focus can be in the track, in order, and whether it is drawn now.
+  const slots = useMemo(() => {
+    const list: { key: string; focus: string; drawn: boolean }[] = [
+      { key: HELP_SLOT, focus: helpKey ?? '', drawn: helpKey !== undefined },
+      { key: TOP_KEY, focus: TOP_KEY, drawn: top.status === 'shown' },
+    ];
+    for (const row of planned) {
+      const key = `${PLANNED_PREFIX}${row.key}`;
+      list.push({ key, focus: key, drawn: counts[row.key] !== 0 });
+    }
+    sources.forEach((source, index) => {
+      const key = `${RESULT_PREFIX}${source.key}`;
+      const items = results[index] ?? null;
+      const drawn = !allFailed && (failed[index] === true || items === null || items.length > 0);
+      list.push({ key, focus: key, drawn });
+    });
+    return list;
+  }, [helpKey, top.status, planned, counts, sources, results, failed, allFailed]);
+  const latest = useRef(slots);
+  const drawnRows = slots
+    .filter((slot) => slot.drawn)
+    .map((slot) => slot.key)
+    .join(' ');
+
+  useLayoutEffect(() => {
+    latest.current = slots;
+    const from = handOff.current;
+    if (from === undefined) return;
+    handOff.current = undefined;
+    // The next place drawn after the one that went, else the one before it, else the box.
+    const at = slots.findIndex((slot) => slot.key === from);
+    const drawn = (slot: { drawn: boolean }) => slot.drawn;
+    const next =
+      slots.slice(at + 1).find(drawn) ?? slots.slice(0, Math.max(0, at)).reverse().find(drawn);
+    void setFocus(next ? next.focus : SEARCH_FIELD);
+  });
+  // Rows coming and going above the focused one move it: the view goes back to it.
+  useLayoutEffect(() => slideTrack(trackRef.current, memory.slideRow), [drawnRows]);
   // The Sports group above the other rows grows and shrinks by itself, as its
   // rows come and go: the view goes back to the row it was on.
   const onSportsLayout = useCallback(() => slideTrack(trackRef.current, memory.slideRow), []);
-  // Focus leaving the Sports group goes to the first row under it, or the box.
+  // Focus leaving the Sports group goes to the first place under it, or the box.
   const onSportsLeave = useCallback(() => {
-    const { sources: list, empty: none } = latest.current;
-    const below = list.find((source) => !none.has(source.key));
-    void setFocus(below ? `${RESULT_PREFIX}${below.key}` : SEARCH_FIELD);
+    const below = latest.current.find((slot) => slot.drawn);
+    void setFocus(below ? below.focus : SEARCH_FIELD);
   }, []);
 
-  const onEmpty = useCallback((key: string) => {
-    setEmpty((previous) => new Set(previous).add(key));
+  const onCount = useCallback((key: string, count: number) => {
+    setCounts((previous) => (previous[key] === count ? previous : { ...previous, [key]: count }));
+  }, []);
+  const onGone = useCallback((rowKey: string) => {
+    handOff.current = rowKey;
   }, []);
   const onItemFocus = useCallback((rowKey: string) => {
     if (!canSlide()) return;
     memory.slideRow = rowKey;
     slideTrack(trackRef.current, rowKey);
   }, []);
+  const onTopFocus = useCallback(() => onItemFocus(TOP_KEY), [onItemFocus]);
   const onItemPress = useCallback(
     (item: MetaPreview) => {
       recentSearches.add(term);
@@ -162,10 +365,21 @@ function Results({ term, sources, sportsSources }: ResultsProps) {
     },
     [term],
   );
+  const onRetry = useCallback(() => {
+    // The rows come back as they are asked again: focus goes to the first of them.
+    handOff.current = HELP_SLOT;
+    queries.forEach((query, index) => {
+      if (states[index]?.status === 'error') query.retry();
+    });
+    for (const row of planned) {
+      const query = plannedQuery(row);
+      if (query.get().status === 'error') query.retry();
+    }
+  }, [queries, states, planned]);
 
-  const nothing = sources.every((source) => empty.has(source.key)) && !sportsContent;
   return (
     <div className={styles.results}>
+      {allFailed && <p className={styles.message}>{t('search.noAnswer')}</p>}
       {nothing && <p className={styles.message}>{t('search.nothingFound', { term })}</p>}
       <div ref={trackRef} className={styles.track}>
         {sportsSources && (
@@ -178,13 +392,48 @@ function Results({ term, sources, sportsSources }: ResultsProps) {
             onLeave={onSportsLeave}
           />
         )}
+        {allFailed ? (
+          <Help allFailed someFailed help={NO_HELP} onPick={onPick} onRetry={onRetry} />
+        ) : nothing && help !== undefined ? (
+          <Help
+            allFailed={false}
+            someFailed={someFailed}
+            help={help}
+            onPick={onPick}
+            onRetry={onRetry}
+          />
+        ) : null}
+        {top.status === 'shown' && (
+          <Row
+            focusKey={TOP_KEY}
+            title={t('search.topResults')}
+            shape="poster"
+            items={top.items}
+            onItemFocus={onTopFocus}
+            onItemPress={onItemPress}
+          />
+        )}
+        {planned.map((row) => (
+          <PlannedResultRow
+            key={row.key}
+            row={row}
+            onCount={onCount}
+            onGone={onGone}
+            onItemFocus={onItemFocus}
+            onItemPress={onItemPress}
+          />
+        ))}
         {sources.map((source, index) => (
           <ResultRow
             key={source.key}
             source={source}
-            term={term}
+            query={queries[index]!}
+            items={results[index] ?? null}
+            failed={failed[index] === true}
+            error={states[index]?.error}
+            hidden={allFailed}
             tag={tags[index]!}
-            onEmpty={onEmpty}
+            onGone={onGone}
             onItemFocus={onItemFocus}
             onItemPress={onItemPress}
           />
@@ -221,8 +470,8 @@ function RecentSearches({ onPick }: { onPick: (term: string) => void }) {
 }
 
 /**
- * Search across every addon that can search. Results come as rows grouped by
- * type, then addon, and update as typing pauses.
+ * Search across every addon that can search, and what the words mean: a
+ * genre, a mood, a year or a catalog's name. Results update as typing pauses.
  */
 export function SearchScreen() {
   const { t } = useTranslation();
@@ -245,6 +494,14 @@ export function SearchScreen() {
       leaveOut(source.addon, source.catalog),
     );
   }, [ready, collection.addons, sports.shown, sports.searchLeaveOut]);
+  // What the words can be answered from: the catalogs Discover browses, less sport's.
+  const discover = useMemo(() => {
+    if (!ready) return NO_DISCOVER;
+    const leaveOut = sports.homeLeaveOut;
+    return discoverSources(collection.addons).filter(
+      (source) => !leaveOut?.(source.addon, source.catalog),
+    );
+  }, [ready, collection.addons, sports.homeLeaveOut]);
   const [text, setText] = useState(memory.text);
   const [term, setTerm] = useState(memory.term);
 
@@ -266,22 +523,36 @@ export function SearchScreen() {
     return () => clearTimeout(timer);
   }, [text, search]);
 
+  // A recent search, a spelling or a genre: it goes in the box and is searched at once.
+  const pick = useCallback(
+    (picked: string) => {
+      // The box is the natural place to continue from. Focus moves there before
+      // the button pressed goes with the old results: otherwise spatial
+      // navigation puts focus back on the screen a moment later, mid-typing.
+      void Promise.resolve(setFocus(SEARCH_FIELD)).then(() => {
+        setText(picked);
+        search(termOf(picked));
+      });
+    },
+    [search],
+  );
+
   let body;
   if (ready && sources.length === 0 && !sportsSources) {
     body = <p className={styles.message}>{t('search.noAddons')}</p>;
   } else if (term === '') {
+    body = <RecentSearches onPick={pick} />;
+  } else if (ready) {
     body = (
-      <RecentSearches
-        onPick={(picked) => {
-          setText(picked);
-          search(termOf(picked));
-          // The list goes away with a term; the box is the natural place to continue from.
-          void setFocus(SEARCH_FIELD);
-        }}
+      <Results
+        key={term}
+        term={term}
+        sources={sources}
+        discover={discover}
+        sportsSources={sportsSources}
+        onPick={pick}
       />
     );
-  } else if (ready) {
-    body = <Results key={term} term={term} sources={sources} sportsSources={sportsSources} />;
   }
 
   return (

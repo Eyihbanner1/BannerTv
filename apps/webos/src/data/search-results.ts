@@ -132,11 +132,22 @@ export function useQueryStates<T>(queries: readonly Query<T>[]): readonly QueryS
   return states;
 }
 
+const NO_ITEMS: Items = [];
+// A kids profile's titles for each list, kept so a row that has not changed
+// keeps the same list and is not drawn again when another addon answers.
+const kidsTitles = new WeakMap<Items, Items>();
+const kidsFamilyTitles = new WeakMap<Items, Items>();
+
 /** What a kids profile may see of a row's titles; everything for anyone else. */
 export function visibleTitles(items: Items, fromFamilyCatalog = false): Items {
-  return isKidsProfile()
-    ? items.filter((item) => kidsTitleAllowed(item, fromFamilyCatalog))
-    : items;
+  if (!isKidsProfile()) return items;
+  const cache = fromFamilyCatalog ? kidsFamilyTitles : kidsTitles;
+  let kept = cache.get(items);
+  if (!kept) {
+    kept = items.filter((item) => kidsTitleAllowed(item, fromFamilyCatalog));
+    cache.set(items, kept);
+  }
+  return kept;
 }
 
 /** Whether the profile has a title in My List, or part watched. */
@@ -206,7 +217,7 @@ export function useSmartSearch(
   const results = useMemo(
     () =>
       states.map((state) =>
-        state.data ? visibleTitles(state.data) : state.status === 'error' ? [] : null,
+        state.data ? visibleTitles(state.data) : state.status === 'error' ? NO_ITEMS : null,
       ),
     [states],
   );

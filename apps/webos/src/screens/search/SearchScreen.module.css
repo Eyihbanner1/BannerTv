@@ -66,3 +66,18 @@
   margin-bottom: 20px;
   color: var(--bt-text-muted);
 }
+
+/* Under "Nothing found": Did you mean, genres to look through, or Try again. */
+.help {
+  width: 1300px;
+  padding: 8px 0 0 var(--bt-content-inset);
+}
+
+.helpLine {
+  margin-bottom: 28px;
+}
+
+.helpNote {
+  margin-bottom: 20px;
+  color: var(--bt-text-muted);
+}
