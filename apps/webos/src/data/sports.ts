@@ -29,7 +29,7 @@ import {
 } from '@bannertv/core';
 import { catalogAccepts, type ManifestCatalog, type MetaPreview } from '@bannertv/protocol';
 import { SPORTS_IN_BUILD } from '../app/features';
-import { addonClient, addonCollection } from './addons';
+import { addonClient, addonCollection, allAddons } from './addons';
 import { SPORTS_DATA_SCRIPT } from './sports-data-script';
 import { storage } from './storage';
 
@@ -209,14 +209,17 @@ export function startSports(): Promise<void> {
     void kickoffs.load();
     let before: readonly InstalledAddon[] = [];
     let wasReady = false;
+    // What is kept about an addon follows every install, so switching one off keeps its
+    // setting and kick-offs; what Sports shows follows only the addons switched on.
     const onCollection = () => {
-      const { addons, ready } = addonCollection.get();
+      const { addons, ready } = allAddons.get();
       if (wasReady) followCollection(before, addons);
       before = addons;
       wasReady = ready;
       detect();
     };
-    addonCollection.subscribe(onCollection);
+    allAddons.subscribe(onCollection);
+    addonCollection.subscribe(detect);
     onCollection();
   });
   return stored;

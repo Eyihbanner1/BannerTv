@@ -3,6 +3,7 @@ import {
   createAddonClient,
   createAddonCollection,
   createAddonHealth,
+  createAddonSwitches,
   createLimiter,
   createQueryCache,
   DEFAULT_ADDONS,
@@ -12,6 +13,7 @@ import {
   installIdOf,
   MANIFEST_TIMEOUT_MS,
   observeAnswers,
+  switchedOnOnly,
 } from '@bannertv/core';
 import { type Manifest, normalizeManifestUrl, parseManifest } from '@bannertv/protocol';
 import { fetchJson } from '../platform/http';
@@ -37,16 +39,37 @@ export const addonHealth = createAddonHealth({ storage: storage.kv });
 // included, without the collection or the client knowing. The collection is read only when
 // a request goes, by which time it exists.
 const watchedFetch = observeAnswers(fetchJson, {
-  installOf: (url) => installIdForUrl(addonCollection.get().addons, url),
+  installOf: (url) => installIdForUrl(allAddons.get().addons, url),
   note: addonHealth.note,
   elapsed,
 });
 
-export const addonCollection = createAddonCollection({
+/**
+ * Every install, those switched off included, in priority order: for the
+ * Addons screens and their dialogs, and for the BannerTV account, which
+ * keeps the addons whether they are on or off. Everything else reads
+ * `addonCollection`.
+ */
+export const allAddons = createAddonCollection({
   storage: storage.kv,
   fetchJson: watchedFetch,
   defaults: DEFAULT_ADDONS,
 });
+
+/**
+ * Which addons are switched off: one set for the screen, as the addons are,
+ * and the account's when there is one. A default addon switched off is
+ * still installed, so it stays off rather than coming back as new.
+ */
+export const addonSwitches = createAddonSwitches({ storage: storage.kv, collection: allAddons });
+
+/**
+ * The addons the app uses: every install but those switched off. Home,
+ * Search, Discover, Sports, the player, subtitles and the addon client read
+ * this, so a switched-off addon is asked nothing and shows nowhere, while
+ * its settings and its place in the list are kept.
+ */
+export const addonCollection = switchedOnOnly(allAddons, addonSwitches);
 
 /** Every request the app makes for browsing waits its turn here, TMDB's included. */
 export const requestLimiter = createLimiter(MAX_REQUESTS);
@@ -62,9 +85,14 @@ export const addonClient = createAddonClient({
   kidsOnly: isKidsProfile,
 });
 
-/** Each installed addon's name, by its manifest id. */
+/** Each installed addon's name, by its manifest id, those switched off included. */
 export function addonNames(): Map<string, string> {
-  return new Map(addonCollection.get().addons.map((a) => [a.manifest.id, a.manifest.name]));
+  return new Map(allAddons.get().addons.map((a) => [a.manifest.id, a.manifest.name]));
+}
+
+/** Switches an addon off, keeping its settings and its place, or back on. */
+export function switchAddon(addon: InstalledAddon, off: boolean): void {
+  addonSwitches.set(installIdOf(addon), off);
 }
 
 /**
@@ -112,13 +140,13 @@ export async function addonPreview(input: string): Promise<Manifest> {
  */
 function followRemovals(): void {
   let installed: readonly string[] | undefined;
-  addonCollection.subscribe(() => {
-    const { ready, addons } = addonCollection.get();
+  allAddons.subscribe(() => {
+    const { ready, addons } = allAddons.get();
     if (!ready) return;
     const ids = addons.map(installIdOf);
     if (!installed) {
       void addonHealth.load().then(() => {
-        const now = addonCollection.get().addons.map(installIdOf);
+        const now = allAddons.get().addons.map(installIdOf);
         const stale = Array.from(addonHealth.get().keys()).filter((id) => now.indexOf(id) === -1);
         if (stale.length > 0) addonHealth.forget(stale);
       });
@@ -130,15 +158,18 @@ function followRemovals(): void {
 }
 
 /**
- * Reads the addon collection, then refreshes day-old manifests once Home has
- * had a few seconds to load, so the refresh never competes with the first rows.
+ * Reads the addon collection and its switches, then refreshes day-old
+ * manifests once Home has had a few seconds to load, so the refresh never
+ * competes with the first rows. Switched-off addons are refreshed too, so
+ * their cards stay up to date.
  */
 export function startAddons(): void {
   followRemovals();
   void addonHealth.load();
-  void addonCollection.load().then(() => {
+  void addonSwitches.load();
+  void allAddons.load().then(() => {
     setTimeout(() => {
-      void addonCollection.refreshManifests(MANIFEST_MAX_AGE_MS);
+      void allAddons.refreshManifests(MANIFEST_MAX_AGE_MS);
     }, IDLE_DELAY_MS);
   });
 }

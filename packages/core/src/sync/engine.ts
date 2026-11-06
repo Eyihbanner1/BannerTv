@@ -139,8 +139,9 @@ export interface SyncEngineOptions {
   timers: Timers;
   /**
    * The parts of the account-wide documents: the app's profiles part (keys
-   * `<id>` and `<id>/name|colour|kids|pin`), collectionPart, and the app's
-   * Sports part (`s/<manifestId>`).
+   * `<id>` and `<id>/name|colour|kids|pin`), collectionPart, the addons'
+   * switches (addonSwitchesPart, `off/<installId>`) and the app's Sports
+   * part (`s/<manifestId>`).
    */
   accountParts: readonly SyncPart[];
   /**
