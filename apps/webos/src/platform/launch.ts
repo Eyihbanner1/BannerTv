@@ -1,6 +1,13 @@
 import { sinceActivity } from '../navigation/activity';
-import { bootInfo } from './boot';
+import { scriptAt } from './boot';
 import { bootMark } from './marks';
+
+/**
+ * The page's own clock (performance.now()), which a change of the TV's time
+ * never moves: the TV can set its clock from the network in the first
+ * seconds after it starts, and Date.now() would then jump.
+ */
+const pageClock = () => performance.now();
 
 /**
  * Once Home has placed its first focus, the launch has settled when the
@@ -31,8 +38,8 @@ function settle(): void {
 /** Settles now if it is time, else looks again when it could be: a key press meanwhile waits longer. */
 function check(): void {
   if (settled) return;
-  const now = Date.now();
-  let wait = SETTLE_LATEST_MS - (now - bootInfo.startedAt);
+  const now = pageClock();
+  let wait = SETTLE_LATEST_MS - (now - scriptAt);
   if (homeFocusedAt !== undefined) {
     // Before any key, the remote has been still since Home's focus.
     const quiet = Math.min(sinceActivity(), now - homeFocusedAt);
@@ -52,7 +59,7 @@ function check(): void {
  */
 export function noteHomeFocused(): void {
   if (homeFocusedAt !== undefined) return;
-  homeFocusedAt = Date.now();
+  homeFocusedAt = pageClock();
   bootMark('boot:first-focus');
   if (waiting.length > 0) check();
 }

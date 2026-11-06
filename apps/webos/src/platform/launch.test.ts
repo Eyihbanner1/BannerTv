@@ -82,6 +82,28 @@ describe('afterLaunch', () => {
     expect(busy).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps to its times when the TV sets its clock meanwhile', async () => {
+    const HOUR = 60 * 60 * 1000;
+    const { afterLaunch, noteHomeFocused, SETTLE_QUIET_MS, SETTLE_LATEST_MS } = await load();
+    const forward = vi.fn();
+    afterLaunch(forward);
+    vi.advanceTimersByTime(1000);
+    vi.setSystemTime(Date.now() + HOUR);
+    noteHomeFocused();
+    expect(forward).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SETTLE_QUIET_MS);
+    expect(forward).toHaveBeenCalledTimes(1);
+
+    const again = await load();
+    const back = vi.fn();
+    again.noteHomeFocused();
+    again.afterLaunch(back);
+    remote.lastKeyAt = Date.now();
+    vi.setSystemTime(Date.now() - HOUR);
+    vi.advanceTimersByTime(SETTLE_LATEST_MS);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
   it('runs at once once the launch has settled, and one failing stops no other', async () => {
     const { afterLaunch, noteHomeFocused, SETTLE_QUIET_MS } = await load();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
