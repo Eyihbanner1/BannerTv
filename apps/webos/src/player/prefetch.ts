@@ -14,6 +14,13 @@ import { stopProbing, type StreamFinder, streamFinder } from './finder';
 export const PREFETCH_REST_MS = tuning.prefetchRestMs;
 
 /**
+ * The rest on a page where nothing moves focus, so opening it is the intent
+ * to watch (the phone's title and event pages): still long enough to skip a
+ * quick look and back out.
+ */
+export const OPEN_PAGE_REST_MS = 300;
+
+/**
  * Whether links may be tested before Play. Off on webOS 5 TVs under "auto"
  * until probing has been measured on one (docs/PLAN.md, auto-play). Off on
  * Android too: the test runs in the WebView's player, which fails files
