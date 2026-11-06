@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.streamhelper'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.streamhelper"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  sourceSets {
+    main {
+      // The helper's server and rules, shared with the Android TV app and tested there
+      // (apps/androidtv/helper-core/README.md). This module adds only the Android shell.
+      java.srcDir "$projectDir/../../../../androidtv/helper-core/src/main/java"
+    }
+  }
+}

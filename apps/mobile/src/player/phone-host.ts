@@ -417,9 +417,37 @@ const host = {
     if (/^https:\/\//i.test(url)) Linking.openURL(url).catch(() => undefined);
   },
   player: (command: string) => handle(command),
+  ...helperBridge(),
 };
 
 let installed = false;
+
+/** modules/stream-helper: the stream helper for an LG on the home network (ADR 0005, decision 13). */
+interface StreamHelperModule {
+  /** The same JSON as the Android TV app's helperState(). */
+  state(): string;
+  command(command: string): void;
+}
+
+/**
+ * The bridge's helper() and helperState(), only when the build has the native module. The web
+ * build has none, so the shared androidHelperState() reads null there and Settings hides it.
+ */
+function helperBridge(): { helper?(command: string): void; helperState?(): string } {
+  const native = requireOptionalNativeModule<StreamHelperModule>('BannerStreamHelper');
+  if (!native) return {};
+  return {
+    helperState: () => native.state(),
+    helper: (command: string) => {
+      if (command !== 'start' && command !== 'stop' && command !== 'forget') return;
+      try {
+        native.command(command);
+      } catch {
+        // Android refused to start the service: the helper stays off, and its state says so.
+      }
+    },
+  };
+}
 
 /** modules/banner-relaunch: BannerTV opened again from the launcher while running. */
 interface RelaunchModule {

@@ -4,6 +4,7 @@ import { preferences, setPreference, type Preferences } from '@tv/data/preferenc
 import { addonCollection } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection } from '@tv/data/sync';
+import { androidHelperState } from '@tv/platform/android';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -88,6 +89,10 @@ export function SettingsScreen() {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+  // The stream helper, on builds that have it (not the web build). Read on each visit: it is
+  // switched on its own screen, or off from its notification.
+  const [helper, setHelper] = useState(androidHelperState);
+  useFocusEffect(useCallback(() => setHelper(androidHelperState()), []));
 
   const valueOf = (_choice: Choice, value: string) => t(`settings.streamChoiceValue.${value}`);
   const accountDetail =
@@ -167,6 +172,17 @@ export function SettingsScreen() {
               />
             ) : null}
           </Section>
+
+          {helper ? (
+            <Section title={t('phone.yourTv')}>
+              <ListRow
+                title={t('settings.streamHelper')}
+                detail={t('phone.streamHelperDetail')}
+                value={helper.on ? t('common.on') : t('common.off')}
+                onPress={() => router.push('/stream-helper')}
+              />
+            </Section>
+          ) : null}
 
           {services.tmdb ? (
             <Section title={t('settings.services')}>
