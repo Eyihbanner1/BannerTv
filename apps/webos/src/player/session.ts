@@ -16,6 +16,14 @@ import { bandwidth, progress, sourceMemory } from '../data/playback';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
+import {
+  createLandingWatch,
+  LANDING_SETTLE_MS,
+  type LandingBounds,
+  landingStream,
+  readLandingMode,
+  showLandings,
+} from './landing';
 import { rewindWindow, shouldReturnToLive } from './live';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
@@ -248,6 +256,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let wantedText: string | null = null;
   // Shaka lets go of the video element asynchronously; the next engine waits for it.
   let releasing: Promise<void> = Promise.resolve();
+  // Where the viewer's jumps really land, by the tester's switch read now (landing.ts).
+  const landings = createLandingWatch(readLandingMode());
+  showLandings();
+  // Reads a paused jump's landing, once the TV has had a moment to say where it is.
+  let landingTimer: number | undefined;
 
   function release() {
     const old = engine;
@@ -527,6 +540,34 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     );
   }
 
+  /** Where a jump may go: the video, and on a broadcast the part a rewind may land in. */
+  function jumpBounds(): LandingBounds {
+    const kept = liveWindow();
+    return {
+      duration: isFinite(video.duration) ? video.duration : Infinity,
+      window: kept ? rewindWindow(kept) : null,
+    };
+  }
+
+  function stopLandingTimer() {
+    clearTimeout(landingTimer);
+    landingTimer = undefined;
+  }
+
+  /**
+   * Reads where the watched jump landed. In 'again' a miss is jumped once
+   * more, and that second jump is not the viewer's: the engine, the tracker
+   * and the bar are not told, nothing is saved or offered, and the clock
+   * takes the bar there as it plays.
+   */
+  function readLanding(final: boolean) {
+    if (!engine) return;
+    const second = landings.read(video.currentTime, final, jumpBounds());
+    if (second === undefined) return;
+    stopLandingTimer();
+    video.currentTime = second;
+  }
+
   const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
     [
       'play',
@@ -618,6 +659,19 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       },
     ],
     [
+      'seeked',
+      () => {
+        if (!landings.seeked()) return;
+        // Playing, the next reading as the clock moves on says where it landed.
+        // Paused, no clock moves on: it is read once the TV has had a moment.
+        stopLandingTimer();
+        landingTimer = window.setTimeout(() => {
+          landingTimer = undefined;
+          if (video.paused) readLanding(true);
+        }, LANDING_SETTLE_MS);
+      },
+    ],
+    [
       'timeupdate',
       () => {
         // A stream let go of resets the element to 0, which is no place in the video.
@@ -656,6 +710,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
         patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
+        readLanding(false);
       },
     ],
     [
@@ -756,6 +811,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       autoLiveAt = -Infinity;
       clearInterval(liveTimer);
       firstTrusted = undefined;
+      // Another file lands its jumps its own way: nothing learnt carries over.
+      landings.reset();
+      stopLandingTimer();
       patch({
         status: 'loading',
         entry,
@@ -899,7 +957,20 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       clearTimeout(judgeTimer);
       judgeTimer = undefined;
       lastSeekAt = Date.now();
-      video.currentTime = target;
+      // In 'learn' the element is sent as much past the target as this stream's
+      // jumps usually fall short. The viewer's place stays the target.
+      const aimed = landings.aim(target, video.currentTime, jumpBounds());
+      stopLandingTimer();
+      video.currentTime = aimed;
+      // Before the first picture the engine is still finding its start, which it checks itself.
+      if (startedPlaying) {
+        landings.jumped({
+          wanted: target,
+          aimed,
+          paused: video.paused,
+          stream: landingStream(engine?.name ?? null, state.get().entry?.facts),
+        });
+      }
       engine?.seeked?.();
       tracker?.seeked(target);
       // Back from the end it is paused there, not ended: Play goes on from it.
@@ -955,6 +1026,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       destroyed = true;
       clearTimers();
       clearInterval(liveTimer);
+      landings.reset();
+      stopLandingTimer();
       handlers.forEach(([event, handler]) => video.removeEventListener(event, handler));
       release();
     },

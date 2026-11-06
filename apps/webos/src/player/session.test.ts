@@ -4,6 +4,13 @@ import { labStream } from '../lab/player';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  clearLandings,
+  LANDING_KEY,
+  LANDING_SETTLE_MS,
+  type LandingMode,
+  recentLandings,
+} from './landing';
+import {
   LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
@@ -250,11 +257,15 @@ beforeEach(() => {
   kept.sourceMemory.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
+  // Each landing read is printed for the TV round; here the log is read instead.
+  clearLandings();
+  vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('a paused stream', () => {
@@ -1292,5 +1303,221 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('where a jump lands', () => {
+  /** The tester's switch, as `localStorage.setItem('bannertv.landing', mode)` sets it before the player opens. */
+  function landingMode(mode: LandingMode | null) {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => (key === LANDING_KEY ? mode : null),
+    });
+  }
+
+  /** The element finishes a jump at `at`, as the TV's player does: it says so, then its clock moves on. */
+  function land(video: FakeVideo, at: number) {
+    video.currentTime = at;
+    video.fire('seeked');
+    vi.advanceTimersByTime(250);
+    video.currentTime = at + 0.25;
+    video.fire('timeupdate');
+  }
+
+  it('logs where the picture really landed, with nothing of the address, and the bar follows it', async () => {
+    landingMode('measure');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+    // webOS reads 0 for a moment: not where it landed.
+    video.fire('seeked');
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(recentLandings()).toHaveLength(0);
+    vi.advanceTimersByTime(250);
+    video.currentTime = 1796.25;
+    video.fire('timeupdate');
+
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({
+        engine: 'hls.js',
+        container: 'mkv',
+        mode: 'measure',
+        paused: false,
+        wanted: 1800,
+        aimed: 1800,
+        landed: 1796.25,
+        miss: -3.75,
+        corrected: false,
+      }),
+    ]);
+    expect(session.get().position).toBe(1796.25);
+    expect(session.trustedPosition()).toBe(1796.25);
+    expect(console.info).toHaveBeenCalledTimes(1);
+    const [line] = vi.mocked(console.info).mock.calls[0]!;
+    expect(line).toMatch(/^\[BannerTV landing\] hls\.js mkv, measure, playing: /);
+    for (const said of [String(line), JSON.stringify(recentLandings())]) {
+      expect(said).not.toMatch(/media\.example\.com|first|https?:/);
+    }
+  });
+
+  it("changes nothing in 'measure': every jump goes where it was asked, once", async () => {
+    landingMode('measure');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    expect(video.currentTime).toBe(1796.25);
+    session.seek(2400);
+    expect(video.currentTime).toBe(2400);
+    land(video, 2396);
+    expect(video.currentTime).toBe(2396.25);
+    expect(recentLandings().map((landing) => landing.aimed)).toEqual([1800, 2400]);
+    expect(lastEngine().seeks).toBe(2);
+  });
+
+  it("jumps once more after a miss in 'again', only once, and not as the viewer's jump", async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    // Further by the miss, at once.
+    expect(video.currentTime).toBe(1803.75);
+    expect(lastEngine().seeks).toBe(1);
+    expect(session.get()).toMatchObject({ status: 'playing', position: 1796.25 });
+    expect(recentLandings()).toHaveLength(0);
+
+    // Short again, and left there: a second jump is never corrected.
+    land(video, 1801);
+    expect(video.currentTime).toBe(1801.25);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(video.currentTime).toBe(1801.25);
+    expect(lastEngine().seeks).toBe(1);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({
+        mode: 'again',
+        wanted: 1800,
+        landed: 1796.25,
+        corrected: true,
+        secondAimed: 1803.75,
+        secondLanded: 1801.25,
+        secondMiss: 1.25,
+      }),
+    ]);
+    // The bar and the next skip go from where the picture is.
+    expect(session.get().position).toBe(1801.25);
+    expect(session.trustedPosition()).toBe(1801.25);
+  });
+
+  it("sends later jumps further by the stream's usual miss in 'learn', the default, as the bar shows the place asked for", async () => {
+    landingMode(null);
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+    land(video, 1796);
+
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+    expect(session.get().position).toBe(2400);
+    expect(session.trustedPosition()).toBe(2400);
+    // It lands well, and no second jump follows.
+    land(video, 2400);
+    expect(video.currentTime).toBe(2400.25);
+    expect(recentLandings()[1]).toMatchObject({
+      mode: 'learn',
+      wanted: 2400,
+      aimed: 2403.75,
+      miss: 0.25,
+      corrected: false,
+    });
+
+    // Back as well: short is short whichever way.
+    session.seek(2300);
+    expect(video.currentTime).toBe(2303.625);
+    expect(lastEngine().seeks).toBe(3);
+  });
+
+  it('starts each new stream with nothing learnt', async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+
+    await start(session, video, second, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+  });
+
+  it('checks only the latest jump when the viewer jumps again before the last one landed', async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    session.seek(2400);
+    land(video, 2396);
+    expect(video.currentTime).toBe(2403.75);
+    land(video, 2400);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({ wanted: 2400, corrected: true, secondLanded: 2400.25 }),
+    ]);
+  });
+
+  it('reads a paused jump once the TV has had a moment, with no clock moving on to say', async () => {
+    landingMode('measure');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.pause();
+    session.seek(1800);
+    video.currentTime = 1797;
+    video.fire('seeked');
+    vi.advanceTimersByTime(LANDING_SETTLE_MS - 1);
+    expect(recentLandings()).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({ paused: true, landed: 1797, miss: -3, sure: true }),
+    ]);
+  });
+
+  it("leaves a jump before the first picture to the engine's own start", async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    session.play(first, 2400, { chosen: true, paused: true });
+    await settle();
+    session.seek(1800);
+    land(video, 1796);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(video.currentTime).toBe(1796.25);
+    expect(recentLandings()).toHaveLength(0);
+  });
+
+  it('never aims past live on a broadcast, and keeps every aim to what it keeps', async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 0);
+    await settle();
+    lastEngine().live = true;
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.currentTime = 7200;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    video.fire('timeupdate');
+    session.seek(7100);
+    land(video, 7096);
+
+    session.seek(7198);
+    expect(video.currentTime).toBe(7200);
+    // A segment in from the oldest kept, then the allowance.
+    session.seek(6000);
+    expect(video.currentTime).toBe(7009.75);
+    expect(session.get().behind).toBe(194);
+    session.destroy();
   });
 });
