@@ -1,3 +1,4 @@
+import type { Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   canHash,
@@ -7,6 +8,7 @@ import {
   hashStream,
   openSubtitlesHash,
 } from './stream-hash';
+import { noteRequestHeaders } from './request-headers';
 
 /**
  * The hash as OpenSubtitles defines it, worked another way to check against:
@@ -151,5 +153,20 @@ describe('reading the hash of a stream', () => {
     expect(canHash('https://live.example.com/match/master.m3u8')).toBe(false);
     expect(canHash('https://cdn.example.com/film/manifest.mpd')).toBe(false);
     expect(canHash('magnet:?xt=urn:btih:abc')).toBe(false);
+  });
+
+  it('never reads a link whose addon asked for request headers', async () => {
+    const guarded = 'https://cdn.example.com/needs-headers/film.mkv';
+    noteRequestHeaders({
+      source: { kind: 'url', url: guarded },
+      behaviorHints: { proxyHeaders: { request: { Referer: 'https://site.example/' } } },
+    } as unknown as Stream);
+    expect(canHash(guarded)).toBe(false);
+    const asked = serve(file(3 * HASH_CHUNK));
+    await expect(hashStream(guarded, 3 * HASH_CHUNK)).resolves.toBeUndefined();
+    expect(asked).toEqual([]);
+    // Listed again without headers, it is one file like any other.
+    noteRequestHeaders({ source: { kind: 'url', url: guarded }, behaviorHints: {} } as Stream);
+    expect(canHash(guarded)).toBe(true);
   });
 });

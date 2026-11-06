@@ -202,6 +202,15 @@ export {
   WATCHED_FRACTION,
 } from './playback/progress';
 export {
+  createSubtitleDrifts,
+  type DriftAdoption,
+  MAX_SUBTITLE_DRIFTS,
+  type SavedDrift,
+  SUBTITLE_DRIFTS,
+  type SubtitleDrift,
+  type SubtitleDrifts,
+} from './playback/drifts';
+export {
   createSubtitleOffsets,
   MAX_SUBTITLE_OFFSETS,
   type OffsetAdoption,

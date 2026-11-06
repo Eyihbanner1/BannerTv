@@ -1,6 +1,20 @@
 /** The steps the Timing tab offers, in seconds: negative shows subtitles earlier. */
 export const TIMING_STEPS: readonly number[] = [-0.5, -0.1, 0.1, 0.5];
 
+/** Big steps for a file that is far out, which the phone offers beside TIMING_STEPS. */
+export const COARSE_TIMING_STEPS: readonly number[] = [-5, 5];
+
+/** How far a step moves, for its words: "0.5" or "5". */
+export function stepAmount(step: number): string {
+  const size = Math.abs(step);
+  return size % 1 === 0 ? String(size) : size.toFixed(1);
+}
+
+/** A step's button: "−0.5 s", "+5 s", with a true minus sign. */
+export function stepLabel(step: number): string {
+  return `${step < 0 ? '−' : '+'}${stepAmount(step)} s`;
+}
+
 /** Tenths of a second, which is as fine as the steps go. */
 function tenths(seconds: number): number {
   return Math.round(seconds * 10) / 10;

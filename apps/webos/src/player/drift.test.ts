@@ -1,6 +1,6 @@
 import { memoryKeyValueStore } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
-import { createSubtitleDrifts, DRIFT_RATES, MAX_SUBTITLE_DRIFTS, stretchCues } from './drift';
+import { createSubtitleDrifts, DRIFT_RATES, stretchCues } from './drift';
 
 const line = (text: string) => [[{ text }]];
 
@@ -33,52 +33,12 @@ describe('stretchCues', () => {
   });
 });
 
-describe('createSubtitleDrifts', () => {
-  it('keeps each file’s drift fix, forgets a fix taken off, and reads it back', async () => {
+describe('the drift store', () => {
+  it('is the core one, under the same key, so fixes kept before still read', async () => {
     const storage = memoryKeyValueStore();
+    await storage.set('subtitleDrift', [{ key: 'a', drift: 'ahead' }]);
     const drifts = createSubtitleDrifts({ storage });
-    await drifts.remember('a', 'ahead');
-    await drifts.remember('b', 'behind');
+    await drifts.load();
     expect(drifts.get('a')).toBe('ahead');
-    expect(drifts.get('b')).toBe('behind');
-    expect(drifts.get('c')).toBeUndefined();
-    await drifts.remember('a', null);
-    expect(drifts.get('a')).toBeUndefined();
-    expect(await storage.get('subtitleDrift')).toEqual([{ key: 'b', drift: 'behind' }]);
-
-    const again = createSubtitleDrifts({ storage });
-    await again.load();
-    expect(again.get('b')).toBe('behind');
-  });
-
-  it('drops damaged entries and the least recently changed past the limit', async () => {
-    const storage = memoryKeyValueStore();
-    await storage.set('subtitleDrift', [
-      { key: 'old', drift: 'ahead' },
-      { key: '', drift: 'ahead' },
-      { key: 'odd', drift: 'sideways' },
-      { key: 'twice', drift: 'ahead' },
-      { key: 'twice', drift: 'behind' },
-      null,
-    ]);
-    const drifts = createSubtitleDrifts({ storage });
-    await drifts.load();
-    expect(drifts.get('twice')).toBe('behind');
-    expect(drifts.get('odd')).toBeUndefined();
-    for (let i = 0; i < MAX_SUBTITLE_DRIFTS; i++) await drifts.remember(`f${i}`, 'ahead');
-    expect(drifts.get('old')).toBeUndefined();
-    expect(drifts.get(`f${MAX_SUBTITLE_DRIFTS - 1}`)).toBe('ahead');
-  });
-
-  it('tells its listeners of a change, and not of a choice that changes nothing', async () => {
-    const drifts = createSubtitleDrifts({ storage: memoryKeyValueStore() });
-    await drifts.load();
-    let told = 0;
-    const stop = drifts.subscribe(() => told++);
-    await drifts.remember('a', 'ahead');
-    await drifts.remember('a', 'ahead');
-    await drifts.remember('b', null);
-    stop();
-    expect(told).toBe(1);
   });
 });

@@ -37,7 +37,8 @@ const PHONE = {
   leavePlayer: 'Leave the player',
   live: 'LIVE',
   embeddedSubtitles: 'In the video',
-  fromAddon: 'From {{addon}}',
+  timingInVideo:
+    'The phone’s player draws these subtitles itself, so their timing can’t be changed yet. Subtitles from an addon can be moved.',
   history: 'History',
   emptyList: 'Nothing saved yet. Tap My List on a title to keep it here.',
   searchHint: 'Type the name of a film or series.',
