@@ -434,6 +434,51 @@ test('timing marks name the remote keys, slides, rows and hero changes, and noth
   ).toEqual([]);
 });
 
+interface BootReport {
+  launch: string;
+  steps: Record<string, number>;
+}
+
+const readBoot = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __bannertvBoot: () => BootReport }).__bannertvBoot());
+
+test('launch marks follow the start to Home’s first focus and rows, and say whether it was a reload', async ({
+  page,
+}) => {
+  await tune(page, { marks: true });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // A first launch has nothing cached: the first rows come from the addons.
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-network');
+  const first = await readBoot(page);
+  expect(first.launch).toBe('cold');
+  const steps = Object.keys(first.steps);
+  for (const step of [
+    'nav:domInteractive',
+    'boot:script',
+    'boot:start-end',
+    'boot:idb-open',
+    'boot:addons-read',
+    'boot:layout-read',
+    'boot:continue-read',
+    'boot:first-focus',
+  ]) {
+    expect(steps).toContain(step);
+  }
+  expect(steps.indexOf('boot:script')).toBeLessThan(steps.indexOf('boot:start-end'));
+  expect(steps.indexOf('boot:layout-read')).toBeLessThan(steps.indexOf('boot:first-focus'));
+  expect(steps.filter((step) => step.indexOf('boot:first-row-cached') === 0)).toEqual([]);
+  // Only launch steps and the page's own: no key presses, rows or addresses.
+  expect(steps.filter((step) => !/^(?:nav|paint|boot|matcher):/.test(step))).toEqual([]);
+  expect(steps.filter((step) => /https?:|\/\//.test(step))).toEqual([]);
+
+  // Starting again, as a profile switch does: the first rows come from the cache now.
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-cached');
+  expect((await readBoot(page)).launch).toBe('reload');
+});
+
 test('by default art is decoded ahead, nothing is marked, the rows box has no layer, and the hero does not fade', async ({
   page,
 }) => {

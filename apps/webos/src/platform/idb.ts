@@ -5,6 +5,7 @@ import {
   memoryCacheStore,
   memoryKeyValueStore,
 } from '@bannertv/core';
+import { bootMark } from './marks';
 
 const DB_NAME = 'bannertv';
 const DB_VERSION = 1;
@@ -92,7 +93,9 @@ export function createStorage(): Storage {
   let writes = 0;
 
   void db.then((database) => {
-    if (database) prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
+    if (!database) return;
+    bootMark('boot:idb-open');
+    prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
   });
 
   return {

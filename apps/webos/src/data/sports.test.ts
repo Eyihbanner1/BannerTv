@@ -448,3 +448,53 @@ describe('Show in Sports in the BannerTV account', () => {
     expect(sports.sportsSetting(addon)).toBe('auto');
   });
 });
+
+describe('the team and league data', () => {
+  const addon = install('org.x.sports', 'https://x.example.com/manifest.json', [FOOTBALL, LIVE]);
+  const EMPTY_DATA = {
+    version: 1,
+    built: '2026-10-28',
+    countries: [],
+    competitions: [],
+    teams: [],
+    uefa: {},
+    calendars: {},
+  };
+  let scripts: Array<{ src: string; onload?: () => void; onerror?: () => void }>;
+
+  beforeEach(() => {
+    scripts = [];
+    vi.stubGlobal('document', {
+      createElement: () => ({ src: '', remove: () => undefined }),
+      head: { appendChild: (script: (typeof scripts)[number]) => scripts.push(script) },
+    });
+  });
+
+  /** The data script arriving, and the maps built from it. */
+  function arrive() {
+    (globalThis as Record<string, unknown>).__BANNERTV_SPORTS_DATA__ = EMPTY_DATA;
+    scripts[0]!.onload!();
+    vi.runOnlyPendingTimers();
+  }
+
+  it('is asked for as soon as a sports catalog turns up, and traced as it comes', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    const sports = await import('./sports');
+    const traced: string[] = [];
+    sports.traceSportsMatcher((name) => traced.push(name));
+    const collection = (await import('./addons')).addonCollection as unknown as Collection;
+    // The mocked collection outlives each test's fresh copy of the module.
+    collection.set({ ready: false, addons: [] });
+    await sports.startSports();
+    expect(scripts).toEqual([]);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts.map((script) => script.src)).toEqual(['./data/sports-data.js']);
+    expect(traced).toEqual(['matcher:load']);
+
+    arrive();
+    expect(traced).toEqual(['matcher:load', 'matcher:script', 'matcher:start', 'matcher:end']);
+    expect(sports.sportsMatcher.get()?.built).toBe('2026-10-28');
+    expect('__BANNERTV_SPORTS_DATA__' in globalThis).toBe(false);
+  });
+});

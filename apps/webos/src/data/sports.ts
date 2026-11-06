@@ -411,6 +411,16 @@ export function noteFirstPage(
 }
 
 let matcherRequested = false;
+let markMatcher: (name: string) => void = () => undefined;
+
+/**
+ * Tells `mark` as the team and league data is asked for (`matcher:load`),
+ * has arrived (`matcher:script`) and its maps start and finish being built
+ * (`matcher:start`, `matcher:end`), for a trace of the launch.
+ */
+export function traceSportsMatcher(mark: (name: string) => void): void {
+  markMatcher = mark;
+}
 
 function readData(value: unknown): SportsData | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -427,9 +437,11 @@ function readData(value: unknown): SportsData | undefined {
 function loadMatcher(): void {
   if (matcherRequested) return;
   matcherRequested = true;
+  markMatcher('matcher:load');
   const script = document.createElement('script');
   script.src = `./${SPORTS_DATA_SCRIPT.file}`;
   script.onload = () => {
+    markMatcher('matcher:script');
     const holder = window as unknown as Record<string, unknown>;
     const data = readData(holder[SPORTS_DATA_SCRIPT.global]);
     delete holder[SPORTS_DATA_SCRIPT.global];
@@ -438,11 +450,13 @@ function loadMatcher(): void {
     // Its maps take a moment to build on a TV: out of the key press that got here.
     window.setTimeout(() => {
       let matcher: Matcher | undefined;
+      markMatcher('matcher:start');
       try {
         matcher = createMatcher(data);
       } catch {
         return;
       }
+      markMatcher('matcher:end');
       sportsMatcher.set(matcher);
       sportsFeed.setMatcher(matcher);
     }, 0);
