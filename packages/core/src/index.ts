@@ -64,6 +64,13 @@ export {
   SLOW_SHARE,
 } from './addons/health';
 export {
+  type AddonSwitches,
+  addonSwitchesPart,
+  createAddonSwitches,
+  switchedOnOnly,
+  type SwitchesState,
+} from './addons/switches';
+export {
   BANNERTV_DEMO_ID,
   BANNERTV_DEMO_URL,
   CINEMETA_URL,
