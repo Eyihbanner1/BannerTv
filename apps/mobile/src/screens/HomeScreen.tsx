@@ -60,11 +60,11 @@ function playContinue(item: ContinueItem): void {
 
 function continueNote(t: ReturnType<typeof useTranslation>['t'], item: ContinueItem) {
   if (item.season !== undefined && item.episode !== undefined) {
-    return t(item.upNext ? 'home.nextEpisodeNote' : 'home.episodeNote', {
-      season: item.season,
-      episode: item.episode,
-    });
+    const numbers = { season: item.season, episode: item.episode };
+    if (item.newEpisode) return t('browsing.newEpisodeNote', numbers);
+    return t(item.upNext ? 'home.nextEpisodeNote' : 'home.episodeNote', numbers);
   }
+  if (item.newEpisode) return t('browsing.newNote');
   return item.upNext ? t('home.nextNote') : undefined;
 }
 

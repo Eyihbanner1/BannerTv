@@ -763,6 +763,8 @@
     "moreFrom": "More {{genre}} from {{addon}}",
     "streamReady": "Best stream ready",
     "findingStream": "Finding the best stream",
-    "noStreamYet": "No stream found yet"
+    "noStreamYet": "No stream found yet",
+    "newEpisodeNote": "New: S{{season}}:E{{episode}}",
+    "newNote": "New episode"
   }
 }

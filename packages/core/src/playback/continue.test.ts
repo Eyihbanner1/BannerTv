@@ -2,9 +2,12 @@ import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { memoryKeyValueStore, type KeyValueStore } from '../storage';
 import {
+  cardNext,
+  caughtUpSeries,
   CONTINUE_LIMIT,
   continueWatching,
   createPlayedVideos,
+  NEW_EPISODE_MS,
   playedCard,
   type PlayedVideo,
 } from './continue';
@@ -915,6 +918,92 @@ describe('filled cards and the BannerTV account', () => {
       'tt1',
       'tt5',
       'tt3',
+    ]);
+  });
+});
+
+describe('caught-up series and new seasons', () => {
+  // Only season 1 listed, as when the finale played before season 2 was announced.
+  const SEASON_ONE = detail(SHOW_ITEM, [ep(1, 1), ep(1, 2), ep(1, 3)]);
+
+  it('finds a series finished up to its last listed episode, and nothing part way or after', async () => {
+    const tv = await watching();
+    tv.play(episode('tt9:1:3', 2300), 1, playedCard(SHOW_ITEM, 'tt9:1:3', SEASON_ONE));
+    tv.play(movie('tt1', 5900), 2, filmCard());
+    expect(caughtUpSeries(tv.progress, tv.played.get).map(({ card }) => card.videoId)).toEqual([
+      'tt9:1:3',
+    ]);
+
+    // Started again part way: there is something to resume, so it is on the row as it is.
+    tv.play(episode('tt9:1:3', 600), 3, playedCard(SHOW_ITEM, 'tt9:1:3', SEASON_ONE));
+    expect(caughtUpSeries(tv.progress, tv.played.get)).toEqual([]);
+  });
+
+  it('passes over a series whose card already knows the next episode, aired or not', async () => {
+    const tv = await watching();
+    tv.play(episode('tt9:1:3', 2300), 1, episodeCard('tt9:1:3'));
+    expect(caughtUpSeries(tv.progress, tv.played.get)).toEqual([]);
+  });
+
+  it('passes over a title taken off the row', async () => {
+    const tv = await watching();
+    tv.play(episode('tt9:1:3', 2300), 1, playedCard(SHOW_ITEM, 'tt9:1:3', SEASON_ONE));
+    tv.progress.leaveRow('tt9');
+    expect(caughtUpSeries(tv.progress, tv.played.get)).toEqual([]);
+  });
+
+  it('brings the series back to the row once a newer episode list gives the next one', async () => {
+    const tv = await watching();
+    const finale = playedCard(SHOW_ITEM, 'tt9:1:3', SEASON_ONE);
+    tv.play(episode('tt9:1:3', 2300), 1, finale);
+    expect(tv.items()).toEqual([]);
+
+    // Season 2 is listed now, airing a week after NOW.
+    const next = cardNext(SHOW, 'tt9:1:3');
+    expect(next).toEqual({
+      videoId: 'tt9:2:1',
+      season: 2,
+      episode: 1,
+      name: 'S2E1',
+      released: Date.parse(AIRS),
+    });
+    tv.played.record({ ...finale, next: next! });
+    expect(caughtUpSeries(tv.progress, tv.played.get)).toEqual([]);
+    expect(tv.items()).toEqual([]);
+    expect(tv.items(undefined, Date.parse(AIRS))).toMatchObject([
+      { videoId: 'tt9:2:1', season: 2, episode: 1, upNext: true, newEpisode: true },
+    ]);
+  });
+
+  it('calls an episode up next new for a week after it airs, and an undated one never', async () => {
+    const tv = await watching();
+    tv.play(episode('tt9:1:3', 2300), 1, episodeCard('tt9:1:3'));
+    const aired = Date.parse(AIRS);
+    expect(tv.items(undefined, aired + NEW_EPISODE_MS - 1)[0]?.newEpisode).toBe(true);
+    expect(tv.items(undefined, aired + NEW_EPISODE_MS)[0]).not.toHaveProperty('newEpisode');
+
+    const undated = detail(SHOW_ITEM, [
+      ep(1, 1),
+      { id: 'tt9:1:2', title: 'S1E2', season: 1, episode: 2 },
+    ]);
+    tv.play(episode('tt9:1:1', 2300), 2, playedCard(SHOW_ITEM, 'tt9:1:1', undated));
+    expect(tv.items(undefined, 0)[0]).not.toHaveProperty('newEpisode');
+  });
+
+  it('stops at the limit', async () => {
+    const tv = await watching();
+    for (let n = 0; n < 3; n++) {
+      const item = preview({ id: `tt5${n}`, type: 'series', name: `Show ${n}` });
+      const videos = [{ id: `tt5${n}:1:1`, title: 'Pilot', season: 1, episode: 1 }];
+      tv.play(
+        { metaId: item.id, type: 'series', videoId: `tt5${n}:1:1`, position: 2300, duration: 2400 },
+        n + 1,
+        playedCard(item, `tt5${n}:1:1`, detail(item, videos)),
+      );
+    }
+    expect(caughtUpSeries(tv.progress, tv.played.get, 2).map(({ entry }) => entry.metaId)).toEqual([
+      'tt52',
+      'tt51',
     ]);
   });
 });

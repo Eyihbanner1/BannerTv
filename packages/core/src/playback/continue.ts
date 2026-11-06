@@ -8,6 +8,8 @@ const KEY = 'played';
 const MAX_CARDS = 200;
 /** Home shows at most this many titles to continue. */
 export const CONTINUE_LIMIT = 20;
+/** An episode that aired this recently is new: its tile says so. */
+export const NEW_EPISODE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * What Home needs to show a video that played, kept beside its progress: the
@@ -109,17 +111,26 @@ export function playedCard(
     if (video.episode !== undefined) card.episode = video.episode;
     if (video.title) card.episodeName = video.title;
   }
-  // Whether it has aired by then: a weekly show comes back to the row on its own.
-  const next = meta && video ? nextVideo(meta, videoId, Infinity) : undefined;
-  if (next) {
-    card.next = { videoId: next.id };
-    if (next.season !== undefined) card.next.season = next.season;
-    if (next.episode !== undefined) card.next.episode = next.episode;
-    if (next.title) card.next.name = next.title;
-    const released = next.released === undefined ? NaN : Date.parse(next.released);
-    if (isCount(released)) card.next.released = released;
-  }
+  const next = meta && video ? cardNext(meta, videoId) : undefined;
+  if (next) card.next = next;
   return card;
+}
+
+/**
+ * The episode after `videoId` in `meta`, as a card keeps it. Whether it has aired by then: a
+ * weekly show comes back to the row on its own once its release time passes. Undefined after
+ * the last episode the addon lists.
+ */
+export function cardNext(meta: MetaDetail, videoId: string): PlayedVideo['next'] {
+  const next = nextVideo(meta, videoId, Infinity);
+  if (!next) return undefined;
+  const result: NonNullable<PlayedVideo['next']> = { videoId: next.id };
+  if (next.season !== undefined) result.season = next.season;
+  if (next.episode !== undefined) result.episode = next.episode;
+  if (next.title) result.name = next.title;
+  const released = next.released === undefined ? NaN : Date.parse(next.released);
+  if (isCount(released)) result.released = released;
+  return result;
 }
 
 function readNext(value: unknown): PlayedVideo['next'] {
@@ -321,6 +332,8 @@ export interface ContinueItem {
   episode?: number;
   /** True when this is the episode after one that was finished. */
   upNext: boolean;
+  /** An episode up next that aired in the last week (NEW_EPISODE_MS). */
+  newEpisode?: true;
 }
 
 function previewOf(card: PlayedVideo): MetaPreview {
@@ -412,6 +425,7 @@ export function continueItem(
     if (done !== undefined) item.progress = done;
     if (next.season !== undefined) item.season = next.season;
     if (next.episode !== undefined) item.episode = next.episode;
+    if (next.released !== undefined && now - next.released < NEW_EPISODE_MS) item.newEpisode = true;
     return item;
   }
   return undefined;
@@ -441,4 +455,31 @@ export function continueWatching(
     if (item) items.push(item);
   }
   return items;
+}
+
+/**
+ * The series the viewer is caught up on: the last video played of each is an episode finished
+ * (or marked watched) whose card knows of nothing after it, as when a finale played before the
+ * next season was listed. Most recent first, at most `limit`. A screen looks at their episode
+ * lists again now and then (with cardNext), so a new season brings them back to the row.
+ */
+export function caughtUpSeries(
+  progress: ProgressReader,
+  played: (videoId: string) => PlayedVideo | undefined,
+  limit = CONTINUE_LIMIT,
+): Array<{ entry: ProgressEntry; card: PlayedVideo }> {
+  const found: Array<{ entry: ProgressEntry; card: PlayedVideo }> = [];
+  const seen = new Set<string>();
+  for (const entry of progress.recent()) {
+    if (found.length >= limit) break;
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
+    seen.add(entry.metaId);
+    if (entry.continueRow === false || entry.type !== 'series') continue;
+    const card = played(entry.videoId);
+    if (!card || card.episode === undefined || card.next) continue;
+    if (progress.resumeAt(entry.videoId) !== undefined) continue;
+    const ending = entry.duration > 0 && entry.duration - entry.position < END_SECONDS;
+    if (entry.watched || ending) found.push({ entry, card });
+  }
+  return found;
 }

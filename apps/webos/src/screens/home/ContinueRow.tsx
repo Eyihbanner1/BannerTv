@@ -176,8 +176,10 @@ export function useContinueItems(): ContinueItem[] | null {
 function noteFor(t: TFunction, item: ContinueItem): string | undefined {
   if (item.season !== undefined && item.episode !== undefined) {
     const numbers = { season: item.season, episode: item.episode };
+    if (item.newEpisode) return t('browsing.newEpisodeNote', numbers);
     return item.upNext ? t('home.nextEpisodeNote', numbers) : t('home.episodeNote', numbers);
   }
+  if (item.newEpisode) return t('browsing.newNote');
   return item.upNext ? t('home.nextNote') : undefined;
 }
 

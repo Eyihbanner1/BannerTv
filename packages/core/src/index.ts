@@ -123,11 +123,14 @@ export {
 } from './query';
 export { type BandwidthMemory, createBandwidthMemory } from './playback/bandwidth';
 export {
+  cardNext,
+  caughtUpSeries,
   CONTINUE_LIMIT,
   type ContinueItem,
   continueItem,
   continueWatching,
   createPlayedVideos,
+  NEW_EPISODE_MS,
   type PlayedAdoption,
   playedCard,
   type PlayedVideo,
