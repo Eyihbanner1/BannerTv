@@ -531,6 +531,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         offset={subtitles.offset}
         clock={clock}
         raised={controls}
+        look={prefs.subtitleStyle}
       />
 
       {waiting || problem ? (

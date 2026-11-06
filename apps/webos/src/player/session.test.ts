@@ -450,6 +450,56 @@ describe('tracks the viewer chose', () => {
   });
 });
 
+describe("cues of the stream's own subtitles", () => {
+  const cue = (start: number, end: number, text: string) => ({
+    start,
+    end,
+    lines: [[{ text }]],
+  });
+
+  it('are added to as hls.js and Shaka hand them over, each once', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const { listener } = lastEngine();
+    listener.cues('eng', [cue(1, 2, 'One'), cue(3, 4, 'Two')]);
+    // Sent again after an audio switch, with one more.
+    listener.cues('eng', [cue(3, 4, 'Two'), cue(5, 6, 'Three')]);
+    expect(session.get().streamCues.eng).toEqual([
+      cue(1, 2, 'One'),
+      cue(3, 4, 'Two'),
+      cue(5, 6, 'Three'),
+    ]);
+  });
+
+  it("are replaced whole when the engine says so, as Android's are when a line closes", async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const { listener } = lastEngine();
+    listener.cues('2:0', [cue(1, Infinity, 'Hello')], true);
+    expect(session.get().streamCues['2:0']).toEqual([cue(1, Infinity, 'Hello')]);
+    listener.cues('2:0', [cue(1, 3, 'Hello')], true);
+    expect(session.get().streamCues['2:0']).toEqual([cue(1, 3, 'Hello')]);
+    // Another track's are left as they are, and an empty list clears the track.
+    listener.cues('2:1', [cue(2, Infinity, 'Bonjour')], true);
+    listener.cues('2:0', [], true);
+    expect(session.get().streamCues).toEqual({ '2:0': [], '2:1': [cue(2, Infinity, 'Bonjour')] });
+  });
+
+  it('from a stream played before are dropped', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const before = lastEngine();
+    before.listener.cues('2:0', [cue(1, Infinity, 'Old')], true);
+    session.play(second, 0);
+    await settle();
+    before.listener.cues('2:0', [cue(1, Infinity, 'Old, late')], true);
+    expect(session.get().streamCues).toEqual({});
+  });
+});
+
 describe('a stream that keeps buffering', () => {
   it('steps down to a lighter stream at the same place after three long waits', async () => {
     const { video, session, lighter } = setup({ lighter: [bluray, web] });

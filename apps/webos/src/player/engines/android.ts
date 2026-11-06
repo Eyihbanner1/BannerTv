@@ -1,4 +1,6 @@
+import { type Cue, parseCueMarkup } from '@bannertv/core';
 import {
+  type AndroidCue,
   type AndroidPlayerEvent,
   type AndroidTrack,
   onAndroidPlayer,
@@ -19,6 +21,9 @@ const SEEK_MS = 5000;
 
 /** Numbers each load command, across players, so Android's news names the stream it is about. */
 let loads = 0;
+
+/** The lines of the file's own subtitles kept for drawing: plenty for any timing offset. */
+export const MAX_CUES = 50;
 
 /** Android's audio MIME types as the codec names the track list already reads. */
 const AUDIO_CODECS: Record<string, string> = {
@@ -55,6 +60,40 @@ export function toEngineTrack(track: AndroidTrack, audio: boolean): EngineTrack 
   return listed;
 }
 
+/** When the last group Android handed over began: the latest start or end in the record. */
+function lastGroupAt(history: readonly Cue[]): number {
+  let at = -Infinity;
+  for (const cue of history) at = Math.max(at, cue.start, isFinite(cue.end) ? cue.end : cue.start);
+  return at;
+}
+
+/**
+ * The record of a subtitle track's lines after Android hands over the group that shows from
+ * `at`. Android only says what shows from when, so each line stays open (ends at Infinity)
+ * until the next group, which closes it; an empty group just closes. A group from before the
+ * last one means the clock jumped back, and the record starts again. Earlier lines are kept so
+ * that subtitles moved later by their timing still show.
+ */
+export function followCues(
+  history: readonly Cue[],
+  at: number,
+  group: readonly AndroidCue[],
+): Cue[] {
+  const kept =
+    at < lastGroupAt(history)
+      ? []
+      : history
+          .map((cue) => (cue.end === Infinity ? { ...cue, end: at } : cue))
+          .filter((cue) => cue.end > cue.start);
+  for (const line of group) {
+    if (!line || typeof line.text !== 'string') continue;
+    const lines = parseCueMarkup(line.text);
+    if (lines.length === 0) continue;
+    kept.push({ start: at, end: Infinity, lines, ...(line.top === true ? { top: true } : {}) });
+  }
+  return kept.length > MAX_CUES ? kept.slice(kept.length - MAX_CUES) : kept;
+}
+
 /** Tracks the device cannot play are left out, unless none of them can be played. */
 function playable(tracks: AndroidTrack[]): AndroidTrack[] {
   const supported = tracks.filter((track) => track.supported);
@@ -67,7 +106,9 @@ function playable(tracks: AndroidTrack[]): AndroidTrack[] {
  * `<video>` cannot. The session, the subtitles and the controls all read the
  * one `<video>` element, so this engine makes that element tell Android's
  * clock, pause state and events, and takes them back off when it is done.
- * Subtitles inside the file are drawn by Android under the page.
+ * Subtitles inside the file come to the page line by line and are drawn in the
+ * viewer's style, as files from addons are; Android draws only picture
+ * subtitles (PGS, VobSub, DVB) itself, under the page.
  */
 export const createAndroidEngine: EngineFactory = (video, listener) => {
   let position = 0;
@@ -83,6 +124,10 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
   let seeking = false;
   let audio: EngineTrack[] = [];
   let text: EngineTrack[] = [];
+  /** The subtitle track chosen last: Android's lines for any other are old news. */
+  let textId: string | null = null;
+  /** Its lines so far, as Android handed them over (followCues). */
+  let cueHistory: Cue[] = [];
   let loaded = false;
   /** The id of the current load command. */
   let loadId = 0;
@@ -124,10 +169,18 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
     else fire(value ? 'pause' : 'play');
   }
 
+  /** Lines from before a jump, or of another track, never show again. */
+  function forgetCues() {
+    if (cueHistory.length === 0) return;
+    cueHistory = [];
+    if (textId !== null) listener.cues(textId, [], true);
+  }
+
   function seekTo(target: number) {
     if (!loaded || !isFinite(target)) return;
     const end = duration !== null && duration > 0 ? duration : Infinity;
     const at = Math.max(0, Math.min(target, end));
+    forgetCues();
     place(at);
     seeking = true;
     ended = false;
@@ -236,6 +289,13 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
     if (playing && !wasPlaying) fire('playing');
   }
 
+  function onCues(event: Extract<AndroidPlayerEvent, { event: 'cues' }>) {
+    if (textId === null || event.track !== textId) return;
+    if (typeof event.at !== 'number' || !isFinite(event.at) || !Array.isArray(event.cues)) return;
+    cueHistory = followCues(cueHistory, event.at, event.cues);
+    listener.cues(textId, cueHistory, true);
+  }
+
   function onEvent(event: AndroidPlayerEvent) {
     // News sent before Android had the latest load is about the stream before it.
     if (!loaded || (event.load !== undefined && event.load !== loadId)) return;
@@ -251,6 +311,7 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
       case 'seeked':
         clearTimeout(seekTimer);
         seeking = false;
+        forgetCues();
         place(event.position);
         fire('seeked');
         fire('timeupdate');
@@ -259,6 +320,9 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
         audio = playable(event.audio).map((track) => toEngineTrack(track, true));
         text = playable(event.text).map((track) => toEngineTrack(track, false));
         listener.tracks();
+        return;
+      case 'cues':
+        onCues(event);
         return;
       case 'error':
         listener.fatal(new PlaybackError(event.kind, event.message, event.detail));
@@ -286,6 +350,9 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
       intent = null;
       audio = [];
       text = [];
+      // Android shows no subtitles for a new stream until the page chooses again.
+      textId = null;
+      cueHistory = [];
       if (!loaded) attach();
       loaded = true;
       const mime = guessMimeType(url);
@@ -318,11 +385,16 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
       listener.tracks();
     },
 
-    // Drawn by Android under the page: no cues come to the page.
+    // Android hands over each track's lines as they show (the cues event), for the page to draw.
     textTracks: () => text,
 
     selectText(id) {
-      sendPlayerCommand({ op: 'text', id });
+      if (id !== textId) {
+        forgetCues();
+        textId = id;
+      }
+      // cues: an Android app from before this asks nothing more, and draws them itself.
+      sendPlayerCommand({ op: 'text', id, cues: true });
       text = text.map((track) => ({ ...track, active: track.id === id }));
       listener.tracks();
     },
@@ -331,6 +403,8 @@ export const createAndroidEngine: EngineFactory = (video, listener) => {
       unsubscribe?.();
       unsubscribe = undefined;
       clearTimeout(seekTimer);
+      textId = null;
+      cueHistory = [];
       if (!loaded) return;
       loaded = false;
       sendPlayerCommand({ op: 'release' });

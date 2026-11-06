@@ -3,9 +3,12 @@ import { FIRST_ROW, mockAddons } from './addons';
 import {
   ANDROID_URL,
   androidCalls,
+  androidCues,
   androidOpens,
   androidSays,
+  androidTextTracks,
   openAsAndroid,
+  openFocusedTitle,
   playerOps,
   playerState,
 } from './android';
@@ -183,6 +186,96 @@ test('a stream Android cannot play moves on to the next, as on the TV', async ({
     .toHaveLength(2);
   const loads = (await androidCalls(page)).player.filter((command) => command.op === 'load');
   expect(loads[1]!.url).not.toBe(loads[0]!.url);
+});
+
+test("subtitles inside the file are drawn in the profile's style on Android, and follow its timing", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    preferences: {
+      subtitleLanguage: 'eng',
+      subtitleStyle: { size: 'large', colour: 'yellow', background: 'box', position: 'bottom' },
+    },
+  });
+  await mockPlayback(page, { subtitles: false });
+  await openAsAndroid(page);
+  await page.goto(ANDROID_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openFocusedTitle(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(async () => (await playerOps(page)).filter((op) => op === 'load'))
+    .toHaveLength(1);
+  await androidOpens(page);
+
+  // English inside the file, as last chosen: the page asks Android for its lines.
+  await androidTextTracks(page, [
+    { id: '2:0', lang: 'en' },
+    { id: '2:1', lang: 'fr' },
+  ]);
+  await expect
+    .poll(async () => (await androidCalls(page)).player.filter((command) => command.op === 'text'))
+    .toContainEqual({ op: 'text', id: '2:0', cues: true });
+
+  // The page draws the line in the profile's style: large, yellow, in a box, italic as marked.
+  await playerState(page, { playing: true, position: 5 });
+  await androidCues(page, 5, [{ text: '<i>Hello from inside the file</i>' }]);
+  const hello = page.getByText('Hello from inside the file');
+  await expect(hello).toBeVisible();
+  expect(
+    await hello.evaluate((span) => {
+      const own = getComputedStyle(span);
+      return {
+        fontSize: own.fontSize,
+        color: own.color,
+        fontStyle: own.fontStyle,
+        box: getComputedStyle(span.parentElement!).backgroundColor,
+      };
+    }),
+  ).toEqual({
+    fontSize: '64px',
+    color: 'rgb(255, 228, 92)',
+    fontStyle: 'italic',
+    box: 'rgba(0, 0, 0, 0.6)',
+  });
+  // An empty group ends it.
+  await androidSays(page, { type: 'player', event: 'time', position: 7, duration: 900 });
+  await androidCues(page, 7, []);
+  await expect(hello).toHaveCount(0);
+
+  // Timing: half a second later. No drift fix for these, which keep in step with the video.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await androidSays(page, { type: 'key', key: 'Back' });
+  await expectFocus(page, 'player-tracks-tab-subtitles');
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.getByText('Kept for this file.')).toBeVisible();
+  await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
+  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await press(page, 'ArrowRight', 'player-tracks-timing-p05');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Subtitles 0.5 s later')).toBeVisible();
+
+  // With the clock held at 20, a line Android shows from 20 waits until 20.5...
+  await playerState(page, { playing: false, playWhenReady: false, position: 20 });
+  await androidCues(page, 20, [{ text: 'Half a second later' }]);
+  const later = page.getByText('Half a second later');
+  await page.waitForTimeout(600);
+  await expect(later).toHaveCount(0);
+  await androidSays(page, { type: 'player', event: 'time', position: 20.6, duration: 900 });
+  await expect(later).toBeVisible();
+  // ...and goes half a second after Android ends it.
+  await androidCues(page, 21, []);
+  await androidSays(page, { type: 'player', event: 'time', position: 21.2, duration: 900 });
+  await page.waitForTimeout(600);
+  await expect(later).toBeVisible();
+  await androidSays(page, { type: 'player', event: 'time', position: 21.6, duration: 900 });
+  await expect(later).toHaveCount(0);
+  expect(errors).toEqual([]);
 });
 
 test('Trailer opens the YouTube app on Android', async ({ page }) => {

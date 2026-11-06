@@ -50,6 +50,14 @@ export interface AndroidTrack {
   forced?: boolean;
 }
 
+/** One line group of the subtitles inside the file, as Android's player hands it over. */
+export interface AndroidCue {
+  /** With <b>, <i> and <u>, and &, < and > escaped; \n between lines. */
+  text: string;
+  /** Placed at the top of the picture. */
+  top?: boolean;
+}
+
 /**
  * News from Android's player. `load` is the id of the load command it is about, so news about a
  * stream the page has already moved on from can be told apart.
@@ -71,6 +79,11 @@ export type AndroidPlayerEvent = { load?: number } & (
   | { type: 'player'; event: 'time'; position: number; duration: number | null }
   | { type: 'player'; event: 'seeked'; position: number }
   | { type: 'player'; event: 'tracks'; audio: AndroidTrack[]; text: AndroidTrack[] }
+  /**
+   * What shows from `at` (seconds on the player's clock) for subtitle track `track`, until the
+   * next cues event: none when empty. Sent only after a text command with `cues: true`.
+   */
+  | { type: 'player'; event: 'cues'; track: string; at: number; cues: AndroidCue[] }
   | {
       type: 'player';
       event: 'error';
@@ -100,7 +113,8 @@ export type AndroidPlayerCommand =
   | { op: 'pause' }
   | { op: 'seek'; position: number }
   | { op: 'audio'; id: string }
-  | { op: 'text'; id: string | null }
+  /** cues: the page draws the file's own subtitles, so Android sends them rather than show them. */
+  | { op: 'text'; id: string | null; cues?: true }
   | { op: 'release' };
 
 declare global {

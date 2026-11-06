@@ -790,8 +790,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             reapplyTracks();
             refreshTracks();
           },
-          cues: (trackId: string, cues: Cue[]) => {
+          cues: (trackId: string, cues: Cue[], replace?: boolean) => {
             if (current !== attempt) return;
+            if (replace) {
+              patch({ streamCues: { ...state.get().streamCues, [trackId]: cues } });
+              return;
+            }
             // hls.js sends a track's cues again after an audio switch; Shaka can overlap.
             const seen = (seenCues[trackId] = seenCues[trackId] ?? {});
             const fresh = cues.filter((cue) => {

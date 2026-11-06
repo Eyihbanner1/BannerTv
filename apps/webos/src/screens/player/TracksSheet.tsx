@@ -361,26 +361,33 @@ export function TracksSheet(props: TracksSheetProps) {
               {t('player.timingReset')}
             </Pressable>
           </div>
-          {/* For a file timed for another frame rate, which slides further out as the film goes on. */}
-          <div className={styles.steps}>
-            <span className={styles.rowLabel}>{t('player.drift')}</span>
-            {DRIFT_CHOICES.map(({ name, drift, label }) => {
-              const on = subtitles.drift === drift;
-              return (
-                <Pressable
-                  key={name}
-                  focusKey={`${SHEET}-drift-${name}`}
-                  label={on ? `${t(label)}, ${t('player.driftChosen')}` : t(label)}
-                  className={on ? `${styles.step} ${styles.stepOn}` : styles.step}
-                  focusedClassName={styles.stepFocused}
-                  onPress={() => subtitles.setDrift(drift)}
-                >
-                  {t(label)}
-                </Pressable>
-              );
-            })}
-          </div>
-          <p className={styles.kept}>{`${t('player.driftHint')} ${t('player.timingKept')}`}</p>
+          {/* For a file timed for another frame rate, which slides further out as the film goes on.
+              Not for the lines Android hands over from inside the file, which keep in step. */}
+          {subtitles.canFixDrift && (
+            <div className={styles.steps}>
+              <span className={styles.rowLabel}>{t('player.drift')}</span>
+              {DRIFT_CHOICES.map(({ name, drift, label }) => {
+                const on = subtitles.drift === drift;
+                return (
+                  <Pressable
+                    key={name}
+                    focusKey={`${SHEET}-drift-${name}`}
+                    label={on ? `${t(label)}, ${t('player.driftChosen')}` : t(label)}
+                    className={on ? `${styles.step} ${styles.stepOn}` : styles.step}
+                    focusedClassName={styles.stepFocused}
+                    onPress={() => subtitles.setDrift(drift)}
+                  >
+                    {t(label)}
+                  </Pressable>
+                );
+              })}
+            </div>
+          )}
+          <p className={styles.kept}>
+            {subtitles.canFixDrift
+              ? `${t('player.driftHint')} ${t('player.timingKept')}`
+              : t('player.timingKept')}
+          </p>
         </Pane>
       );
   } else {
