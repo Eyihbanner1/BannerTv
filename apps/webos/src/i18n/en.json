@@ -495,6 +495,21 @@
       "old-container": "An old file type: it may not start, and seeking may be slow.",
       "cam": "Recorded in a cinema: poor picture and sound.",
       "uncached": "Not cached by your debrid service yet: it would have to download first."
+    },
+    "filter": {
+      "button": "Filter: {{value}}",
+      "none": "none",
+      "title": "Filter streams",
+      "quality": "Quality",
+      "cached": "Cached only",
+      "cachedValue": "cached",
+      "addon": "Addon",
+      "language": "Audio language",
+      "any": "Any",
+      "clear": "Clear filter",
+      "shown_one": "{{shown}} of {{count}} stream",
+      "shown_other": "{{shown}} of {{count}} streams",
+      "missed": "No stream matches the filter, so all are shown."
     }
   },
   "settings": {

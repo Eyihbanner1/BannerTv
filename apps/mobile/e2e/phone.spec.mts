@@ -159,3 +159,58 @@ test("a stream that needs the addon's headers plays, and they go to the phone's 
   await expect.poll(() => playback.media).toContain('/movie-headers.webm');
   expect(errors).toEqual([]);
 });
+
+test('chips above the stream list filter it, and Clear shows every stream again', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await mockPlayback(page, {
+    streams: {
+      tt2285752: [
+        {
+          name: 'Test Streams\n2160p',
+          description: 'Film 2160p WEB-DL\n⚡ Cached',
+          path: '/a.webm',
+        },
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Film 1080p WEB-DL\n⚡ Cached',
+          path: '/b.webm',
+        },
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Film 1080p BluRay 🇪🇸\n⚡ Cached',
+          path: '/c.webm',
+        },
+        { name: 'Test Streams\n1080p', description: 'Film 1080p WEBRip', path: '/d.webm' },
+        { name: 'Test Streams\n720p', description: 'Film 720p WEBRip\n⚡ Cached', path: '/e.webm' },
+      ],
+    },
+  });
+  await openApp(page);
+  await addStreamAddon(page);
+  await page
+    .getByLabel(/Tears of Steel/)
+    .last()
+    .click();
+  await page.getByRole('button', { name: /All streams/ }).click();
+  await expect(page.getByText('5 streams', { exact: true })).toBeVisible();
+
+  // A tap on Cached keeps the cached ones.
+  await page.getByRole('button', { name: 'Cached', exact: true }).click();
+  await expect(page.getByText('4 of 5 streams', { exact: true })).toBeVisible();
+  await expect(page.getByText('Film 1080p WEBRip')).toHaveCount(0);
+
+  // Quality opens a picker of the sizes found, with how many have each.
+  await page.getByRole('button', { name: 'Quality', exact: true }).click();
+  await page.getByRole('button', { name: /^1080p/ }).click();
+  await expect(page.getByText('2 of 5 streams', { exact: true })).toBeVisible();
+  await expect(page.getByText('Film 720p WEBRip')).toHaveCount(0);
+  await expect(page.getByText('Film 1080p BluRay 🇪🇸')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clear filter', exact: true }).click();
+  await expect(page.getByText('5 streams', { exact: true })).toBeVisible();
+  await expect(page.getByText('Film 720p WEBRip')).toBeVisible();
+  expect(errors).toEqual([]);
+});

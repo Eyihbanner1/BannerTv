@@ -1,5 +1,6 @@
 import { createStore, MAIN_PROFILE_ID, type Store, type StreamOrder } from '@bannertv/core';
 import { activeProfileId } from './profiles';
+import { NO_FILTER, readStreamFilter, type StreamFilter } from '../player/stream-filter';
 
 export type SubtitleSize = 'small' | 'medium' | 'large' | 'huge';
 export type SubtitleColour = 'white' | 'yellow' | 'cyan' | 'green';
@@ -24,6 +25,8 @@ export interface Preferences {
   probing: 'auto' | 'on' | 'off';
   /** The order of the All streams list. */
   allStreamsOrder: StreamOrder;
+  /** The quick filter on the stream lists, kept from the last one chosen. */
+  streamFilter: StreamFilter;
   /** Learned from the last audio track chosen. Null: the stream's default. */
   audioLanguage: string | null;
   /** Learned from the last subtitles chosen. Null: subtitles off. */
@@ -39,6 +42,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   streamChoice: 'quality',
   probing: 'auto',
   allStreamsOrder: 'quality',
+  streamFilter: NO_FILTER,
   audioLanguage: null,
   subtitleLanguage: null,
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
@@ -85,6 +89,7 @@ export function readPreferences(raw: string | null): Preferences {
       ['quality', 'fast', 'addon'] as const,
       d.allStreamsOrder,
     ),
+    streamFilter: readStreamFilter(stored.streamFilter),
     audioLanguage: nullableString(stored.audioLanguage, d.audioLanguage),
     subtitleLanguage: nullableString(stored.subtitleLanguage, d.subtitleLanguage),
     subtitleStyle: {
