@@ -211,7 +211,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     return () => subscription.remove();
   }, [session]);
 
-  const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
+  const subtitles = useSubtitles(
+    titleType,
+    videoId,
+    metaId,
+    state.entry,
+    session,
+    state,
+    // The title's own running time judges a file's length until the video's is known.
+    parseRuntime(item?.runtime),
+  );
   useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
 
   // The language the viewer chose before, once per stream and engine.

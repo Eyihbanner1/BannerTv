@@ -6,7 +6,12 @@ import {
   releaseMatch,
   type StreamEntry,
 } from '@bannertv/core';
-import type { SubtitleChoice, Subtitles, SubtitleStatus } from '../screens/player/use-subtitles';
+import type {
+  SubtitleCheck,
+  SubtitleChoice,
+  Subtitles,
+  SubtitleStatus,
+} from '../screens/player/use-subtitles';
 import { streamTitle } from './describe';
 import type { PlayingRelease } from './subtitle-pick';
 
@@ -137,34 +142,85 @@ export function playingRelease(entry: StreamEntry | null): PlayingRelease {
 
 /**
  * What a version's row says of it: still loading its first line, could not be
- * read (the one chosen) or was passed over for that reason (another), or that
- * its release name looks made for the video playing. In that order.
+ * read (the one chosen) or was passed over for that reason (another); else
+ * what reading it found (its text in another script, signs only, part of the
+ * video, longer than it), that its drift was fixed by itself, that its
+ * release name looks made for the video playing, and that it is for the hard
+ * of hearing.
  */
-export type VersionNote = 'loading' | 'failed' | 'skipped' | 'matches';
+export type VersionNote =
+  | 'loading'
+  | 'failed'
+  | 'skipped'
+  | 'otherScript'
+  | 'signs'
+  | 'short'
+  | 'long'
+  | 'driftFixed'
+  | 'matches'
+  | 'hearing';
 
 /** Each note's words, as keys in the strings. */
 export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
   loading: 'player.versionLoading',
   failed: 'player.versionFailed',
   skipped: 'player.versionSkipped',
+  otherScript: 'player.versionOtherScript',
+  signs: 'player.versionSigns',
+  short: 'player.versionShort',
+  long: 'player.versionLong',
+  driftFixed: 'player.versionDriftFixed',
   matches: 'player.matchesVideo',
+  hearing: 'player.versionHearing',
 };
 
-export function versionNote(
+const PROBLEM_NOTES: Readonly<Record<NonNullable<SubtitleCheck['problem']>, VersionNote>> = {
+  script: 'otherScript',
+  signs: 'signs',
+  short: 'short',
+  long: 'long',
+};
+
+/** A row has room for this many notes beside its release name. */
+const MAX_NOTES = 2;
+
+/**
+ * The notes on a version's row, most telling first, at most two: loading or
+ * a failure alone; else what reading it found, then a drift fixed by itself,
+ * a release name that matches, and lines for the hard of hearing.
+ */
+export function versionNotes(
   version: SubtitleVersion,
   selected: boolean,
   status: SubtitleStatus | undefined,
   video: PlayingRelease,
-): VersionNote | undefined {
-  if (status === 'loading') return 'loading';
-  if (status === 'failed') return selected ? 'failed' : 'skipped';
-  return releaseMatch(version.release, video) ? 'matches' : undefined;
+  check?: SubtitleCheck,
+): VersionNote[] {
+  if (status === 'loading') return ['loading'];
+  if (status === 'failed') return [selected ? 'failed' : 'skipped'];
+  const notes: VersionNote[] = [];
+  if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
+  if (check?.autoDrift) notes.push('driftFixed');
+  if (releaseMatch(version.release, video)) notes.push('matches');
+  if (check?.hearing) notes.push('hearing');
+  return notes.slice(0, MAX_NOTES);
 }
 
-/** The version a language starts with when it is picked: its first that has not failed. */
+/** Whether a version was passed over for what reading it found: another script, or signs only. */
+export function isUnfit(check: SubtitleCheck | undefined): boolean {
+  return check?.problem === 'script' || check?.problem === 'signs';
+}
+
+/**
+ * The version a language starts with when it is picked: its first that has
+ * not failed and was not passed over for its checks, else its first that has
+ * not failed, else its first.
+ */
 export function languageFirstPick(
   group: LanguageGroup<SubtitleVersion>,
   statusOf: Subtitles['statusOf'],
+  checkOf?: Subtitles['checkOf'],
 ): SubtitleVersion {
-  return group.items.find((item) => statusOf(item.choice) !== 'failed') ?? group.items[0]!;
+  const working = group.items.filter((item) => statusOf(item.choice) !== 'failed');
+  return working.find((item) => !isUnfit(checkOf?.(item.choice))) ?? working[0] ?? group.items[0]!;
 }

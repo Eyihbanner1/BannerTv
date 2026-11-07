@@ -3,6 +3,7 @@ import { preferences } from '@tv/data/preferences';
 import {
   createOrderMemory,
   DRIFT_CHOICES,
+  isUnfit,
   languageFirstPick,
   type OrderMemory,
   playingRelease,
@@ -12,7 +13,7 @@ import {
   VERSION_NOTES,
   versionGroups,
   versionId,
-  versionNote,
+  versionNotes,
 } from '@tv/player/subtitle-versions';
 import {
   COARSE_TIMING_STEPS,
@@ -140,20 +141,24 @@ function SubtitleChoices({
   const versionRow = ({ item, number }: { item: SubtitleVersion; number?: number }) => {
     const selected = sameChoice(item.choice, choice);
     const status = subtitles.statusOf(item.choice);
-    const note = versionNote(item, selected, status, video);
+    const check = subtitles.checkOf(item.choice);
+    const notes = versionNotes(item, selected, status, video, check).map((note) =>
+      t(VERSION_NOTES[note]),
+    );
     const label =
       number === undefined
         ? item.source
         : t('player.sourceNumber', { source: item.source, number });
-    // The note first: a long release name is cut at the end, and the note must stay in sight.
-    const detail = [note ? t(VERSION_NOTES[note]) : '', item.release].filter(Boolean).join(' · ');
+    // The notes first: a long release name is cut at the end, and the notes must stay in sight.
+    const detail = [...notes, item.release].filter(Boolean).join(' · ');
     return (
       <PanelOption
         key={versionId(item.choice)}
         label={label}
         {...(detail ? { detail } : {})}
         selected={selected}
-        dim={status === 'failed'}
+        // Passed over, for good reason: still there to pick by hand.
+        dim={status === 'failed' || isUnfit(check)}
         accessibilityLabel={detail ? `${label}, ${detail}` : label}
         onPress={() => onChoose(item.choice)}
       />
@@ -165,7 +170,10 @@ function SubtitleChoices({
   const pickLanguage = (group: LanguageGroup<SubtitleVersion>) => {
     onOpen(group.key);
     if (group.key === chosenLanguage) return;
-    subtitles.choose(languageFirstPick(group, subtitles.statusOf).choice);
+    subtitles.choose(
+      languageFirstPick(group, subtitles.statusOf, subtitles.checkOf).choice,
+      'language',
+    );
   };
 
   return (
@@ -293,7 +301,9 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
               />
             ))}
           </View>
-          <Text style={styles.note}>{`${t('player.driftHint')} ${t('player.timingKept')}`}</Text>
+          <Text style={styles.note}>
+            {`${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`}
+          </Text>
         </>
       ) : (
         <Text style={styles.note}>{t('player.timingKept')}</Text>
