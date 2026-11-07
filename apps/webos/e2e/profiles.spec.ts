@@ -273,12 +273,14 @@ test('a kids profile sees Family rows only, no Addons, a short Settings, and no 
 
   const kidsRow = 'home-0-movie-top-genre-family';
   await expectFocus(page, `${kidsRow}-tile-0`);
-  expect(requests.catalogs).toContain('movie/top/genre=Family');
-  expect(requests.catalogs).not.toContain('movie/top');
   // Elephants Dream says Horror, so it is left out; Sintel says nothing, and its row asked for Family.
   const row = page.locator(`[data-row-key="${kidsRow}"]`);
   await expect(row.getByRole('button', { name: /Big Buck Bunny/ })).toBeVisible();
   await expect(row.getByRole('button', { name: /Elephants Dream/ })).toHaveCount(0);
+  // Focus can land on the row's loading tiles a moment before its catalog is asked for,
+  // so what was asked is read once the row shows its titles.
+  expect(requests.catalogs).toContain('movie/top/genre=Family');
+  expect(requests.catalogs).not.toContain('movie/top');
 
   await press(page, 'Enter', 'details-watch');
   await pressBack(page);
