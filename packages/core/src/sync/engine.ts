@@ -1512,7 +1512,16 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
         touched.add(doc);
       }
     }
-    await Promise.all(Array.from(touched).map(savePendLater));
+    // These edits are not yet in the stores, as edits always are: the documents are marked as
+    // not yet taken (`apply`) before the edits are saved. A launch that then finds a store
+    // without them, the TV having gone off before the store saved, brings them into it,
+    // rather than taking an addon the store lacks for one the person removed (catchUp).
+    const marked = Array.from(touched);
+    for (const doc of marked) {
+      if (!doc.base.apply) doc.base = { ...doc.base, apply: true };
+    }
+    await Promise.all(marked.map(saveBaseLater));
+    await Promise.all(marked.map(savePendLater));
   }
 
   /**

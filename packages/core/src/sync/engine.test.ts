@@ -1944,6 +1944,30 @@ describe('bringing back what Use set aside', () => {
     expect(titles(a)).toEqual(['b1', 'a1']);
   });
 
+  it('cut off while the addons store saves what came back, brings it into the store at the next launch rather than removing it', async () => {
+    const w = world();
+    const { b, code, storage } = await usedAccount(w);
+    // The addons store as it was saved before, and the TV going off while it saves again.
+    const saved = memoryPart('addons', ['a/', 'order']);
+    for (const key of b.addons.keys()) saved.set(key, b.addons.get(key)!.v);
+    const adopt = b.addons.part.adopt.bind(b.addons.part);
+    b.addons.part.adopt = (change) => {
+      void adopt(change);
+      return new Promise<void>(() => undefined);
+    };
+    void b.engine.bringBack();
+    await vi.waitFor(async () => expect(await storage.get('sync/pend/addons')).toBeTruthy());
+    expect(await storage.get('sync-aside')).toMatchObject({ back: true });
+
+    const again = screen(w, { storage, profiles: b.profiles, addons: saved });
+    await again.start();
+    await vi.waitFor(async () => expect(await storage.get('sync-aside')).toBeUndefined());
+    await again.engine.syncNow();
+    expect(again.addons.keys()).toEqual(['a/mine', 'a/shared']);
+    const account = (await accountItems(w, code, 'addons'))!;
+    expect(account['a/mine']).toMatchObject({ v: { u: MINE } });
+  });
+
   it('carries on at the next launch when interrupted before anything changed, and says the profiles came back', async () => {
     const w = world();
     const { b, code, storage } = await usedAccount(w);
