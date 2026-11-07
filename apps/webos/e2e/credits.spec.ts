@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { mockPlayback, type PlaybackOptions, readKv, seedStreamAddon } from './play';
+import { mockServices, traktSignIn } from './services';
 import { APP_URL, expectFocus, expectFocusLabel, openSection, press, pressBack } from './tv';
 
 /** The first episode of the series on Home, as Stremio names it, and the one after it. */
@@ -113,6 +114,24 @@ test('left in the credits, the episode counts as watched and Continue Watching o
   await page.goto(APP_URL);
   await expectFocus(page, 'home-continue-tile-0');
   await expectFocusLabel(page, 'Morevna Project, Next: S1:E2');
+});
+
+test('closed in the credits, Trakt hears that the episode was seen', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { kv: { trakt: traktSignIn() } });
+  await mockPlayback(page, { skips: CREDITS });
+  const { trakt } = await mockServices(page, { trakt: true });
+  await playFirstEpisode(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/start').length).toBe(1);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+
+  // A few seconds into the 40 s file, but past where the credits start: 100%, not about 15%.
+  await pressBack(page);
+  await pressBack(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/stop').length).toBe(1);
+  expect(trakt.callsTo('/scrobble/stop')[0]!.body!.progress).toBe(100);
 });
 
 test('with "Start next at credits" on, the card counts ten seconds from the credits and plays the next episode', async ({
