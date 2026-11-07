@@ -99,30 +99,32 @@ class WatchNextPublisher(context: Context) {
         }
     }
 
-    /** BannerTV's rows on the row: the provider shows an app its own and nobody else's. */
-    private fun rows(resolver: ContentResolver): List<WatchNextRow>? {
-        val cursor =
-            try {
-                resolver.query(WatchNextPrograms.CONTENT_URI, ROW_COLUMNS, null, null, null)
-            } catch (e: Exception) {
-                null
-            } ?: return null
-        return cursor.use {
-            val rows = ArrayList<WatchNextRow>(it.count)
-            while (it.moveToNext()) {
-                rows.add(
-                    WatchNextRow(
-                        id = it.getLong(0),
-                        key = if (it.isNull(1)) null else it.getString(1),
-                        // Only the system clears it, when the person takes the card off the row.
-                        browsable = it.isNull(2) || it.getInt(2) != 0,
-                        watchedAt = if (it.isNull(3)) 0L else it.getLong(3),
-                    ),
-                )
+    /**
+     * BannerTV's rows on the row, or null when the provider cannot be read: it shows an app its own
+     * and nobody else's.
+     */
+    private fun rows(resolver: ContentResolver): List<WatchNextRow>? =
+        try {
+            resolver.query(WatchNextPrograms.CONTENT_URI, ROW_COLUMNS, null, null, null)?.use {
+                val rows = ArrayList<WatchNextRow>(it.count)
+                while (it.moveToNext()) {
+                    rows.add(
+                        WatchNextRow(
+                            id = it.getLong(0),
+                            key = if (it.isNull(1)) null else it.getString(1),
+                            // Only the system clears it, when the person takes the card off the row.
+                            browsable = it.isNull(2) || it.getInt(2) != 0,
+                            watchedAt = if (it.isNull(3)) 0L else it.getLong(3),
+                        ),
+                    )
+                }
+                rows
             }
-            rows
+        } catch (e: Exception) {
+            // The provider can also go away while its rows are read. This runs on a thread of its
+            // own, where anything thrown would take the whole app down.
+            null
         }
-    }
 
     /**
      * The provider's row for a card. Every field is written each time, empty ones too, so a card

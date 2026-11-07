@@ -20,15 +20,21 @@ const app = vi.hoisted(() => ({
   profiles: null as unknown as Store<ProfilesState>,
   activeId: null as unknown as Store<string | null>,
   router: null as unknown as Store<{ top: string }>,
-  /** The installed addons' addresses. */
-  addons: [] as string[],
+  /** The installed addons, as far as the row needs them: whether they have been read, and their addresses. */
+  addons: null as unknown as Store<{ ready: boolean; addons: { transportUrl: string }[] }>,
 }));
 
 vi.mock('./addons', () => ({
-  addonCollection: {
-    get: () => ({ addons: app.addons.map((transportUrl) => ({ transportUrl })) }),
+  get addonCollection() {
+    return app.addons;
   },
 }));
+
+/** The addons, read, at these addresses. */
+const installed = (...transportUrls: string[]) => ({
+  ready: true,
+  addons: transportUrls.map((transportUrl) => ({ transportUrl })),
+});
 
 vi.mock('./playback', () => ({
   get progress() {
@@ -131,7 +137,7 @@ beforeEach(async () => {
   });
   app.activeId = createStore<string | null>('main');
   app.router = createStore({ top: 'home' });
-  app.addons = [];
+  app.addons = createStore(installed());
   vi.resetModules();
   watchNext = await import('./watch-next');
 });
@@ -389,7 +395,7 @@ describe('startWatchNext', () => {
   });
 
   it("keeps artwork an addon serves from its own address off the device's row", async () => {
-    app.addons = ['https://meta.example/secret-config/manifest.json'];
+    app.addons.set(installed('https://meta.example/secret-config/manifest.json'));
     const film = preview('tt1', 'movie', {
       poster: 'https://meta.example/secret-config/poster/tt1.jpg',
       background: 'https://images.example/tt1/wide.jpg',
@@ -400,6 +406,26 @@ describe('startWatchNext', () => {
     expect(last()).toEqual([
       expect.objectContaining({ meta: 'tt1', landscape: 'https://images.example/tt1/wide.jpg' }),
     ]);
+    expect(last()![0]).not.toHaveProperty('poster');
+  });
+
+  it('waits for the addons to be read, since until then any artwork could carry a key', async () => {
+    app.addons.set({ ready: false, addons: [] });
+    played(
+      preview('tt1', 'movie', { poster: 'https://meta.example/secret-config/poster/tt1.jpg' }),
+      'tt1',
+      1800,
+      6000,
+    );
+    await start();
+    page.hidden = true;
+    page.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(watchNext.QUIET_MS);
+    expect(sent).toEqual([]);
+
+    app.addons.set(installed('https://meta.example/secret-config/manifest.json'));
+    await vi.advanceTimersByTimeAsync(watchNext.QUIET_MS);
+    expect(last()).toEqual([expect.objectContaining({ meta: 'tt1' })]);
     expect(last()![0]).not.toHaveProperty('poster');
   });
 
