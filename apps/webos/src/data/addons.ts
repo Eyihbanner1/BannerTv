@@ -1,5 +1,6 @@
 import {
   answerState,
+  BANNERTV_DEMO_ID,
   createAddonClient,
   createAddonCollection,
   createAddonHealth,
@@ -108,6 +109,25 @@ export function addonNames(): Map<string, string> {
 /** Switches an addon off, keeping its settings and its place, or back on. */
 export function switchAddon(addon: InstalledAddon, off: boolean): void {
   addonSwitches.set(installIdOf(addon), off);
+}
+
+/**
+ * The installs this profile could ask for streams, for the problem box: the
+ * BannerTV Demo addon aside, which only plays its own clips, and adult
+ * addons on a kids profile. `on`: one is switched on, so the player asks it.
+ * `off`: one is installed but switched off, so it was not asked, and the box
+ * says to switch it on rather than to add one.
+ */
+export function streamAddons(): { on: boolean; off: boolean } {
+  const kids = isKidsProfile();
+  const findsStreams = (addon: InstalledAddon) =>
+    addon.manifest.id !== BANNERTV_DEMO_ID &&
+    !(kids && addon.manifest.behaviorHints.adult) &&
+    addon.manifest.resources.some((resource) => resource.name === 'stream');
+  return {
+    on: addonCollection.get().addons.some(findsStreams),
+    off: allAddons.get().addons.some((addon) => addonSwitches.isOff(addon) && findsStreams(addon)),
+  };
 }
 
 /**

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSubtitles, plainId } from './subtitles';
+import { clearSubtitleCache, loadSubtitles, plainId } from './subtitles';
 
 const CHUNK = new Uint8Array(64 * 1024);
 const MB = 1024 * 1024;
@@ -58,6 +58,21 @@ describe('loadSubtitles', () => {
     );
     const cues = await loadSubtitles({ url: 'https://subs.example.com/pieces.srt', lang: 'eng' });
     expect(cues.map((cue) => cue.lines[0]![0]!.text)).toEqual(['Hello there']);
+  });
+
+  it('reads a file once, and again after the files read so far are forgotten', async () => {
+    let fetched = 0;
+    vi.stubGlobal('fetch', () => {
+      fetched++;
+      return Promise.resolve(new Response('1\n00:00:01,000 --> 00:00:02,000\nHello there\n'));
+    });
+    const file = { url: 'https://subs.example.com/kept.srt', lang: 'eng' };
+    await loadSubtitles(file);
+    await loadSubtitles(file);
+    expect(fetched).toBe(1);
+    clearSubtitleCache();
+    await loadSubtitles(file);
+    expect(fetched).toBe(2);
   });
 
   it('stops reading a file with no declared size once it passes 5 MB', async () => {

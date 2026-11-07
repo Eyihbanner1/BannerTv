@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The helper's notification, worded as on the Android TV app (apps/androidtv strings.xml). -->
+<resources>
+    <string name="stream_helper_channel">Stream helper</string>
+    <string name="stream_helper_on_title">Stream helper is on</string>
+    <string name="stream_helper_on_text">Your TV can play add-on streams through this phone.</string>
+    <string name="stream_helper_stop">Stop</string>
+</resources>

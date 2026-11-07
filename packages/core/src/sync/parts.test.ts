@@ -5,6 +5,7 @@ import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from '../addons/defau
 import { createHomeLayout } from '../addons/layout';
 import { createLibrary } from '../library/library';
 import { createPlayedVideos } from '../playback/continue';
+import { createSubtitleDrifts } from '../playback/drifts';
 import { createSubtitleOffsets } from '../playback/offsets';
 import { createProgressStore } from '../playback/progress';
 import { createTrackMemory } from '../playback/tracks';
@@ -21,6 +22,7 @@ import {
   libraryPart,
   mergeRowOrder,
   profileParts,
+  subtitleDriftsPart,
   subtitleOffsetsPart,
   trackMemoryPart,
   watchPart,
@@ -400,6 +402,58 @@ describe('trackMemoryPart and subtitleOffsetsPart', () => {
   });
 });
 
+describe('subtitleDriftsPart', () => {
+  it('carries drift fixes beside the timings, where no fix is gone', async () => {
+    const drifts = createSubtitleDrifts({ storage: memoryKeyValueStore() });
+    const part = subtitleDriftsPart('main', drifts);
+    expect(part.document).toBe('p/main/settings');
+    expect(part.prefixes).toEqual(['drift/']);
+    await part.load();
+    await drifts.remember('k1', 'behind');
+    await drifts.remember('k2', 'none');
+    expect(part.snapshot()).toEqual(
+      new Map([
+        ['drift/k1', { v: 'behind' }],
+        ['drift/k2', { v: 'none' }],
+      ]),
+    );
+    await drifts.remember('k1', null);
+    expect(part.snapshot()).toEqual(new Map([['drift/k2', { v: 'none' }]]));
+  });
+
+  it('takes only the agreed words from the account, oldest first, and removals', async () => {
+    const drifts = createSubtitleDrifts({ storage: memoryKeyValueStore() });
+    const part = subtitleDriftsPart('main', drifts);
+    await part.load();
+    await drifts.remember('gone', 'ahead');
+    await part.adopt(
+      change(
+        {
+          'drift/k4': { t: 3, v: 'auto' },
+          'drift/k3': { t: 2, v: 'ahead' },
+          'drift/k2': { t: 1, v: 'behind' },
+          'drift/bad': { t: 1, v: 'sideways' },
+          'drift/odd': { t: 1, v: 7 },
+        },
+        ['drift/gone'],
+      ),
+    );
+    expect(drifts.drifts()).toEqual([
+      { key: 'k2', drift: 'behind' },
+      { key: 'k3', drift: 'ahead' },
+      { key: 'k4', drift: 'auto' },
+    ]);
+  });
+
+  it("is one of every profile's parts, over a store of its own", () => {
+    const stores = createProfileStores(memoryKeyValueStore());
+    const parts = profileParts('main', stores);
+    expect(
+      parts.map((p) => p.prefixes).filter((prefixes) => prefixes.indexOf('drift/') !== -1),
+    ).toHaveLength(1);
+  });
+});
+
 describe('collectionPart', () => {
   const EXTRA_URL = 'https://addon.example.com/manifest.json';
   const EXTRA_MANIFEST = {
@@ -526,6 +580,7 @@ describe('profileParts', () => {
     expect(parts.map((part) => part.document)).toEqual([
       'p/abc123/list',
       'p/abc123/watch',
+      'p/abc123/settings',
       'p/abc123/settings',
       'p/abc123/settings',
       'p/abc123/settings',

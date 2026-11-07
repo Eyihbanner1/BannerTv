@@ -32,7 +32,7 @@ import {
 import { SPORTS_IN_BUILD } from '../app/features';
 import { pageCrypto, webCryptoWorks } from '../platform/web-crypto';
 import { addonSwitches, allAddons } from './addons';
-import { homeLayout, library, subtitleOffsets, trackMemory } from './library';
+import { homeLayout, library, subtitleDrifts, subtitleOffsets, trackMemory } from './library';
 import { playedVideos, progress } from './playback';
 import { preferences, profilePreferences } from './preferences';
 import { deleteProfile } from './profile-delete';
@@ -276,6 +276,7 @@ function activeParts(profileId: string): SyncPart[] {
       homeLayout,
       trackMemory,
       subtitleOffsets,
+      subtitleDrifts,
     }),
     preferencesPart(profileId, preferences),
     // A build without Sports leaves the follows in the account as they are.

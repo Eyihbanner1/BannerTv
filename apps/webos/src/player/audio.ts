@@ -1,4 +1,12 @@
-import { languageKey, languageName } from '@bannertv/core';
+import {
+  languageKey,
+  languageName,
+  namesOnlyOthers,
+  type OrderOptions,
+  type QualityReference,
+  type StreamEntry,
+  streamInLanguage,
+} from '@bannertv/core';
 import type { EngineTrack } from './engines/types';
 
 /**
@@ -123,4 +131,45 @@ export function pickAudio(
   const main = matching.filter((track) => !isCommentary(track, byName));
   if (active && (main.length === 0 || main.includes(active))) return active;
   return main[0] ?? matching[0];
+}
+
+/** A language as ISO 639-1 ("eng", "en-GB" and "English" are "en"), or undefined when it isn't one. */
+function baseLanguage(language: string): string | undefined {
+  const code = languageKey(language).split('-')[0]!;
+  return /^[a-z]{2}$/.test(code) ? code : undefined;
+}
+
+/**
+ * Whether one of the tracks is in the language; undefined when none of them
+ * says which language it is.
+ */
+export function hasLanguage(tracks: readonly EngineTrack[], language: string): boolean | undefined {
+  const wanted = baseLanguage(language);
+  let named = false;
+  for (const track of tracks) {
+    const code = track.lang ? baseLanguage(track.lang) : undefined;
+    if (code === undefined) continue;
+    if (code === wanted) return true;
+    named = true;
+  }
+  return named ? false : undefined;
+}
+
+/**
+ * The stream the Audio tab offers for hearing `language` ("English audio:
+ * switch stream"), when what plays has no track in it: its tracks name other
+ * languages, or name none while the stream names only others. Undefined when
+ * it has the language, or no other stream does.
+ */
+export function audioSwitch(
+  tracks: readonly EngineTrack[],
+  reference: QualityReference,
+  candidates: readonly StreamEntry[],
+  language: string,
+  options?: OrderOptions,
+): StreamEntry | undefined {
+  const has = hasLanguage(tracks, language);
+  if (has === true) return undefined;
+  if (has === undefined && !namesOnlyOthers(reference.entry.facts, language)) return undefined;
+  return streamInLanguage(candidates, reference, language, options);
 }

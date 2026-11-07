@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification icon for the stream helper: a screen on a stand. White on transparent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M3,4h18v12H3z M5,6v8h14V6z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8,18h8v2H8z" />
+</vector>

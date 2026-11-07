@@ -42,7 +42,6 @@ const PHONE = {
   leavePlayer: 'Leave the player',
   live: 'LIVE',
   embeddedSubtitles: 'In the video',
-  fromAddon: 'From {{addon}}',
   history: 'History',
   emptyList: 'Nothing saved yet. Tap My List on a title to keep it here.',
   searchHint: 'Type the name of a film or series.',
@@ -92,6 +91,20 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  // Settings, Languages and picture (the TV's words where they fit a phone).
+  picture: {
+    any: 'As high as the phone shows',
+    '2160p': '4K',
+    '1080p': '1080p',
+    '720p': '720p',
+  },
+  avoidHdr: 'Avoid HDR',
+  learnLanguages: 'Use player choices for every title',
+  yourTv: 'Your TV',
+  streamHelperDetail: 'Your LG plays some add-on streams through this phone',
+  streamHelperSwitch: 'Use the stream helper',
+  streamHelperNotificationsOff:
+    'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
   // Search: what only the phone's list needs.
   search: {
     /** The line that opens each addon's own results, under Top results. */
@@ -151,6 +164,17 @@ const OVERRIDES = {
         'None of your addons offered a stream this phone can play. Try Streams, or add a stream addon in Settings, Addons.',
       format: "This phone can't play this stream's format.",
       decode: "This phone couldn't decode this stream.",
+      noStreamAddon: 'You have no addon that finds streams yet. Add one in Settings, Addons.',
+      streamAddonsOff:
+        'Your stream addons are all switched off. Switch one on in Settings, Addons, then try again.',
+      someStreamAddonsOff:
+        "Some of your stream addons are switched off, so they weren't asked. You can switch them on in Settings, Addons.",
+      failedRecently_one:
+        "The stream found didn't play a moment ago. Try again to give it another go, or open Streams.",
+      failedRecently_other:
+        "The {{count}} streams found didn't play a moment ago. Try again to give them another go, or open Streams.",
+      uncached:
+        "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in Streams.",
     },
   },
 } as const;

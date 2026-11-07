@@ -4,6 +4,7 @@ import { preferences, setPreference, type Preferences } from '@tv/data/preferenc
 import { allAddons } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
+import { androidHelperState } from '@tv/platform/android';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -21,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { statusLine } from '../data/account-text';
 import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
+import { LanguagesSection } from './LanguagesSection';
 import { ListRow } from '../ui/Button';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
@@ -101,6 +103,10 @@ export function SettingsScreen() {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+  // The stream helper, on builds that have it (not the web build). Read on each visit: it is
+  // switched on its own screen, or off from its notification.
+  const [helper, setHelper] = useState(androidHelperState);
+  useFocusEffect(useCallback(() => setHelper(androidHelperState()), []));
 
   const valueOf = (_choice: Choice, value: string) => t(`settings.streamChoiceValue.${value}`);
   const accountDetail =
@@ -176,6 +182,8 @@ export function SettingsScreen() {
             />
           </Section>
 
+          <LanguagesSection />
+
           <Section title={t('phone.libraryAndAccounts')}>
             <ListRow
               title={t('profiles.title')}
@@ -198,6 +206,17 @@ export function SettingsScreen() {
               />
             ) : null}
           </Section>
+
+          {helper ? (
+            <Section title={t('phone.yourTv')}>
+              <ListRow
+                title={t('settings.streamHelper')}
+                detail={t('phone.streamHelperDetail')}
+                value={helper.on ? t('common.on') : t('common.off')}
+                onPress={() => router.push('/stream-helper')}
+              />
+            </Section>
+          ) : null}
 
           {services.tmdb ? (
             <Section title={t('settings.services')}>

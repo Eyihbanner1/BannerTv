@@ -425,20 +425,268 @@ test('when nothing plays, the player says why and offers the list', async ({ pag
   await openMovie(page);
 
   await press(page, 'Enter', 'player-surface');
-  await expect(page.getByText("This stream won't play")).toBeVisible();
+  // Both links were tried: it says so, then why the last one stopped.
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(page.getByText('Tried 2 streams, and none of them played.')).toBeVisible();
   // A link that answers 404 is the link's fault, not a format the TV lacks.
   await expect(page.getByText('Its source may be busy or offline.')).toBeVisible();
-  // The torrent cannot play on a TV, so there is nothing left to try.
+  // The torrent cannot play on a TV: it says what would make it play.
+  await expect(
+    page.getByText(
+      'Test Streams also sent 1 torrent, which plays once a debrid service is set up in its settings.',
+    ),
+  ).toBeVisible();
   await expect(page.locator('[data-focus-key="player-problem-another"]')).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
   // A stray click beside the box neither leaves nor brings the controls up behind it.
   await page.mouse.move(80, 80);
   await page.mouse.click(60, 60);
   await page.waitForTimeout(300);
-  await expect(page.getByText("This stream won't play")).toBeVisible();
+  await expect(page.getByText('No stream could play')).toBeVisible();
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   await press(page, 'Enter', 'streams-item-0');
   expect(errors).toEqual([]);
+});
+
+test('with only torrents, the player names the addon and says to set up a debrid service', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n4K',
+          description: 'Open Movie 2160p REMUX\n👤 52',
+          infoHash: 'a'.repeat(40),
+        },
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p\n👤 12',
+          infoHash: 'b'.repeat(40),
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-problem-streams');
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText(
+      "Test Streams sent 2 torrents, and BannerTV can't play torrents by itself. Set up a debrid service in the addon's settings, then try again.",
+    ),
+  ).toBeVisible();
+});
+
+test('Play passes over a dub for a release in the language wanted, and Audio can switch back to it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const playback = await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p BluRay REMUX 🇪🇸\n💾 9 GB ⚡ Cached',
+          path: '/movie-1080p-castellano.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL\n💾 2 GB ⚡ Cached',
+          path: '/movie-720p.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  expect(playback.media).not.toContain('/movie-1080p-castellano.webm');
+
+  // The dub picked by hand, Audio offers the language back from the other stream.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(1));
+  await press(page, 'ArrowDown', source(0));
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p-castellano.webm');
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await page.keyboard.press('Enter');
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  const offer = page.locator('[data-focus-key="player-tracks-audio-switch"]');
+  await expect(offer).toContainText('English audio: switch stream');
+  await expect(offer).toContainText('720p');
+  await press(page, 'ArrowDown', 'player-tracks-audio-switch');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  expect((await video(page)).time).toBeGreaterThan(0);
+});
+
+test('Watch starts the release played last for the title', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      releaseChoices: [
+        { metaId: MOVIE, addonId: 'org.bannertv.test-streams', bingeGroup: 'test-720p' },
+      ],
+    },
+  });
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  // What is kept names the release, never its link.
+  expect(JSON.stringify(await readKv(page, 'releaseChoices'))).not.toContain('media.example.com');
+});
+
+test('a release played last that the addon no longer sends leaves the usual pick', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    kv: {
+      releaseChoices: [
+        { metaId: MOVIE, addonId: 'org.bannertv.test-streams', bingeGroup: 'test-gone' },
+      ],
+    },
+  });
+  await mockPlayback(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p.webm');
+});
+
+test('Languages and picture in Settings: the highest picture keeps Play within it', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  for (const key of [
+    'settings-probing',
+    'settings-subtitle-style',
+    'settings-still-watching',
+    'settings-diagnostics',
+    'settings-lab',
+    'settings-stream-helper',
+    'settings-languages',
+  ]) {
+    await press(page, 'ArrowDown', key);
+  }
+  await press(page, 'Enter', 'languages-audio');
+  await expect(page.locator('[data-focus-key="languages-audio"]')).toHaveAttribute(
+    'aria-label',
+    'Audio: Original',
+  );
+
+  // Subtitles in English, only when the audio isn't English.
+  await press(page, 'ArrowDown', 'languages-subtitles');
+  await press(page, 'Enter', 'languages-subtitles-menu-0');
+  await press(page, 'ArrowDown', 'languages-subtitles-menu-1');
+  await press(page, 'Enter', 'languages-subtitles');
+  await expect(page.locator('[data-focus-key="languages-subtitles"]')).toHaveAttribute(
+    'aria-label',
+    'Subtitles: English',
+  );
+  await press(page, 'ArrowDown', 'languages-when');
+  await press(page, 'Enter', 'languages-when-menu-0');
+  await press(page, 'ArrowDown', 'languages-when-menu-1');
+  await press(page, 'Enter', 'languages-when');
+  await expect(page.locator('[data-focus-key="languages-when"]')).toHaveAttribute(
+    'aria-label',
+    "Show subtitles: Only when the audio isn't English",
+  );
+
+  // At most 720p.
+  await press(page, 'ArrowDown', 'languages-picture');
+  await press(page, 'Enter', 'languages-picture-menu-0');
+  for (const index of [1, 2, 3]) await press(page, 'ArrowDown', `languages-picture-menu-${index}`);
+  await press(page, 'Enter', 'languages-picture');
+  await expect(page.locator('[data-focus-key="languages-picture"]')).toHaveAttribute(
+    'aria-label',
+    'Highest picture: 720p',
+  );
+  expect(
+    JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
+  ).toMatchObject({ subtitleLanguage: 'en', subtitleWhen: 'foreign', maxResolution: '720p' });
+
+  await pressBack(page);
+  await expectFocus(page, 'settings-languages');
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-watch');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
+  // A stream that names no other language is taken to be in English: no subtitles.
+  await expect.poll(async () => (await video(page)).time, { timeout: 10000 }).toBeGreaterThan(2);
+  await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
+});
+
+test('subtitles set to show only when the audio is in another language show for a dub', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    preferences: { subtitleLanguage: 'en', subtitleWhen: 'foreign', audioLanguage: 'fr' },
+  });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL 🇫🇷',
+          path: '/movie-1080p-vf.webm',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/movie-1080p-vf.webm');
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+});
+
+test('when only uncached debrid links were tried, the player says so', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: '[RD download] Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL',
+          path: '/movie-1080p.webm',
+        },
+        {
+          name: '[RD download] Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL',
+          path: '/movie-720p.webm',
+        },
+      ],
+    },
+    broken: ['/movie-1080p.webm', '/movie-720p.webm'],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect(page.getByText('Tried 2 streams, and none of them played.')).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(
+    page.getByText(
+      "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in All streams.",
+    ),
+  ).toBeVisible();
 });
 
 test('All streams lists every stream, says which cannot play, and plays the one picked', async ({
@@ -576,9 +824,12 @@ test('subtitles come from the subtitles addon: a language on the left, its versi
   await pressBack(page);
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
-  // The language is remembered: the next video starts with it.
+  // The language is kept for the title; the profile's own, set in Settings, stays as it was.
+  await expect
+    .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
+    .toEqual([expect.objectContaining({ subtitle: 'eng' })]);
   const saved = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
-  expect(JSON.parse(saved ?? '{}')).toMatchObject({ subtitleLanguage: 'eng' });
+  expect(JSON.parse(saved ?? '{}').subtitleLanguage ?? null).toBeNull();
 });
 
 test('near the end of an episode, Up Next plays the next one from the same release', async ({
@@ -1283,10 +1534,8 @@ test('HLS with audio and subtitle choices plays through hls.js, and both show in
   await press(page, 'Enter', 'player-tracks-audio-fre|French');
   await expect(page.locator('[data-focus-key="player-tracks-tab-audio"]')).toContainText('French');
   await expect
-    .poll(async () =>
-      JSON.parse((await page.evaluate(() => localStorage.getItem('bannertv.preferences'))) ?? '{}'),
-    )
-    .toMatchObject({ audioLanguage: 'fre' });
+    .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
+    .toContainEqual(expect.objectContaining({ audio: 'fre' }));
 });
 
 test("in the language last chosen, the stream's own subtitles come before an addon's file", async ({
@@ -3135,15 +3384,19 @@ test('each version says where it is from and how it is doing, and its timing is 
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   const missing = page.locator(`[data-focus-key="${OPENSUBTITLES}#missing"]`);
   // The release names it sends, and a best guess at which matches the stream (1080p WEB-DL).
-  await expect(en1).toHaveText('OpenSubtitles v3 1Open.Movie.1080p.WEB-DL · Matches your video');
+  await expect(en1).toHaveText('OpenSubtitles v3 1Matches your video · Open.Movie.1080p.WEB-DL');
   await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
 
-  // The subtitle line sits just above the sheet.
-  const line = (await page.getByText('Hello from the test subtitles').boundingBox())!;
-  const top = (await sheet.boundingBox())!.y;
-  expect(line.y + line.height).toBeLessThanOrEqual(top);
-  expect(line.y + line.height).toBeGreaterThan(top - 120);
+  // The subtitle line sits just above the sheet, once it has slid up there (its
+  // move is eased, and a busy runner can measure it on the way).
+  const gapAboveSheet = async () => {
+    const line = (await page.getByText('Hello from the test subtitles').boundingBox())!;
+    const top = (await sheet.boundingBox())!.y;
+    return top - (line.y + line.height);
+  };
+  await expect.poll(gapAboveSheet).toBeGreaterThanOrEqual(0);
+  expect(await gapAboveSheet()).toBeLessThan(120);
 
   // A file says Loading… until its first line is ready.
   await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
@@ -3201,6 +3454,293 @@ test('each version says where it is from and how it is doing, and its timing is 
   await page.keyboard.press('Enter');
   await expect(timing).toContainText('0.0 s');
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
+});
+
+/** Records every piece of text the page draws, for a check that some never showed. */
+async function recordDrawnText(page: Page) {
+  await page.addInitScript(() => {
+    const drawn: string[] = [];
+    (window as unknown as { drawnText: string[] }).drawnText = drawn;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'characterData') drawn.push(record.target.textContent ?? '');
+        record.addedNodes.forEach((node) => drawn.push(node.textContent ?? ''));
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+}
+
+function drawnText(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { drawnText: string[] }).drawnText.join('\n'));
+}
+
+test('the first subtitles to show are the full file: signs only, lines for the hard of hearing and a file running past the end are passed over, and adverts never show', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    // The 10-minute video, so the files' lengths can be judged against it.
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    // As OpenSubtitles might list them: the worst first, and no release names.
+    subtitleList: [
+      { id: 'signs', lang: 'eng' },
+      { id: 'sdh', lang: 'eng' },
+      { id: 'past', lang: 'eng' },
+      { id: 'full', lang: 'eng' },
+    ],
+    // The full file comes last, as from a slow server: the first lines wait for it.
+    subtitleDelayMs: { full: 1200 },
+  });
+  await recordDrawnText(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // The full file's first line, at 3 s; its advert, at the very start, was taken out.
+  await expect(page.getByText('The full file, line 1')).toBeVisible();
+  const drawn = await drawnText(page);
+  expect(drawn).not.toContain('OpenSubtitles.org');
+  expect(drawn).not.toContain('Advertise your product');
+  // The signs file listed first, the one for the hard of hearing and the one running past the
+  // end never showed a line. Neither of the first two fits as it is, so the next two were read.
+  expect(drawn).not.toContain('A SIGN');
+  expect(drawn).not.toContain('For the hard of hearing');
+  expect(drawn).not.toContain('Running past the end');
+
+  // The sheet says why: the signs file has only a few lines, and is dimmed.
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toHaveAttribute(
+    'aria-label',
+    'English, 4 versions',
+  );
+  const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
+  const sdh = page.locator(`[data-focus-key="${OPENSUBTITLES}#sdh"]`);
+  const past = page.locator(`[data-focus-key="${OPENSUBTITLES}#past"]`);
+  const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
+  await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
+  await expect(signs).toHaveClass(/dim/);
+  await expect(sdh).toHaveText('OpenSubtitles v3 2For the hard of hearing');
+  await expect(past).toHaveText('OpenSubtitles v3 3');
+  await expect(full).toHaveText('OpenSubtitles v3 4');
+  await expect(sdh).not.toHaveClass(/dim/);
+  await expect(past).not.toHaveClass(/dim/);
+  await expect(full).not.toHaveClass(/dim/);
+  await press(page, 'ArrowRight', `${OPENSUBTITLES}#full`);
+
+  // Picked by hand, the file running past the end shows, its drift fixed for it, and the
+  // pick is kept for this release by who the file is, never its link.
+  await press(page, 'ArrowUp', `${OPENSUBTITLES}#past`);
+  await page.keyboard.press('Enter');
+  // Its lines come every 2 s and last 4, so two show at once.
+  await expect(page.getByText(/^Running past the end, line \d+$/).first()).toBeVisible({
+    timeout: 12000,
+  });
+  await expect(past).toHaveText('OpenSubtitles v3 3Drift fixed for you');
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
+    'drift fixed',
+  );
+  await expect
+    .poll(async () => readKv(page, 'subtitlePicks'))
+    .toEqual([
+      {
+        metaId: MOVIE,
+        release: 'binge:test-1080p',
+        file: expect.stringMatching(/^[0-9a-z]+$/),
+      },
+    ]);
+  // Nothing of the fix is kept while the player made it.
+  expect((await readKv(page, 'subtitleDrift')) ?? []).toEqual([]);
+
+  // A tenth of a second later: the timing moves by that, and the fix stays on, kept with the
+  // timing as the player's own, so another release of the film works it out again.
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await page.keyboard.press('Enter');
+  const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
+  await expect(timing).toContainText('+0.1 s');
+  await expect(timing).toContainText('drift fixed');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await expect
+    .poll(async () => readKv(page, 'subtitleDrift'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'auto' }]);
+  await expect
+    .poll(async () => readKv(page, 'subtitleOffsets'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.1 }]);
+  expect(await drawnText(page)).not.toContain('OpenSubtitles.org');
+});
+
+test('English turned on from the sheet starts on its best version, read first, and stays the viewer’s language', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  // No subtitle language chosen yet, so the film starts with subtitles off.
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    subtitleList: [
+      { id: 'signs', lang: 'eng' },
+      { id: 'sdh', lang: 'eng' },
+      { id: 'past', lang: 'eng' },
+      { id: 'full', lang: 'eng' },
+    ],
+  });
+  await recordDrawnText(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // English, pressed: none of its files has been read, and the signs file is listed first.
+  await openSheet(page, 'player-tracks-off');
+  await press(page, 'ArrowDown', 'player-tracks-lang-en');
+  await page.keyboard.press('Enter');
+  const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
+  const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
+  // Its files are read before a line shows, and the full one is chosen.
+  await expect(full).toHaveClass(/selected/);
+  await expect(page.getByText(/^The full file, line \d+$/).first()).toBeVisible();
+  await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
+  const drawn = await drawnText(page);
+  expect(drawn).not.toContain('A SIGN');
+  expect(drawn).not.toContain('For the hard of hearing, line');
+  expect(drawn).not.toContain('Running past the end, line');
+  // English is the viewer's for the title, and no version is kept as picked by hand.
+  await expect
+    .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
+    .toContainEqual(expect.objectContaining({ metaId: MOVIE, subtitle: 'eng' }));
+  expect((await readKv(page, 'subtitlePicks')) ?? []).toEqual([]);
+
+  // Off, then English again: back on the full file, not the first listed.
+  await press(page, 'ArrowUp', 'player-tracks-off');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(/^The full file, line \d+$/)).toHaveCount(0);
+  await press(page, 'ArrowDown', 'player-tracks-lang-en');
+  await page.keyboard.press('Enter');
+  await expect(full).toHaveClass(/selected/);
+  await expect(page.getByText(/^The full file, line \d+$/).first()).toBeVisible();
+  expect(await drawnText(page)).not.toContain('A SIGN');
+});
+
+test('a version picked by hand comes back first when the film plays again, though the stream lists its own English track as it starts', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ name: 'Test Streams\nHLS', description: 'Open Movie HLS', path: HLS_PATH }],
+    },
+  });
+  await recordDrawnText(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  // The stream's own English track comes first.
+  await expect(page.getByText('Hello from the stream')).toBeVisible();
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
+
+  // Paused, so the short stream does not end, and OpenSubtitles' first file picked by hand:
+  // kept for this release.
+  await press(page, 'Enter', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await press(page, 'ArrowRight', 'player-tracks-track-eng|English');
+  await press(page, 'ArrowDown', `${OPENSUBTITLES}#en1`);
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await expect
+    .poll(async () => readKv(page, 'subtitlePicks'))
+    .toEqual([
+      { metaId: MOVIE, release: `video:${MOVIE}`, file: expect.stringMatching(/^[0-9a-z]+$/) },
+    ]);
+
+  // Out to the title, and Watch again: Back goes to the languages, closes the sheet, hides the
+  // controls and leaves.
+  for (let step = 0; step < 3; step++) await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await pressBack(page);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^details-/,
+  );
+  await page.evaluate(() => {
+    (window as unknown as { drawnText: string[] }).drawnText.length = 0;
+  });
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // hls.js listed the stream's English track before the first picture; the file picked by
+  // hand still comes first, and the track never shows a line.
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await openSheet(page, 'player-tracks-lang-en');
+  await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
+  await expect(page.locator('[data-focus-key="player-tracks-track-eng|English"]')).toHaveText(
+    'In the stream',
+  );
+  expect(await drawnText(page)).not.toContain('Hello from the stream');
+});
+
+test('the best file, read only after the lines show, takes over once, and one as good read later does not', async ({
+  page,
+}) => {
+  let sendFull!: () => void;
+  let sendCopy!: () => void;
+  const fullGate = new Promise<void>((done) => (sendFull = done));
+  const copyGate = new Promise<void>((done) => (sendCopy = done));
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    subtitleList: [
+      { id: 'copy', lang: 'eng' },
+      { id: 'sdh', lang: 'eng' },
+      { id: 'full', lang: 'eng' },
+    ],
+    // Both whole plain files come from a slow server: each arrives when the test says.
+    subtitleGates: { full: fullGate, copy: copyGate },
+  });
+  await recordDrawnText(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // The hold ends without them: the lines for the hard of hearing show.
+  const sdhLine = page.getByText(/^For the hard of hearing, line \d+$/).first();
+  await expect(sdhLine).toBeVisible({ timeout: 12000 });
+
+  // The full file, read after, fits clearly better (plain, not for the hard of hearing):
+  // it takes over.
+  sendFull();
+  const fullLine = page.getByText(/^The full file, line \d+$/).first();
+  await expect(fullLine).toBeVisible();
+  const switchedAt = await page.evaluate(
+    () => (window as unknown as { drawnText: string[] }).drawnText.length,
+  );
+
+  // The copy, listed first, read later still: it fits as well, no better, so nothing changes.
+  const copyRead = page.waitForResponse((response) => response.url().endsWith('/copy.srt'));
+  sendCopy();
+  await copyRead;
+  const number = Number(/\d+$/.exec((await fullLine.textContent()) ?? '')![0]);
+  // Two lines on, 4 s later, still the full file.
+  await expect(page.getByText(`The full file, line ${number + 2}`, { exact: true })).toBeVisible({
+    timeout: 12000,
+  });
+  const since = await page.evaluate(
+    (from) => (window as unknown as { drawnText: string[] }).drawnText.slice(from).join('\n'),
+    switchedAt,
+  );
+  expect(since).not.toContain('Another full file');
+  expect(since).not.toContain('For the hard of hearing, line');
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`)).toHaveClass(/selected/);
 });
 
 test('rows keep their places as more subtitles arrive, and every row answers the pointer', async ({
@@ -3429,7 +3969,7 @@ test('a stream that fails with the sheet open closes it, and the problem box has
   await pressCode(page, BLUE);
   const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
   await expect(sheet).toBeVisible();
-  await expect(page.getByText("This stream won't play")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('No stream could play')).toBeVisible({ timeout: 15000 });
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-problem-streams');
 });

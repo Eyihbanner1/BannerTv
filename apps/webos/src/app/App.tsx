@@ -20,6 +20,8 @@ import { ProfilesScreen } from '../screens/profiles/ProfilesScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { AccountScreen } from '../screens/settings/AccountScreen';
 import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
+import { LanguagesScreen } from '../screens/settings/LanguagesScreen';
+import { StreamHelperScreen } from '../screens/settings/StreamHelperScreen';
 import { TraktScreen } from '../screens/settings/TraktScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { EventScreen } from '../screens/sports/EventScreen';
@@ -103,6 +105,10 @@ function Screen({ route }: { route: Route }) {
       return <TraktScreen />;
     case 'account':
       return <AccountScreen startOnJoin={route.join} />;
+    case 'stream-helper':
+      return <StreamHelperScreen />;
+    case 'languages':
+      return <LanguagesScreen />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;

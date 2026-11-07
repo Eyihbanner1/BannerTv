@@ -3,13 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
 import { addonsDidntAnswer } from '../../data/describe';
-import type { PlaybackError } from '../../player/engines/types';
+import type { ProblemText } from '../../player/describe';
 import styles from './PlayerScreen.module.css';
 
 interface PlayerProblemProps {
-  /** No addon offered a stream this TV can play. */
-  nothing: boolean;
-  error: PlaybackError | null;
+  /** What went wrong and what was tried, from problemText. */
+  text: ProblemText;
   /** Addons that did not answer, so the viewer knows the list may be short. */
   failedAddons: number;
   canTryAnother: boolean;
@@ -26,12 +25,9 @@ interface PlayerProblemProps {
  * player; a stray click beside the box does not.
  */
 export function PlayerProblem(props: PlayerProblemProps) {
-  const { nothing, error, failedAddons, canTryAnother } = props;
+  const { text, failedAddons, canTryAnother } = props;
   const { t } = useTranslation();
-  const title = nothing ? t('player.problem.nothingTitle') : t('player.problem.failedTitle');
-  const message = nothing
-    ? t('player.problem.nothing')
-    : t(`player.problem.${error?.kind ?? 'other'}`);
+  const title = text.title;
   const first = canTryAnother ? 'player-problem-another' : 'player-problem-streams';
   return (
     <Overlay
@@ -44,7 +40,11 @@ export function PlayerProblem(props: PlayerProblemProps) {
       closeOnOutsideClick={false}
     >
       <h2 className={styles.problemTitle}>{title}</h2>
-      <p className={styles.problemMessage}>{message}</p>
+      {text.lines.map((line) => (
+        <p key={line} className={styles.problemMessage}>
+          {line}
+        </p>
+      ))}
       {failedAddons > 0 && (
         <p className={styles.problemMessage}>{addonsDidntAnswer(t, props.failedNames)}</p>
       )}

@@ -7,12 +7,13 @@ import {
   isMuchShorter,
   judgeLive,
   type LiveWindow,
+  type PlayAttempt,
   type ProgressTracker,
   type ProgressUpdate,
   type QualityReference,
   type StreamEntry,
 } from '@bannertv/core';
-import { bandwidth, progress, sourceMemory } from '../data/playback';
+import { bandwidth, progress, releaseMemory, sourceMemory } from '../data/playback';
 import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
@@ -109,6 +110,11 @@ export interface SessionState {
    * it: nothing it plays counts as watching the video.
    */
   clip: boolean;
+  /**
+   * The streams opened that stopped since anything last played, oldest first,
+   * so the problem box can say what was tried and why it stopped.
+   */
+  attempts: readonly PlayAttempt[];
 }
 
 export interface SessionOptions {
@@ -225,6 +231,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamCues: {},
   rate: 1,
   clip: false,
+  attempts: [],
 };
 
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
@@ -429,6 +436,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (entry) {
       if (keep) sourceMemory.record(entry.addonId, false);
       finder.markFailed(entry);
+      const stopped: PlayAttempt = { key: entryKey(entry), entry, kind: error.kind };
+      if (error.detail !== undefined) stopped.detail = error.detail;
+      patch({ attempts: state.get().attempts.concat(stopped) });
     }
     const resumeAt = carryOn();
     const next =
@@ -672,7 +682,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         if (!startedPlaying) playMark(finder, 'first-frame');
         startedPlaying = true;
         const buffered = endBuffering();
-        patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
+        patch({
+          status: 'playing',
+          failedOver: false,
+          steppedDown: false,
+          error: null,
+          attempts: [],
+        });
         if (buffered) judgeBuffering(attempt);
         // A stall left the broadcast well behind: back to live, as a TV channel would be.
         const kept = buffered && current === attempt ? liveWindow() : null;
@@ -767,6 +783,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           reportedWorked = true;
           const entry = state.get().entry;
           if (entry && keep) sourceMemory.record(entry.addonId, true);
+          // Its release starts first the next time the title does (improvements list PL2):
+          // the last that played, so a step-down replaces the stream that kept buffering.
+          // Not a broadcast's, a clip's or a sports event's.
+          if (entry && keep && !offRow && !live && !clip) {
+            void releaseMemory.remember(metaId, entry).catch(() => undefined);
+          }
         }
         // Ten minutes in a row without buffering: the connection keeps up with this stream.
         if (trusted !== undefined && lastPosition !== undefined) {
@@ -936,8 +958,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             reapplyTracks();
             refreshTracks();
           },
-          cues: (trackId: string, cues: Cue[]) => {
+          cues: (trackId: string, cues: Cue[], replace?: boolean) => {
             if (current !== attempt) return;
+            if (replace) {
+              patch({ streamCues: { ...state.get().streamCues, [trackId]: cues } });
+              return;
+            }
             // hls.js sends a track's cues again after an audio switch; Shaka can overlap.
             const seen = (seenCues[trackId] = seenCues[trackId] ?? {});
             const fresh = cues.filter((cue) => {

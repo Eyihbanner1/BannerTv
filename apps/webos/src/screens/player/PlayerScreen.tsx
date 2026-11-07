@@ -59,7 +59,13 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
 import { Menu } from '../../components/Menu';
 import { addonClient } from '../../data/addons';
-import { playedVideos, progress, speedMemory } from '../../data/playback';
+import {
+  playedVideos,
+  progress,
+  releaseMemory,
+  rememberedRelease,
+  speedMemory,
+} from '../../data/playback';
 import { preferences } from '../../data/preferences';
 import { useSkipSegments } from '../../data/skips';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
@@ -71,11 +77,12 @@ import { focusedKey, pressFocused } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { inputMode } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
-import { pickAudio } from '../../player/audio';
-import { headlineBadges, resolutionLabel } from '../../player/describe';
+import { audioSwitch, pickAudio } from '../../player/audio';
+import { headlineBadges, problemText, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, putPlayerFirst, streamFinder } from '../../player/finder';
 import { rewindWindow } from '../../player/live';
+import { playProblem } from '../../player/problem';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
 import { playMark } from '../../player/play-marks';
 import {
@@ -178,7 +185,7 @@ function formatSkip(seconds: number): string {
  */
 export function PlayerScreen(props: PlayerScreenProps) {
   const { type, metaId, videoId, preview } = props;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const sportsEvent = props.event;
@@ -413,6 +420,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     state.entry,
     session,
     state,
+    // The title's own running time judges a file's length until the video's is known.
+    parseRuntime(item?.runtime),
   );
 
   useScrobble(session, state, { type, metaId, videoId, lab: props.lab }, finder.runtimeSeconds);
@@ -482,15 +491,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setSession(created);
     if (!props.lab) finder.start();
     let cancelled = false;
-    void progress
-      .load()
+    void Promise.all([progress.load(), releaseMemory.load()])
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
         // From saved progress a few seconds early (resumeLeadIn); a place carried over exactly.
         const start = props.startAt ?? (remember ? progress.resumeFrom(videoId) : 0) ?? 0;
         setResumedAt(start);
-        const entry = props.stream ?? (await finder.choose(props.binge));
+        // The release played last for the title goes first, as the next episode's does.
+        const release = remember && !sportsEvent ? rememberedRelease(metaId) : undefined;
+        const entry = props.stream ?? (await finder.choose(props.binge ?? release));
         if (cancelled) return;
         if (entry) {
           playMark(finder, 'chosen', props.stream ? 'picked' : settledAtOpen ? 'ready' : 'waited');
@@ -1171,6 +1181,22 @@ export function PlayerScreen(props: PlayerScreenProps) {
     () => qualityChoices(finderState.candidates, reference, finder.orderOptions()),
     [finderState.candidates, reference, finder],
   );
+  // Audio in the language wanted, or the app's own when none was chosen, from
+  // another stream when this one lacks it. Not for a Lab file, which has no other.
+  const switchLanguage = (!props.lab && wantedAudio(metaId)) || i18n.language;
+  const switchTo = useMemo(
+    () =>
+      reference && !props.lab
+        ? audioSwitch(
+            state.audio,
+            reference,
+            finderState.candidates,
+            switchLanguage,
+            finder.orderOptions(),
+          )
+        : undefined,
+    [state.audio, reference, finderState.candidates, switchLanguage, finder, props.lab],
+  );
   const currentQuality = state.entry?.facts.resolution ?? 'other';
   // Whether the Quality menu offers something smaller than what is playing.
   const lowerChoice = useMemo(() => {
@@ -1409,6 +1435,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Anything else says on its row why it can't play here.
   }
 
+  /** "English audio: switch stream": plays from where the film is, and keeps the language for the title. */
+  function switchForAudio(entry: StreamEntry, language: string) {
+    closedBy.current = 'pick';
+    setPanel(null);
+    if (!session) return;
+    chooseAudioLanguage(metaId, language);
+    session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
+    setSwitching({ entry });
+  }
+
   const chooseAudio = (track: EngineTrack) => {
     session?.selectAudio(track.id);
     if (track.lang) chooseAudioLanguage(props.lab ? undefined : metaId, track.lang);
@@ -1587,6 +1623,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onTab={setSheetTab}
           returnFocusKey={sheetReturn('player-tracks-button')}
           onAudio={chooseAudio}
+          audioSwitch={
+            switchTo && {
+              language: switchLanguage,
+              entry: switchTo,
+              onPress: () => switchForAudio(switchTo, switchLanguage),
+            }
+          }
           onBack={backFromSheet}
           onClose={() => setPanel(null)}
         />
@@ -1690,8 +1733,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
       {problem && (
         <PlayerProblem
-          nothing={nothing}
-          error={state.error}
+          text={problemText(t, playProblem(nothing, finderState, state))}
           failedAddons={finderState.failed.length}
           canTryAnother={!nothing && !!session && session.hasNext()}
           onTryAnother={() => session?.playNext()}

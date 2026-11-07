@@ -9,6 +9,7 @@ import { App } from './app/App';
 import { startBootMarks } from './app/boot-marks';
 import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
+import { startStreamHelper } from './data/helper';
 import { startLibraryData } from './data/library';
 import { startOpenLinks } from './data/open-link';
 import { startPlaybackData } from './data/playback';
@@ -75,6 +76,7 @@ function start() {
   // A card on Android's own home screen opens its title, cold or while the app runs.
   const onOpen = isAndroid() ? startOpenLinks(takeAndroidLink) : undefined;
   initAndroid({ onRelaunch: askAgainOnRelaunch, onOpen });
+  startStreamHelper();
   startAddons();
   startPlaybackData();
   startLibraryData();
