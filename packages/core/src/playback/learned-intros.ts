@@ -1,7 +1,7 @@
 import { createPersisted } from '../persisted';
 import type { KeyValueStore } from '../storage';
 import type { Listener } from '../store';
-import type { SkipSegment } from './skips';
+import type { EpisodeMarks, SkipSegment } from './skips';
 
 /**
  * Skip intro where IntroDB has no timings: learned from the viewer. A skip
@@ -70,6 +70,18 @@ export function guessSettles(guess: IntroGuess, position: number): 'learn' | 'dr
   if (!isFinite(position)) return 'wait';
   if (position < guess.end - LEARN_UNDONE_S) return 'drop';
   return position >= guess.end + LEARN_SETTLE_S ? 'learn' : 'wait';
+}
+
+/**
+ * Whether IntroDB settles an episode's intro: it times one, or its viewers
+ * agree there is none. Nothing is learned from a skip in such an episode,
+ * which would only be the viewer passing over a scene.
+ */
+export function introKnown(marks: EpisodeMarks): boolean {
+  return (
+    !!marks.noIntro ||
+    marks.segments.some((segment) => segment.kind === 'intro' && !segment.learned)
+  );
 }
 
 /** A series' learned intro, and when it was learned (milliseconds since 1970). */

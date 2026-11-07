@@ -12,6 +12,7 @@ import {
   endAction,
   guessIntro,
   guessSettles,
+  introKnown,
   type IntroGuess,
   inLastStretch,
   languageName,
@@ -40,6 +41,7 @@ import {
   stopsBeforeNext,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
+  UP_NEXT_BEFORE_END_S,
   upNextStage,
 } from '@bannertv/core';
 import type { MetaPreview, Video } from '@bannertv/protocol';
@@ -359,13 +361,23 @@ export function PlayerScreen(props: PlayerScreenProps) {
         askPreference &&
         askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
       );
-    const card =
+    let card =
       offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
+    // On a stream the mark is not exact for, the count stops for good: back on the
+    // marked one, the card only offers, never starting the next episode at once.
+    if (card && card.counts && !cue?.startsNext) card = { ...card, counts: false };
     if (card !== creditsCard) setCreditsCard(card);
   }
   // Counting to the next episode at the credits, until Watch credits, Keep watching or the end.
+  // Only while the file playing is the release marked: another stream (Quality, a
+  // failover) cut a little differently stops the count, and the ending plays out.
   const creditsCounts =
-    !!creditsCard && creditsCard.counts && !creditsCard.gone && !upNextDismissed && !sleepsHere;
+    !!creditsCard &&
+    creditsCard.counts &&
+    !!cue?.startsNext &&
+    !creditsCard.gone &&
+    !upNextDismissed &&
+    !sleepsHere;
   // The credits card is up in its own right while the credits play, or while it
   // counts; in the last 30 seconds otherwise, the end's count takes over.
   const creditsUp =
@@ -783,10 +795,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
    * intro's length early in an episode is taken as it once playback goes on
    * from there, and the series' next episode offers Skip intro at the same
    * place. Only in a series' episode, never the Lab, sports, a broadcast or a
-   * clip. A jump from inside IntroDB's recap is that recap's.
+   * clip, nor one whose intro IntroDB times or says it has none. A jump from
+   * inside IntroDB's recap is that recap's.
    */
   function noteJump(from: number, to: number) {
-    if (type !== 'series' || props.lab || sportsEvent || state.live || state.clip) {
+    const learns = type === 'series' && !props.lab && !sportsEvent && !state.live && !state.clip;
+    if (!learns || introKnown(marks)) {
       introGuess.current = null;
       return;
     }
@@ -809,6 +823,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (undo !== null) {
       session.seek(undo);
       setUndo(null);
+      // Going back is not playback going on from a skip: no intro is learned from it.
+      introGuess.current = null;
       return;
     }
     const from = session.trustedPosition() ?? state.position;
@@ -1104,9 +1120,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }, [panel]);
 
   // The next episode's streams are asked for well before Up Next, so reading
-  // them does not hold up the count, and the episode starts at once.
+  // them does not hold up the count, and the episode starts at once: as long
+  // before the credits card as before the last 30 seconds' count.
   const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
-  const nearEnd = ended || remaining <= NEXT_STREAMS_BEFORE_END_S;
+  const toCredits = cue ? cue.start - state.position : Infinity;
+  const nearEnd =
+    ended ||
+    remaining <= NEXT_STREAMS_BEFORE_END_S ||
+    toCredits <= NEXT_STREAMS_BEFORE_END_S - UP_NEXT_BEFORE_END_S;
   useEffect(() => {
     if (nearEnd && next) streamFinder(type, next.id).start();
   }, [nearEnd, next, type]);
@@ -1197,8 +1218,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const verdict = guessSettles(guess, position);
     if (verdict === 'wait') return;
     introGuess.current = null;
-    if (verdict === 'learn') learnedIntros.learn(metaId, guess);
-  }, [position, waiting, metaId]);
+    // IntroDB may have answered since the skip: its own word wins.
+    if (verdict === 'learn' && !introKnown(marks)) learnedIntros.learn(metaId, guess);
+  }, [position, waiting, metaId, marks]);
 
   // The count at the credits ran out on screen: on to the next episode.
   useEffect(() => {

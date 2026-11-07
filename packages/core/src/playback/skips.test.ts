@@ -159,6 +159,17 @@ describe('readEpisodeMarks', () => {
     });
   });
 
+  it("keeps IntroDB's word that an episode has no intro, unless it times one", () => {
+    expect(readEpisodeMarks({ intro: null, no_intro: true })).toEqual({
+      segments: [],
+      noIntro: true,
+    });
+    expect(readEpisodeMarks({ intro: null, no_intro: false })).toEqual({ segments: [] });
+    expect(readEpisodeMarks({ intro: timed(60, 95), no_intro: true })).toEqual({
+      segments: [{ kind: 'intro', start: 60, end: 95 }],
+    });
+  });
+
   it('drops credits that start before the intro has ended', () => {
     expect(readEpisodeMarks({ intro: timed(60, 95), outro: timed(80, 140) })).toEqual({
       segments: [{ kind: 'intro', start: 60, end: 95 }],
@@ -171,12 +182,23 @@ describe('creditsCue', () => {
 
   it('offers the next episode from the credits when the mark fits the file, and may start it there', () => {
     expect(creditsCue(mark, 2600)).toEqual({ start: 2500, startsNext: true });
-    expect(creditsCue(mark, 2600 + CREDITS_EXACT_S)).toEqual({ start: 2500, startsNext: true });
     expect(creditsCue(mark, 2600 - CREDITS_EXACT_S)).toEqual({ start: 2500, startsNext: true });
   });
 
+  it('is never early on a longer file, whose extra time may come before the credits', () => {
+    expect(creditsCue(mark, 2600 + CREDITS_EXACT_S)).toEqual({
+      start: 2500 + CREDITS_EXACT_S,
+      startsNext: true,
+    });
+    expect(creditsCue(mark, 2645)).toEqual({ start: 2545, startsNext: false });
+    expect(creditsCue(mark, 2600 + CREDITS_FIT_S)).toEqual({
+      start: 2500 + CREDITS_FIT_S,
+      startsNext: false,
+    });
+  });
+
   it('only offers it, never starting it, from a release cut a little differently or with a scene after', () => {
-    expect(creditsCue(mark, 2600 + CREDITS_EXACT_S + 1)).toEqual({
+    expect(creditsCue(mark, 2600 - CREDITS_EXACT_S - 1)).toEqual({
       start: 2500,
       startsNext: false,
     });
@@ -194,12 +216,12 @@ describe('creditsCue', () => {
     expect(creditsCue(mark, Infinity)).toBeUndefined();
     expect(creditsCue(undefined, 2600)).toBeUndefined();
     expect(creditsCue({ start: 2575, end: 2600, sceneAfter: false }, 2600)).toBeUndefined();
-    // Credits ending a little before the file's end, so starting more than CREDITS_LONGEST_S before it.
+    // Credits starting more than CREDITS_LONGEST_S before the file's end.
     const longest = { start: 1000, end: 1000 + CREDITS_LONGEST_S, sceneAfter: false };
     expect(creditsCue(longest, 1000 + CREDITS_LONGEST_S)).toEqual({
       start: 1000,
       startsNext: true,
     });
-    expect(creditsCue(longest, 1000 + CREDITS_LONGEST_S + 1)).toBeUndefined();
+    expect(creditsCue({ ...longest, start: 995 }, 1000 + CREDITS_LONGEST_S)).toBeUndefined();
   });
 });

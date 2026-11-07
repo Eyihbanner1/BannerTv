@@ -230,3 +230,23 @@ test('a skip undone at once teaches nothing', async ({ page }) => {
     .toBeGreaterThan(from + 16);
   expect(await readKv(page, 'learnedIntros')).toBeUndefined();
 });
+
+test('a skip by hand in an episode whose intro IntroDB times teaches nothing', async ({ page }) => {
+  test.slow();
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: { [EPISODE]: LONG_EPISODE },
+    skips: { [EPISODE]: { intro: [1, 6] } },
+  });
+  await playFirstEpisode(page);
+  // Past IntroDB's intro, the viewer passes over a scene.
+  await expect.poll(async () => (await video(page)).time, { timeout: 15000 }).toBeGreaterThan(7);
+  const from = (await video(page)).time;
+  for (let press = 0; press < 6; press++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 55);
+  await expect
+    .poll(async () => (await video(page)).time, { timeout: 25000 })
+    .toBeGreaterThan(from + 60 + 16);
+  expect(await readKv(page, 'learnedIntros')).toBeUndefined();
+});

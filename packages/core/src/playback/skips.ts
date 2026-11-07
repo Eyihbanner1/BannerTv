@@ -171,16 +171,27 @@ export function readCredits(answer: unknown): CreditsMark | undefined {
 export interface EpisodeMarks {
   segments: readonly SkipSegment[];
   credits?: CreditsMark;
+  /**
+   * IntroDB's viewers agree the episode has no intro (its no_intro): there
+   * is nothing to skip, so no intro learned elsewhere in the series is offered.
+   */
+  noIntro?: true;
 }
 
 /** An IntroDB /segments answer, read. */
 export function readEpisodeMarks(answer: unknown): EpisodeMarks {
   const segments = readSkipSegments(answer);
+  const marks: EpisodeMarks = { segments };
+  const fields =
+    typeof answer === 'object' && answer !== null ? (answer as Record<string, unknown>) : {};
+  if (fields.no_intro === true && !segments.some((segment) => segment.kind === 'intro')) {
+    marks.noIntro = true;
+  }
   const credits = readCredits(answer);
   // Credits that start before the intro or recap has ended are not this episode's.
   const last = segments[segments.length - 1];
-  if (!credits || (last && credits.start < last.end)) return { segments };
-  return { segments, credits };
+  if (credits && !(last && credits.start < last.end)) marks.credits = credits;
+  return marks;
 }
 
 /** Where Up Next offers the next episode in the file playing, from IntroDB's credits mark. */
@@ -199,6 +210,10 @@ export interface CreditsCue {
  * CREDITS_FIT_S of the file's end, and start before the last
  * UP_NEXT_BEFORE_END_S, which Up Next counts anyway. Undefined while the
  * length is unknown, or with no mark.
+ *
+ * Never early: a file longer than the one marked may have its extra time
+ * before the credits, so their start moves on by all of it. A shorter one
+ * keeps the marked start, which can then only be late.
  */
 export function creditsCue(
   mark: CreditsMark | undefined,
@@ -207,7 +222,8 @@ export function creditsCue(
   if (!mark || !isFinite(duration) || duration <= 0) return undefined;
   const miss = Math.abs(duration - mark.end);
   if (miss > CREDITS_FIT_S) return undefined;
-  if (mark.start >= duration - UP_NEXT_BEFORE_END_S) return undefined;
-  if (duration - mark.start > CREDITS_LONGEST_S) return undefined;
-  return { start: mark.start, startsNext: !mark.sceneAfter && miss <= CREDITS_EXACT_S };
+  const start = mark.start + Math.max(0, duration - mark.end);
+  if (start >= duration - UP_NEXT_BEFORE_END_S) return undefined;
+  if (duration - start > CREDITS_LONGEST_S) return undefined;
+  return { start, startsNext: !mark.sceneAfter && miss <= CREDITS_EXACT_S };
 }

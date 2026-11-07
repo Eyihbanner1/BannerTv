@@ -10,6 +10,7 @@ import {
   endAction,
   guessIntro,
   guessSettles,
+  introKnown,
   type IntroGuess,
   inLastStretch,
   languageName,
@@ -28,6 +29,7 @@ import {
   skipRearms,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
+  UP_NEXT_BEFORE_END_S,
   upNextStage,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
@@ -289,12 +291,18 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   );
   const current = meta?.videos.find((video) => video.id === videoId);
   const offersNext = !!next && !state.live && !state.clip;
+  // As long before the credits pill as before the last 30 seconds' count.
+  const toCredits = cue ? cue.start - state.position : Infinity;
   useEffect(() => {
     if (!next) return;
-    if (ended || (state.duration > 0 && state.duration - state.position <= PREFETCH_NEXT_S)) {
+    if (
+      ended ||
+      (state.duration > 0 && state.duration - state.position <= PREFETCH_NEXT_S) ||
+      toCredits <= PREFETCH_NEXT_S - UP_NEXT_BEFORE_END_S
+    ) {
       streamFinder(titleType, next.id).start();
     }
-  }, [next, ended, state.duration, state.position, titleType]);
+  }, [next, ended, state.duration, state.position, titleType, toCredits]);
 
   const playEpisode = useCallback(
     (target: Video) => {
@@ -340,11 +348,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         prefs.stillWatching &&
         askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
       );
-    const card =
+    let card =
       offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
+    // On a stream the mark is not exact for, the count stops for good: back on the marked one,
+    // the pill only offers, never starting the next episode at once.
+    if (card && card.counts && !cue?.startsNext) card = { ...card, counts: false };
     if (card !== creditsCard) setCreditsCard(card);
   }
-  const creditsCounts = !!creditsCard && creditsCard.counts && !creditsCard.gone && !dismissed;
+  // Only while the file playing is the release marked: another stream cut a little
+  // differently stops the count, and the ending plays out.
+  const creditsCounts =
+    !!creditsCard && creditsCard.counts && !!cue?.startsNext && !creditsCard.gone && !dismissed;
   const creditsUp =
     !!creditsCard &&
     !creditsCard.gone &&
@@ -426,6 +440,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         setPanel(null);
         return true;
       }
+      // Over the credits pill, as on the TV: Watch credits.
+      if (creditsUp) {
+        setCreditsCard((card) => card && { ...card, gone: true });
+        return true;
+      }
       if (counting || (ended && decision === 'hold')) {
         setDismissed(true);
         return true;
@@ -433,7 +452,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       return false;
     });
     return () => subscription.remove();
-  }, [panel, counting, ended, decision]);
+  }, [panel, counting, ended, decision, creditsUp]);
 
   // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
   // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
@@ -463,10 +482,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       const inRecap = marks.segments.some(
         (segment) => segment.kind === 'recap' && from >= segment.start && from < segment.end,
       );
-      if (!learnsIntro) introGuess.current = null;
+      // Nor in an episode whose intro IntroDB times or says it has none.
+      if (!learnsIntro || introKnown(marks)) introGuess.current = null;
       else if (!inRecap) introGuess.current = guessIntro(introGuess.current, from, to);
     },
-    [session, marks.segments, learnsIntro],
+    [session, marks, learnsIntro],
   );
   const position = state.position;
   useEffect(() => {
@@ -475,8 +495,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     const verdict = guessSettles(guess, position);
     if (verdict === 'wait') return;
     introGuess.current = null;
-    if (verdict === 'learn') learnedIntros.learn(metaId, guess);
-  }, [position, waiting, metaId]);
+    // IntroDB may have answered since the skip: its own word wins.
+    if (verdict === 'learn' && !introKnown(marks)) learnedIntros.learn(metaId, guess);
+  }, [position, waiting, metaId, marks]);
 
   // Taps: one shows or hides the controls; two on a side start a skip of ten seconds, and each
   // tap after that adds ten more (tap-skip.ts). The 10 s buttons add to the same total. It
@@ -635,6 +656,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setPending(null);
     setBackTo(null);
     session.seek(backTo.at);
+    // Going back is not playback going on from a skip: no intro is learned from it.
+    introGuess.current = null;
   };
 
   // The scene preview, for a swipe or a finger on the bar, names the intro or recap it lands in.

@@ -4,6 +4,7 @@ import {
   createLearnedIntros,
   guessIntro,
   guessSettles,
+  introKnown,
   LEARN_LONGEST_S,
   LEARN_SETTLE_S,
   LEARN_SHORTEST_S,
@@ -65,6 +66,18 @@ describe('guessSettles', () => {
     // Back to where it began: the viewer watches the intro after all.
     expect(guessSettles(guess, 62)).toBe('drop');
     expect(guessSettles(guess, NaN)).toBe('wait');
+  });
+});
+
+describe('introKnown', () => {
+  it('is known where IntroDB times an intro or says there is none, not where it only learned one', () => {
+    expect(introKnown({ segments: [{ kind: 'intro', start: 30, end: 60 }] })).toBe(true);
+    expect(introKnown({ segments: [], noIntro: true })).toBe(true);
+    expect(introKnown({ segments: [] })).toBe(false);
+    expect(introKnown({ segments: [{ kind: 'recap', start: 0, end: 40 }] })).toBe(false);
+    expect(introKnown({ segments: [{ kind: 'intro', start: 30, end: 90, learned: true }] })).toBe(
+      false,
+    );
   });
 });
 

@@ -77,7 +77,14 @@ test('the Lab measures each speed on what plays, asks about sound, and keeps wha
     await press(page, 'ArrowDown', `rail-${item}`);
   }
   await press(page, 'Enter', 'settings-stream-choice');
-  for (const item of ['probing', 'subtitle-style', 'still-watching', 'diagnostics', 'lab']) {
+  for (const item of [
+    'probing',
+    'subtitle-style',
+    'still-watching',
+    'next-at-credits',
+    'diagnostics',
+    'lab',
+  ]) {
     await press(page, 'ArrowDown', `settings-${item}`);
   }
   await press(page, 'Enter', 'lab-start-mode');

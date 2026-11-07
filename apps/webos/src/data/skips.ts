@@ -33,7 +33,8 @@ const noChange = () => () => undefined;
  * The intro and recap of the episode playing, and its end credits, once
  * IntroDB answers; none while it hasn't, or when `on` is false (the Lab,
  * sports). Where IntroDB has no intro (it answered without one, has nothing
- * for the series, or failed), the intro learned for the series, if any.
+ * for the series, or failed), the intro learned for the series, if any,
+ * unless IntroDB says the episode has none.
  */
 export function useEpisodeMarks(
   type: string,
@@ -52,7 +53,8 @@ export function useEpisodeMarks(
   const settled = answer.status === 'success' || answer.status === 'error';
   const marks = answer.data ?? NONE;
   return useMemo(() => {
-    if (!settled || !learned) return marks;
+    // Nor where IntroDB's viewers agree there is no intro.
+    if (!settled || !learned || marks.noIntro) return marks;
     const segments = withLearnedIntro(marks.segments, learned);
     return segments === marks.segments ? marks : { ...marks, segments };
   }, [settled, learned, marks]);

@@ -252,6 +252,7 @@ export {
   guessIntro,
   guessSettles,
   type IntroGuess,
+  introKnown,
   LEARN_LONGEST_S,
   LEARN_SETTLE_S,
   LEARN_SHORTEST_S,
