@@ -3332,8 +3332,11 @@ test('the first subtitles to show are the full file: signs only and a file runni
   const past = page.locator(`[data-focus-key="${OPENSUBTITLES}#past"]`);
   const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
   await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
+  await expect(signs).toHaveClass(/dim/);
   await expect(past).toHaveText('OpenSubtitles v3 2');
   await expect(full).toHaveText('OpenSubtitles v3 3');
+  await expect(past).not.toHaveClass(/dim/);
+  await expect(full).not.toHaveClass(/dim/);
   await press(page, 'ArrowRight', `${OPENSUBTITLES}#full`);
 
   // Picked by hand, the file running past the end shows, its drift fixed for it, and the
@@ -3354,6 +3357,33 @@ test('the first subtitles to show are the full file: signs only and a file runni
         file: expect.stringMatching(/^[0-9a-z]+$/),
       },
     ]);
+  // Nothing of the fix is kept while the player made it.
+  expect((await readKv(page, 'subtitleDrift')) ?? []).toEqual([]);
+
+  // A tenth of a second later: the timing moves by that, and the fix stays on, kept now as
+  // the viewer's own for this file.
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await page.keyboard.press('Enter');
+  const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
+  await expect(timing).toContainText('+0.1 s');
+  await expect(timing).toContainText('drift fixed');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await expect
+    .poll(async () => readKv(page, 'subtitleDrift'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'behind' }]);
+  await expect
+    .poll(async () => readKv(page, 'subtitleOffsets'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.1 }]);
   expect(await drawnText(page)).not.toContain('OpenSubtitles.org');
 });
 

@@ -129,10 +129,15 @@ function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
     .join('\n');
 }
 
-/** A line every 10 seconds from `from` seconds until `until`, numbered after `name`. */
-function dialogue(name: string, from: number, until: number): Array<[number, number, string]> {
+/** A line every `every` seconds from `from` seconds until `until`, numbered after `name`. */
+function dialogue(
+  name: string,
+  from: number,
+  until: number,
+  every = 10,
+): Array<[number, number, string]> {
   const lines: Array<[number, number, string]> = [];
-  for (let at = from, n = 1; at < until; at += 10, n++)
+  for (let at = from, n = 1; at < until; at += every, n++)
     lines.push([at, at + 4, `${name}, line ${n}`]);
   return lines;
 }
@@ -149,7 +154,9 @@ export const LONG_SUBTITLES = {
     [240, 243, 'A SIGN ON THE ROAD'],
     [560, 563, 'A SIGN AT THE END'],
   ]),
-  past: srt(dialogue('Running past the end', 1, 620)),
+  // Its last lines end up to 25 s past the video's end, line after line: by more than half
+  // of what timing for film speed on a 25 fps video gives (4.3%), so its drift is fixed.
+  past: srt(dialogue('Running past the end', 1, 625, 5)),
   full: srt([
     [0.2, 2.5, 'Advertise your product or brand here\ncontact www.OpenSubtitles.org today'],
     ...dialogue('The full file', 3, 575),
