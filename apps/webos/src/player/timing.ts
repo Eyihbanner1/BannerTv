@@ -26,3 +26,26 @@ export function offsetWay(offset: number): { way: 'later' | 'earlier' | 'none'; 
   if (rounded < 0) return { way: 'earlier', amount };
   return { way: 'none', amount };
 }
+
+/**
+ * The longest the subtitle layer sleeps between clock reads. It wakes sooner
+ * for the next line to start or end, and on every play, pause, seek or speed
+ * change.
+ */
+export const MAX_READ_DELAY_MS = 250;
+/** Never sooner than this, so a clock that lags its timer cannot spin. */
+export const MIN_READ_DELAY_MS = 15;
+/** This much after a change is due, so the clock has surely reached it. */
+const LATE_MS = 4;
+
+/**
+ * How long the subtitle layer sleeps before reading the clock again: until
+ * the next line starts or ends (`next`, on the subtitles' clock, from `now`)
+ * at the speed playing. While paused, or with nothing more to come, only the
+ * slow read, in case a seek comes without its events.
+ */
+export function nextReadDelay(now: number, next: number, rate: number, paused: boolean): number {
+  if (paused || !isFinite(now) || !isFinite(next) || !(rate > 0)) return MAX_READ_DELAY_MS;
+  const ms = ((next - now) / rate) * 1000 + LATE_MS;
+  return Math.max(MIN_READ_DELAY_MS, Math.min(MAX_READ_DELAY_MS, ms));
+}

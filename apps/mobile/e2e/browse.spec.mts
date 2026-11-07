@@ -133,7 +133,8 @@ test('a genre on a title opens its catalog on it, and a name in the cast opens S
   // Animation is one of Cinemeta's film genres; Short is not.
   await expect(page.getByText('Short', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Browse Animation from Cinemeta' }).click();
-  await expect(page.getByText('Animation from Cinemeta')).toBeVisible();
+  // The catalog's heading: the title page below it also says "More Animation from Cinemeta".
+  await expect(page.getByRole('heading', { name: 'Animation from Cinemeta' })).toBeVisible();
   await expect.poll(() => requests.catalogs).toContain('movie/top/genre=Animation');
 
   await page.locator('[aria-label="Back"]:visible').first().click();

@@ -79,7 +79,8 @@ describe('age ratings', () => {
     expect(ukRating('G', 'US')).toBe('U');
     expect(ukRating('PG-13', 'US')).toBe('12');
     expect(ukRating('R', 'US')).toBe('15');
-    expect(ukRating('TV-Y7', 'US')).toBe('U');
+    expect(ukRating('TV-Y7', 'US')).toBe('PG');
+    expect(ukRating('TV-Y7-FV', 'US')).toBe('PG');
     expect(ukRating('TV-PG', 'US')).toBe('PG');
     expect(ukRating('TV-14', 'US')).toBe('15');
     expect(ukRating('TV-MA', 'US')).toBe('18');
@@ -183,17 +184,18 @@ describe('kidsDetailsAllowed', () => {
     expect(kidsDetailsAllowed(film(['Family']), { certificate: 'PG' }, 'PG')).toBe(true);
   });
 
-  it('always needs the details to say it is for families or children', () => {
-    // As the Details screens did before the rule was shared: a rating alone is not enough.
+  it('needs no Family genre with a rating, but never takes a genre not for children', () => {
+    // As Cinemeta's Family rows offer Moana: PG, and its details say Animation and Adventure.
     expect(kidsDetailsAllowed(film(['Animation', 'Adventure']), { certificate: 'U' }, 'PG')).toBe(
-      false,
+      true,
     );
-    expect(kidsDetailsAllowed(film([]), { certificate: 'U' }, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film([]), { certificate: 'U' }, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Horror']), { certificate: 'PG' }, '12')).toBe(false);
     expect(kidsDetailsAllowed(film(['Family', 'Horror']), { certificate: 'PG' }, '12')).toBe(false);
     expect(kidsDetailsAllowed(film(['Family']), { certificate: '12' }, 'PG')).toBe(false);
   });
 
-  it('takes Family without a rating, and needs a profile limit with one', () => {
+  it('needs Family without a rating, and a profile limit with one', () => {
     expect(kidsDetailsAllowed(film(['Family', 'Comedy']), undefined, 'PG')).toBe(true);
     expect(kidsDetailsAllowed(film(['Family', 'Comedy']), {}, undefined)).toBe(true);
     expect(kidsDetailsAllowed(film(['Comedy']), {}, 'PG')).toBe(false);

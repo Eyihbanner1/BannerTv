@@ -1,14 +1,17 @@
 import { phone } from '@brand/tokens/design';
-import { kidsDetailsAllowed, tmdbImageUrl } from '@bannertv/core';
+import { kidsDetailsAllowed, kidsTitleAllowed, moreLikeSource, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
-import { addonClient } from '@tv/data/addons';
+import { addonClient, addonCollection } from '@tv/data/addons';
 import { describeAddonError, formatDate, metaFacts } from '@tv/data/describe';
 import { library, watchedSet } from '@tv/data/library';
 import { isWatched, markEpisodes, markFilm } from '@tv/data/marks';
 import { progress } from '@tv/data/playback';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
+import { sportsState } from '@tv/data/sports';
 import { tmdbClient, useTmdbDetails } from '@tv/data/tmdb';
 import { useQuery } from '@tv/data/use-query';
+import { resolutionLabel } from '@tv/player/describe';
+import { streamFinder } from '@tv/player/finder';
 import { OPEN_PAGE_REST_MS, usePrefetch } from '@tv/player/prefetch';
 import { formatTime } from '@tv/player/media';
 import { playTrailer } from '@tv/platform/youtube';
@@ -39,13 +42,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { goBack, openPlayer, openStreams } from '../nav/routes';
+import { goBack, openCatalog, openPlayer, openStreams, openTitle } from '../nav/routes';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
 import { Icon, type IconName, OutlineIcon } from '../ui/icons';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { CastList, GenreLinks } from './TitleLinks';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
+import { Row, type RowItem } from '../ui/Row';
 import { phoneArt } from '../ui/Tile';
 
 /** A square-ish button in the row of three under Play: My List, All streams and so on. */
@@ -72,6 +76,108 @@ function ActionTile({
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+type ReadyState = 'none' | 'finding' | 'ready' | 'nothing';
+
+/**
+ * Under Play: whether the stream Play will start has been found ("Best stream ready · 1080p").
+ * It reads the finder Details' prefetch started and draws again only when the line's words
+ * change, not on every addon's answer.
+ */
+function StreamReady({ type: titleType, videoId }: { type: string; videoId: string }) {
+  const { t } = useTranslation();
+  const finder = useMemo(() => streamFinder(titleType, videoId), [titleType, videoId]);
+  const line = useSyncExternalStore(finder.subscribe, () => {
+    const state = finder.get();
+    const best = state.candidates[0];
+    const kind: ReadyState = state.settled
+      ? best
+        ? 'ready'
+        : 'nothing'
+      : state.pending > 0 || state.entries.length > 0
+        ? 'finding'
+        : 'none';
+    const quality = kind === 'ready' ? (resolutionLabel(best?.facts.resolution) ?? '') : '';
+    return `${kind}|${quality}`;
+  });
+  const [kind, quality] = line.split('|') as [ReadyState, string];
+  if (kind === 'none') return null;
+  const text =
+    kind === 'ready'
+      ? [t('phone.streamReady'), quality].filter(Boolean).join(' · ')
+      : kind === 'finding'
+        ? t('phone.findingStream')
+        : t('phone.noStreamYet');
+  return (
+    <View style={styles.ready} accessibilityLiveRegion="polite">
+      <View
+        style={[
+          styles.readyDot,
+          kind === 'ready' && styles.readyDotOn,
+          kind === 'nothing' && styles.readyDotOff,
+        ]}
+      />
+      <Text style={styles.readyText} numberOfLines={1}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+const MORE_ITEMS = 20;
+
+function MoreFrom({ item, titleType }: { item: MetaPreview; titleType: string }) {
+  const { t } = useTranslation();
+  const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  // The same pick as the TV's More like this and the genre links above: only a catalog that
+  // lists the genre, so See all opens Browse on it, and never a sport catalog.
+  const source = useMemo(
+    () =>
+      collection.ready && sports.ready
+        ? moreLikeSource(collection.addons, item, titleType, sports.homeLeaveOut)
+        : undefined,
+    // The title's genres and id decide it; the rest of the item may refresh underneath.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [collection, sports.ready, sports.homeLeaveOut, item.id, item.genres[0], titleType],
+  );
+  const query = useMemo(
+    () =>
+      source
+        ? addonClient.catalog(source.addon, titleType, source.catalog.id, [['genre', source.genre]])
+        : null,
+    [source, titleType],
+  );
+  const state = useQuery(query);
+  const items = useMemo<RowItem[] | null>(() => {
+    if (!state.data) return null;
+    const kids = isKidsProfile();
+    return state.data
+      .filter((other) => other.id !== item.id && (!kids || kidsTitleAllowed(other, true)))
+      .slice(0, MORE_ITEMS)
+      .map((other, index) => ({ item: other, key: `${index}:${other.id}` }));
+  }, [state.data, item.id]);
+  if (!source || state.status === 'error' || items?.length === 0) return null;
+  const title = t('phone.moreFrom', { genre: source.genre, addon: source.addon.manifest.name });
+  return (
+    <Row
+      title={title}
+      items={items}
+      shape="poster"
+      onPress={(entry) => openTitle(entry.item)}
+      seeAllLabel={t('home.seeAll')}
+      onSeeAll={() =>
+        openCatalog({
+          transportUrl: source.addon.transportUrl,
+          type: titleType,
+          catalogId: source.catalog.id,
+          genre: source.genre,
+          title,
+        })
+      }
+    />
   );
 }
 
@@ -357,6 +463,9 @@ export function TitleScreen({
               style={styles.main}
             />
           ) : null}
+          {primaryVideoId !== null && kidsAllowed ? (
+            <StreamReady type={titleType} videoId={primaryVideoId} />
+          ) : null}
           <View style={styles.actionRow}>
             {watchVideoId !== null && resumeAt !== undefined ? (
               <ActionTile
@@ -473,6 +582,9 @@ export function TitleScreen({
         data={hasEpisodes && kidsAllowed && season ? season.videos : []}
         keyExtractor={(video, index) => `${index}:${video.id}`}
         ListHeaderComponent={header}
+        ListFooterComponent={
+          kidsAllowed ? <MoreFrom item={item} titleType={titleType} /> : undefined
+        }
         renderItem={({ item: video, index }) => (
           <EpisodeRow
             video={video}
@@ -551,6 +663,11 @@ const styles = StyleSheet.create({
   actions: { gap: space.s },
   main: { alignSelf: 'stretch', minHeight: touch.play, borderRadius: 14 },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s },
+  ready: { flexDirection: 'row', alignItems: 'center', gap: space.s, paddingVertical: 2 },
+  readyDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textSubtle },
+  readyDotOn: { backgroundColor: colors.accent },
+  readyDotOff: { backgroundColor: colors.danger },
+  readyText: { ...type.meta, fontWeight: '600', color: colors.textSoft, flexShrink: 1 },
   tile: {
     flexBasis: '31%',
     flexGrow: 1,

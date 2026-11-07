@@ -13,6 +13,7 @@ import {
   seedStreamAddon,
 } from './play';
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
+import { mockServices, traktSignIn } from './services';
 
 /** Elephants Dream, the first title on Home. */
 const MOVIE = 'tt0807840';
@@ -332,6 +333,148 @@ test('a clip picked by hand plays with no Up Next over it, and at its end says i
   // The episode's own release was already tried here, so All streams is the way on.
   await expectFocus(page, 'player-problem-streams');
   await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
+});
+
+test('a clip picked after the episode tells Trakt nothing of its own: a pause or close in it keeps the episode’s place', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  // Episodes run 45 minutes; the 1080p file is the episode (10 minutes here), the 720p a 40 s clip.
+  await mockAddons(page, { seriesRuntime: '45 min' });
+  await seedStreamAddon(page, { kv: { trakt: traktSignIn() } });
+  await mockPlayback(page, {
+    streams: {
+      'tt8000001:1:1': [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL x264\n💾 1.4 GB ⚡ Cached',
+          path: '/long-episode-1080p.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL x264\n💾 700 MB ⚡ Cached',
+          path: '/episode-720p.webm',
+        },
+      ],
+    },
+  });
+  const { trakt } = await mockServices(page, { trakt: true });
+  await playFirstEpisode(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/start').length).toBe(1);
+
+  // 10 s into the 10 minute file: about 2% of the episode, with room left
+  // in the 40 s clip, which opens at the episode's place.
+  await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((element: HTMLVideoElement) => (element.currentTime = 10));
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(10.5);
+  await page.waitForTimeout(500);
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowDown', source(1));
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).src).toBe('/episode-720p.webm');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await page.waitForTimeout(500);
+
+  // Paused in the clip: Trakt keeps the episode's place (10 s and the time the
+  // menus took, of 10 minutes), not the clip's own place against 45 minutes
+  // (under 1%) or against its 40 s (over 25%).
+  await press(page, 'Enter', 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
+  await expect.poll(() => trakt.callsTo('/scrobble/pause').length).toBe(1);
+  const paused = trakt.callsTo('/scrobble/pause')[0]!.body!;
+  expect(paused.progress).toBeGreaterThan(1.6);
+  expect(paused.progress).toBeLessThan(6);
+  // Playing on in the clip starts nothing.
+  await press(page, 'Enter', 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Pause');
+
+  // Closed in the clip: it stops at the episode's place. Trakt hears one call
+  // at a time, so anything else would have come before the stop.
+  await pressBack(page);
+  await pressBack(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/stop').length).toBe(1);
+  const stopped = trakt.callsTo('/scrobble/stop')[0]!.body!;
+  expect(stopped.progress).toBeCloseTo(paused.progress as number, 1);
+  expect(trakt.callsTo('/scrobble/start')).toHaveLength(1);
+  expect(trakt.callsTo('/scrobble/pause')).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('a clip picked while the episode is paused opens paused, and closing it stops at the episode’s place', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await mockAddons(page, { seriesRuntime: '45 min' });
+  await seedStreamAddon(page, { kv: { trakt: traktSignIn() } });
+  await mockPlayback(page, {
+    streams: {
+      'tt8000001:1:1': [
+        {
+          name: 'Test Streams\n1080p',
+          description: 'Open Movie 1080p WEB-DL x264\n💾 1.4 GB ⚡ Cached',
+          path: '/long-episode-1080p.webm',
+        },
+        {
+          name: 'Test Streams\n720p',
+          description: 'Open Movie 720p WEB-DL x264\n💾 700 MB ⚡ Cached',
+          path: '/episode-720p.webm',
+        },
+      ],
+    },
+  });
+  const { trakt } = await mockServices(page, { trakt: true });
+  await playFirstEpisode(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/start').length).toBe(1);
+  await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((element: HTMLVideoElement) => (element.currentTime = 30));
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(30);
+
+  // Paused at about 30 s of the 10 minute file: Trakt hears about 5%.
+  await press(page, 'Enter', 'player-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toHaveText('Play');
+  await expect.poll(() => trakt.callsTo('/scrobble/pause').length).toBe(1);
+  const paused = trakt.callsTo('/scrobble/pause')[0]!.body!;
+  expect(paused.progress).toBeGreaterThanOrEqual(5);
+  expect(paused.progress).toBeLessThan(6);
+
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'ArrowRight', 'player-quality-button');
+  await press(page, 'ArrowRight', 'player-streams-button');
+  await press(page, 'Enter', source(0));
+  await press(page, 'ArrowDown', source(1));
+  // Paused, it comes back to the controls.
+  await press(page, 'Enter', 'player-play');
+  await expect.poll(async () => (await video(page)).src).toBe('/episode-720p.webm');
+  // The clip's length is known, so the player has judged it.
+  await expect
+    .poll(() =>
+      page
+        .locator('video:not([aria-hidden])')
+        .evaluate((element: HTMLVideoElement) => element.duration),
+    )
+    .toBeLessThan(60);
+  expect((await video(page)).playing).toBe(false);
+
+  // Closed in the clip: Trakt keeps the episode's place, and heard nothing else.
+  for (let tries = 0; tries < 3; tries++) {
+    if ((await page.locator('[data-focus-key="player-surface"]').count()) === 0) break;
+    await pressBack(page);
+  }
+  await expect.poll(() => trakt.callsTo('/scrobble/stop').length).toBe(1);
+  const stopped = trakt.callsTo('/scrobble/stop')[0]!.body!;
+  expect(stopped.progress).toBeCloseTo(paused.progress as number, 1);
+  expect(trakt.callsTo('/scrobble/start')).toHaveLength(1);
+  expect(trakt.callsTo('/scrobble/pause')).toHaveLength(1);
+  expect(errors).toEqual([]);
 });
 
 test('OK while a stream starts lets it start and then shows the controls, and coming back from another app has Play ready', async ({

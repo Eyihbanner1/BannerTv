@@ -39,6 +39,11 @@
   transform: none;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: the screens' jump leaves the zoom to its own. */
+:global(.tune-screens-jump) .tile {
+  --bt-motion: 180ms;
+}
+
 .competition,
 .side,
 .when,

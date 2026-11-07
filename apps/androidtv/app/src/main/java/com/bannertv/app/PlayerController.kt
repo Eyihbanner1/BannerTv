@@ -39,12 +39,15 @@ import org.json.JSONObject
 class PlayerController(
     context: Context,
     private val view: PlayerView,
-    userAgent: String,
+    private val userAgent: String,
     private val emit: (JSONObject) -> Unit,
     private val onPlayingChanged: (Boolean) -> Unit,
 ) : Player.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private val player: ExoPlayer
+
+    /** Every request of the stream goes through this, so each load can set its own headers. */
+    private val http: DefaultHttpDataSource.Factory
 
     /** Something is loaded; commands other than load are ignored until then. */
     private var hasMedia = false
@@ -78,7 +81,7 @@ class PlayerController(
         }
 
     init {
-        val http =
+        http =
             DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
                 .setUserAgent(userAgent)
@@ -169,10 +172,16 @@ class PlayerController(
         if (url.isNullOrEmpty()) return
         val startAt = command.optDouble("startAt", 0.0)
         val type = Protocol.streamType(stringOrNull(command, "mime"))
+        val headers = Protocol.requestHeaders(readHeaders(command.optJSONObject("headers")))
 
         hasMedia = true
         // Events stop() causes are still about the stream before, so they keep its id.
         player.stop()
+        // An addon's Referer, Origin or User-Agent goes with every request of this stream (playlist,
+        // segments, keys), and none of the last stream's stays. ExoPlayer makes its requests after
+        // this, from the factory as it is now.
+        http.setUserAgent(Protocol.userAgent(headers) ?: userAgent)
+        http.setDefaultRequestProperties(headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) })
         loadId = command.optInt("id", 0)
         openedUrl = url
         openedStartAt = startAt
@@ -393,6 +402,18 @@ class PlayerController(
             cause = cause.cause
         }
         return null
+    }
+
+    /** The load command's headers object as a map; values that are not strings are dropped. */
+    private fun readHeaders(json: JSONObject?): Map<String, String?> {
+        if (json == null) return emptyMap()
+        val headers = HashMap<String, String?>()
+        val names = json.keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            headers[name] = json.opt(name) as? String
+        }
+        return headers
     }
 
     private fun stringOrNull(command: JSONObject, key: String): String? =

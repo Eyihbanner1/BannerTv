@@ -433,6 +433,13 @@
     "timingReset": "Reset",
     "timingKept": "Kept for this file.",
     "timingOff": "Turn subtitles on to change their timing.",
+    "drift": "Drift",
+    "driftNone": "No fix",
+    "driftAhead": "Getting ahead",
+    "driftBehind": "Falling behind",
+    "driftChosen": "in use",
+    "driftFixed": "drift fixed",
+    "driftHint": "Lines slide further out as the film goes on? Pick the way they drift.",
     "style": "Subtitle style",
     "styleTab": "Style",
     "styleSummary": "{{size}}, {{colour}}",
@@ -514,7 +521,7 @@
     },
     "cannot": {
       "torrent": "A torrent. Torrents need a streaming engine, which comes in a later update.",
-      "proxy-headers": "Needs request headers the TV's player can't send.",
+      "proxy-headers": "Needs request headers the TV's player can't send. Pair a stream helper in Settings to play it.",
       "youtube": "Opens in the YouTube app.",
       "external": "Opens a web page, which BannerTV can't show."
     },
@@ -558,7 +565,8 @@
     "tmdb": "Extra details from TMDB: {{value}}",
     "stillWatching": "Ask \"Still watching?\": {{value}}",
     "tmdbCredit": "Extra details, images and some search results come from TMDB. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
-    "account": "BannerTV account"
+    "account": "BannerTV account",
+    "streamHelper": "Stream helper"
   },
   "diagnostics": {
     "refresh": "Refresh",
@@ -623,7 +631,7 @@
     "full": "This TV already has six profiles.",
     "colour": "Colour {{number}}",
     "kidsProfile": "Kids profile",
-    "kidsExplained": "Only family films and series, no Addons, and limited Settings. Ratings come from TMDB when it is on, and titles without one are left out.",
+    "kidsExplained": "No Addons, and limited Settings. Home, Discover and Search show family films and series. A title plays when TMDB rates it within this limit, or, with no rating, when it is listed as Family. Horror, thriller, crime, war and adult titles never play.",
     "mainNotKids": "Main set BannerTV up, so it is never a kids profile.",
     "youNotKids": "Switch to another profile to make this one a kids profile.",
     "save": "Save",
@@ -859,6 +867,38 @@
     "setupConfirmed": "The account is made. BannerTV is still sending this screen's data, and carries on when it can reach its service.",
     "setupJoining": "Joining the account didn't finish. BannerTV carries on when it can reach its service.",
     "tryNow": "Try now"
+  },
+  "streamHelper": {
+    "title": "Stream helper",
+    "leadTv": "Some add-on streams need extra request headers that this TV's player can't send. BannerTV on an Android phone or TV box on the same Wi-Fi can fetch them for the TV. Turn the helper on there, then type its address and code here.",
+    "leadAndroid": "Some add-on streams need extra request headers that an LG TV's player can't send. While the helper is on, your LG can play them through this device. The video stays on your home Wi-Fi.",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "onNote": "On. Keep this device on the same Wi-Fi as the TV while you watch.",
+    "offNote": "Off. Nothing is shared.",
+    "typeOnTv": "On your LG, open Settings > Stream helper and type:",
+    "noWifi": "Connect this device to the same Wi-Fi as your TV to see its address.",
+    "forget_one": "Forget the paired TV",
+    "forget_other": "Forget the {{count}} paired TVs",
+    "updateApp": "Update BannerTV on this device to use the stream helper.",
+    "address": "Address",
+    "addressPlaceholder": "Shown on the helper, for example 192.168.1.42",
+    "code": "Code",
+    "codePlaceholder": "Six digits shown on the helper",
+    "pair": "Pair",
+    "pairing": "Pairing…",
+    "pairedWith": "Paired with the helper at {{address}}.",
+    "checkAgain": "Check again",
+    "unpair": "Unpair",
+    "checking": "Checking the helper…",
+    "reachable": "The helper is on. Streams that need it will play.",
+    "unreachable": "Can't reach the helper. Open BannerTV on your phone or box, turn the helper on, and keep it on the same Wi-Fi.",
+    "failed": {
+      "bad-address": "Type the address as the helper shows it, for example 192.168.1.42.",
+      "bad-code": "The code is six digits.",
+      "wrong-code": "That code didn't match. Check the code on the helper and try again.",
+      "unreachable": "Can't reach the helper at that address. Check it's on and on the same Wi-Fi."
+    }
   },
   "browsing": {
     "play": "Play",

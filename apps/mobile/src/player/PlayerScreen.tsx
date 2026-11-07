@@ -70,10 +70,16 @@ import { StreamList } from '../ui/StreamList';
 import { colors, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
 import { holdLandscape } from './orientation';
-import { phonePlayer, pictureShown } from './phone-host';
+import {
+  BACKGROUND_PAUSE_DELAY_MS,
+  phonePlayer,
+  pictureInPicture,
+  pictureShown,
+} from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
+import { SubtitleStyleChoices } from './SubtitleStyle';
 import { SkipRipple } from './SkipRipple';
 import { SubtitleText } from './SubtitleText';
 import { isSwipe, startsAtEdge, swipeMoves, swipeTarget } from './swipe-seek';
@@ -100,7 +106,7 @@ const SKIP_RAISED = 112;
 const BACK_TO_TOP = space.m + touch.min + space.s;
 const noop = () => () => undefined;
 
-type Panel = 'tracks' | 'more' | 'streams' | 'quality' | null;
+type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -129,6 +135,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   );
   const finderState = useSyncExternalStore(finder.subscribe, finder.get);
   const shown = useSyncExternalStore(pictureShown.subscribe, pictureShown.get);
+  const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
+  const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
@@ -215,21 +223,41 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // A problem closes the other sheets; its Sources button opens the stream list over it.
   if (problem && panel !== null && panel !== 'streams') setPanel(null);
 
-  // The app going to the background pauses and saves, as hiding the TV app does.
+  // The app going to the background saves, and pauses unless the film went on in a small
+  // window (picture-in-picture), as hiding the TV app does.
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const subscription = AppState.addEventListener('change', (next) => {
+      clearTimeout(timer);
       if (next === 'background' && session) {
-        session.pause();
         session.saveProgress();
+        timer = setTimeout(() => {
+          if (AppState.currentState !== 'active' && !pictureInPicture.get()) session.pause();
+        }, BACKGROUND_PAUSE_DELAY_MS);
       } else if (next === 'active') {
         setControls(true);
       }
     });
-    return () => subscription.remove();
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
   }, [session]);
+  // Leaving the player ends the small window too.
+  useEffect(() => () => pictureInPicture.set(false), []);
+  const startPip = () => {
+    setPanel(null);
+    void videoView.current?.startPictureInPicture();
+  };
 
   const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
-  useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
+  useScrobble(
+    session,
+    state,
+    { type: titleType, metaId, videoId },
+    finder.runtimeSeconds,
+    finder.knownRuntimeSeconds,
+  );
 
   // The language the viewer chose before, once per stream and engine.
   const audioDecided = useRef('');
@@ -448,7 +476,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // a still of that scene, and the player goes there as it lifts. Taps and double taps work as
   // before; a touch only becomes a swipe once it has moved sideways, and one starting at the
   // screen's edge is left to Android's back gesture. Not on a broadcast, while a stream opens or
-  // fails, or with a panel open.
+  // fails, with a panel open, or in picture-in-picture.
   const [swipe, setSwipe] = useState<{ origin: number; target: number } | null>(null);
   // Where a finger on the seek bar is, and where the video was as it went down, for the same
   // scene preview and for Back to.
@@ -456,7 +484,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [barFrom, setBarFrom] = useState(0);
   // Where the finger went down, in the page.
   const touchStart = useRef({ x: 0, y: 0 });
-  const swipeAllowed = !!session && !waiting && !problem && !state.live && panel === null;
+  const swipeAllowed = !!session && !waiting && !problem && !pip && !state.live && panel === null;
   const swipeLands = (origin: number, pageX: number) =>
     swipeTarget(origin, pageX - touchStart.current.x, surfaceWidth.current, state.duration);
   const endSwipe = (pageX: number | null) => {
@@ -509,7 +537,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.
-  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
+  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports, and never
+  // in picture-in-picture, where the window is too small to tap it.
   const skips = useSkipSegments(titleType, videoId, !sportsEvent);
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
@@ -526,7 +555,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     skipShown?.key === skipKey(skipping) &&
     !skipCardDone(skipShown.at, state.position, state.rate);
   const skipUp =
-    !!skipping && !waiting && !problem && panel === null && !scrubbing && (controls || skipFresh);
+    !!skipping &&
+    !waiting &&
+    !problem &&
+    !pip &&
+    panel === null &&
+    !scrubbing &&
+    (controls || skipFresh);
   const skipSegment = () => {
     if (!session || !skipping) return;
     noteInput();
@@ -659,11 +694,27 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <StatusBar hidden />
       {shown ? (
         <VideoView
+          ref={videoView}
           player={phonePlayer()}
           style={styles.video}
           contentFit="contain"
           nativeControls={false}
-          allowsPictureInPicture={false}
+          allowsPictureInPicture
+          // Home or a swipe away while a film plays keeps it going in a small window.
+          startsPictureInPictureAutomatically={playing && !problem}
+          onPictureInPictureStart={() => {
+            pictureInPicture.set(true);
+            setPanel(null);
+            setControls(false);
+          }}
+          onPictureInPictureStop={() => {
+            pictureInPicture.set(false);
+            // The small window was closed rather than opened full again: stop there.
+            if (AppState.currentState !== 'active' && session) {
+              session.pause();
+              session.saveProgress();
+            }
+          }}
         />
       ) : null}
 
@@ -684,7 +735,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         raised={controls}
       />
 
-      {waiting || problem ? (
+      {!pip && (waiting || problem) ? (
         <View style={StyleSheet.absoluteFill}>
           {backdrop ? (
             <Artwork
@@ -698,7 +749,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {waiting ? (
+      {waiting && !pip ? (
         <View style={styles.centre} pointerEvents="none">
           <ActivityIndicator color={colors.prismTop} size="large" />
           <Text style={styles.waitTitle}>{title}</Text>
@@ -707,13 +758,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {buffering ? (
+      {buffering && !pip ? (
         <View style={styles.centre} pointerEvents="none">
           <ActivityIndicator color={colors.prismTop} size="large" />
         </View>
       ) : null}
 
-      {problem ? (
+      {problem && !pip ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
             <Text style={styles.problemTitle}>
@@ -743,7 +794,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {controls && !problem ? (
+      {controls && !problem && !pip ? (
         <View
           style={[
             StyleSheet.absoluteFill,
@@ -888,7 +939,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         />
       ) : null}
 
-      {previewAt !== null && !problem ? (
+      {previewAt !== null && !problem && !pip ? (
         <ScenePreview
           at={previewAt}
           origin={swipe ? swipe.origin : barFrom}
@@ -942,6 +993,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
       {!controls &&
       !problem &&
+      !pip &&
       ((counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
@@ -960,7 +1012,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {ended && decision === 'ask' && next ? (
+      {ended && decision === 'ask' && next && !pip ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
             <Text style={styles.problemTitle}>{t('phone.stillWatching')}</Text>
@@ -980,7 +1032,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {toast && !waiting ? (
+      {toast && !waiting && !pip ? (
         <View style={styles.toast} pointerEvents="none">
           <Text style={styles.toastText}>{toast}</Text>
         </View>
@@ -1056,10 +1108,23 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                 {subtitles.pending > 0 ? (
                   <Text style={styles.sheetNote}>{t('common.loading')}</Text>
                 ) : null}
+                <PanelOption
+                  label={t('player.style')}
+                  detail={t('phone.styleFor')}
+                  onPress={() => setPanel('style')}
+                />
               </ScrollView>
             </PanelColumn>
           </View>
         )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'style'}
+        title={t('player.style')}
+        onClose={() => setPanel('tracks')}
+      >
+        {() => <SubtitleStyleChoices />}
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
@@ -1073,6 +1138,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               onPress={() => setPanel('quality')}
             />
             <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
+            {shown ? <PanelOption label={t('phone.pictureInPicture')} onPress={startPip} /> : null}
           </PanelColumn>
         )}
       </SidePanel>

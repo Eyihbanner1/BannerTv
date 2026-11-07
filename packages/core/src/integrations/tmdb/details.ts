@@ -1,5 +1,5 @@
 import { HttpError } from '../../http';
-import { ukRating } from '../../profiles/kids';
+import { stricterRating, ukRating } from '../../profiles/kids';
 
 /** Cast shown on Details at most. */
 export const MAX_CAST = 12;
@@ -23,6 +23,12 @@ export interface TmdbDetails {
   cast: TmdbPerson[];
   /** A UK rating (U, PG, 12, 15, 18 or R18): the UK's certificate, else the US one mapped. */
   certificate?: string;
+  /**
+   * The strictest of that country's ratings, when one is stricter than
+   * `certificate`: a film cut for the cinema can come out uncut later, rated
+   * higher. Kids profiles compare this one.
+   */
+  strictestCertificate?: string;
   /** A series' first network, or a film's first production company. */
   network?: string;
   tagline?: string;
@@ -169,19 +175,31 @@ function readCast(kind: TmdbKind, credits: unknown): TmdbPerson[] {
 
 const COUNTRIES = ['GB', 'US'] as const;
 
-/** The first certificate that reads as a UK rating, trying the UK's before the US's. */
-function firstRating(certificates: (country: string) => string[]): string | undefined {
+interface Ratings {
+  /** The first certificate that reads as a UK rating. */
+  first: string;
+  /** The strictest of the same country's. */
+  strictest: string;
+}
+
+/** The ratings of the first country with any, trying the UK's before the US's. */
+function firstRating(certificates: (country: string) => string[]): Ratings | undefined {
   for (const country of COUNTRIES) {
+    let ratings: Ratings | undefined;
     for (const certificate of certificates(country)) {
       const rating = ukRating(certificate, country);
-      if (rating) return rating;
+      if (!rating) continue;
+      ratings = ratings
+        ? { first: ratings.first, strictest: stricterRating(ratings.strictest, rating) }
+        : { first: rating, strictest: rating };
     }
+    if (ratings) return ratings;
   }
   return undefined;
 }
 
 /** A film is certified per release; a cinema release's certificate comes first. */
-function filmCertificate(releaseDates: unknown): string | undefined {
+function filmCertificate(releaseDates: unknown): Ratings | undefined {
   const results = list(asObject(releaseDates)?.results);
   return firstRating((country) => {
     const cinema: string[] = [];
@@ -224,7 +242,7 @@ function homeRelease(releaseDates: unknown): number | undefined {
   return undefined;
 }
 
-function seriesCertificate(contentRatings: unknown): string | undefined {
+function seriesCertificate(contentRatings: unknown): Ratings | undefined {
   const results = list(asObject(contentRatings)?.results);
   return firstRating((country) => {
     const ratings: string[] = [];
@@ -274,10 +292,11 @@ export function readDetails(kind: TmdbKind, tmdbId: number, value: unknown): Tmd
   if (logoPath) details.logoPath = logoPath;
   const backdropPath = chooseBackdrop(raw, images);
   if (backdropPath) details.backdropPath = backdropPath;
-  const certificate = tv
-    ? seriesCertificate(raw.content_ratings)
-    : filmCertificate(raw.release_dates);
-  if (certificate) details.certificate = certificate;
+  const ratings = tv ? seriesCertificate(raw.content_ratings) : filmCertificate(raw.release_dates);
+  if (ratings) {
+    details.certificate = ratings.first;
+    if (ratings.strictest !== ratings.first) details.strictestCertificate = ratings.strictest;
+  }
   const network = firstName(tv ? raw.networks : raw.production_companies);
   if (network) details.network = network;
   const tagline = text(raw.tagline);

@@ -164,7 +164,7 @@ function watchedMovies(): unknown[] {
   ];
 }
 
-/** sync/watched/shows?extended=full. */
+/** sync/watched/shows?extended=full,progress. */
 function watchedShows(): unknown[] {
   return [
     {
@@ -287,6 +287,40 @@ function sameTitle(a: Ids, b: Ids) {
   return (a.imdb !== undefined && a.imdb === b.imdb) || (a.tmdb !== undefined && a.tmdb === b.tmdb);
 }
 
+/** A list path without its page and limit, and the page asked for (1 when none). */
+function paging(path: string): { route: string; page: number; limit: number | undefined } {
+  const [pathname = '', query] = path.split('?');
+  let page = 1;
+  let limit: number | undefined;
+  const rest: string[] = [];
+  for (const part of query ? query.split('&') : []) {
+    const [name, value = ''] = part.split('=');
+    if (name === 'page') page = Number(value);
+    else if (name === 'limit') limit = Number(value);
+    else rest.push(part);
+  }
+  return { route: rest.length > 0 ? `${pathname}?${rest.join('&')}` : pathname, page, limit };
+}
+
+/** One page of a list, as Trakt pages it: 100 items unless asked for more, up to its cap. */
+function pageOf(items: readonly unknown[], page: number, limit: number | undefined, cap: number) {
+  const size = Math.min(limit ?? 100, cap);
+  return items.slice((page - 1) * size, page * size);
+}
+
+/** A watched show as Trakt sends it without extended=progress: no seasons. */
+function withoutSeasons(item: unknown) {
+  const rest = { ...(item as Record<string, unknown>) };
+  delete rest.seasons;
+  return rest;
+}
+
+/** A watched show as extended=progress alone sends it: seasons, and a show without its details. */
+function progressOnly(item: unknown) {
+  const { show, ...rest } = item as { show: { title: string; year?: number; ids: unknown } };
+  return { ...rest, show: { title: show.title, year: show.year, ids: show.ids } };
+}
+
 /** Moves one time in a last_activities answer on, as Trakt does when that part changes. */
 function touch(activities: Record<string, unknown>, field: string, at = '2026-10-28T10:00:00Z') {
   const [section = '', name = ''] = field.split('.');
@@ -315,7 +349,8 @@ function fakeTrakt() {
     overrides: new Map<string, () => Answer>(),
     calls: [] as { method: TraktMethod; path: string; body?: unknown }[],
     changes: 0,
-    answer(method: TraktMethod, path: string, body: unknown): Answer {
+    answer(method: TraktMethod, fullPath: string, body: unknown): Answer {
+      const { route: path, page, limit } = paging(fullPath);
       const override = server.overrides.get(`${method} ${path}`);
       if (override) return override();
       switch (`${method} ${path}`) {
@@ -324,13 +359,19 @@ function fakeTrakt() {
         case 'GET /sync/playback?extended=full':
           return ok(server.playback);
         case 'GET /sync/watched/movies':
-          return ok(server.watchedMovies);
+          return ok(pageOf(server.watchedMovies, page, limit, 250));
+        // Since July 2026 seasons come only with extended=progress, at most 100 shows a page.
+        case 'GET /sync/watched/shows':
         case 'GET /sync/watched/shows?extended=full':
-          return ok(server.watchedShows);
+          return ok(pageOf(server.watchedShows.map(withoutSeasons), page, limit, 250));
+        case 'GET /sync/watched/shows?extended=full,progress':
+          return ok(pageOf(server.watchedShows, page, limit, 100));
+        case 'GET /sync/watched/shows?extended=progress':
+          return ok(pageOf(server.watchedShows.map(progressOnly), page, limit, 100));
         case 'GET /sync/watchlist/movies':
-          return ok(server.watchlist.movies);
+          return ok(pageOf(server.watchlist.movies, page, limit, 250));
         case 'GET /sync/watchlist/shows':
-          return ok(server.watchlist.shows);
+          return ok(pageOf(server.watchlist.shows, page, limit, 250));
         case 'POST /sync/watchlist':
           return ok(server.change(body as WatchlistBody, 'add'), 201);
         case 'POST /sync/watchlist/remove':
@@ -447,7 +488,12 @@ function setup(
     now,
     timers,
   });
-  const calls = () => server.calls.map((call) => `${call.method} ${call.path}`);
+  // Each list as one call: its first page, without the paging.
+  const calls = () =>
+    server.calls
+      .map((call) => ({ method: call.method, ...paging(call.path) }))
+      .filter((call) => call.page === 1)
+      .map((call) => `${call.method} ${call.route}`);
   const forget = () => {
     server.calls.length = 0;
   };
@@ -458,7 +504,7 @@ const EVERYTHING = [
   'GET /sync/last_activities',
   'GET /sync/playback?extended=full',
   'GET /sync/watched/movies',
-  'GET /sync/watched/shows?extended=full',
+  'GET /sync/watched/shows?extended=full,progress',
   'GET /sync/watchlist/movies',
   'GET /sync/watchlist/shows',
 ];
@@ -550,6 +596,7 @@ describe('createTraktSync', () => {
       },
     ]);
     expect(await storage.get('traktSync')).toEqual({
+      format: 2,
       times: {
         'movies.paused_at': '2026-10-27T20:15:04.000Z',
         'episodes.paused_at': '2026-10-27T19:00:00.000Z',
@@ -583,7 +630,7 @@ describe('createTraktSync', () => {
       expect(calls()).toEqual([
         'GET /sync/last_activities',
         'GET /sync/watched/movies',
-        'GET /sync/watched/shows?extended=full',
+        'GET /sync/watched/shows?extended=full,progress',
       ]);
     }
 
@@ -660,7 +707,7 @@ describe('createTraktSync', () => {
     touch(server.activities, 'watchlist.updated_at');
     touch(server.activities, 'movies.watched_at');
     server.overrides.set('GET /sync/watchlist/movies', () => ok({ error: 'odd' }));
-    server.overrides.set('GET /sync/watched/shows?extended=full', () => ok(null));
+    server.overrides.set('GET /sync/watched/shows?extended=full,progress', () => ok(null));
     expect(await sync.run()).toBe('failed');
     expect(library.has('tt1104001')).toBe(true);
     expect(watched.has('tt0903747:1:2')).toBe(true);
@@ -1191,13 +1238,190 @@ describe('createTraktSync', () => {
 
   it('writes nothing for a run that outlives its sign-in', async () => {
     const { sync, server, state, storage, watched } = setup();
-    server.overrides.set('GET /sync/watched/shows?extended=full', () => {
+    // Signed out on the empty page that ends the list, so nothing asks Trakt after it.
+    let pages = 0;
+    server.overrides.set('GET /sync/watched/shows?extended=full,progress', () => {
+      pages += 1;
+      if (pages === 1) return ok(server.watchedShows);
       state.set({ status: 'signedOut' });
-      return ok(server.watchedShows);
+      return ok([]);
     });
     expect(await sync.run()).toBe('skipped');
     await flush();
     expect(watched.has('tt0468569')).toBe(false);
     expect(await storage.get('traktSync')).toBeUndefined();
+  });
+
+  it('keeps no watchlist from a run that outlives its sign-in', async () => {
+    const { sync, server, state, storage, library } = setup();
+    let pages = 0;
+    server.overrides.set('GET /sync/watchlist/shows', () => {
+      pages += 1;
+      if (pages === 1) return ok(server.watchlist.shows);
+      state.set({ status: 'signedOut' });
+      return ok([]);
+    });
+    expect(await sync.run()).toBe('skipped');
+    await flush();
+    expect(library.has('tt1104001')).toBe(false);
+    expect(await storage.get('traktSync')).toBeUndefined();
+  });
+
+  describe('Trakt lists a page at a time (July 2026)', () => {
+    const film = (i: number) => ({
+      plays: 1,
+      movie: { title: `Film ${i}`, ids: { trakt: 10000 + i, imdb: `tt${2000000 + i}` } },
+    });
+    const show = (i: number) => ({
+      plays: 1,
+      show: {
+        title: `Show ${i}`,
+        ids: { trakt: 20000 + i, imdb: `tt${3000000 + i}` },
+        runtime: 30,
+      },
+      seasons: [
+        { number: 1, episodes: [{ number: 1, plays: 1, last_watched_at: '2025-01-01T20:00:00Z' }] },
+      ],
+    });
+    const pagesOf = (server: Server, route: string) =>
+      server.calls
+        .map((call) => paging(call.path))
+        .filter((call) => call.route === route)
+        .map((call) => [call.page, call.limit]);
+
+    it('reads every page of the watched lists, with the seasons of each show', async () => {
+      const { sync, server, watched } = setup();
+      server.watchedMovies = Array.from({ length: 600 }, (_, i) => film(i));
+      server.watchedShows = Array.from({ length: 150 }, (_, i) => show(i));
+      expect(await sync.run()).toBe('done');
+
+      expect(pagesOf(server, '/sync/watched/movies')).toEqual([
+        [1, 250],
+        [2, 250],
+        [3, 250],
+        [4, 250],
+      ]);
+      expect(pagesOf(server, '/sync/watched/shows?extended=full,progress')).toEqual([
+        [1, 100],
+        [2, 100],
+        [3, 100],
+      ]);
+      expect(watched.has('tt2000000')).toBe(true);
+      expect(watched.has('tt2000599')).toBe(true);
+      expect(watched.has('tt3000000:1:1')).toBe(true);
+      expect(watched.has('tt3000149:1:1')).toBe(true);
+    });
+
+    it('asks for the seasons alone when Trakt leaves them out of full,progress', async () => {
+      const { sync, server, watched, progress, calls } = setup();
+      server.overrides.set('GET /sync/watched/shows?extended=full,progress', () =>
+        ok(server.watchedShows.map(withoutSeasons)),
+      );
+      expect(await sync.run()).toBe('done');
+      expect(calls()).toContain('GET /sync/watched/shows?extended=progress');
+      expect(watched.has('tt0903747:1:1')).toBe(true);
+      expect(watched.has('tt0903747:1:2')).toBe(true);
+      // The running time from the first answer still puts the show on Continue Watching.
+      expect(progress.get('tt0903747:1:2')).toMatchObject({ watched: true, duration: 45 * 60 });
+    });
+
+    it('stops when Trakt sends the whole list for every page', async () => {
+      const { sync, server, library } = setup();
+      server.overrides.set('GET /sync/watchlist/movies', () => ok(server.watchlist.movies));
+      expect(await sync.run()).toBe('done');
+      expect(pagesOf(server, '/sync/watchlist/movies')).toEqual([
+        [1, 250],
+        [2, 250],
+      ]);
+      expect(library.items().map((item) => item.id)).toEqual(['tt1104001', 'tt14452776']);
+    });
+
+    it('keeps a watchlist longer than one page', async () => {
+      const { sync, server, library } = setup();
+      server.watchlist.movies = Array.from({ length: 300 }, (_, i) =>
+        listed(
+          i,
+          'movie',
+          { title: `Film ${i}`, ids: { trakt: 10000 + i, imdb: `tt${2000000 + i}` } },
+          '2026-10-25T10:00:00.000Z',
+        ),
+      );
+      expect(await sync.run()).toBe('done');
+      expect(library.items().filter((item) => item.type === 'movie')).toHaveLength(300);
+    });
+
+    it('reads a watchlist again when a title leaves it between two pages', async () => {
+      const { sync, server, library, calls, forget } = setup();
+      const film = (i: number) =>
+        listed(
+          i,
+          'movie',
+          { title: `Film ${i}`, ids: { trakt: 10000 + i, imdb: `tt${2000000 + i}` } },
+          '2026-10-25T10:00:00.000Z',
+        );
+      server.watchlist.movies = Array.from({ length: 300 }, (_, i) => film(i));
+      expect(await sync.run()).toBe('done');
+      expect(library.items().filter((item) => item.type === 'movie')).toHaveLength(300);
+
+      // On a phone, film 5 comes off while the TV is between pages 1 and 2, so the
+      // film that was 251st moves onto page 1, which the TV has read already.
+      const all = server.watchlist.movies;
+      let asked = 0;
+      server.overrides.set('GET /sync/watchlist/movies', () => {
+        asked += 1;
+        if (asked === 2) {
+          server.watchlist.movies = all.filter((_, i) => i !== 5);
+          touch(server.activities, 'watchlist.updated_at', '2026-10-28T11:30:00Z');
+        }
+        // Pages as the fake reads them; the override bypasses its paging.
+        const page = paging(server.calls[server.calls.length - 1]!.path).page;
+        return ok(server.watchlist.movies.slice((page - 1) * 250, page * 250));
+      });
+      touch(server.activities, 'watchlist.updated_at', '2026-10-28T11:00:00Z');
+      forget();
+      expect(await sync.run()).toBe('done');
+      const movies = library.items().filter((item) => item.type === 'movie');
+      expect(movies).toHaveLength(299);
+      expect(library.has('tt2000005')).toBe(false);
+      expect(library.has('tt2000251')).toBe(true);
+      // At the start, after the pages that moved, and after the pages read again.
+      expect(calls().filter((call) => call === 'GET /sync/last_activities')).toHaveLength(3);
+      expect(calls().filter((call) => call === 'GET /sync/watchlist/movies')).toHaveLength(2);
+    });
+
+    it('brings in the watched lists and the watchlist again after the update', async () => {
+      const { sync, server, storage, watched, calls, forget } = setup();
+      // A run before the update saw Trakt's times as they are, and only one page.
+      const times: Record<string, string> = {};
+      for (const field of [
+        'movies.paused_at',
+        'episodes.paused_at',
+        'movies.watched_at',
+        'episodes.watched_at',
+        'movies.watchlisted_at',
+        'shows.watchlisted_at',
+        'watchlist.updated_at',
+      ]) {
+        const [section = '', name = ''] = field.split('.');
+        times[field] = (server.activities[section] as Record<string, string>)[name]!;
+      }
+      await storage.set('traktSync', { times });
+
+      expect(await sync.run()).toBe('done');
+      expect(calls()).toEqual([
+        'GET /sync/last_activities',
+        'GET /sync/watched/movies',
+        'GET /sync/watched/shows?extended=full,progress',
+        'GET /sync/watchlist/movies',
+        'GET /sync/watchlist/shows',
+      ]);
+      expect(watched.has('tt0903747:1:1')).toBe(true);
+      expect(await storage.get('traktSync')).toEqual({ format: 2, times });
+
+      // Once in, nothing is fetched again until Trakt changes.
+      forget();
+      expect(await sync.run()).toBe('done');
+      expect(calls()).toEqual(['GET /sync/last_activities']);
+    });
   });
 });

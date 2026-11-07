@@ -87,6 +87,11 @@ export interface TvCapabilities {
   dts: boolean | null;
   /** Dolby TrueHD audio. In none of LG's format tables, so false unless the TV says otherwise. */
   truehd: boolean | null;
+  /**
+   * The player can send an addon's request headers with the link (Android's
+   * player). Left out where it cannot: webOS's `<video>` sends none of its own.
+   */
+  requestHeaders?: boolean;
 }
 
 /** Why a stream may not play well on this TV. Each becomes one plain sentence in the picker. */
@@ -116,7 +121,7 @@ export type StreamAction =
   | { kind: 'external' }
   | {
       kind: 'unavailable';
-      /** torrent: needs a streaming server. proxy-headers: needs headers <video> cannot send. */
+      /** torrent: needs a streaming server. proxy-headers: needs headers the player can't send. */
       reason: 'torrent' | 'proxy-headers';
     };
 
@@ -154,6 +159,12 @@ export interface OrderOptions {
    * stream within it, in the quality and fast orders. No limit when unset.
    */
   maxBitrate?: number;
+  /**
+   * The limit for links through one debrid service (`facts.service`, such as
+   * "RD" or "TB"), or undefined for none: each service's servers keep up with
+   * their own rates. Takes the place of `maxBitrate` where it gives a rate.
+   */
+  maxBitrateFor?: (service: string | undefined) => number | undefined;
   /** The video's running time in seconds, for estimating bitrates from file sizes. */
   runtimeSeconds?: number;
 }

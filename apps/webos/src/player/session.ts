@@ -481,6 +481,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     return Math.min(byRuntime, byDuration);
   }
 
+  /**
+   * The debrid service the stream's link goes through, as the bandwidth memory
+   * keeps a limit for each (TorBox's servers keep up with other rates than
+   * Real-Debrid's). Nothing for a link through none.
+   */
+  function serviceOf(entry: StreamEntry): [] | [string] {
+    return entry.facts.service ? [entry.facts.service] : [];
+  }
+
   /** Closes the buffering in progress, if the connection caused it. True when there was one. */
   function endBuffering(): boolean {
     if (bufferingSince === undefined) return false;
@@ -509,7 +518,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (!entry) return;
     const bitrate = bitrateOf(entry);
     // Never above the limit this stream started with, even if its first minutes played smoothly.
-    if (bitrate !== undefined && keep) bandwidth.struggled(bitrate, limitBefore);
+    if (bitrate !== undefined && keep) {
+      bandwidth.struggled(bitrate, limitBefore, ...serviceOf(entry));
+    }
     const lighter =
       options.autoFailover && !viewerChose && stepDowns < MAX_STEP_DOWNS
         ? finder.lighter(entry, tried, reference(entry))
@@ -779,9 +790,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           judgedSmooth = true;
           const entry = state.get().entry;
           const bitrate = entry && bitrateOf(entry);
-          if (bitrate && keep) {
-            limitBefore = bandwidth.maxBitrate();
-            bandwidth.smooth(bitrate);
+          if (entry && bitrate && keep) {
+            limitBefore = bandwidth.maxBitrate(...serviceOf(entry));
+            bandwidth.smooth(bitrate, ...serviceOf(entry));
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
@@ -903,6 +914,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         entry,
         engine: null,
         position: startAt,
+        // Unknown until this file says: never the last file's, which could be
+        // a clip's 40 s beside the video's own start.
+        duration: 0,
         live: false,
         liveWindow: null,
         behind: 0,

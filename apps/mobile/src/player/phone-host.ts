@@ -49,6 +49,16 @@ const PHONE_CAPABILITIES = {
 /** Whether a stream is open, so the player screen draws Android's picture. */
 export const pictureShown = createStore(false);
 
+/** Whether the film plays in a small window over other apps (picture-in-picture). */
+export const pictureInPicture = createStore(false);
+
+/**
+ * How long a move to the background waits before it pauses. Android may report the app going to
+ * the background just before it says the film went to picture-in-picture, and that film must
+ * keep playing.
+ */
+export const BACKGROUND_PAUSE_DELAY_MS = 600;
+
 let player: VideoPlayer | null = null;
 let loadId = 0;
 let hasMedia = false;
@@ -440,12 +450,17 @@ export function installPhoneHost(): void {
     emit({ type: 'relaunch' }),
   );
   AppState.addEventListener('change', (next) => {
-    // Nothing plays in the background (the TV app does the same). The player screen pauses the
-    // session too; the state news follows its pause command, so the session knows the viewer
-    // paused. Sent from here first, it would leave a stream still opening stuck as loading.
-    if (next === 'background' && hasMedia && player) {
-      wantPlay = false;
-      player.pause();
-    }
+    // Nothing plays in the background (the TV app does the same), except in picture-in-picture.
+    // The player screen pauses the session too; the state news follows its pause command, so
+    // the session knows the viewer paused. Sent from here first, it would leave a stream still
+    // opening stuck as loading.
+    if (next !== 'background') return;
+    setTimeout(() => {
+      if (AppState.currentState === 'active' || pictureInPicture.get()) return;
+      if (hasMedia && player) {
+        wantPlay = false;
+        player.pause();
+      }
+    }, BACKGROUND_PAUSE_DELAY_MS);
   });
 }

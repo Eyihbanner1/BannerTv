@@ -767,6 +767,8 @@ describe('a stream far shorter than the title', () => {
     expect(markFailed).toHaveBeenCalledWith(first);
     expect(session.get().entry).toBe(second);
     expect(session.get().failedOver).toBe(true);
+    // The next file shows no length until it gives its own: never the clip's.
+    expect(session.get().duration).toBe(0);
     await settle();
     expect(lastEngine().startAt).toBe(600);
     expect(kept.progress).not.toHaveBeenCalled();

@@ -17,6 +17,7 @@ import {
   type QueryState,
   type StreamEntry,
   type StreamOrder,
+  streamRequestHeaders,
   type TvCapabilities,
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
@@ -29,6 +30,7 @@ import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { tuning } from '../platform/tuning';
 import { playMark } from './play-marks';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
+import { noteRequestHeaders } from './request-headers';
 
 /**
  * Once one stream could play, slower addons get this much longer to offer a
@@ -119,6 +121,9 @@ export function entryKey(entry: StreamEntry): string {
   return `${entry.addonRank}:${entry.addonId}#${entry.rank}`;
 }
 
+/** Each debrid service's links are judged by the limit learnt for that service (TorBox, RD …). */
+const serviceLimit = (service: string | undefined) => bandwidth.maxBitrate(service);
+
 // Reading a stream's text is the costly part, and lists are rebuilt as each
 // addon answers, so each stream object is read once.
 const described = new WeakMap<
@@ -148,6 +153,8 @@ function buildEntries(
           },
         };
         described.set(stream, known);
+        // Android's player sends them when it opens the link.
+        noteRequestHeaders(stream);
       }
       entries.push({ ...known.entry, addonRank });
     });
@@ -184,6 +191,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     return {
       addonScore: (id) => memory.score(id),
       maxBitrate: bandwidth.maxBitrate(),
+      maxBitrateFor: serviceLimit,
       runtimeSeconds: runtimeSeconds(),
     };
   }
@@ -227,9 +235,12 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     probing = true;
     try {
       for (let tested = 0; tested < PROBE_LIMIT;) {
+        // The test's hidden <video> cannot send an addon's request headers: those links go untested.
         const candidate = state
           .get()
-          .candidates.find((entry) => probes[entryKey(entry)] === undefined);
+          .candidates.find(
+            (entry) => probes[entryKey(entry)] === undefined && !streamRequestHeaders(entry.stream),
+          );
         if (!candidate || candidate.stream.source.kind !== 'url') return;
         if (state.get().candidates.some((entry) => probes[entryKey(entry)] === 'works')) return;
         const key = entryKey(candidate);
@@ -449,7 +460,7 @@ export function holdProbing(): () => void {
 /** Whether a stream needs more data than this TV's connection is expected to keep up with. */
 export function isHeavy(entry: StreamEntry, runtimeSeconds: number): boolean {
   const bitrate = estimateBitrate(entry.facts, runtimeSeconds);
-  return bitrate !== undefined && bitrate > bandwidth.maxBitrate();
+  return bitrate !== undefined && bitrate > serviceLimit(entry.facts.service);
 }
 
 /** All streams, in the order the viewer picked for that list. */
@@ -461,6 +472,7 @@ export function listOrder(
   return orderStreams(entries, order, knownCapabilities(), {
     addonScore: (id) => sourceMemory.score(id),
     maxBitrate: bandwidth.maxBitrate(),
+    maxBitrateFor: serviceLimit,
     runtimeSeconds,
   });
 }

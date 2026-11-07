@@ -98,6 +98,13 @@ describe('readTraktCall', () => {
     expect(
       readTraktCall({ method: 'GET', path: '/sync/watched/shows?extended=noseasons' })?.query,
     ).toBe('extended=noseasons');
+    // How the TV reads the watched shows since Trakt's change of July 2026.
+    expect(
+      readTraktCall({
+        method: 'GET',
+        path: '/sync/watched/shows?extended=full,progress&page=2&limit=100',
+      })?.query,
+    ).toBe('extended=full,progress&limit=100&page=2');
     expect(readTraktCall({ method: 'GET', path: '/sync/playback?' })?.query).toBe('');
     for (const query of [
       'extended=full&client_id=x',

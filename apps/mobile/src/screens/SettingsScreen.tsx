@@ -4,6 +4,7 @@ import { preferences, setPreference, type Preferences } from '@tv/data/preferenc
 import { allAddons } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
+import { traktAccount } from '@tv/data/trakt';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -22,6 +23,7 @@ import { statusLine } from '../data/account-text';
 import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { ListRow } from '../ui/Button';
+import { SubtitleStyleChoices, useSubtitleStyle } from '../player/SubtitleStyle';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 
@@ -82,7 +84,10 @@ export function SettingsScreen() {
   const list = useSyncExternalStore(profiles.subscribe, profiles.get).profiles;
   // Every install, those switched off too: Addons lists them all.
   const addons = useSyncExternalStore(allAddons.subscribe, allAddons.get);
+  const trakt = useSyncExternalStore(traktAccount.subscribe, traktAccount.get);
   const [choosing, setChoosing] = useState<Choice | null>(null);
+  const [styling, setStyling] = useState(false);
+  const look = useSubtitleStyle();
   const kids = isKidsProfile();
   const isMain = activeProfileId.get() === MAIN_PROFILE_ID;
   const profile = activeProfile();
@@ -169,6 +174,14 @@ export function SettingsScreen() {
               value={valueOf('streamChoice', prefs.streamChoice)}
               onPress={() => setChoosing('streamChoice')}
             />
+            <ListRow
+              title={t('phone.subtitleStyle')}
+              value={t('player.styleSummary', {
+                size: t(`player.styleValue.size.${look.size}`),
+                colour: t(`player.styleColourInline.${look.colour}`),
+              })}
+              onPress={() => setStyling(true)}
+            />
             <Toggle
               title={t('phone.stillWatchingSetting')}
               value={prefs.stillWatching}
@@ -189,6 +202,15 @@ export function SettingsScreen() {
                 : {})}
               onPress={() => router.push('/addons')}
             />
+            {services.trakt ? (
+              <ListRow
+                title={t('phone.trakt')}
+                {...(trakt.status === 'signedIn'
+                  ? { value: trakt.username ?? t('trakt.signedIn') }
+                  : {})}
+                onPress={() => router.push('/trakt')}
+              />
+            ) : null}
             <ListRow title={t('homeRows.title')} onPress={() => router.push('/home-rows')} />
             {isMain && section.shown ? (
               <ListRow
@@ -213,6 +235,15 @@ export function SettingsScreen() {
       )}
 
       <Text style={styles.about}>{t('phone.about', { version })}</Text>
+
+      <Sheet
+        visible={styling}
+        title={t('phone.subtitleStyle')}
+        onClose={() => setStyling(false)}
+        scroll={false}
+      >
+        <SubtitleStyleChoices />
+      </Sheet>
 
       <Sheet
         visible={choosing !== null}
