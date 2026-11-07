@@ -2,6 +2,7 @@ import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useScreenSlot } from '../app/screen-slot';
 import { KeyCode } from '../navigation/keys';
+import { answeredOk } from '../navigation/ok-click';
 import { useBack } from '../navigation/use-back';
 import styles from './TextField.module.css';
 
@@ -57,7 +58,10 @@ export function TextField({
     accessibilityLabel: label,
     // Not while another screen covers this one (see Pressable).
     onEnterPress: () => {
-      if (slot.get()) input.current?.focus();
+      if (!slot.get()) return;
+      // Typing is what OK did: its click, outside a dialog say, is the same press.
+      answeredOk();
+      input.current?.focus();
     },
     onArrowPress: () => slot.get(),
     // A click on a box that did not have focus: type once spatial navigation has focused it.

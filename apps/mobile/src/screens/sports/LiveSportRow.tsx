@@ -1,6 +1,6 @@
 import { buildDay, eventState, type SportEvent } from '@bannertv/core';
 import { fixtureText } from '@tv/screens/sports/fixture';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { openEvent } from '../../nav/routes';
 import { FixtureRow } from '../../ui/FixtureRow';
@@ -18,8 +18,11 @@ const MAX_ITEMS = 40;
 /**
  * Home's "Live sport" row, as on the TV: what the sports addons have live or starting soon,
  * from the first page of their live catalogs only. It shows only when something is live.
+ * Memoised: it is a line of Home's list, which draws every cell again each time Home renders
+ * (a row's first page, a newly reached row), and it takes no props, so it draws again only when
+ * its own sport, clock or words change.
  */
-export function LiveSportRow() {
+export const LiveSportRow = memo(function LiveSportRow() {
   const { t } = useTranslation();
   const shown = useSportsShown();
   const onShow = useOnShow();
@@ -52,4 +55,4 @@ export function LiveSportRow() {
       }}
     />
   );
-}
+});

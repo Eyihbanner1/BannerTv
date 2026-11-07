@@ -1,14 +1,18 @@
 import {
   addSleepTime,
   askStillWatching,
+  BACK_TO_MS,
   bingeEntry,
   type BingeHint,
   bingeHint,
   endAction,
   inLastStretch,
   languageName,
+  liveFraction,
+  type LiveWindow,
   nextSleepCheck,
   nextVideo,
+  offersBackTo,
   parseRuntime,
   playedCard,
   type QualityReference,
@@ -18,7 +22,9 @@ import {
   skipAt,
   skipCardDone,
   skipKey,
+  SKIP_LANDS_AFTER_MS,
   skipRearms,
+  skipStep,
   type SleepChoice,
   sleepPhase,
   SPEED_KINDS,
@@ -69,6 +75,7 @@ import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import { entryKey, holdProbing, isHeavy, putPlayerFirst, streamFinder } from '../../player/finder';
+import { rewindWindow } from '../../player/live';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
 import { playMark } from '../../player/play-marks';
 import {
@@ -102,7 +109,7 @@ import styles from './PlayerScreen.module.css';
 /** Controls hide after this long without a key press, while playing. */
 const CONTROLS_HIDE_MS = 5000;
 /** A skip lands this long after the last press. */
-const SCRUB_COMMIT_MS = 800;
+const SCRUB_COMMIT_MS = SKIP_LANDS_AFTER_MS;
 /** The note for a skip made with the controls hidden stays this long after it lands. */
 const SKIP_NOTE_MS = 1500;
 /**
@@ -110,8 +117,6 @@ const SKIP_NOTE_MS = 1500;
  * rests this long: on the TV a quick roll comes in flicks, with gaps between.
  */
 const WHEEL_REST_MS = 500;
-/** Start over offers to go back to where the viewer was for this long. */
-const UNDO_MS = 8000;
 /** Start over this close to the start has nothing worth going back to. */
 const UNDO_FROM_S = 10;
 /** Back this soon after the controls hid by themselves was meant for them: it asks again. */
@@ -120,6 +125,11 @@ const BACK_AFTER_HIDE_MS = 2000;
 const LEAVE_HINT_MS = 3000;
 /** What the pointer can press in the player; anywhere else is the picture. */
 const CONTROL = '[role="button"], [role="slider"]';
+/**
+ * A corner card over the picture: Up Next, Skip intro, the sleep timer's
+ * warning. Sheets are dialogs too, but while one is open the picture takes no clicks.
+ */
+const CARD = '[role="dialog"]';
 /** The next episode's streams are asked for this long before the end. */
 const NEXT_STREAMS_BEFORE_END_S = 120;
 /** A minutes sleep timer is read again at least this often: does it run out before the next episode? */
@@ -147,16 +157,6 @@ interface PlayerScreenProps {
 
 const noop = () => () => undefined;
 const initial = () => INITIAL_SESSION_STATE;
-
-/**
- * How far one press skips: 10 s, the same for every way of skipping. A key
- * held down repeats, and goes further the longer it is held.
- */
-function skipStep(repeats: number): number {
-  if (repeats > 12) return 60;
-  if (repeats > 4) return 30;
-  return 10;
-}
 
 /** A skip's total, such as "+30 s" or "−1:30". */
 function formatSkip(seconds: number): string {
@@ -209,7 +209,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const [scrubTo, setScrubTo] = useState<number | null>(null);
   // A skip in progress: where it began, where it will land, and the timer that lands it.
   const scrub = useRef<{ origin: number; target: number; timer: number } | null>(null);
-  const [skipNote, setSkipNote] = useState<{ delta: number; target: number } | null>(null);
+  // The note for a skip made with the controls hidden. On a broadcast, `live`
+  // is where live was as it was made, so it can say how far behind it lands.
+  const [skipNote, setSkipNote] = useState<{
+    delta: number;
+    target: number;
+    live?: LiveWindow;
+  } | null>(null);
   const noteTimer = useRef<number | undefined>(undefined);
   // How many times Fast forward or Rewind has repeated while held down.
   const heldSkip = useRef(0);
@@ -220,12 +226,15 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const pointerOnChrome = useRef(false);
   // Whether it rests on a control, whose OK is that control's; elsewhere it is the picture's.
   const pointerOnControl = useRef(false);
+  // Whether it rests on a corner card (Up Next, Skip intro, the sleep timer's warning).
+  const pointerOnCard = useRef(false);
   // Whether the wheel has moved focus since the pointer last moved: OK is then the focused control's.
   const wheelMovedFocus = useRef(false);
   const lastAutoHide = useRef(0);
   const [leaveHint, setLeaveHint] = useState(false);
   const leaveTimer = useRef<number | undefined>(undefined);
-  // Where Start over left from, while it offers to go back there.
+  // Where Start over, or any jump of two minutes or more, left from, while it
+  // offers to go back there ("Back to 42:10" in Start over's place).
   const [undo, setUndo] = useState<number | null>(null);
   const undoTimer = useRef<number | undefined>(undefined);
   // The stream a Quality choice opened, and its quality, for the note while it opens.
@@ -393,6 +402,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     !held &&
     !cardUp &&
     !warns;
+  // With the controls up during an intro or recap, Skip intro waits above the
+  // bar, whatever became of the card: the controls never leave it out.
+  const skipInControls = chrome && !!skipping;
 
   const subtitles = useSubtitles(
     type,
@@ -475,7 +487,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = props.startAt ?? (remember ? progress.resumeAt(videoId) : 0) ?? 0;
+        // From saved progress a few seconds early (resumeLeadIn); a place carried over exactly.
+        const start = props.startAt ?? (remember ? progress.resumeFrom(videoId) : 0) ?? 0;
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose(props.binge));
         if (cancelled) return;
@@ -578,17 +591,36 @@ export function PlayerScreen(props: PlayerScreenProps) {
    * One press of a skip: each adds to a total that lands once, a moment after
    * the last. `repeats`: how often the key has repeated while held down. With
    * the controls hidden, or behind a panel, a small note shows the total and
-   * the controls stay away.
+   * the controls stay away. On a broadcast it moves along what the broadcast
+   * keeps, where the engine can tell, from a little in from its oldest moment
+   * up to live; one whose window nobody can tell has nothing to skip along.
    */
   function scrubBy(direction: -1 | 1, repeats = 0) {
-    // A broadcast has no bar to skip along (Fast forward and Rewind jump at once, below).
-    if (!session || waiting || state.live) return;
+    if (!session || waiting) return;
+    const kept = state.live ? session.liveWindow() : null;
+    if (state.live && !kept) return;
     const current = scrub.current;
     const origin = current ? current.origin : (session.trustedPosition() ?? state.position);
+    // Playing live, Right has nowhere to go: the note says so, and nothing lands.
+    if (kept && direction === 1 && !current && atLive) {
+      if (chrome && !panel) return;
+      clearTimeout(noteTimer.current);
+      setSkipNote({ delta: 0, target: origin, live: kept });
+      noteTimer.current = window.setTimeout(() => setSkipNote(null), SKIP_NOTE_MS);
+      return;
+    }
     const from = current ? current.target : origin;
-    const wanted = Math.max(0, from + direction * skipStep(repeats));
-    // A film whose file gives no length is only kept from going before its start.
-    const target = state.duration > 0 ? Math.min(state.duration - 1, wanted) : wanted;
+    const wanted = from + direction * skipStep(repeats);
+    let target: number;
+    if (kept) {
+      // Live is where the broadcast plays now, even read a moment late.
+      const live = Math.max(kept.live, origin);
+      target = Math.max(rewindWindow(kept).start, Math.min(live, wanted));
+    } else {
+      // A film whose file gives no length is only kept from going before its start.
+      const atLeast = Math.max(0, wanted);
+      target = state.duration > 0 ? Math.min(state.duration - 1, atLeast) : atLeast;
+    }
     if (current) clearTimeout(current.timer);
     const timer = window.setTimeout(commitScrub, SCRUB_COMMIT_MS);
     scrub.current = { origin, target, timer };
@@ -598,17 +630,31 @@ export function PlayerScreen(props: PlayerScreenProps) {
       return;
     }
     clearTimeout(noteTimer.current);
-    setSkipNote({ delta: target - origin, target });
+    setSkipNote(
+      kept
+        ? { delta: target - origin, target, live: { ...kept, live: Math.max(kept.live, origin) } }
+        : { delta: target - origin, target },
+    );
     noteTimer.current = window.setTimeout(() => setSkipNote(null), SCRUB_COMMIT_MS + SKIP_NOTE_MS);
   }
-  /** Lands the skip in progress at once. False when there is none. */
+  /**
+   * Lands the skip in progress at once. False when there is none. On a
+   * broadcast, one that reaches live goes to live, which reads where live is
+   * now; a film's jump of two minutes or more offers to go back.
+   */
   function commitScrub(): boolean {
     const current = scrub.current;
     if (!current) return false;
     clearTimeout(current.timer);
     scrub.current = null;
     setScrubTo(null);
-    session?.seek(current.target);
+    if (!session) return true;
+    const kept = state.live ? session.liveWindow() : null;
+    // Back to live from behind it reads where live is now; from live, it stays.
+    if (kept && current.target >= kept.live - Math.max(0, kept.slack)) {
+      if (!atLive) session.goToLive();
+    } else session.seek(current.target);
+    offerBackTo(current.origin, current.target);
     return true;
   }
   function cancelScrub(): boolean {
@@ -622,6 +668,18 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
   useEffect(() => () => void cancelScrub(), []);
 
+  /**
+   * After a jump of two minutes or more, Start over's place reads "Back to
+   * 42:10" for a few seconds, and one press goes back there. Never on a
+   * broadcast, whose clock begins wherever it was joined.
+   */
+  function offerBackTo(from: number, to: number) {
+    if (state.live || !offersBackTo(from, to)) return;
+    clearTimeout(undoTimer.current);
+    setUndo(from);
+    undoTimer.current = window.setTimeout(() => setUndo(null), BACK_TO_MS);
+  }
+
   /** A click on the bar: straight there, whatever skip was in progress. */
   function seekTo(seconds: number) {
     cancelScrub();
@@ -630,11 +688,18 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const kept = state.live ? state.liveWindow : null;
     if (session && kept && seconds >= kept.live - Math.max(0, kept.slack)) {
       if (!atLive) session.goToLive();
-    } else session?.seek(seconds);
+    } else if (session) {
+      const from = session.trustedPosition() ?? state.position;
+      session.seek(seconds);
+      offerBackTo(from, seconds);
+    }
     armHide();
   }
 
-  /** Start over goes back to 0:00, then for a few seconds offers to go back to where it was. */
+  /**
+   * Start over goes back to 0:00, then for a few seconds offers to go back to
+   * where it was. While anything offers "Back to", it goes back there instead.
+   */
   function startOver() {
     // Until a stream opened paused has its length, a seek would only be undone by its own start.
     if (!session || !video || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
@@ -650,7 +715,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     session.seek(0);
     if (from < UNDO_FROM_S) return;
     setUndo(from);
-    undoTimer.current = window.setTimeout(() => setUndo(null), UNDO_MS);
+    undoTimer.current = window.setTimeout(() => setUndo(null), BACK_TO_MS);
   }
 
   function showLeaveHint() {
@@ -734,12 +799,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
       case KeyCode.Rewind: {
         heldSkip.current = event.repeat ? heldSkip.current + 1 : 0;
         const direction = event.keyCode === KeyCode.FastForward ? 1 : -1;
-        if (state.live && session && !waiting) {
-          // Within what the broadcast keeps, and the controls show where that is.
-          if (direction === 1 && atLive) {
-            show();
-            break;
-          }
+        // A broadcast whose window nobody can tell: at once, and the controls
+        // show where it is. Anything else adds up and lands once, as Left and Right do.
+        if (state.live && session && !waiting && !session.liveWindow()) {
           const at = session.trustedPosition() ?? state.position;
           session.seek(at + direction * skipStep(heldSkip.current));
           show();
@@ -788,6 +850,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const target = event.target instanceof Element ? event.target : null;
     pointerOnChrome.current = target?.closest('[data-player-chrome]') != null;
     pointerOnControl.current = target?.closest(CONTROL) != null;
+    pointerOnCard.current = target?.closest(CARD) != null;
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
     // Behind the problem box, or while a stream opens, the controls would not
@@ -843,7 +906,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // A click on the picture shows the controls, or hides them. A click on a
   // control is that control's, and so is a click after the wheel moved focus
   // to one: the Magic Remote sends its OK as a click alone while the pointer shows.
-  const picturePressable = () => !problem && !waiting && !panel && !card && !asleep && !asking;
+  // A corner card (Up Next, Skip intro, the sleep timer's warning) gives way
+  // to the controls a click on the picture beside it brings, as Up does; the
+  // pointer only moving leaves it where it is, under the pointer heading for it.
+  const picturePressable = () => !problem && !waiting && !panel && !asleep && !asking;
   function pressPicture() {
     if (controls) hide();
     else show('player-play');
@@ -851,6 +917,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const onPictureClick = (event: MouseEvent) => {
     if (clickCameWithOk()) return;
     if (event.target instanceof Element && event.target.closest(CONTROL)) return;
+    // A corner card's own edge, picture or words are the card's, not the picture's.
+    if (event.target instanceof Element && event.target.closest(CARD)) return;
     if (!picturePressable()) return;
     if (chrome && wheelMovedFocus.current) pressFocused();
     else pressPicture();
@@ -865,6 +933,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (event.keyCode !== KeyCode.Ok || inputMode.get() !== 'pointer') return;
     // A control the pointer rests on is the picture while the controls are hidden.
     if (chrome && (pointerOnControl.current || wheelMovedFocus.current)) return;
+    // A corner card under the pointer is the card's: its button has focus
+    // from the pointer, or keeps the focus it had, and takes the OK.
+    if (card && (pointerOnControl.current || pointerOnCard.current)) return;
     if (!picturePressable()) return;
     event.preventDefault();
     event.stopPropagation();
@@ -961,8 +1032,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (!session || !skipping) return;
     // A skip still to land would undo it.
     cancelScrub();
+    const from = session.trustedPosition() ?? state.position;
     session.seek(skipping.end);
+    // A long recap skipped offers the way back, as any big jump does.
+    offerBackTo(from, skipping.end);
     setSkipShown((shown) => shown && { ...shown, gone: true });
+  }
+  /** Skip intro from the controls: the controls go with it, back to the picture. */
+  function skipSegmentFromControls() {
+    skipSegment();
+    hide();
   }
   function letSkipGo() {
     setSkipShown((shown) => shown && { ...shown, gone: true });
@@ -989,6 +1068,19 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Only the card going matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card]);
+
+  // Skip intro in the controls going with focus on it (the intro played out,
+  // or a skip left it) leaves focus on the bar below it.
+  const hadSkipInControls = useRef(skipInControls);
+  useEffect(() => {
+    if (skipInControls === hadSkipInControls.current) return;
+    hadSkipInControls.current = skipInControls;
+    if (!skipInControls && chrome && focusedKey() === 'player-skip-chrome') {
+      void setFocus('player-seek');
+    }
+    // Only the button going matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipInControls]);
 
   // The end: back to the title's page, or on to the next episode, once nothing holds it.
   useEffect(() => {
@@ -1120,11 +1212,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   // Two tiers with fixed places: nothing comes or goes while the video plays.
   // What can't be used now stays, dimmed, and says why when focused.
+  // Playing live with nothing waiting to land: Forward 10 s and Go to live
+  // have nowhere to go. A rewind still adding up has somewhere to come back from.
+  const liveNow = atLive && scrubTo === null;
   function skipButton(direction: -1 | 1) {
     if (!session || waiting) return;
-    if (state.live) {
-      // As Rewind on a broadcast: at once, within what it keeps.
-      if (direction === 1 && atLive) return;
+    if (direction === 1 && liveNow) return;
+    if (state.live && !session.liveWindow()) {
+      // As Rewind on a broadcast whose window nobody can tell: at once.
       const at = session.trustedPosition() ?? state.position;
       session.seek(at + direction * skipStep(0));
       armHide();
@@ -1132,6 +1227,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
   function goToLive() {
     if (!session || waiting) return;
+    // A rewind still to land would undo it.
+    cancelScrub();
     session.goToLive();
     armHide();
   }
@@ -1166,7 +1263,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       focusKey: 'player-fwd10',
       icon: 'fwd10',
       label: t('player.forward10'),
-      unavailable: atLive ? t('player.atLive') : undefined,
+      unavailable: liveNow ? t('player.atLive') : undefined,
       onPress: () => skipButton(1),
     },
     // A broadcast has Go to live in Next episode's place; anything with an
@@ -1178,7 +1275,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           label: t('player.goToLive'),
           unavailable: !state.liveWindow
             ? t('player.liveUnknownPoint')
-            : atLive
+            : liveNow
               ? t('player.atLive')
               : undefined,
           onPress: goToLive,
@@ -1317,6 +1414,49 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (track.lang) chooseAudioLanguage(props.lab ? undefined : metaId, track.lang);
   };
 
+  /**
+   * The note for a skip made with the controls hidden: the total, and where
+   * it lands; once it has landed, where the picture really is. On a
+   * broadcast, how far behind live, or that it plays live.
+   */
+  function skipNoteView() {
+    if (!skipNote) return null;
+    const landed = scrubTo === null;
+    const at = landed ? state.position : skipNote.target;
+    const kept = skipNote.live;
+    let where: string | undefined;
+    let share: number | undefined;
+    let total = formatSkip(skipNote.delta);
+    if (kept) {
+      const behind = landed ? state.behind : Math.max(0, kept.live - skipNote.target);
+      const live = behind <= Math.max(0, kept.slack);
+      where = live ? t('player.atLive') : t('player.behindLive', { time: formatTime(behind) });
+      share = live ? 1 : liveFraction(kept, kept.live - behind);
+      // Right at live has nowhere to go, nor a skip that came back to it: it
+      // says so, with no total of what is only the engine's lag.
+      if (live && Math.abs(skipNote.delta) < Math.max(1, kept.slack)) {
+        total = t('player.atLive');
+        where = undefined;
+      }
+    } else if (state.duration > 0) {
+      where = t('player.skipWhere', { time: formatTime(at), length: formatTime(state.duration) });
+      share = Math.min(1, at / state.duration);
+    }
+    return (
+      <>
+        <div className={styles.skipNote} role="status">
+          <p className={styles.skipTotal}>{total}</p>
+          {where && <p className={styles.skipWhere}>{where}</p>}
+        </div>
+        {share !== undefined && (
+          <div className={styles.skipBar}>
+            <div className={styles.skipPlayed} style={{ width: `${share * 100}%` }} />
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <section
       className={styles.player}
@@ -1369,29 +1509,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           {toast}
         </p>
       )}
-      {skipNote && (!chrome || panel) && (
-        <>
-          <div className={styles.skipNote} role="status">
-            <p className={styles.skipTotal}>{formatSkip(skipNote.delta)}</p>
-            {state.duration > 0 && (
-              <p className={styles.skipWhere}>
-                {t('player.skipWhere', {
-                  time: formatTime(skipNote.target),
-                  length: formatTime(state.duration),
-                })}
-              </p>
-            )}
-          </div>
-          {state.duration > 0 && (
-            <div className={styles.skipBar}>
-              <div
-                className={styles.skipPlayed}
-                style={{ width: `${Math.min(1, skipNote.target / state.duration) * 100}%` }}
-              />
-            </div>
-          )}
-        </>
-      )}
+      {skipNote && (!chrome || panel) && skipNoteView()}
 
       <PlayerControls
         // They make way for a sheet, and come back when it goes.
@@ -1416,6 +1534,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
         }}
         onSeekTo={seekTo}
         onLeave={back}
+        skip={
+          skipInControls && skipping
+            ? {
+                label: t(skipping.kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap'),
+                onPress: skipSegmentFromControls,
+              }
+            : undefined
+        }
       />
 
       {warningUp && (
@@ -1431,6 +1557,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
       {cardUp && next && (
         <UpNext
           video={next}
+          number={
+            next.season !== undefined && next.episode !== undefined
+              ? t('player.episodeNumber', { season: next.season, episode: next.episode })
+              : undefined
+          }
           seconds={count}
           onPlay={playNextEpisode}
           onDismiss={() => setUpNextDismissed(true)}
@@ -1443,6 +1574,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onSkip={skipSegment}
           onDismiss={letSkipGo}
           onControls={() => show('player-play')}
+          onScrub={scrubBy}
         />
       )}
 

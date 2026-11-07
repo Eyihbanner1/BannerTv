@@ -584,7 +584,8 @@ test('a title taken off My List from its page leaves focus on the Library', asyn
     },
   });
   await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // With nothing to continue, Home opens on its My List row.
+  await expectFocus(page, 'home-my-list-tile-0');
   await openSection(page, 'library');
   await expectFocus(page, 'discover-tile-0');
   await press(page, 'ArrowRight', 'discover-tile-1');
@@ -613,11 +614,12 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
   await openSettings(page);
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
+  // Continue Watching and My List come first; the catalogs follow.
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  await press(page, 'ArrowDown', 'home-rows-bannertv-my-list-show');
   const top = 'home-rows-0-movie-top';
-  await press(page, 'Enter', `${top}-up`);
-  // Hide the first row, then move the series row to the top.
-  await press(page, 'ArrowRight', `${top}-down`);
-  await press(page, 'ArrowRight', `${top}-show`);
+  // Hide the first catalog row, then move the series row up above it.
+  await press(page, 'ArrowDown', `${top}-show`);
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
     'aria-label',

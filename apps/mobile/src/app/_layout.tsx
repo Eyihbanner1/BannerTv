@@ -3,9 +3,10 @@ import { welcomed } from '@tv/data/welcome';
 import { noteInput } from '@tv/navigation/activity';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { keepOrientation } from '../player/orientation';
 import { ProfilePicker } from '../screens/ProfilePicker';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { colors } from '../ui/theme';
@@ -21,6 +22,9 @@ import { colors } from '../ui/theme';
 export default function RootLayout() {
   const welcomeDone = useSyncExternalStore(welcomed.subscribe, welcomed.get);
   const profileId = useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
+  // Upright unless the player is open, also after the app starts again with Android still
+  // holding the last run's sideways lock, and on every return to the front.
+  useEffect(() => keepOrientation(), []);
   const cover = !welcomeDone ? (
     <WelcomeScreen />
   ) : profileId === null ? (
