@@ -83,6 +83,17 @@ describe('follow keys', () => {
     expect(d!.followKeys).toEqual(c!.followKeys);
   });
 
+  it('leave off the sport words of a club named in full', () => {
+    const [county, short, rugby] = eventsOf(
+      { name: 'Yorkshire County Cricket Club vs Lancashire CCC', genres: ['Cricket'] },
+      { name: 'Yorkshire vs Lancashire', genres: ['Cricket'] },
+      { name: 'Bath Rugby Football Club vs Saracens Rugby Club', genres: ['Rugby'] },
+    );
+    expect(county!.followKeys).toEqual(['cricket:yorkshire', 'cricket:lancashire']);
+    expect(short!.followKeys).toEqual(county!.followKeys);
+    expect(rugby!.followKeys).toEqual(['rugby:bath', 'rugby:saracens']);
+  });
+
   it("tell a club's women's and youth sides, and its other sports, from its first team", () => {
     const [women, wsl, youth, basketball, football] = eventsOf(
       { name: 'Arsenal Women vs Chelsea Women', genres: ['Football'] },

@@ -324,9 +324,10 @@ function canonicalKey(side: Side, team: TeamEntry | undefined): string {
 }
 
 // The dictionary has no rugby or cricket sides, and addons write the sport after the club or
-// leave it off: "Bath Rugby" and "Bath", "Yorkshire County Cricket Club" and "Yorkshire".
+// leave it off: "Bath Rugby" and "Bath", "Yorkshire County Cricket Club" and "Yorkshire". The
+// team key has already lost a last "club" (teamKey), so "county cricket" ends it there.
 const SPORT_TAIL =
-  /\s(?:rugby(?:\s(?:union|league|club|football club))?|rfc|rufc|rlfc|cricket(?:\sclub)?|county cricket club|ccc)$/;
+  /\s(?:rugby(?:\s(?:union|league|club|football(?:\sclub)?))?|rfc|rufc|rlfc|cricket(?:\sclub)?|county cricket(?:\sclub)?|ccc)$/;
 
 /**
  * A side's key for following it: the sport, its team key, and its youth and
