@@ -26,8 +26,10 @@ vi.mock('../app/router', () => ({
   openSection: (section: string) => {
     app.stack = [section];
   },
-  push: (route: { name: string; type: string; id: string }) => {
-    app.stack.push(`${route.name}:${route.type}:${route.id}`);
+  push: (route: { name: string; type: string; id: string; video?: string }) => {
+    app.stack.push(
+      `${route.name}:${route.type}:${route.id}${route.video ? `@${route.video}` : ''}`,
+    );
   },
 }));
 
@@ -129,7 +131,7 @@ describe('startOpenLinks', () => {
   it('opens the title the app was started with on Details over Home', () => {
     const android = shell({ type: 'movie', meta: 'tt1', video: 'tt1' });
     links.startOpenLinks(android.take);
-    expect(app.stack).toEqual(['home', 'details:movie:tt1']);
+    expect(app.stack).toEqual(['home', 'details:movie:tt1@tt1']);
   });
 
   it('waits for "Who\'s watching?" before taking the link', () => {
@@ -150,7 +152,8 @@ describe('startOpenLinks', () => {
     expect(android.takes).toBe(0);
     expect(app.stack).toEqual(['sports', 'event:x']);
     app.activeId.set('p2');
-    expect(app.stack).toEqual(['home', 'details:series:tt2']);
+    // Details opens the series' episodes on the one the card was for.
+    expect(app.stack).toEqual(['home', 'details:series:tt2@tt2:1:1']);
     expect(app.asked).toBe(0);
   });
 

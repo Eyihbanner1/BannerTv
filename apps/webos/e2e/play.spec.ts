@@ -3388,11 +3388,15 @@ test('each version says where it is from and how it is doing, and its timing is 
   await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
 
-  // The subtitle line sits just above the sheet.
-  const line = (await page.getByText('Hello from the test subtitles').boundingBox())!;
-  const top = (await sheet.boundingBox())!.y;
-  expect(line.y + line.height).toBeLessThanOrEqual(top);
-  expect(line.y + line.height).toBeGreaterThan(top - 120);
+  // The subtitle line sits just above the sheet, once it has slid up there (its
+  // move is eased, and a busy runner can measure it on the way).
+  const gapAboveSheet = async () => {
+    const line = (await page.getByText('Hello from the test subtitles').boundingBox())!;
+    const top = (await sheet.boundingBox())!.y;
+    return top - (line.y + line.height);
+  };
+  await expect.poll(gapAboveSheet).toBeGreaterThanOrEqual(0);
+  expect(await gapAboveSheet()).toBeLessThan(120);
 
   // A file says Loading… until its first line is ready.
   await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
