@@ -1,5 +1,5 @@
 import { createStore } from '@bannertv/core';
-import type { AndroidEvent, AndroidPlayerCommand, AndroidTrack } from '@tv/platform/android';
+import type { AndroidEvent, AndroidPlayerCommand } from '@tv/platform/android';
 import { requireOptionalNativeModule } from 'expo';
 import Constants from 'expo-constants';
 import {
@@ -15,6 +15,7 @@ import {
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
 import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { toAndroidTrack, trackId } from './tracks';
 import { videoSource } from './video-source';
 
 /**
@@ -117,34 +118,6 @@ function emitTime(): void {
   });
 }
 
-function trackId(prefix: string, track: AudioTrack | SubtitleTrack, index: number): string {
-  return `${prefix}:${track.id ?? index}`;
-}
-
-function sameTrack(
-  track: AudioTrack | SubtitleTrack,
-  active: AudioTrack | SubtitleTrack | null,
-): boolean {
-  if (!active) return false;
-  if (track.id !== undefined || active.id !== undefined) return track.id === active.id;
-  return track.language === active.language && track.label === active.label;
-}
-
-function toTrack(
-  prefix: string,
-  track: AudioTrack | SubtitleTrack,
-  index: number,
-  active: AudioTrack | SubtitleTrack | null,
-): AndroidTrack {
-  return {
-    id: trackId(prefix, track, index),
-    lang: track.language || 'und',
-    label: track.label || track.name || '',
-    active: sameTrack(track, active),
-    supported: true,
-  };
-}
-
 function emitTracks(): void {
   if (!player || !hasMedia) return;
   audioTracks = player.availableAudioTracks;
@@ -155,8 +128,8 @@ function emitTracks(): void {
     type: 'player',
     event: 'tracks',
     load: loadId,
-    audio: audioTracks.map((track, index) => toTrack('a', track, index, audio)),
-    text: textTracks.map((track, index) => toTrack('t', track, index, text)),
+    audio: audioTracks.map((track, index) => toAndroidTrack('a', track, index, audio)),
+    text: textTracks.map((track, index) => toAndroidTrack('t', track, index, text)),
   });
 }
 
