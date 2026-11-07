@@ -63,9 +63,92 @@ export interface Tuning {
   heroFade: boolean;
   /**
    * Performance marks for a TV trace: key presses, row slides, rows filling
-   * in, hero changes and decoding ahead (performance.getEntriesByType('mark')).
+   * in, hero changes and decoding ahead (performance.getEntriesByType('mark')),
+   * and the stages from Play to the first picture (window.__bannertvPlay()).
    */
   marks: boolean;
+
+  // Launch. Each default is what shipped before the switch came, so one
+  // install can compare them. With `marks` on, the launch is marked too:
+  // read window.__bannertvBoot() from the web inspector.
+
+  /**
+   * When the launch trims the cache of addon answers to MAX_CACHE_ENTRIES:
+   * as the database opens, ahead of the launch's reads (`open`), or once the
+   * launch has settled, Home focused and the remote still (`later`). The
+   * trim every 50 writes is the same either way.
+   */
+  idbPrune: 'open' | 'later';
+  /**
+   * Writes to the cache of addon answers commit without waiting for the
+   * disk, so a refresh does not hold up the reads after it. Only that cache:
+   * profiles, progress and the account always wait. A power cut may lose
+   * the last answers written, which are fetched again.
+   */
+  idbRelaxed: boolean;
+  /**
+   * When the team and league data, with a sports addon installed, is loaded
+   * and its maps built, one long task: as soon as a sports catalog turns up
+   * at launch (`launch`), or once the launch has settled (`idle`), sooner if
+   * a sports screen or search opens or focus enters the Live sport row.
+   */
+  matcherAt: 'launch' | 'idle';
+
+  // Starting playback. Each default is what shipped before the switch.
+  /**
+   * How long focus rests on Watch or an episode before Details asks the
+   * addons for its streams. The phone's title page waits 300 ms, as nothing
+   * there moves focus.
+   */
+  prefetchRestMs: number;
+  /**
+   * Once one stream could play, how much longer slower addons get to offer
+   * a better one before auto-play chooses. Shorter starts sooner, but can
+   * choose another stream than the full wait would have.
+   */
+  settleAfterFirstMs: number;
+  /**
+   * The player's own stream and subtitles requests go ahead of every other
+   * request waiting for one of the six request slots, those already waiting
+   * included: Home's rows under the player, Details' extras, and lookups
+   * ahead for other episodes, which keep their order among themselves.
+   */
+  playFirst: boolean;
+  /**
+   * A stream auto-play chose that has not said how long it is (loadedmetadata)
+   * this long after it was opened gives way to the next one, as a link that
+   * failed would. 0: no such deadline, only the 30 s one for the first
+   * picture. Never a stream the viewer picked; a big file whose index sits at
+   * its end, on a slow debrid host, can rightly take over 12 s.
+   */
+  metadataTimeoutMs: number;
+
+  // Decoding ahead, second round. Each default is what shipped before it came.
+  /**
+   * How `decodeAhead` gets art ready. `decode` asks the browser to decode it,
+   * which it does at full size, leaving the upload to the press. `raster`
+   * draws it once at its tile's size in a 1 px box under the rail instead, so
+   * the browser decodes and uploads the very copy the tile will draw, wide art
+   * included, between presses. At most 10 are kept drawn there.
+   */
+  aheadMode: 'decode' | 'raster';
+  /**
+   * Which art `decode` mode leaves out as too big for its tile, whose
+   * full-size copy drawing it would not use. 1.5: art over 1.5 times its
+   * drawn width. 2: the browser's own rule, which draws from a half-size
+   * copy only when that copy still covers the drawn size both ways, and
+   * never for art cropped to fill its tile, so any other art is decoded at
+   * full size anyway and costs no more decoded ahead. Raster mode needs
+   * neither: drawing picks its copy itself.
+   */
+  aheadOversize: 1.5 | 2;
+  /**
+   * The poster grids of Discover, See all and Library get decoding ahead
+   * too, in either `aheadMode`: the row the next Down brings into view, and
+   * after an Up the row above too. Without it each move down the grid
+   * decodes a new row of posters in the frame that shows it.
+   */
+  gridAhead: boolean;
 }
 
 export const TUNING_KEY = 'bannertv.tuning';
@@ -86,9 +169,24 @@ export const TUNING_DEFAULTS: Readonly<Tuning> = {
   decodeAhead: true,
   heroFade: false,
   marks: false,
+  // Launch: what shipped before the switches.
+  idbPrune: 'open',
+  idbRelaxed: false,
+  matcherAt: 'launch',
+
+  // Starting playback.
+  prefetchRestMs: 1500,
+  settleAfterFirstMs: 2000,
+  playFirst: false,
+  metadataTimeoutMs: 0,
+
+  // Decoding ahead, second round.
+  aheadMode: 'decode',
+  aheadOversize: 1.5,
+  gridAhead: false,
 };
 
-function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+function oneOf<T extends string | number>(value: unknown, options: readonly T[], fallback: T): T {
   return options.indexOf(value as T) >= 0 ? (value as T) : fallback;
 }
 
@@ -126,6 +224,21 @@ export function parseTuning(raw: string | null): Tuning {
     decodeAhead: flag(stored.decodeAhead, d.decodeAhead),
     heroFade: flag(stored.heroFade, d.heroFade),
     marks: flag(stored.marks, d.marks),
+    // Launch.
+    idbPrune: oneOf(stored.idbPrune, ['open', 'later'], d.idbPrune),
+    idbRelaxed: flag(stored.idbRelaxed, d.idbRelaxed),
+    matcherAt: oneOf(stored.matcherAt, ['launch', 'idle'], d.matcherAt),
+
+    // Starting playback.
+    prefetchRestMs: count(stored.prefetchRestMs, 0, 10000, d.prefetchRestMs),
+    settleAfterFirstMs: count(stored.settleAfterFirstMs, 0, 10000, d.settleAfterFirstMs),
+    playFirst: flag(stored.playFirst, d.playFirst),
+    metadataTimeoutMs: count(stored.metadataTimeoutMs, 0, 30000, d.metadataTimeoutMs),
+
+    // Decoding ahead, second round.
+    aheadMode: oneOf(stored.aheadMode, ['decode', 'raster'], d.aheadMode),
+    aheadOversize: oneOf(stored.aheadOversize, [1.5, 2], d.aheadOversize),
+    gridAhead: flag(stored.gridAhead, d.gridAhead),
   };
 }
 

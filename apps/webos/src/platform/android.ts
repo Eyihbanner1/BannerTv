@@ -15,6 +15,16 @@ interface AndroidHost {
   exit(): void;
   openExternal(url: string): void;
   player(command: string): void;
+  /** The stream helper for the LG. Missing from apps built before it. */
+  helper?(command: string): void;
+  helperState?(): string;
+  /**
+   * Added to version 1 later, so missing from an older app and from the
+   * phone's stand-in: replaces BannerTV's cards on the system's Watch Next row.
+   */
+  watchNext?(cards: string): void;
+  /** Added later too: the link the app was opened with, as JSON, once; "" when none. */
+  takeLink?(): string;
 }
 
 /** The Android app, as it describes itself. */
@@ -47,6 +57,14 @@ export interface AndroidTrack {
   forced?: boolean;
 }
 
+/** One line group of the subtitles inside the file, as Android's player hands it over. */
+export interface AndroidCue {
+  /** With <b>, <i> and <u>, and &, < and > escaped; \n between lines. */
+  text: string;
+  /** Placed at the top of the picture. */
+  top?: boolean;
+}
+
 /**
  * News from Android's player. `load` is the id of the load command it is about, so news about a
  * stream the page has already moved on from can be told apart.
@@ -68,6 +86,11 @@ export type AndroidPlayerEvent = { load?: number } & (
   | { type: 'player'; event: 'time'; position: number; duration: number | null }
   | { type: 'player'; event: 'seeked'; position: number }
   | { type: 'player'; event: 'tracks'; audio: AndroidTrack[]; text: AndroidTrack[] }
+  /**
+   * What shows from `at` (seconds on the player's clock) for subtitle track `track`, until the
+   * next cues event: none when empty. Sent only after a text command with `cues: true`.
+   */
+  | { type: 'player'; event: 'cues'; track: string; at: number; cues: AndroidCue[] }
   | {
       type: 'player';
       event: 'error';
@@ -81,15 +104,26 @@ export type AndroidEvent =
   | { type: 'key'; key: string; repeat?: boolean }
   | { type: 'keyboard'; visible: boolean }
   | { type: 'relaunch' }
+  /** Opened from a link while running, such as a Watch Next card: takeLink() hands it over. */
+  | { type: 'open' }
   | AndroidPlayerEvent;
 
 export type AndroidPlayerCommand =
-  | { op: 'load'; id: number; url: string; startAt: number; mime: string }
+  | {
+      op: 'load';
+      id: number;
+      url: string;
+      startAt: number;
+      mime: string;
+      /** Request headers the addon asks to be sent with the link, for every request of the stream. */
+      headers?: Record<string, string>;
+    }
   | { op: 'play' }
   | { op: 'pause' }
   | { op: 'seek'; position: number }
   | { op: 'audio'; id: string }
-  | { op: 'text'; id: string | null }
+  /** cues: the page draws the file's own subtitles, so Android sends them rather than show them. */
+  | { op: 'text'; id: string | null; cues?: true }
   | { op: 'release' };
 
 declare global {
@@ -127,7 +161,10 @@ export function androidHostInfo(): AndroidHostInfo | null {
   return info;
 }
 
-/** What the device can decode and pass to the TV or receiver. Nothing is known off Android. */
+/**
+ * What the device can decode and pass to the TV or receiver. Nothing is known off Android.
+ * Android's player always sends an addon's request headers (the build ships inside the app).
+ */
 export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
   const bridge = host();
   if (!bridge) return null;
@@ -144,7 +181,41 @@ export function androidCapabilities(): Omit<TvCapabilities, 'webOS'> | null {
     av1: flag(facts.av1),
     dts: flag(facts.dts),
     truehd: flag(facts.truehd),
+    requestHeaders: true,
   };
+}
+
+/** The stream helper this device runs for a TV on the home network (apps/androidtv helper/). */
+export interface AndroidHelperState {
+  on: boolean;
+  /** The home-network address the TV types in; null while not on Wi-Fi or Ethernet. */
+  address?: string | null;
+  port?: number;
+  /** Six digits, shown on the phone and typed on the TV once. */
+  code?: string;
+  /** How many TVs have paired. */
+  paired: number;
+}
+
+/** The helper's state, or null off Android or in an app built before the helper. */
+export function androidHelperState(): AndroidHelperState | null {
+  const bridge = host();
+  if (!bridge || typeof bridge.helperState !== 'function') return null;
+  const read = bridge.helperState.bind(bridge);
+  const state = readJson<Partial<AndroidHelperState>>(read);
+  if (!state || typeof state.on !== 'boolean') return null;
+  return {
+    on: state.on,
+    address: typeof state.address === 'string' ? state.address : null,
+    port: typeof state.port === 'number' ? state.port : undefined,
+    code: typeof state.code === 'string' ? state.code : undefined,
+    paired: typeof state.paired === 'number' ? state.paired : 0,
+  };
+}
+
+/** Turns the stream helper on or off, or unpairs every TV. */
+export function sendHelperCommand(command: 'start' | 'stop' | 'forget'): void {
+  host()?.helper?.(command);
 }
 
 export function sendPlayerCommand(command: AndroidPlayerCommand): void {
@@ -154,6 +225,32 @@ export function sendPlayerCommand(command: AndroidPlayerCommand): void {
 /** Opens an https address in another app on the device, such as YouTube for a trailer. */
 export function openExternal(url: string): void {
   host()?.openExternal(url);
+}
+
+/**
+ * Publishes to the system's own "Continue watching" row (Watch Next), or
+ * null when this Android app cannot: an older build, or the phone's player.
+ * Android itself does nothing on a phone, a Fire TV or before Android 8.
+ * Each list replaces the last; an empty one empties the row.
+ */
+export function androidWatchNext(): ((cards: readonly object[]) => void) | null {
+  const bridge = host();
+  const watchNext = bridge?.watchNext;
+  if (!bridge || typeof watchNext !== 'function') return null;
+  return (cards) => watchNext.call(bridge, JSON.stringify({ cards }));
+}
+
+/**
+ * The link Android was opened with and holds for the page, read once (the
+ * next read gives nothing), or null when there is none. What it says is
+ * checked by whoever opens it: another app can send one.
+ */
+export function takeAndroidLink(): unknown {
+  const bridge = host();
+  const takeLink = bridge?.takeLink;
+  if (!bridge || typeof takeLink !== 'function') return null;
+  // "" when nothing waits, which is no JSON.
+  return readJson<unknown>(() => takeLink.call(bridge));
 }
 
 const playerListeners = new Set<(event: AndroidPlayerEvent) => void>();
@@ -210,6 +307,8 @@ function playerPaused(): boolean {
 export interface AndroidHooks {
   /** The app came back to the front, as webOSRelaunch does on the TV. */
   onRelaunch?: () => void;
+  /** The app was opened from a link while running; takeAndroidLink() has it. */
+  onOpen?: () => void;
 }
 
 /**
@@ -238,6 +337,9 @@ export function initAndroid(hooks: AndroidHooks = {}): void {
           return;
         case 'relaunch':
           hooks.onRelaunch?.();
+          return;
+        case 'open':
+          hooks.onOpen?.();
           return;
         case 'player':
           playerListeners.forEach((listener) => listener(event));

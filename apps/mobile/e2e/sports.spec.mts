@@ -59,3 +59,45 @@ test('Sports: the Live sport row, the Sports tab, a match page and the match pla
   await expect(page.getByText('Listed by Test Sports')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('Sports: following a team puts its matches first, on Sports and in the Live sport row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await page.clock.install({ time: SPORTS_NOW });
+  await mockAddons(page);
+  await seedSports(page);
+  await mockSports(page);
+  await page.route(/^http:\/\/localhost:8765\//, (route) => route.continue());
+  await page.goto('/');
+
+  // Home's Live sport row goes by competition until something is followed.
+  const liveCards = page.getByRole('button', { name: /^(Arsenal v Brighton|Celtic v Rangers),/ });
+  await expect(liveCards.first()).toHaveAccessibleName(/^Arsenal v Brighton,/);
+
+  await page
+    .getByLabel(/^Celtic v Rangers/)
+    .first()
+    .click();
+  await expect(page.getByText('Listed by Test Sports')).toBeVisible();
+  // Its row is BannerTV's guess from the teams, not a competition to follow.
+  await expect(page.getByRole('button', { name: /^Follow/ })).toHaveText([
+    'Follow Celtic',
+    'Follow Rangers',
+  ]);
+  // The web build has no notifications to schedule, so it offers no Remind me.
+  await expect(page.getByRole('button', { name: 'Remind me' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Follow Celtic' }).click();
+  await expect(page.getByRole('button', { name: 'Following Celtic' })).toBeVisible();
+
+  // Back on Home, the Live sport row starts with it.
+  await page.getByRole('button', { name: 'Back' }).first().click();
+  await expect(liveCards.first()).toHaveAccessibleName(/^Celtic v Rangers,/);
+
+  // On Sports, Following comes first, and the row Celtic v Rangers was in has gone.
+  await page.getByRole('tab', { name: 'Sports' }).click();
+  const rows = page.getByRole('heading', { name: /^(Following|EFL Cup|Other football)/ });
+  await expect(rows.first()).toHaveText('Following');
+  await expect(page.getByRole('heading', { name: 'Other football' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

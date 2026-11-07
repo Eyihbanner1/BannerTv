@@ -2,7 +2,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import type { ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { type TileShape, LANDSCAPE, POSTER, Tile } from './Tile';
-import { colors, radius, space, type } from './theme';
+import { colors, gutter, radius, space, type } from './theme';
 
 export interface RowItem {
   item: MetaPreview;
@@ -18,15 +18,19 @@ export function Row({
   items,
   shape,
   onPress,
+  onLongPress,
   onSeeAll,
   seeAllLabel,
   footer,
 }: {
   title: string;
-  tag?: string;
+  /** Muted words after the title, or a source's logo. */
+  tag?: ReactNode;
   items: readonly RowItem[] | null;
   shape: TileShape;
   onPress: (item: RowItem) => void;
+  /** A long press on a tile, for a row that offers more than opening it. */
+  onLongPress?: (item: RowItem) => void;
   onSeeAll?: () => void;
   seeAllLabel?: string;
   /** Shown instead of tiles: an error with Try again, for example. */
@@ -39,14 +43,16 @@ export function Row({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        {tag ? (
+        {typeof tag === 'string' && tag !== '' ? (
           <Text style={styles.tag} numberOfLines={1}>
             {tag}
           </Text>
+        ) : typeof tag === 'object' ? (
+          tag
         ) : null}
         <View style={styles.spacer} />
         {onSeeAll && seeAllLabel ? (
-          <Pressable onPress={onSeeAll} accessibilityRole="button" hitSlop={12}>
+          <Pressable onPress={onSeeAll} accessibilityRole="button" hitSlop={14}>
             <Text style={styles.seeAll}>{seeAllLabel}</Text>
           </Pressable>
         ) : null}
@@ -71,9 +77,11 @@ export function Row({
               {...(entry.note ? { note: entry.note } : {})}
               {...(entry.progress !== undefined ? { progress: entry.progress } : {})}
               onPress={() => onPress(entry)}
+              {...(onLongPress ? { onLongPress: () => onLongPress(entry) } : {})}
             />
           )}
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={Separator}
           initialNumToRender={4}
@@ -90,19 +98,19 @@ function Separator() {
 }
 
 const styles = StyleSheet.create({
-  row: { paddingTop: space.l, gap: space.s },
+  row: { paddingTop: 22, gap: 10 },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    paddingHorizontal: space.l,
+    paddingHorizontal: gutter,
     gap: space.s,
   },
   title: { ...type.heading, color: colors.text, flexShrink: 1 },
   tag: { ...type.small, color: colors.textSubtle, flexShrink: 1 },
   spacer: { flex: 1 },
-  seeAll: { ...type.label, color: colors.accent },
-  list: { paddingHorizontal: space.l },
-  separator: { width: space.m },
-  placeholders: { flexDirection: 'row', gap: space.m, paddingHorizontal: space.l },
+  seeAll: { ...type.label, color: colors.accent, paddingVertical: space.s },
+  list: { paddingHorizontal: gutter },
+  separator: { width: 10 },
+  placeholders: { flexDirection: 'row', gap: 10, paddingHorizontal: gutter },
   placeholder: { backgroundColor: colors.surface2, borderRadius: radius.m },
 });

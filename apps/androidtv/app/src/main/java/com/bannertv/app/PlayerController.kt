@@ -2,8 +2,12 @@ package com.bannertv.app
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
+import android.text.Spanned
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.OptIn
@@ -14,8 +18,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -39,12 +45,15 @@ import org.json.JSONObject
 class PlayerController(
     context: Context,
     private val view: PlayerView,
-    userAgent: String,
+    private val userAgent: String,
     private val emit: (JSONObject) -> Unit,
     private val onPlayingChanged: (Boolean) -> Unit,
 ) : Player.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private val player: ExoPlayer
+
+    /** Every request of the stream goes through this, so each load can set its own headers. */
+    private val http: DefaultHttpDataSource.Factory
 
     /** Something is loaded; commands other than load are ignored until then. */
     private var hasMedia = false
@@ -69,6 +78,18 @@ class PlayerController(
     private var firstError: PlaybackException? = null
     private var destroyed = false
 
+    /** The subtitle track the page chose last, by its id; null while subtitles are off. */
+    private var textId: String? = null
+
+    /**
+     * The page draws the subtitles inside the file itself, in the viewer's style: its text
+     * command said `cues: true`. A page built before that never says so, and Android draws them.
+     */
+    private var pageDrawsCues = false
+
+    /** Read for each cue group, to put its time on the page's clock. */
+    private val window = Timeline.Window()
+
     private val ticker: Runnable =
         object : Runnable {
             override fun run() {
@@ -78,7 +99,7 @@ class PlayerController(
         }
 
     init {
-        val http =
+        http =
             DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
                 .setUserAgent(userAgent)
@@ -144,7 +165,7 @@ class PlayerController(
             "pause" -> player.pause()
             "seek" -> seek(command)
             "audio" -> selectTrack(C.TRACK_TYPE_AUDIO, stringOrNull(command, "id"))
-            "text" -> selectTrack(C.TRACK_TYPE_TEXT, stringOrNull(command, "id"))
+            "text" -> selectText(command)
             "release" -> releaseMedia()
         }
     }
@@ -169,15 +190,23 @@ class PlayerController(
         if (url.isNullOrEmpty()) return
         val startAt = command.optDouble("startAt", 0.0)
         val type = Protocol.streamType(stringOrNull(command, "mime"))
+        val headers = Protocol.requestHeaders(readHeaders(command.optJSONObject("headers")))
 
         hasMedia = true
         // Events stop() causes are still about the stream before, so they keep its id.
         player.stop()
+        // An addon's Referer, Origin or User-Agent goes with every request of this stream (playlist,
+        // segments, keys), and none of the last stream's stays. ExoPlayer makes its requests after
+        // this, from the factory as it is now.
+        http.setUserAgent(Protocol.userAgent(headers) ?: userAgent)
+        http.setDefaultRequestProperties(headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) })
         loadId = command.optInt("id", 0)
         openedUrl = url
         openedStartAt = startAt
         typeSettled = type != null
         firstError = null
+        textId = null
+        view.subtitleView?.visibility = View.VISIBLE
         // Each title starts with ExoPlayer's own audio choice and no subtitles; the page re-selects.
         player.trackSelectionParameters =
             player.trackSelectionParameters
@@ -215,28 +244,39 @@ class PlayerController(
         player.seekTo((seconds.coerceAtLeast(0.0) * 1000).toLong())
     }
 
-    private fun selectTrack(trackType: Int, id: String?) {
+    private fun selectText(command: JSONObject) {
+        pageDrawsCues = command.optBoolean("cues", false)
+        // Android's own subtitles show unless the page draws them; onCues hides them per group.
+        if (!pageDrawsCues) view.subtitleView?.visibility = View.VISIBLE
+        val id = stringOrNull(command, "id")
+        if (selectTrack(C.TRACK_TYPE_TEXT, id)) textId = id
+    }
+
+    /** Whether the track was chosen: an id the player does not list changes nothing. */
+    private fun selectTrack(trackType: Int, id: String?): Boolean {
         val parameters = player.trackSelectionParameters.buildUpon()
         if (id == null) {
             // Only subtitles can be switched off; audio always keeps a track.
-            if (trackType != C.TRACK_TYPE_TEXT) return
+            if (trackType != C.TRACK_TYPE_TEXT) return false
             parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
         } else {
-            val (groupIndex, trackIndex) = Protocol.parseTrackId(id) ?: return
+            val (groupIndex, trackIndex) = Protocol.parseTrackId(id) ?: return false
             val groups = player.currentTracks.groups
-            if (groupIndex >= groups.size) return
+            if (groupIndex >= groups.size) return false
             val group = groups[groupIndex]
-            if (group.type != trackType || trackIndex >= group.length) return
+            if (group.type != trackType || trackIndex >= group.length) return false
             parameters
                 .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, trackIndex))
                 .setTrackTypeDisabled(trackType, false)
         }
         player.trackSelectionParameters = parameters.build()
+        return true
     }
 
     private fun releaseMedia() {
         hasMedia = false
         readyOnce = false
+        textId = null
         handler.removeCallbacks(ticker)
         player.stop()
         player.clearMediaItems()
@@ -318,6 +358,34 @@ class PlayerController(
         emit(playerEvent("tracks").put("audio", audio).put("text", text))
     }
 
+    /**
+     * The lines of the subtitles inside the file, for the page to draw in the viewer's style
+     * when it asked to. Every group is sent, an empty one too: that is how a line ends. A group
+     * with a picture in it (PGS, VobSub, DVB) is left to Android's own view, all of it.
+     */
+    override fun onCues(cueGroup: CueGroup) {
+        val track = textId
+        if (!hasMedia || !pageDrawsCues || track == null) return
+        val pictures = cueGroup.cues.any { it.bitmap != null }
+        // Android's view draws every group too; it only shows the ones the page cannot draw.
+        view.subtitleView?.visibility = if (pictures) View.VISIBLE else View.INVISIBLE
+        val cues = JSONArray()
+        if (!pictures) {
+            for (cue in cueGroup.cues) {
+                val text = cue.text ?: continue
+                val line = JSONObject().put("text", Cues.markup(text.toString(), styleRuns(text)))
+                if (Cues.atTop(cue.line, cue.lineType)) line.put("top", true)
+                cues.put(line)
+            }
+        }
+        emit(
+            playerEvent("cues")
+                .put("track", track)
+                .put("at", cueSeconds(cueGroup.presentationTimeUs))
+                .put("cues", cues),
+        )
+    }
+
     override fun onPlayerError(error: PlaybackException) {
         val code = error.errorCode
         if (PlayerErrors.recoversNatively(code)) {
@@ -345,6 +413,35 @@ class PlayerController(
                 .put("message", PlayerErrors.message(kind, httpStatus(reported)))
                 .put("detail", PlayerErrors.detail(reported.errorCodeName, reported.errorCode)),
         )
+    }
+
+    /** The bold, italic and underlined stretches of a cue's text, as Media3's parsers mark them. */
+    private fun styleRuns(text: CharSequence): List<Cues.Run> {
+        if (text !is Spanned) return emptyList()
+        val runs = ArrayList<Cues.Run>()
+        for (span in text.getSpans(0, text.length, StyleSpan::class.java)) {
+            val bold = (span.style and Typeface.BOLD) != 0
+            val italic = (span.style and Typeface.ITALIC) != 0
+            if (bold || italic) {
+                runs.add(Cues.Run(text.getSpanStart(span), text.getSpanEnd(span), bold, italic, false))
+            }
+        }
+        for (span in text.getSpans(0, text.length, UnderlineSpan::class.java)) {
+            runs.add(Cues.Run(text.getSpanStart(span), text.getSpanEnd(span), false, false, true))
+        }
+        return runs
+    }
+
+    /** A cue group's time in seconds on the page's clock, which is the window's. */
+    private fun cueSeconds(presentationTimeUs: Long): Double {
+        val timeline = player.currentTimeline
+        val windowStartUs =
+            if (timeline.isEmpty) {
+                0L
+            } else {
+                timeline.getWindow(player.currentMediaItemIndex, window).positionInFirstPeriodUs
+            }
+        return Cues.seconds(presentationTimeUs, windowStartUs, player.currentPosition)
     }
 
     private fun videoMime(tracks: Tracks): String? =
@@ -393,6 +490,18 @@ class PlayerController(
             cause = cause.cause
         }
         return null
+    }
+
+    /** The load command's headers object as a map; values that are not strings are dropped. */
+    private fun readHeaders(json: JSONObject?): Map<String, String?> {
+        if (json == null) return emptyMap()
+        val headers = HashMap<String, String?>()
+        val names = json.keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            headers[name] = json.opt(name) as? String
+        }
+        return headers
     }
 
     private fun stringOrNull(command: JSONObject, key: String): String? =

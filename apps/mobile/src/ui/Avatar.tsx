@@ -6,9 +6,12 @@ import { PROFILE_ART, type } from './theme';
 export function Avatar({
   profile,
   size,
+  round = false,
 }: {
   profile: Pick<Profile, 'name' | 'colour'>;
   size: number;
+  /** A circle, as on Home and in Settings, rather than the TV's rounded square. */
+  round?: boolean;
 }) {
   const [from, to] = PROFILE_ART[profile.colour % PROFILE_ART.length]!;
   return (
@@ -16,7 +19,10 @@ export function Avatar({
       colors={[from, to]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={[styles.circle, { width: size, height: size, borderRadius: size / 4 }]}
+      style={[
+        styles.circle,
+        { width: size, height: size, borderRadius: round ? size / 2 : size / 4 },
+      ]}
     >
       <Text style={[styles.letter, { fontSize: size * 0.45, lineHeight: size * 0.55 }]}>
         {profile.name.slice(0, 1).toUpperCase()}

@@ -1,4 +1,10 @@
-import type { InstalledAddon, Store } from '@bannertv/core';
+import {
+  type AddonCollection,
+  type InstalledAddon,
+  installIdOf,
+  type Store,
+  type SwitchesState,
+} from '@bannertv/core';
 import {
   type ManifestCatalog,
   type MetaPreview,
@@ -10,22 +16,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // What the app keeps, in memory.
 const saved = vi.hoisted(() => new Map<string, unknown>());
 
-vi.mock('./storage', () => ({
-  storage: {
-    kv: {
-      get: (key: string) => Promise.resolve(saved.get(key)),
-      set: (key: string, value: unknown) => {
-        saved.set(key, value);
-        return Promise.resolve();
-      },
+vi.mock('./storage', () => {
+  const kv = {
+    get: (key: string) => Promise.resolve(saved.get(key)),
+    set: (key: string, value: unknown) => {
+      saved.set(key, value);
+      return Promise.resolve();
     },
-  },
-}));
+  };
+  // One profile, Main, whose keys have no prefix (ADR 0004).
+  return { storage: { kv }, profileKv: kv };
+});
 
 vi.mock('./addons', async () => {
-  const { createStore } = await import('@bannertv/core');
+  const { createStore, switchedOnOnly } = await import('@bannertv/core');
+  const allAddons = createStore({ ready: false, addons: [] });
+  // The installs switched off, which a test changes as Addons would.
+  const addonSwitches = createStore<SwitchesState>({ ready: true, off: new Set() });
   return {
-    addonCollection: createStore({ ready: false, addons: [] }),
+    allAddons,
+    addonSwitches,
+    addonCollection: switchedOnOnly(allAddons as unknown as AddonCollection, {
+      ...addonSwitches,
+      load: () => Promise.resolve(),
+    }),
     addonClient: {},
   };
 });
@@ -69,7 +83,7 @@ const matches = ['Arsenal vs Chelsea', 'Celtic vs Rangers', 'Ajax vs PSV'].map((
 async function start(addons: InstalledAddon[]) {
   vi.resetModules();
   const sports = await import('./sports');
-  const collection = (await import('./addons')).addonCollection as unknown as Collection;
+  const collection = (await import('./addons')).allAddons as unknown as Collection;
   await sports.startSports();
   collection.set({ ready: true, addons });
   return { sports, collection };
@@ -161,6 +175,30 @@ describe('an addon set up again with other settings', () => {
     expect(saved.get('sports.settings')).toEqual({});
     expect(saved.get('sports.evidence')).toEqual([]);
     expect(saved.get('sports.kickoffs')).toEqual([]);
+  });
+});
+
+describe('an addon switched off', () => {
+  const addon = install('org.x.sports', 'https://x.example.com/manifest.json', [FOOTBALL, LIVE]);
+
+  it('leaves Sports, and keeps its Show in Sports and kick-offs for when it is back', async () => {
+    const { sports } = await start([addon]);
+    const switches = (await import('./addons')).addonSwitches as unknown as Store<SwitchesState>;
+    sports.setSportsSetting(addon, 'yes');
+    const at = Date.parse('2026-10-28T20:00:00Z');
+    sports.kickoffs.note(addon.manifest.id, 'x:0', { at, sure: true, source: 'released' });
+    await sports.kickoffs.flush();
+    expect(sports.sportsState.get().shown).toBe(true);
+
+    switches.set({ ready: true, off: new Set([installIdOf(addon)]) });
+    expect(sports.sportsState.get().shown).toBe(false);
+    expect(sports.sportsState.get().catalogs).toEqual([]);
+    expect(sports.sportsSetting(addon)).toBe('yes');
+    expect(saved.get('sports.settings')).toEqual({ 'org.x.sports': 'yes' });
+    expect(sports.kickoffs.get(addon.manifest.id, 'x:0')?.at).toBe(at);
+
+    switches.set({ ready: true, off: new Set() });
+    expect(sports.sportsState.get().shown).toBe(true);
   });
 });
 
@@ -446,5 +484,103 @@ describe('Show in Sports in the BannerTV account', () => {
     sports.sportsChoices.adopt([['__proto__', 'yes']], []);
     expect(sports.sportsSetting(odd)).toBe('yes');
     expect(sports.sportsSetting(addon)).toBe('auto');
+  });
+});
+
+describe('the team and league data', () => {
+  const addon = install('org.x.sports', 'https://x.example.com/manifest.json', [FOOTBALL, LIVE]);
+  const EMPTY_DATA = {
+    version: 1,
+    built: '2026-10-28',
+    countries: [],
+    competitions: [],
+    teams: [],
+    uefa: {},
+    calendars: {},
+  };
+  let scripts: Array<{ src: string; onload?: () => void; onerror?: () => void }>;
+
+  beforeEach(() => {
+    scripts = [];
+    vi.stubGlobal('document', {
+      createElement: () => ({ src: '', remove: () => undefined }),
+      head: { appendChild: (script: (typeof scripts)[number]) => scripts.push(script) },
+    });
+  });
+
+  /** The data script arriving, and the maps built from it. */
+  function arrive() {
+    (globalThis as Record<string, unknown>).__BANNERTV_SPORTS_DATA__ = EMPTY_DATA;
+    scripts[0]!.onload!();
+    vi.runOnlyPendingTimers();
+  }
+
+  it('is asked for as soon as a sports catalog turns up, and traced as it comes', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    const sports = await import('./sports');
+    const traced: string[] = [];
+    sports.traceSportsMatcher((name) => traced.push(name));
+    const collection = (await import('./addons')).allAddons as unknown as Collection;
+    // The mocked collection outlives each test's fresh copy of the module.
+    collection.set({ ready: false, addons: [] });
+    await sports.startSports();
+    expect(scripts).toEqual([]);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts.map((script) => script.src)).toEqual(['./data/sports-data.js']);
+    expect(traced).toEqual(['matcher:load']);
+
+    arrive();
+    expect(traced).toEqual(['matcher:load', 'matcher:script', 'matcher:start', 'matcher:end']);
+    expect(sports.sportsMatcher.get()?.built).toBe('2026-10-28');
+    expect('__BANNERTV_SPORTS_DATA__' in globalThis).toBe(false);
+  });
+
+  /** A fresh copy of the module, held back at launch or not, with the collection not read yet. */
+  async function launch(hold: boolean) {
+    vi.resetModules();
+    const sports = await import('./sports');
+    const collection = (await import('./addons')).allAddons as unknown as Collection;
+    collection.set({ ready: false, addons: [] });
+    if (hold) sports.holdSportsMatcher();
+    await sports.startSports();
+    return { sports, collection };
+  }
+
+  it('held back at launch, waits until something wants it, then loads once', async () => {
+    const { sports, collection } = await launch(true);
+    collection.set({ ready: true, addons: [addon] });
+    expect(sports.sportsState.get().shown).toBe(true);
+    expect(scripts).toEqual([]);
+    sports.wantSportsMatcher();
+    expect(scripts.map((script) => script.src)).toEqual(['./data/sports-data.js']);
+    sports.wantSportsMatcher();
+    collection.set({ ready: true, addons: [] });
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('wanted before any sports catalog, loads as soon as one turns up', async () => {
+    const { sports, collection } = await launch(true);
+    sports.wantSportsMatcher();
+    expect(scripts).toEqual([]);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('is wanted when Discover draws a sports catalog', async () => {
+    const { sports, collection } = await launch(true);
+    collection.set({ ready: true, addons: [addon] });
+    sports.prepareItems(addon, catalogOf(addon, 'football'), matches);
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('without a hold, is not asked again by wanting it after it failed', async () => {
+    const { sports, collection } = await launch(false);
+    collection.set({ ready: true, addons: [addon] });
+    expect(scripts).toHaveLength(1);
+    scripts[0]!.onerror!();
+    sports.wantSportsMatcher();
+    expect(scripts).toHaveLength(1);
   });
 });

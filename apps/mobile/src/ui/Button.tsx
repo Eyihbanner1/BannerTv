@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { Icon, type IconName } from './icons';
-import { colors, radius, space, type } from './theme';
+import { colors, space, touch, type } from './theme';
 
-type Kind = 'primary' | 'secondary' | 'quiet' | 'danger';
+/** `play` is the light fill the design keeps for Play and Resume; `primary` is the brand violet. */
+type Kind = 'play' | 'primary' | 'secondary' | 'quiet' | 'danger';
 
 export function Button({
   label,
@@ -24,7 +25,8 @@ export function Button({
   style?: ViewStyle;
   accessibilityLabel?: string;
 }) {
-  const textColour = kind === 'danger' ? colors.danger : colors.text;
+  const textColour =
+    kind === 'danger' ? colors.danger : kind === 'play' ? colors.onPlay : colors.text;
   return (
     <Pressable
       onPress={onPress}
@@ -34,17 +36,23 @@ export function Button({
       accessibilityState={{ disabled: disabled || busy, busy }}
       style={({ pressed }) => [
         styles.base,
+        kind === 'play' && styles.play,
         kind === 'primary' && styles.primary,
         kind === 'secondary' && styles.secondary,
         kind === 'quiet' && styles.quiet,
         kind === 'danger' && styles.secondary,
-        pressed && (kind === 'primary' ? styles.primaryPressed : styles.pressed),
+        pressed &&
+          (kind === 'primary'
+            ? styles.primaryPressed
+            : kind === 'play'
+              ? styles.playPressed
+              : styles.pressed),
         (disabled || busy) && styles.disabled,
         style,
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={colors.text} size="small" />
+        <ActivityIndicator color={textColour} size="small" />
       ) : icon ? (
         <Icon name={icon} size={20} color={textColour} />
       ) : null}
@@ -55,10 +63,11 @@ export function Button({
   );
 }
 
-/** A full-width row in a settings-style list. */
+/** A full-width row in a settings-style list: the title, a line under it, or a value on the right. */
 export function ListRow({
   title,
   detail,
+  value,
   onPress,
   icon,
   right,
@@ -66,6 +75,8 @@ export function ListRow({
 }: {
   title: string;
   detail?: string;
+  /** A short current value shown before the chevron, as "English ›". */
+  value?: string;
   onPress?: () => void;
   icon?: IconName;
   right?: ReactNode;
@@ -87,39 +98,47 @@ export function ListRow({
         <Text style={styles.rowTitle}>{title}</Text>
         {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
       </View>
-      {right ?? (onPress ? <Icon name="chevron" size={22} color={colors.textSubtle} /> : null)}
+      {value ? (
+        <Text style={styles.rowValue} numberOfLines={1}>
+          {value}
+        </Text>
+      ) : null}
+      {right ?? (onPress ? <Icon name="chevron" size={20} color={colors.textMuted} /> : null)}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 48,
+    minHeight: touch.min,
     paddingHorizontal: space.l,
-    borderRadius: radius.m,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.s,
   },
+  play: { backgroundColor: colors.playFill },
+  playPressed: { backgroundColor: colors.textSoft },
   primary: { backgroundColor: colors.action },
   primaryPressed: { backgroundColor: colors.actionPressed },
   secondary: { backgroundColor: colors.surface3 },
   quiet: { backgroundColor: 'transparent' },
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.45 },
-  label: { ...type.label, fontSize: 15 },
+  label: { ...type.label, fontSize: 16 },
   row: {
-    minHeight: 56,
+    minHeight: touch.row,
     paddingHorizontal: space.l,
     paddingVertical: space.m,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.m,
-    backgroundColor: colors.surface1,
+    backgroundColor: colors.surface2,
   },
-  rowPressed: { backgroundColor: colors.surface2 },
+  rowPressed: { backgroundColor: colors.raised },
   rowText: { flex: 1, gap: 2 },
-  rowTitle: { ...type.body, color: colors.text, fontWeight: '600' },
-  rowDetail: { ...type.small, color: colors.textMuted },
+  rowTitle: { ...type.body, color: colors.text },
+  rowDetail: { ...type.meta, color: colors.textMuted },
+  rowValue: { ...type.label, fontWeight: '500', color: colors.textMuted, flexShrink: 1 },
 });

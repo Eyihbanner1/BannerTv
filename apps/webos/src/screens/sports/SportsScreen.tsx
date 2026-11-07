@@ -1,5 +1,10 @@
 import { buildDay, dayStrip, eventState, type SportsDay, type SportsGroup } from '@bannertv/core';
-import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import {
+  doesFocusableExist,
+  FocusContext,
+  setFocus,
+  useFocusable,
+} from '@noriginmedia/norigin-spatial-navigation';
 import {
   memo,
   useCallback,
@@ -23,7 +28,13 @@ import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { fixtureText, groupTitle, stripLabel } from './fixture';
-import { useMinuteClock, useSportsFeed, useViewOptions, useWantSports } from './use-sports';
+import {
+  useMinuteClock,
+  useSportsFeed,
+  useSportsMatcher,
+  useViewOptions,
+  useWantSports,
+} from './use-sports';
 import styles from './SportsScreen.module.css';
 
 /** Focus resting this long on a day of the strip opens it; OK opens it at once. */
@@ -37,8 +48,26 @@ const DAYS_KEY = 'sports-days';
 const dayKey = (index: number) => `sports-day-${index}`;
 const rowKey = (group: SportsGroup) => `${ROW_PREFIX}${group.key}`;
 
-// Kept for the launch, so coming back to Sports finds the day it was on.
-const memory = { day: undefined as SportsDay | undefined };
+// Kept for the launch, so coming back to Sports finds the day it was on. The rows
+// as last drawn, for where a match opened from them is now.
+const memory = {
+  day: undefined as SportsDay | undefined,
+  groups: [] as readonly SportsGroup[],
+};
+
+/**
+ * Where Back from a match page puts focus: on the match, wherever it is now.
+ * Following or unfollowing on the page moves it into or out of the Following
+ * row, and the row it was opened from may have gone with it. A match no longer
+ * on the day falls back to the tile pressed, and then to the strip.
+ */
+function returnTile(eventKey: string, pressed: string): string | undefined {
+  for (const group of memory.groups) {
+    const index = group.events.findIndex((event) => event.key === eventKey);
+    if (index !== -1) return `${rowKey(group)}-tile-${index}`;
+  }
+  return doesFocusableExist(pressed) ? pressed : undefined;
+}
 
 interface DayStripProps {
   days: readonly SportsDay[];
@@ -116,9 +145,11 @@ const GroupRow = memo(function GroupRow({ group, near, view, onFocusRow }: Group
   const onItemPress = useCallback(
     (index: number) => {
       const event = group.events[index];
-      if (event) push({ name: 'event', event });
+      if (!event) return;
+      const pressed = `${key}-tile-${index}`;
+      push({ name: 'event', event }, () => returnTile(event.key, pressed));
     },
-    [group.events],
+    [group.events, key],
   );
   if (!near) return <FixtureRowPlaceholder title={title} />;
   return (
@@ -134,9 +165,10 @@ const GroupRow = memo(function GroupRow({ group, near, view, onFocusRow }: Group
 
 /**
  * Sport from the installed sports addons: a day strip (Live now, Today and
- * the next days), then a row per competition for that day, in priority
- * order, the country groups, Other, and Replays (docs/PLAN.md, Sports
- * addons, Screens). Tiles are text only.
+ * the next days), then Following, with the matches of the teams and
+ * competitions the profile follows, a row per competition for that day, in
+ * priority order, the country groups, Other, and Replays (docs/PLAN.md,
+ * Sports addons, Screens). Tiles are text only.
  */
 export function SportsScreen() {
   const { t } = useTranslation();
@@ -154,6 +186,7 @@ export function SportsScreen() {
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
 
   useWantSports(day);
+  useSportsMatcher();
   useEffect(() => {
     memory.day = day;
   }, [day]);
@@ -163,6 +196,10 @@ export function SportsScreen() {
   }, [sports.ready, sports.shown]);
 
   const groups = useMemo(() => buildDay(feed.events, day, view), [feed.events, day, view]);
+  // Before the screen places focus on being shown again, which asks returnTile.
+  useLayoutEffect(() => {
+    memory.groups = groups;
+  }, [groups]);
   const focusedIndex = Math.max(
     0,
     groups.findIndex((group) => rowKey(group) === focusedRow),

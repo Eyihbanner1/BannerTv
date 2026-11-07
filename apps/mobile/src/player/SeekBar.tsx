@@ -1,20 +1,28 @@
 import { formatTime } from '@tv/player/media';
-import { useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
-import { colors, space, type } from '../ui/theme';
+import { colors, space, touch, type } from '../ui/theme';
 
-/** The position bar: drag or tap to choose a place, and the player goes there on release. */
+/**
+ * The position bar: drag or tap to choose a place, and the player goes there on release. The
+ * time sits above it on the left ("4:21 / 7:44"), with room on the right for Next episode.
+ */
 export function SeekBar({
   position,
   duration,
   onSeek,
   onScrubbing,
+  onScrubAt,
+  right,
 }: {
   position: number;
   duration: number;
   onSeek: (seconds: number) => void;
   /** True while a finger is on the bar, so the controls stay up. */
   onScrubbing: (scrubbing: boolean) => void;
+  /** Where the finger is, in seconds, while it is on the bar (for the scene preview); then null. */
+  onScrubAt?: (seconds: number | null) => void;
+  right?: ReactNode;
 }) {
   const width = useRef(1);
   const [scrub, setScrub] = useState<number | null>(null);
@@ -23,10 +31,19 @@ export function SeekBar({
   const fraction = known ? Math.max(0, Math.min(1, shown / duration)) : 0;
 
   const at = (x: number) => Math.max(0, Math.min(1, x / width.current)) * duration;
+  const scrubTo = (seconds: number | null) => {
+    setScrub(seconds);
+    onScrubAt?.(seconds);
+  };
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.time}>{formatTime(shown)}</Text>
+      <View style={styles.above}>
+        <Text style={styles.time}>
+          {formatTime(shown)} / {known ? formatTime(duration) : '--:--'}
+        </Text>
+        {right}
+      </View>
       <View
         style={styles.touch}
         onLayout={(event: LayoutChangeEvent) => {
@@ -37,17 +54,17 @@ export function SeekBar({
         onResponderTerminationRequest={() => false}
         onResponderGrant={(event) => {
           onScrubbing(true);
-          setScrub(at(event.nativeEvent.locationX));
+          scrubTo(at(event.nativeEvent.locationX));
         }}
-        onResponderMove={(event) => setScrub(at(event.nativeEvent.locationX))}
+        onResponderMove={(event) => scrubTo(at(event.nativeEvent.locationX))}
         onResponderRelease={(event) => {
           const target = at(event.nativeEvent.locationX);
-          setScrub(null);
+          scrubTo(null);
           onScrubbing(false);
           onSeek(target);
         }}
         onResponderTerminate={() => {
-          setScrub(null);
+          scrubTo(null);
           onScrubbing(false);
         }}
         accessibilityRole="adjustable"
@@ -61,28 +78,36 @@ export function SeekBar({
           <View pointerEvents="none" style={[styles.thumb, { left: `${fraction * 100}%` }]} />
         ) : null}
       </View>
-      <Text style={styles.time}>{known ? formatTime(duration) : '--:--'}</Text>
     </View>
   );
 }
 
+const THUMB = 14;
+
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'center', gap: space.m },
-  time: { ...type.label, color: colors.text, minWidth: 56, textAlign: 'center' },
-  touch: { flex: 1, height: 36, justifyContent: 'center' },
+  wrap: { gap: space.xs },
+  above: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: touch.chip,
+  },
+  time: { ...type.meta, fontWeight: '600', color: colors.textSoft, fontVariant: ['tabular-nums'] },
+  // The bar is 4 high; the finger gets 44 around it.
+  touch: { height: 44, justifyContent: 'center' },
   track: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: colors.barTrack,
     overflow: 'hidden',
   },
-  fill: { height: 4, backgroundColor: colors.accent },
+  fill: { height: 4, backgroundColor: colors.text },
   thumb: {
     position: 'absolute',
-    width: 16,
-    height: 16,
-    marginLeft: -8,
-    borderRadius: 8,
-    backgroundColor: colors.prismTop,
+    width: THUMB,
+    height: THUMB,
+    marginLeft: -THUMB / 2,
+    borderRadius: THUMB / 2,
+    backgroundColor: colors.text,
   },
 });

@@ -2,6 +2,7 @@ import {
   buildEvents,
   type CatalogContext,
   type CatalogFilter,
+  createFollows,
   createKickoffMemory,
   createLane,
   createMatcher,
@@ -29,9 +30,10 @@ import {
 } from '@bannertv/core';
 import { catalogAccepts, type ManifestCatalog, type MetaPreview } from '@bannertv/protocol';
 import { SPORTS_IN_BUILD } from '../app/features';
-import { addonClient, addonCollection } from './addons';
+import { addonClient, addonCollection, allAddons } from './addons';
 import { SPORTS_DATA_SCRIPT } from './sports-data-script';
-import { storage } from './storage';
+import { profileKv, storage } from './storage';
+import { storeNow } from './sync-clock';
 
 /** Sports requests use at most this many of the app's 6 request slots (docs/PLAN.md, Fetching and paging). */
 const SPORTS_REQUESTS = 2;
@@ -86,6 +88,12 @@ export const sportsState = createStore<SportsState>({
 
 /** The team and league data, once loaded. Grouping works without it, by what addons say. */
 export const sportsMatcher = createStore<Matcher | undefined>(undefined);
+
+/**
+ * The teams and competitions the profile in use follows (SP2), kept with its
+ * other stores and synced in its settings document.
+ */
+export const sportsFollows = createFollows({ storage: profileKv, now: storeNow });
 
 /** "Show in Sports" by addon id, with no prototype: the ids are the addons' to choose. */
 type Settings = { [manifestId: string]: SportsSetting };
@@ -158,7 +166,7 @@ function detect(): void {
   }
   sportsState.set(next);
   if (!sameCatalogs(current.catalogs, catalogs)) sportsFeed.setCatalogs(catalogs);
-  if (catalogs.length > 0) loadMatcher();
+  if (catalogs.length > 0 && !matcherHeld) loadMatcher();
 }
 
 function readSettings(value: unknown): Settings {
@@ -207,16 +215,20 @@ export function startSports(): Promise<void> {
     evidence.forEach((value, key) => loaded.set(key, value));
     evidence = loaded;
     void kickoffs.load();
+    void sportsFollows.load();
     let before: readonly InstalledAddon[] = [];
     let wasReady = false;
+    // What is kept about an addon follows every install, so switching one off keeps its
+    // setting and kick-offs; what Sports shows follows only the addons switched on.
     const onCollection = () => {
-      const { addons, ready } = addonCollection.get();
+      const { addons, ready } = allAddons.get();
       if (wasReady) followCollection(before, addons);
       before = addons;
       wasReady = ready;
       detect();
     };
-    addonCollection.subscribe(onCollection);
+    allAddons.subscribe(onCollection);
+    addonCollection.subscribe(detect);
     onCollection();
   });
   return stored;
@@ -411,6 +423,39 @@ export function noteFirstPage(
 }
 
 let matcherRequested = false;
+let matcherHeld = false;
+let markMatcher: (name: string) => void = () => undefined;
+
+/**
+ * Keeps the team and league data back at launch, rather than loading it as
+ * soon as a sports catalog turns up, until wantSportsMatcher(). Building its
+ * maps is one long task; nothing needs them before then, as grouping goes by
+ * what addons say meanwhile. Call before startSports. The phone never does.
+ */
+export function holdSportsMatcher(): void {
+  if (!matcherRequested) matcherHeld = true;
+}
+
+/**
+ * Something needs the team and league data now: a sports screen or search,
+ * focus in the Live sport row, or the launch has settled. Ends a hold made
+ * at launch, and from then on the data loads as soon as a sports catalog
+ * turns up, as it does without a hold. Without a hold it does nothing.
+ */
+export function wantSportsMatcher(): void {
+  if (!matcherHeld) return;
+  matcherHeld = false;
+  if (sportsState.get().catalogs.length > 0) loadMatcher();
+}
+
+/**
+ * Tells `mark` as the team and league data is asked for (`matcher:load`),
+ * has arrived (`matcher:script`) and its maps start and finish being built
+ * (`matcher:start`, `matcher:end`), for a trace of the launch.
+ */
+export function traceSportsMatcher(mark: (name: string) => void): void {
+  markMatcher = mark;
+}
 
 function readData(value: unknown): SportsData | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -427,9 +472,11 @@ function readData(value: unknown): SportsData | undefined {
 function loadMatcher(): void {
   if (matcherRequested) return;
   matcherRequested = true;
+  markMatcher('matcher:load');
   const script = document.createElement('script');
   script.src = `./${SPORTS_DATA_SCRIPT.file}`;
   script.onload = () => {
+    markMatcher('matcher:script');
     const holder = window as unknown as Record<string, unknown>;
     const data = readData(holder[SPORTS_DATA_SCRIPT.global]);
     delete holder[SPORTS_DATA_SCRIPT.global];
@@ -438,11 +485,13 @@ function loadMatcher(): void {
     // Its maps take a moment to build on a TV: out of the key press that got here.
     window.setTimeout(() => {
       let matcher: Matcher | undefined;
+      markMatcher('matcher:start');
       try {
         matcher = createMatcher(data);
       } catch {
         return;
       }
+      markMatcher('matcher:end');
       sportsMatcher.set(matcher);
       sportsFeed.setMatcher(matcher);
     }, 0);
@@ -607,6 +656,8 @@ export function prepareItems(
   items: readonly MetaPreview[],
 ): () => void {
   const reading = SPORTS_IN_BUILD ? readingOf(addon, catalog) : undefined;
+  // Discover drawing a sports catalog: its matches open with the team names.
+  if (reading) wantSportsMatcher();
   let state = prepared.get(catalog);
   // Discover opening again, before its first page: what was read of the list stays.
   if (reading && items.length === 0) return () => undefined;

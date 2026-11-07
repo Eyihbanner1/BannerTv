@@ -84,6 +84,53 @@ describe('mergeItem', () => {
   });
 });
 
+describe('unwatching in watch', () => {
+  const document = 'p/main/watch';
+  const base = { metaId: 'tt1', type: 'movie', duration: 5400 };
+  const watchedLongAgo = { t: 1, v: { ...base, position: 5300, watched: true } };
+  const unwatched = { t: 5, v: { ...base, position: 0, watched: false, unmarkedAt: 5 } };
+
+  it('lets a newer unwatch beat a watched tick made before it', () => {
+    expect(mergeItem(document, 'tt1', watchedLongAgo, unwatched)).toEqual(unwatched);
+    expect(mergeItem(document, 'tt1', unwatched, watchedLongAgo)).toEqual(unwatched);
+  });
+
+  it('keeps a tick made after the unwatch, on a screen that had it', () => {
+    const again = { t: 9, v: { ...base, position: 5300, watched: true, unmarkedAt: 5 } };
+    expect(mergeItem(document, 'tt1', unwatched, again)).toEqual(again);
+    expect(mergeItem(document, 'tt1', watchedLongAgo, again)).toEqual(again);
+  });
+
+  it('keeps the unwatch under a later play from a screen that never had it', () => {
+    const elsewhere = { t: 9, v: { ...base, position: 700, watched: false } };
+    expect(mergeItem(document, 'tt1', unwatched, elsewhere)).toEqual({
+      t: 9,
+      v: { ...elsewhere.v, unmarkedAt: 5 },
+    });
+  });
+
+  it('comes out the same whatever order three screens sync in', () => {
+    // Watched long ago on one screen, unwatched on another, then partly played again there.
+    const partly = { t: 9, v: { ...base, position: 600, watched: false, unmarkedAt: 5 } };
+    const items = [watchedLongAgo, unwatched, partly];
+    const results = new Set<string>();
+    for (const [a, b, c] of [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ] as const) {
+      const first = mergeItem(document, 'tt1', items[a], items[b]);
+      results.add(JSON.stringify(mergeItem(document, 'tt1', first, items[c])));
+      const later = mergeItem(document, 'tt1', items[b], items[c]);
+      results.add(JSON.stringify(mergeItem(document, 'tt1', items[a], later)));
+    }
+    expect([...results]).toEqual([JSON.stringify(partly)]);
+  });
+});
+
 describe('changesItem', () => {
   it('is false once the current item carries or beats the one given', () => {
     expect(changesItem('addons', 'order', undefined, { t: 1, v: [] })).toBe(true);
@@ -145,17 +192,22 @@ describe('tidyItems', () => {
     expect((kept.v200 as { v: { card?: unknown } }).v.card).toBeUndefined();
   });
 
-  it('keeps 300 track choices and offsets, and 300 Home rows', () => {
+  it('keeps 300 track choices, offsets and drift fixes, and 300 Home rows', () => {
     const settings = newItems();
     for (let i = 0; i < 310; i++) {
       settings[`track/tt${i}`] = { t: NOW - i, v: { a: 'en' } };
       settings[`offset/k${i}`] = { t: NOW - i, v: 1.5 };
+      settings[`drift/k${i}`] = { t: NOW - i, v: 'auto' };
     }
     settings['home/order'] = { t: 1, v: Array.from({ length: 310 }, (_, i) => `row${i}`) };
     settings['pref/tmdb'] = { t: 1, v: true };
     const kept = tidyItems('p/main/settings', settings, NOW);
     expect(Object.keys(kept).filter((key) => key.indexOf('track/') === 0).length).toBe(300);
     expect(Object.keys(kept).filter((key) => key.indexOf('offset/') === 0).length).toBe(300);
+    expect(Object.keys(kept).filter((key) => key.indexOf('drift/') === 0).length).toBe(300);
+    // The newest are the ones kept.
+    expect(kept['drift/k0']).toEqual({ t: NOW, v: 'auto' });
+    expect(kept['drift/k300']).toBeUndefined();
     expect((kept['home/order'] as { v: string[] }).v.length).toBe(300);
     expect(kept['pref/tmdb']).toEqual({ t: 1, v: true });
   });
@@ -221,6 +273,8 @@ function randomItems(next: () => number, document: string): Items {
     let v: unknown;
     if (kind === 'watch') {
       v = { metaId: key, type: 'movie', position: pick * 10, duration: 100, watched: next() < 0.5 };
+      // Unwatched at one of a few times, so equal and different times both happen.
+      if (next() < 0.4) (v as { unmarkedAt?: number }).unmarkedAt = 1 + Math.floor(next() * 3);
     } else if (kind === 'addons' && key.indexOf('a/') === 0) {
       v = { u: `https://addon.example/${pick}/manifest.json`, o: pick === 0 };
     } else {

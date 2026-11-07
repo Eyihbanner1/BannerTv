@@ -57,15 +57,17 @@ function screen(
     crypto?: SyncCrypto;
     transport?: SyncTransport;
     addons?: ReturnType<typeof memoryPart>;
+    /** The profiles as an earlier launch left them, rather than Main and `others`. */
+    profiles?: ReturnType<typeof memoryPart>;
   } = {},
 ) {
   const storage = options.storage ?? memoryKeyValueStore();
   const skew = options.skew ?? 0;
   const shift = options.shift ?? { ms: 0 };
   const clock = createAccountClock({ now: () => w.now() + skew + shift.ms });
-  const profiles = memoryPart('profiles');
-  profiles.set('main', 1, 0);
-  for (const id of options.others ?? []) {
+  const profiles = options.profiles ?? memoryPart('profiles');
+  if (!options.profiles) profiles.set('main', 1, 0);
+  for (const id of options.profiles ? [] : (options.others ?? [])) {
     profiles.set(id, 1);
     profiles.set(`${id}/name`, id);
   }
@@ -79,6 +81,7 @@ function screen(
   const stores = storesOf(profileId);
   const parts = profileParts(profileId, stores);
   const joined = vi.fn();
+  const broughtBack = vi.fn();
   const engine = createSyncEngine({
     crypto: options.crypto ?? crypto,
     transport: options.transport ?? w.service.transport,
@@ -88,6 +91,7 @@ function screen(
     accountParts: [profiles.part, addons.part],
     profileParts: (id) => profileParts(id, storesOf(id)),
     onJoined: joined,
+    onBroughtBack: broughtBack,
   });
   return {
     storage,
@@ -98,6 +102,7 @@ function screen(
     storesOf,
     engine,
     joined,
+    broughtBack,
     start: () => engine.start({ id: profileId, parts }),
   };
 }
@@ -1134,6 +1139,142 @@ describe('a store behind the account', () => {
   });
 });
 
+describe('changes made while the engine was not running', () => {
+  const ONE = { u: 'https://one.example/manifest.json' };
+  const TWO = { u: 'https://two.example/manifest.json' };
+
+  /** A copy of a screen's addons that its engine does not watch, as after the TV went off. */
+  function offline(from: ReturnType<typeof memoryPart>) {
+    const copy = memoryPart('addons', ['a/', 'order']);
+    for (const key of from.keys()) copy.set(key, from.get(key)!.v, from.get(key)!.t);
+    return copy;
+  }
+
+  /** A has an account with addon `one`; B joined it and went off. */
+  async function joinedThenOff() {
+    const w = world();
+    const { a, code } = await created(w, async (s) => {
+      s.addons.set('a/one', ONE);
+      s.addons.set('order', ['one']);
+    });
+    const storage = memoryKeyValueStore();
+    const b = screen(w, { storage });
+    await b.start();
+    await b.engine.join(code, 'use');
+    await b.engine.syncNow();
+    b.engine.hide();
+    await settled(b.engine);
+    return { w, a, b, code, storage };
+  }
+
+  /** B launches again on `addons` and syncs. */
+  async function relaunch(
+    setUp: Awaited<ReturnType<typeof joinedThenOff>>,
+    addons: ReturnType<typeof memoryPart>,
+  ) {
+    const again = screen(setUp.w, { storage: setUp.storage, addons });
+    await again.start();
+    await setUp.w.time.advance(2000);
+    await settled(again.engine);
+    await setUp.a.engine.syncNow();
+    return again;
+  }
+
+  it('sends an addon installed meanwhile, and another screen gets it', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    addons.set('a/two', TWO);
+    addons.set('order', ['one', 'two']);
+    const again = await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/two']).toMatchObject({ v: TWO });
+    expect(setUp.a.addons.get('a/two')?.v).toEqual(TWO);
+    expect(setUp.a.addons.get('order')?.v).toEqual(['one', 'two']);
+    expect(again.engine.status().state).toBe('idle');
+  });
+
+  it('sends an addon set up again meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    const configured = { u: 'https://one.example/new-settings/manifest.json' };
+    addons.set('a/one', configured);
+    await relaunch(setUp, addons);
+    expect(setUp.a.addons.get('a/one')?.v).toEqual(configured);
+  });
+
+  it('sends an addon removed meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const addons = offline(setUp.b.addons);
+    addons.delete('a/one');
+    addons.set('order', []);
+    await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/one']).toMatchObject({ x: 1 });
+    expect(setUp.a.addons.get('a/one')).toBeUndefined();
+  });
+
+  it("takes the account's newer change rather than sending what the store had before it", async () => {
+    const setUp = await joinedThenOff();
+    const { w, a, b, code } = setUp;
+    b.engine.show();
+    await w.time.advance(1000);
+    a.addons.set('a/one', TWO);
+    await a.engine.flush();
+    // B pulls A's change but its store cannot take it before the TV goes off.
+    b.addons.failAdopts(true);
+    await b.engine.syncNow();
+    b.engine.hide();
+    await settled(b.engine);
+    expect(b.addons.get('a/one')?.v).toEqual(ONE);
+
+    const addons = offline(b.addons);
+    await relaunch(setUp, addons);
+    expect((await accountItems(w, code, 'addons'))!['a/one']).toMatchObject({ v: TWO });
+    expect(addons.get('a/one')?.v).toEqual(TWO);
+    expect(a.addons.get('a/one')?.v).toEqual(TWO);
+  });
+
+  it('sends a title added to My List meanwhile', async () => {
+    const setUp = await joinedThenOff();
+    const stores = setUp.b.storesOf('main');
+    await stores.library.load();
+    await setUp.w.time.advance(1000);
+    await stores.library.add(preview('later'));
+    await relaunch(setUp, offline(setUp.b.addons));
+    expect(Object.keys((await accountItems(setUp.w, setUp.code, 'p/main/list'))!)).toEqual([
+      'later',
+    ]);
+    expect(titles(setUp.a)).toEqual(['later']);
+  });
+
+  it('brings the addons back when the collection fell back to the defaults', async () => {
+    const setUp = await joinedThenOff();
+    // The saved collection could not be read at launch: only the defaults are there.
+    const addons = memoryPart('addons', ['a/', 'order'], { ownData: () => false });
+    addons.set('a/default', { u: 'https://default.example/manifest.json' });
+    addons.set('order', ['default']);
+    const pushes = setUp.w.service.count('/v1/push');
+    await relaunch(setUp, addons);
+    expect((await accountItems(setUp.w, setUp.code, 'addons'))!['a/one']).toMatchObject({
+      v: ONE,
+    });
+    expect(addons.get('a/one')?.v).toEqual(ONE);
+    expect(addons.get('order')?.v).toEqual(['one']);
+    expect(setUp.a.addons.get('a/one')?.v).toEqual(ONE);
+    // A's Sync now is the only push since: B sent nothing.
+    expect(setUp.w.service.count('/v1/push')).toBe(pushes);
+  });
+
+  it('sends nothing on a screen without an account', async () => {
+    const w = world();
+    const addons = memoryPart('addons', ['a/', 'order']);
+    addons.set('a/one', ONE);
+    const a = screen(w, { addons });
+    await a.start();
+    await w.time.advance(DAY);
+    expect(a.engine.status()).toEqual({ state: 'off' });
+    expect(w.service.requests).toEqual([]);
+  });
+});
+
 describe('a push the service or the size refuses', () => {
   it('keeps pulling past a document too big to send, and seals it again only once it changes', async () => {
     const w = world();
@@ -1628,5 +1769,263 @@ describe('setting up', () => {
     });
     await b.engine.confirmCreate();
     expect(b.engine.status().state).toBe('idle');
+  });
+});
+
+describe('bringing back what Use set aside', () => {
+  const SHARED = 'https://shared.example/manifest.json';
+  const MINE = 'https://mine.example/manifest.json';
+
+  /** The ids of the titles in the account's My List for `profile`, sorted. */
+  async function accountList(w: World, code: string, profile = 'main'): Promise<string[]> {
+    return Object.keys((await accountItems(w, code, `p/${profile}/list`)) ?? {}).sort();
+  }
+
+  /**
+   * Screen A makes the account; screen B, with Guest, titles, a video part
+   * way, Home arranged and addons of its own, joins it with Use. B's engine
+   * reads its storage through a store whose throwing away of the copy can be
+   * made to fail, as when the TV goes off just before.
+   */
+  async function usedAccount(w: World, others: string[] = ['guest']) {
+    const { a, code } = await created(w, async (s) => {
+      await s.stores.library.add(preview('a1'));
+      await s.stores.homeLayout.update(() => ({ order: ['x', 'y'], hidden: [] }));
+      s.addons.set('a/shared', { u: SHARED, m: { name: 'Shared' } });
+    });
+    const storage = memoryKeyValueStore();
+    const drops = { fail: false };
+    const engineStorage: KeyValueStore = {
+      ...storage,
+      delete(key) {
+        if (key === 'sync-aside' && drops.fail) return Promise.reject(new Error('IDB aborted'));
+        return storage.delete(key);
+      },
+    };
+    const b = screen(w, { storage, engineStorage, others });
+    await b.start();
+    await w.time.advance(1000);
+    await b.stores.library.add(preview('b1'));
+    b.stores.progress.record({
+      metaId: 'tt9',
+      type: 'movie',
+      videoId: 'tt9',
+      position: 600,
+      duration: 6000,
+    });
+    // Only rows the account orders too, so the account's order is all there is to it.
+    await b.stores.homeLayout.update(() => ({ order: ['x'], hidden: ['h'] }));
+    b.addons.set('a/mine', { u: MINE, m: { name: 'Mine' } });
+    // The account's addon, installed here under another name.
+    b.addons.set('a/again', { u: SHARED, m: { name: 'Shared' } });
+    for (const id of others) await b.storesOf(id).library.add(preview(`${id}-title`));
+    await b.engine.join(code, 'use');
+    return { a, b, code, storage, drops };
+  }
+
+  it("signed in, brings the copy's profiles, titles and addons into the account, the account's settings winning", async () => {
+    const w = world();
+    const { a, b, code, storage } = await usedAccount(w);
+    expect(titles(b)).toEqual(['a1']);
+    expect(b.profiles.keys()).toEqual(['main']);
+    expect(await b.engine.asideCopy()).toEqual({
+      profiles: [{ id: 'main' }, { id: 'guest', name: 'guest' }],
+      list: 2,
+      watching: 1,
+      addons: ['Mine', 'Shared'],
+      until: START + 1000 + 30 * DAY,
+    });
+
+    expect(await b.engine.bringBack()).toEqual({ profiles: true });
+    expect(b.profiles.keys()).toEqual(['guest', 'guest/name', 'main']);
+    // My List and Continue Watching keep their own times.
+    expect(titles(b)).toEqual(['b1', 'a1']);
+    expect(b.stores.progress.get('tt9')).toMatchObject({ position: 600 });
+    const guest = b.storesOf('guest');
+    await guest.library.load();
+    expect(guest.library.items().map((item) => item.id)).toEqual(['guest-title']);
+    // The account's row order wins; the hidden row it had none of comes back.
+    expect(b.stores.homeLayout.get()).toEqual({ order: ['x', 'y'], hidden: ['h'] });
+    // An addon the account has nowhere comes back; one at the account's address does not.
+    expect(b.addons.keys()).toEqual(['a/mine', 'a/shared']);
+    expect(await storage.get('sync-aside')).toBeUndefined();
+    expect(await b.engine.asideCopy()).toBeUndefined();
+
+    // Sent at once, and the other screen gets it all.
+    expect(await accountList(w, code)).toEqual(['a1', 'b1']);
+    expect(await accountList(w, code, 'guest')).toEqual(['guest-title']);
+    expect(Object.keys((await accountItems(w, code, 'profiles'))!).sort()).toEqual([
+      'guest',
+      'guest/name',
+      'main',
+    ]);
+    await a.engine.syncNow();
+    expect(titles(a)).toEqual(['b1', 'a1']);
+    expect(a.profiles.keys()).toEqual(['guest', 'guest/name', 'main']);
+    expect(a.addons.keys()).toEqual(['a/mine', 'a/shared']);
+    expect(a.stores.homeLayout.get()).toEqual({ order: ['x', 'y'], hidden: ['h'] });
+    await expect(b.engine.bringBack()).rejects.toMatchObject({ problem: 'none' });
+  });
+
+  it('refuses past six profiles and changes nothing', async () => {
+    const w = world();
+    const { a, b, code, storage } = await usedAccount(w, ['guest', 'g2', 'g3']);
+    // Meanwhile another screen adds three profiles to the account.
+    for (const id of ['p1', 'p2', 'p3']) {
+      a.profiles.set(id, 1);
+      a.profiles.set(`${id}/name`, id);
+    }
+    await a.engine.flush();
+    const copy = await storage.get('sync-aside');
+    const pushes = w.service.count('/v1/push');
+
+    await expect(b.engine.bringBack()).rejects.toMatchObject({ problem: 'profiles' });
+    expect(await storage.get('sync-aside')).toEqual(copy);
+    expect(titles(b)).toEqual(['a1']);
+    expect(b.addons.keys()).toEqual(['a/shared']);
+    expect(w.service.count('/v1/push')).toBe(pushes);
+    expect(await accountList(w, code)).toEqual(['a1']);
+    expect(b.engine.status().state).toBe('idle');
+
+    // With a profile deleted in the account, they fit.
+    a.profiles.delete('p3');
+    a.profiles.delete('p3/name');
+    await a.engine.flush();
+    await b.engine.bringBack();
+    expect(b.profiles.keys().filter((key) => key.indexOf('/') === -1)).toEqual([
+      'g2',
+      'g3',
+      'guest',
+      'main',
+      'p1',
+      'p2',
+    ]);
+  });
+
+  it('signed out after leaving, puts back what the screen had and sends nothing', async () => {
+    const w = world();
+    const { b, storage } = await usedAccount(w);
+    await b.engine.leave();
+    // Changed here since: what the screen has now wins.
+    await b.stores.homeLayout.update(() => ({ order: ['q'], hidden: [] }));
+    const requests = w.service.requests.length;
+
+    expect(await b.engine.bringBack()).toEqual({ profiles: true });
+    expect(w.service.requests.length).toBe(requests);
+    expect(b.engine.status().state).toBe('off');
+    expect(b.profiles.keys()).toEqual(['guest', 'guest/name', 'main']);
+    expect(titles(b)).toEqual(['b1', 'a1']);
+    expect(b.stores.progress.get('tt9')).toMatchObject({ position: 600 });
+    expect(b.stores.homeLayout.get()).toEqual({ order: ['q'], hidden: ['h'] });
+    expect(b.addons.keys()).toEqual(['a/mine', 'a/shared']);
+    expect(await storage.get('sync-aside')).toBeUndefined();
+  });
+
+  it('carries on at the next launch when interrupted, and changes nothing twice', async () => {
+    const w = world();
+    const { a, b, code, storage, drops } = await usedAccount(w);
+    // The TV goes off just as the copy would be thrown away.
+    drops.fail = true;
+    await b.engine.bringBack();
+    expect(await storage.get('sync-aside')).toMatchObject({ back: true });
+    expect(await accountList(w, code)).toEqual(['a1', 'b1']);
+    const pushes = w.service.count('/v1/push');
+
+    const again = screen(w, { storage, profiles: b.profiles, addons: b.addons });
+    await again.start();
+    await vi.waitFor(async () => expect(await storage.get('sync-aside')).toBeUndefined());
+    await settled(again.engine);
+    expect(titles(again)).toEqual(['b1', 'a1']);
+    expect(again.profiles.keys()).toEqual(['guest', 'guest/name', 'main']);
+    // Everything had come back already: nothing more to send, and no reason to start again.
+    expect(w.service.count('/v1/push')).toBe(pushes);
+    expect(again.broughtBack).not.toHaveBeenCalled();
+    await a.engine.syncNow();
+    expect(titles(a)).toEqual(['b1', 'a1']);
+  });
+
+  it('cut off while the addons store saves what came back, brings it into the store at the next launch rather than removing it', async () => {
+    const w = world();
+    const { b, code, storage } = await usedAccount(w);
+    // The addons store as it was saved before, and the TV going off while it saves again.
+    const saved = memoryPart('addons', ['a/', 'order']);
+    for (const key of b.addons.keys()) saved.set(key, b.addons.get(key)!.v);
+    const adopt = b.addons.part.adopt.bind(b.addons.part);
+    b.addons.part.adopt = (change) => {
+      void adopt(change);
+      return new Promise<void>(() => undefined);
+    };
+    void b.engine.bringBack();
+    await vi.waitFor(async () => expect(await storage.get('sync/pend/addons')).toBeTruthy());
+    expect(await storage.get('sync-aside')).toMatchObject({ back: true });
+
+    const again = screen(w, { storage, profiles: b.profiles, addons: saved });
+    await again.start();
+    await vi.waitFor(async () => expect(await storage.get('sync-aside')).toBeUndefined());
+    await again.engine.syncNow();
+    expect(again.addons.keys()).toEqual(['a/mine', 'a/shared']);
+    const account = (await accountItems(w, code, 'addons'))!;
+    expect(account['a/mine']).toMatchObject({ v: { u: MINE } });
+  });
+
+  it('carries on at the next launch when interrupted before anything changed, and says the profiles came back', async () => {
+    const w = world();
+    const { b, code, storage } = await usedAccount(w);
+    // Marked, and then the TV went off.
+    await storage.set('sync-aside', { ...(await storage.get('sync-aside'))!, back: true });
+
+    const again = screen(w, { storage, profiles: b.profiles, addons: b.addons });
+    await again.start();
+    await vi.waitFor(() => expect(again.broughtBack).toHaveBeenCalled());
+    expect(again.profiles.keys()).toEqual(['guest', 'guest/name', 'main']);
+    expect(titles(again)).toEqual(['b1', 'a1']);
+    expect(await storage.get('sync-aside')).toBeUndefined();
+    expect(await accountList(w, code, 'guest')).toEqual(['guest-title']);
+  });
+
+  it('keeps a copy being brought back past its 30 days, and refuses one that ran out', async () => {
+    const w = world();
+    const { b, storage } = await usedAccount(w);
+    const copy = (await storage.get('sync-aside')) as object;
+    await w.time.advance(31 * DAY);
+    expect(await b.engine.asideCopy()).toBeUndefined();
+    await expect(b.engine.bringBack()).rejects.toMatchObject({ problem: 'none' });
+    expect(await storage.get('sync-aside')).toBeUndefined();
+
+    // A launch carrying on one marked just before it ran out finishes it.
+    await storage.set('sync-aside', { ...copy, documents: {}, back: true });
+    const again = screen(w, { storage, profiles: b.profiles, addons: b.addons });
+    await again.start();
+    await vi.waitFor(async () => expect(await storage.get('sync-aside')).toBeUndefined());
+  });
+
+  it('runs one at a time with the other setup calls, and gives a second call the same answer', async () => {
+    const w = world();
+    const { b } = await usedAccount(w);
+    const back = b.engine.bringBack();
+    expect(b.engine.bringBack()).toBe(back);
+    // A leave asked meanwhile waits for it: the copy comes back into the account first.
+    const leave = b.engine.leave();
+    await back;
+    await leave;
+    expect(b.engine.status().state).toBe('off');
+    expect(titles(b)).toEqual(['b1', 'a1']);
+  });
+
+  it("changes nothing when the service can't be reached, and refuses while a join carries on", async () => {
+    const w = world(2);
+    const { b, storage } = await usedAccount(w);
+    const copy = await storage.get('sync-aside');
+    w.service.failNext({ path: '/v1/pull', network: true });
+    await expect(b.engine.bringBack()).rejects.toMatchObject({ problem: 'offline' });
+    expect(await storage.get('sync-aside')).toEqual(copy);
+    expect(titles(b)).toEqual(['a1']);
+
+    await b.engine.leave();
+    const { code: other } = await created(w);
+    w.service.failNext({ path: '/v1/pull', network: true });
+    await expect(b.engine.join(other, 'use')).rejects.toMatchObject({ problem: 'offline' });
+    await expect(b.engine.bringBack()).rejects.toMatchObject({ problem: 'signed-in' });
+    expect(await storage.get('sync-aside')).toEqual(copy);
   });
 });

@@ -2,14 +2,21 @@ import { activeProfileId } from '@tv/data/profiles';
 import { Tabs } from 'expo-router';
 import { useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useMatchReminders } from '../../data/match-reminders';
+import { useAddonLinks } from '../../nav/use-addon-links';
 import { useSportsShown } from '../../screens/sports/use-sports';
-import { Icon, type IconName } from '../../ui/icons';
-import { colors, font } from '../../ui/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OutlineIcon, type OutlineName } from '../../ui/icons';
+import { colors, font, touch } from '../../ui/theme';
 
+/** The bar's height above the phone's gesture area. */
+const BAR_HEIGHT = 64;
+
+// The bar hands the active tab's tint; the active glyph is the brighter focus violet.
 const icon =
-  (name: IconName) =>
-  ({ color }: { color: unknown }) => (
-    <Icon name={name} size={24} color={typeof color === 'string' ? color : colors.textSubtle} />
+  (name: OutlineName) =>
+  ({ focused }: { focused: boolean }) => (
+    <OutlineIcon name={name} size={24} color={focused ? colors.prismTop : colors.textMuted} />
   );
 
 /**
@@ -21,14 +28,26 @@ export default function TabsLayout() {
   // Read again when the profile is chosen at launch: kids have no Sports.
   useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
   const sportsShown = useSportsShown();
+  // Match reminders' notifications, and a tapped one opening its match.
+  useMatchReminders();
+  const insets = useSafeAreaInsets();
+  // An addon link from outside the app opens Addons over the tabs, for a grown-up.
+  useAddonLinks();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: colors.surface1, borderTopColor: colors.surface2 },
-        tabBarActiveTintColor: colors.prismTop,
-        tabBarInactiveTintColor: colors.textSubtle,
-        tabBarLabelStyle: { fontFamily: font, fontWeight: '600' },
+        tabBarStyle: {
+          backgroundColor: colors.sheet,
+          borderTopColor: colors.raised,
+          borderTopWidth: 1,
+          height: BAR_HEIGHT + insets.bottom,
+          paddingTop: 6,
+        },
+        tabBarItemStyle: { minHeight: touch.min },
+        tabBarActiveTintColor: colors.text,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: { fontFamily: font, fontWeight: '700', fontSize: 12 },
         sceneStyle: { backgroundColor: colors.bg },
       }}
     >
@@ -50,11 +69,11 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="library"
-        options={{ title: t('phone.tabs.library'), tabBarIcon: icon('list') }}
+        options={{ title: t('phone.tabs.library'), tabBarIcon: icon('bookmark') }}
       />
       <Tabs.Screen
         name="settings"
-        options={{ title: t('phone.tabs.settings'), tabBarIcon: icon('settings') }}
+        options={{ title: t('phone.tabs.settings'), tabBarIcon: icon('person') }}
       />
     </Tabs>
   );

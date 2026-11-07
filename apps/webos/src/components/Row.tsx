@@ -5,7 +5,15 @@ import {
   setFocus,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   recallFocus,
@@ -65,8 +73,8 @@ export function nextTile(
 interface RowProps {
   focusKey: string;
   title: string;
-  /** Muted words after the title, such as "Movies". */
-  tag?: string;
+  /** Muted words after the title, such as "Movies", or a source's logo. Keep an element's identity between draws. */
+  tag?: ReactNode;
   shape: TileShape;
   /** Null while loading: the row shows focusable placeholders. */
   items: readonly MetaPreview[] | null;
@@ -76,6 +84,8 @@ interface RowProps {
   /** Any focus in the row. The item is undefined on a placeholder, See all or Try again. */
   onItemFocus: (item: MetaPreview | undefined, row: HTMLElement) => void;
   onItemPress: (item: MetaPreview) => void;
+  /** OK held on a title: what else can be done with it. Without one, OK presses at once. */
+  onItemLongPress?: (item: MetaPreview, focusKey: string) => void;
   /** Adds a last tile that opens the whole catalog. */
   onSeeAll?: () => void;
   /** Per item, in the same order: a progress bar and a short note on the tile. */
@@ -105,6 +115,7 @@ export const Row = memo(function Row(props: RowProps) {
     onRetry,
     onItemFocus,
     onItemPress,
+    onItemLongPress,
     onSeeAll,
     extras,
     scrollKey,
@@ -148,9 +159,27 @@ export const Row = memo(function Row(props: RowProps) {
 
   // Tiles get handlers that never change, so moving along the row redraws the
   // two tiles whose focus changed, not every tile.
-  const latest = useRef({ items, scrolled, anchor, first, last, onItemFocus, onItemPress });
+  const latest = useRef({
+    items,
+    scrolled,
+    anchor,
+    first,
+    last,
+    onItemFocus,
+    onItemPress,
+    onItemLongPress,
+  });
   useLayoutEffect(() => {
-    latest.current = { items, scrolled, anchor, first, last, onItemFocus, onItemPress };
+    latest.current = {
+      items,
+      scrolled,
+      anchor,
+      first,
+      last,
+      onItemFocus,
+      onItemPress,
+      onItemLongPress,
+    };
   });
   const onTileFocus = useCallback(
     (index: number) => {
@@ -191,6 +220,15 @@ export const Row = memo(function Row(props: RowProps) {
     const item = list ? list[index] : undefined;
     if (item) press(item);
   }, []);
+  const hasLongPress = onItemLongPress !== undefined;
+  const onTileLongPress = useCallback(
+    (index: number) => {
+      const { items: list, onItemLongPress: longPress } = latest.current;
+      const item = list ? list[index] : undefined;
+      if (item && longPress) longPress(item, `${focusKey}-tile-${index}`);
+    },
+    [focusKey],
+  );
 
   useEffect(() => {
     if (focusAfterPaging.current === null) return;
@@ -236,6 +274,7 @@ export const Row = memo(function Row(props: RowProps) {
         extra={extras ? extras[index] : undefined}
         onTileFocus={onTileFocus}
         onTilePress={onTilePress}
+        onTileLongPress={hasLongPress ? onTileLongPress : undefined}
       />,
     );
   }

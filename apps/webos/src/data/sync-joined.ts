@@ -9,7 +9,9 @@ import type { SavedProfiles } from './profiles';
  * be missing after it (Chromium hands them over in batches), and a profile
  * Use took away would then stay, one the account never knew. So the join
  * keeps a copy in IndexedDB, and the next launch puts back what it did not
- * read before dropping the copy.
+ * read before dropping the copy. Bringing back what Use set aside starts
+ * the app again the same way, signed in or out, so the profiles it brought
+ * back are never lost with its copy gone.
  *
  * Only that launch: the copy carries a token the join also leaves in
  * window.name, which a reload keeps and closing the app does not. A copy
@@ -29,6 +31,8 @@ interface Joined extends SavedProfiles {
   token: string;
   /** The app already started again once to read it. */
   again?: true;
+  /** Left by a screen without an account, which bringing back what Use set aside does not sign in. */
+  signedOut?: true;
 }
 
 const text = (value: unknown): value is string | null =>
@@ -36,9 +40,12 @@ const text = (value: unknown): value is string | null =>
 
 function readJoined(value: unknown): Joined | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { profiles, held, token, again } = value as Record<string, unknown>;
+  const { profiles, held, token, again, signedOut } = value as Record<string, unknown>;
   if (!text(profiles) || !text(held) || typeof token !== 'string') return undefined;
-  return again === true ? { profiles, held, token, again } : { profiles, held, token };
+  const joined: Joined = { profiles, held, token };
+  if (again === true) joined.again = true;
+  if (signedOut === true) joined.signedOut = true;
+  return joined;
 }
 
 /** Leaves the token for the launch after this one. */
@@ -86,9 +93,14 @@ async function dropCopy(kv: KeyValueStore): Promise<void> {
 /**
  * Keeps what the join left in localStorage, just before the app starts
  * again. `saved` is read again after the copy is written, in case a sync
- * changed the profiles meanwhile.
+ * changed the profiles meanwhile. `signedIn` false is for a screen without
+ * an account, whose next launch puts the profiles back without signing in.
  */
-export async function markJoined(kv: KeyValueStore, saved: () => SavedProfiles): Promise<void> {
+export async function markJoined(
+  kv: KeyValueStore,
+  saved: () => SavedProfiles,
+  signedIn = true,
+): Promise<void> {
   const token = Date.now().toString(36) + secureRandom().toString(36).slice(2, 8);
   leaveToken(token);
   let kept: SavedProfiles | undefined;
@@ -96,7 +108,9 @@ export async function markJoined(kv: KeyValueStore, saved: () => SavedProfiles):
     const now = saved();
     if (kept && kept.profiles === now.profiles && kept.held === now.held) return;
     kept = now;
-    await kv.set(JOINED_KEY, { profiles: now.profiles, held: now.held, token });
+    const copy: Joined = { profiles: now.profiles, held: now.held, token };
+    if (!signedIn) copy.signedOut = true;
+    await kv.set(JOINED_KEY, copy);
   }
 }
 
@@ -106,7 +120,7 @@ export interface JoinedLaunch {
   launch: SavedProfiles;
   /** Writes the join's copy back: into the profiles at once (`now`), or into localStorage only. */
   restore(saved: SavedProfiles, now: boolean): void;
-  /** The join made this screen one of the account's: the flag it set. */
+  /** The join made this screen one of the account's: the flag it set. Not for a copy left signed out. */
   signIn(): void;
   reload(): void;
   /** Waits between reads of the copy tried again. */
@@ -137,16 +151,11 @@ export async function settleJoined(options: JoinedLaunch): Promise<boolean> {
     if (saved !== undefined && saved !== null) await dropCopy(kv);
     return true;
   }
-  options.signIn();
+  if (!joined.signedOut) options.signIn();
   const stale = joined.profiles !== launch.profiles || joined.held !== launch.held;
   if (stale && !joined.again) {
     try {
-      await kv.set(JOINED_KEY, {
-        profiles: joined.profiles,
-        held: joined.held,
-        token: joined.token,
-        again: true,
-      });
+      await kv.set(JOINED_KEY, { ...joined, again: true });
       leaveToken(joined.token);
       options.restore(joined, false);
       options.reload();

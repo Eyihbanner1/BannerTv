@@ -1,24 +1,114 @@
 name: CI
 
+# The repository is private on GitHub Free, so CI has 2,000 minutes a month. Every push runs one
+# quick check: format, lint, typecheck, unit tests and the TV build. The long jobs (the TV journeys
+# and .ipk, the Android TV APK and the phone APK) run only for a build someone will install, called
+# a full build here:
+# - every push to the combined test build (the test/all-together branch);
+# - once each time the full-ci label is added to a pull request (later pushes are quick again, so
+#   remove and add the label for another full build);
+# - a run started by hand from the Actions tab (Run workflow).
+# Pushes to main run the quick check only: what reaches main has passed a full build already.
+#
+# One file serves every branch: a job whose app a branch does not have skips itself.
+
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore: ['**/*.md', 'docs/**']
   push:
     branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
 
+# A newer push replaces a quick check still running on the same branch. A full build has a group of
+# its own, so a quick push does not cancel it, though a newer full build on the same branch does.
+# Adding any other label starts a run that does nothing, in a group of its own.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: >-
+    ci-${{ github.ref }}-${{
+    (github.event.action == 'labeled' && github.event.label.name != 'full-ci') && 'label'
+    || ((github.event_name == 'workflow_dispatch' || github.head_ref == 'test/all-together'
+    || github.event.label.name == 'full-ci') && 'full' || 'quick') }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  # The plan step lists a labelled pull request's files.
+  pull-requests: read
 
 jobs:
-  build:
-    name: Check, test and package
+  quick:
+    name: Quick check
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      androidtv: ${{ steps.plan.outputs.androidtv }}
+      phone: ${{ steps.plan.outputs.phone }}
+      tvnative: ${{ steps.plan.outputs.tvnative }}
     steps:
       - uses: actions/checkout@v5
+
+      # Whether this run is a full build, and which apps it builds. The phone APK needs a branch
+      # with the phone app, and on a labelled pull request a change to a file the phone build
+      # reads: the TV app's data layer (apps/webos/src) and version (webos-meta), the brand
+      # tokens, and the stream helper's Kotlin core it compiles from apps/androidtv/helper-core.
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          LABEL: ${{ github.event.label.name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          full=false
+          if [ "$EVENT" = workflow_dispatch ] || [ "$HEAD_REF" = test/all-together ] || [ "$LABEL" = full-ci ]; then
+            full=true
+          fi
+          androidtv=false
+          if [ "$full" = true ] && [ -d apps/androidtv ]; then
+            androidtv=true
+          fi
+          phone=false
+          if [ "$full" = true ] && [ -f apps/mobile/package.json ]; then
+            phone=true
+            if [ "$LABEL" = full-ci ]; then
+              if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename'); then
+                shared='^(apps/mobile/|apps/webos/(src|e2e|webos-meta)/|apps/androidtv/helper-core/|brand/tokens/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
+                if ! grep -Eq "$shared" <<< "$files"; then
+                  phone=false
+                fi
+              else
+                echo "::warning::Could not list the pull request's files, so the phone APK is built anyway."
+              fi
+            fi
+          fi
+          # The native TV app (apps/tv) builds from the LG app's source and version, the phone
+          # app's source, assets and Babel plugin, the Android TV banner, brand and the packages.
+          tvnative=false
+          if [ "$full" = true ] && [ -f apps/tv/package.json ]; then
+            tvnative=true
+            if [ "$LABEL" = full-ci ]; then
+              if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename'); then
+                tvshared='^(apps/tv/|apps/webos/(src/|webos-meta/|package\.json$)|apps/mobile/(src|assets|build)/|apps/androidtv/app/src/main/res/|brand/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
+                if ! grep -Eq "$tvshared" <<< "$files"; then
+                  tvnative=false
+                fi
+              else
+                echo "::warning::Could not list the pull request's files, so the native TV APK is built anyway."
+              fi
+            fi
+          fi
+          {
+            echo "full=$full"
+            echo "androidtv=$androidtv"
+            echo "phone=$phone"
+            echo "tvnative=$tvnative"
+          } >> "$GITHUB_OUTPUT"
+          echo "Full build: $full. Android TV APK: $androidtv. Phone APK: $phone. Native TV APK: $tvnative." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
 
@@ -51,14 +141,41 @@ jobs:
       - name: Check the build for webOS 5.0
         run: pnpm check:bundle
 
-      # The Android job ships this exact build inside its APK rather than building its own.
+      # The journeys run on this exact build, and the .ipk and the Android TV APK ship it.
       - name: Upload the web build
+        if: steps.plan.outputs.full == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: bannertv-web
           path: apps/webos/dist
           retention-days: 3
           if-no-files-found: error
+
+  tv:
+    name: TV journeys and .ipk
+    needs: quick
+    if: needs.quick.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    # The journeys alone take 17 to 22 minutes; a 20-minute limit cut eight runs short.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the web build
+        uses: actions/download-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
 
       - name: Install Playwright's Chromium
         run: pnpm --filter @bannertv/webos exec playwright install --with-deps chromium
@@ -74,6 +191,7 @@ jobs:
         with:
           name: bannertv-ipk
           path: out/*.ipk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Upload Playwright report
@@ -84,11 +202,14 @@ jobs:
           path: |
             apps/webos/playwright-report/
             apps/webos/test-results/
+          retention-days: 3
           if-no-files-found: ignore
 
   android:
-    name: Android APK
-    needs: build
+    name: Android TV APK
+    # Only once the journeys passed, so every APK here passed them. It ships the web build they ran on.
+    needs: [quick, tv]
+    if: needs.quick.outputs.androidtv == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -173,6 +294,7 @@ jobs:
         with:
           name: bannertv-apk
           path: apps/androidtv/out/*.apk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Upload Gradle reports
@@ -181,14 +303,18 @@ jobs:
         with:
           name: android-reports
           path: apps/androidtv/app/build/reports/
+          retention-days: 3
           if-no-files-found: ignore
 
   # The phone app (apps/mobile, ADR 0007): React Native through Expo. Its native Android project is
   # generated from app.config.ts on every run (`expo prebuild`) rather than kept in the repository.
+  # It waits for the quick check only: its own phone journeys gate the APK.
   mobile:
     name: Phone APK
+    needs: quick
+    if: needs.quick.outputs.phone == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
@@ -203,7 +329,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Touch journeys on the web build with the TV journeys' fake addons, before the long
-      # Android build: every screen opens and a film plays.
+      # Android build: every screen opens and a film plays. Here rather than in a job of their
+      # own, so no phone APK is uploaded unless they passed.
       - name: Phone journeys
         working-directory: apps/mobile
         run: |
@@ -217,6 +344,7 @@ jobs:
         with:
           name: phone-journeys
           path: apps/mobile/test-results/
+          retention-days: 3
           if-no-files-found: ignore
 
       - uses: actions/setup-java@v4
@@ -224,7 +352,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # On a pull request setup-gradle only reads the cache unless told otherwise. Saved here, the
+      # Gradle wrapper, dependencies and transforms come back on the pull request's next run. The
+      # C++ builds are not cached by Gradle at all.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Generate the Android project
         working-directory: apps/mobile
@@ -234,10 +367,15 @@ jobs:
 
       # A release build, so the JavaScript is inside the APK and it runs without a computer
       # attached. Signed with the debug key the Expo template ships, which is the same on every
-      # run, so each test APK installs over the last. Not for the store.
+      # run, so each test APK installs over the last. Not for the store. 64-bit Arm only, the
+      # phones it is tested on: each architecture's C++ is built in full, and 32-bit Arm cost about
+      # 7 to 10 minutes of each build. Add armeabi-v7a back to PHONE_ABIS (comma-separated) for a
+      # 32-bit-only phone.
       - name: Build
         working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        env:
+          PHONE_ABIS: arm64-v8a
+        run: ./gradlew --no-daemon assembleRelease "-PreactNativeArchitectures=$PHONE_ABIS"
 
       - name: Collect the APK
         run: |
@@ -251,6 +389,7 @@ jobs:
         with:
           name: bannertv-phone-apk
           path: apps/mobile/out/*.apk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Upload Gradle reports
@@ -259,12 +398,16 @@ jobs:
         with:
           name: phone-android-reports
           path: apps/mobile/android/app/build/reports/
+          retention-days: 3
           if-no-files-found: ignore
 
   # The native TV app (apps/tv, ADR 0008): React Native for TV through Expo. It installs with npm
   # outside the workspace, so the TV fork of React Native never meets the phone's.
   tv-native:
     name: TV APK (React Native)
+    # A full build only, and on a labelled pull request only when it changes what this app reads.
+    needs: quick
+    if: needs.quick.outputs.tvnative == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -341,3 +484,56 @@ jobs:
           name: tv-native-android-reports
           path: apps/tv/android/app/build/reports/
           if-no-files-found: ignore
+
+  # A throwaway app for the LG, outside the pnpm workspace:
+  # Home drawn by a WebGL renderer against HTML, with the same motion. See trials/motion-home.
+  motion-trial:
+    name: Motion trial .ipk
+    # A full build only, like the other long jobs.
+    needs: quick
+    if: needs.quick.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: trials/motion-home
+    steps:
+      - uses: actions/checkout@v5
+
+      # The root package.json names pnpm, which setup-node would otherwise try to cache.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      # Its direct dependencies are pinned exactly; it keeps no lockfile of its own.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the build for webOS 5.0
+        run: npm run check:bundle
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Walk every mode in Chromium
+        run: npm run e2e
+
+      - name: Package .ipk
+        run: npm run package
+
+      - name: Upload .ipk
+        uses: actions/upload-artifact@v4
+        with:
+          name: motion-trial-ipk
+          path: trials/motion-home/out/*.ipk
+          if-no-files-found: error

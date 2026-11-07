@@ -20,6 +20,7 @@ import { phonePlayer, pictureShown } from '@phone/player/phone-host';
 import { asVideoElement, PhoneVideoElement } from '@phone/player/video-element';
 import { Artwork } from '@phone/ui/Artwork';
 import { addonClient, addonNames } from '@tv/data/addons';
+import { addonsDidntAnswer } from '@tv/data/describe';
 import { playedVideos, progress } from '@tv/data/playback';
 import { preferences, setSubtitleStyle, type SubtitleStyle } from '@tv/data/preferences';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
@@ -183,7 +184,16 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
     return () => subscription.remove();
   }, [session]);
 
-  const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
+  const subtitles = useSubtitles(
+    titleType,
+    videoId,
+    metaId,
+    state.entry,
+    session,
+    state,
+    // The title's own running time judges a file's length until the video's is known.
+    parseRuntime(item?.runtime),
+  );
   useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
 
   // The language the viewer chose before, once per stream and engine.
@@ -387,7 +397,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
   };
   const streams = useMemo(
     () =>
-      listOrder(finderState.entries, prefs.allStreamsOrder, finder.runtimeSeconds()).slice(
+      listOrder(finderState.entries, prefs.allStreamsOrder, finder.orderOptions()).slice(
         0,
         MORE_STREAMS,
       ),
@@ -507,9 +517,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
                 : t(`player.problem.${state.error?.kind ?? 'other'}`)}
             </Text>
             {finderState.failed.length > 0 ? (
-              <Text style={styles.dialogText}>
-                {t('player.problem.addonsFailed', { count: finderState.failed.length })}
-              </Text>
+              <Text style={styles.dialogText}>{addonsDidntAnswer(t, finderState.failed)}</Text>
             ) : null}
             <View style={styles.dialogButtons}>
               {!nothing && session?.hasNext() ? (
@@ -622,7 +630,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
           <View style={styles.dialogButtons}>
             <Button
               kind="primary"
-              label={t('player.playNextIn', { seconds: count })}
+              label={t('player.nextEpisodeIn', { seconds: count })}
               onPress={() => playEpisode(next)}
               preferred={active}
             />

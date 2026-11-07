@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
 import { TextField } from '../../components/TextField';
-import { addonCollection } from '../../data/addons';
+import { allAddons } from '../../data/addons';
 import { describeInstallError } from '../../data/describe';
 import { PAIR_SERVICE } from '../../data/pairing';
 import styles from './AddonsScreen.module.css';
@@ -57,11 +57,11 @@ export function InstallDialog(props: InstallDialogProps) {
   const install = () => {
     if (busy.current) return;
     busy.current = true;
-    const before = addonCollection.get().addons.map((a) => a.transportUrl);
+    const before = allAddons.get().addons.map((a) => a.transportUrl);
     setWorking(true);
     setError(null);
     setReceived(false);
-    addonCollection.install(address).then(
+    allAddons.install(address).then(
       (addon) => {
         installed.current = focusAfterInstall(addon);
         const unused = dropped.current || pending.current !== null;

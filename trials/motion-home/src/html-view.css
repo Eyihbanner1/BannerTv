@@ -1,0 +1,149 @@
+/* Chromium 68 safe: no flex gap, inset, min() or the like (see tools/scripts/check-css.mjs). */
+@font-face {
+  font-family: 'Urbanist';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: block;
+  src: url('../../../apps/webos/src/styles/fonts/urbanist-latin.woff2') format('woff2');
+}
+
+.mt-home {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  font-family: 'Urbanist', sans-serif;
+  color: #f1edff;
+}
+
+.mt-hero-art {
+  position: absolute;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--mt-fade) ease-in-out;
+}
+
+.mt-hero-art.mt-shown {
+  opacity: 1;
+}
+
+.mt-hero-shade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 780px;
+  background:
+    linear-gradient(to bottom, rgba(11, 8, 21, 0) 54%, #0b0815 99%),
+    linear-gradient(to right, #0b0815 28%, rgba(11, 8, 21, 0.85) 42%, rgba(11, 8, 21, 0) 75%);
+}
+
+.mt-hero-title,
+.mt-hero-info,
+.mt-hero-text {
+  position: absolute;
+  left: 120px;
+  margin: 0;
+}
+
+.mt-hero-title {
+  top: 150px;
+  width: 900px;
+  font-size: 64px;
+  line-height: 76px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mt-hero-info {
+  top: 240px;
+  font-size: 28px;
+  color: #b9b0d6;
+}
+
+.mt-hero-text {
+  top: 296px;
+  width: 760px;
+  max-height: 120px;
+  overflow: hidden;
+  font-size: 28px;
+  line-height: 40px;
+  color: #b9b0d6;
+}
+
+.mt-clip {
+  position: absolute;
+  overflow: hidden;
+}
+
+.mt-track,
+.mt-tiles {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  transition: transform var(--mt-slide) ease-out;
+}
+
+.mt-tiles {
+  top: 52px;
+}
+
+.mt-row {
+  position: absolute;
+  left: 0;
+}
+
+.mt-row-title {
+  position: absolute;
+  margin: 0;
+  font-size: 32px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mt-tile {
+  position: absolute;
+  top: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #1b1430;
+  transition: transform var(--mt-zoom) ease-out;
+}
+
+.mt-tile.mt-focused {
+  transform: scale(1.08);
+}
+
+.mt-tile-art {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mt-tile-name {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
+  font-size: 26px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mt-ring {
+  position: absolute;
+  border: 5px solid #c9b5ff;
+  border-radius: 18px;
+  box-sizing: border-box;
+  transform: scale(1.08);
+  pointer-events: none;
+}

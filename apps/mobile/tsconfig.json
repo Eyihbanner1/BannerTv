@@ -9,7 +9,8 @@
     "resolveJsonModule": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@tv/*": ["../webos/src/*"]
+      "@tv/*": ["../webos/src/*"],
+      "@brand/*": ["../../brand/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],

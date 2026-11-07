@@ -44,6 +44,8 @@ interface TileProps {
   /** Stable handlers that take the tile's index, so moving along a row redraws two tiles, not all. */
   onTileFocus: (index: number) => void;
   onTilePress: (index: number) => void;
+  /** OK held on the tile, for a row that offers more than playing (see Pressable). */
+  onTileLongPress?: (index: number) => void;
 }
 
 /**
@@ -62,6 +64,7 @@ export const Tile = memo(function Tile({
   extra,
   onTileFocus,
   onTilePress,
+  onTileLongPress,
 }: TileProps) {
   const note = extra?.note;
   const progress = extra?.progress;
@@ -87,6 +90,7 @@ export const Tile = memo(function Tile({
       style={style}
       onFocus={() => onTileFocus(index)}
       onPress={() => onTilePress(index)}
+      onLongPress={onTileLongPress && item ? () => onTileLongPress(index) : undefined}
     >
       {item && shape === 'poster' && (
         <>

@@ -1,5 +1,18 @@
-import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { type ReactNode, useState } from 'react';
+import {
+  FocusContext,
+  type FocusableComponentLayout,
+  useFocusable,
+} from '@noriginmedia/norigin-spatial-navigation';
+import {
+  type CSSProperties,
+  memo,
+  type ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Pressable } from '../../components/Pressable';
 import { focusedKey } from '../../navigation/spatial';
 import { canSlide } from '../../platform/input-mode';
@@ -29,6 +42,71 @@ const ROW_GAP = 12;
 const OVERSCAN = 2;
 /** Rows kept above the focused one as the list slides. */
 const LEAD = 1;
+
+interface SheetRowItemProps {
+  index: number;
+  focusKey: string;
+  /** Read aloud. */
+  spoken: string;
+  className: string;
+  rowHeight: number;
+  label: string;
+  detail: string | undefined;
+  body: ReactNode;
+  progress: number | undefined;
+  /** Stable handlers that take the row's index, so a move redraws only what changed. */
+  onRowFocus: (index: number, layout: FocusableComponentLayout) => void;
+  onRowPress: (index: number) => void;
+}
+
+/** One row of a sheet: its label and detail, or its own body, and how far in the viewer got. */
+const SheetRowItem = memo(function SheetRowItem({
+  index,
+  focusKey,
+  spoken,
+  className,
+  rowHeight,
+  label,
+  detail,
+  body,
+  progress,
+  onRowFocus,
+  onRowPress,
+}: SheetRowItemProps) {
+  const style = useMemo<CSSProperties>(
+    () =>
+      rowHeight === ROW_HEIGHT
+        ? { top: index * rowHeight }
+        : { top: index * rowHeight, height: rowHeight - ROW_GAP },
+    [index, rowHeight],
+  );
+  return (
+    <Pressable
+      focusKey={focusKey}
+      label={spoken}
+      className={className}
+      focusedClassName={styles.focused}
+      style={style}
+      onPress={() => onRowPress(index)}
+      onFocus={(layout) => onRowFocus(index, layout)}
+    >
+      {body ?? (
+        <>
+          <span className={styles.label}>{label}</span>
+          {detail && <span className={styles.detail}>{detail}</span>}
+        </>
+      )}
+      {progress !== undefined && (
+        <span className={styles.progress}>
+          <span
+            className={styles.progressFill}
+            style={{ width: `${Math.round(Math.max(0, Math.min(1, progress)) * 100)}%` }}
+          />
+        </span>
+      )}
+    </Pressable>
+  );
+});
 
 /**
  * One column of rows in a player sheet. Only the rows near the
@@ -107,14 +185,39 @@ export function SheetList({
     indexes.push(preferredIndex);
   }
 
+  // Rows get handlers that never change, so a move redraws the rows whose
+  // focus changed and the one that slid into view, not every one drawn.
+  const latest = useRef({ rows, lastAnchor, top });
+  useLayoutEffect(() => {
+    latest.current = { rows, lastAnchor, top };
+  });
+  const onRowFocus = useCallback(
+    (index: number, layout: FocusableComponentLayout) => {
+      const { rows: list, lastAnchor: end, top: shown } = latest.current;
+      const row = list[index];
+      if (!row) return;
+      if (canSlide()) {
+        setPlace({ anchor: Math.max(0, Math.min(end, index - LEAD)), focused: row.focusKey });
+      }
+      // Only the row the pointer is on: focus put on a row elsewhere moves nothing.
+      else if (layout.node.matches(':hover')) {
+        setPlace({ anchor: shown, focused: row.focusKey, pointedAt: index });
+      }
+      row.onFocus?.();
+    },
+    [setPlace],
+  );
+  const onRowPress = useCallback((index: number) => latest.current.rows[index]?.onPress(), []);
+
   const drawn = [];
   for (const index of indexes) {
     const row = rows[index]!;
     drawn.push(
-      <Pressable
+      <SheetRowItem
         key={row.focusKey}
+        index={index}
         focusKey={row.focusKey}
-        label={row.spoken ?? (row.detail ? `${row.label}, ${row.detail}` : row.label)}
+        spoken={row.spoken ?? (row.detail ? `${row.label}, ${row.detail}` : row.label)}
         className={[
           styles.row,
           row.body !== undefined && styles.tall,
@@ -123,37 +226,14 @@ export function SheetList({
         ]
           .filter(Boolean)
           .join(' ')}
-        focusedClassName={styles.focused}
-        style={
-          rowHeight === ROW_HEIGHT
-            ? { top: index * rowHeight }
-            : { top: index * rowHeight, height: rowHeight - ROW_GAP }
-        }
-        onPress={row.onPress}
-        onFocus={(layout) => {
-          if (canSlide()) setPlace({ anchor: anchorFor(index), focused: row.focusKey });
-          // Only the row the pointer is on: focus put on a row elsewhere moves nothing.
-          else if (layout.node.matches(':hover')) {
-            setPlace({ anchor: top, focused: row.focusKey, pointedAt: index });
-          }
-          row.onFocus?.();
-        }}
-      >
-        {row.body ?? (
-          <>
-            <span className={styles.label}>{row.label}</span>
-            {row.detail && <span className={styles.detail}>{row.detail}</span>}
-          </>
-        )}
-        {row.progress !== undefined && (
-          <span className={styles.progress}>
-            <span
-              className={styles.progressFill}
-              style={{ width: `${Math.round(Math.max(0, Math.min(1, row.progress)) * 100)}%` }}
-            />
-          </span>
-        )}
-      </Pressable>,
+        rowHeight={rowHeight}
+        label={row.label}
+        detail={row.detail}
+        body={row.body}
+        progress={row.progress}
+        onRowFocus={onRowFocus}
+        onRowPress={onRowPress}
+      />,
     );
   }
 

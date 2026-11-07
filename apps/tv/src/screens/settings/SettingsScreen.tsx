@@ -1,6 +1,6 @@
 import { MAIN_PROFILE_ID } from '@bannertv/core';
 import { statusLine } from '@phone/data/account-text';
-import { addonCollection } from '@tv/data/addons';
+import { allAddons } from '@tv/data/addons';
 import {
   preferences,
   setPreference,
@@ -198,7 +198,8 @@ function AccountSection() {
 
 function AddonsSection() {
   const { t } = useTranslation();
-  const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  // Every install, those switched off too, as the LG and phone Addons screens list them.
+  const collection = useSyncExternalStore(allAddons.subscribe, allAddons.get);
   return (
     <>
       <SettingNote>{t('tv.settings.addonCount', { count: collection.addons.length })}</SettingNote>

@@ -1,6 +1,9 @@
 import {
+  cardNext,
+  caughtUpSeries,
   CONTINUE_LIMIT,
   continueItem,
+  isUnmarked,
   type PlayedVideo,
   playedCard,
   type ProgressEntry,
@@ -18,6 +21,10 @@ const settledListeners = new Set<() => void>();
 let lastPass = '';
 // A card saved during a pass makes the pass run again once it ends, not inside itself.
 let filling = false;
+/** A series the viewer is caught up on is looked at again this often, for a new episode. */
+const RECHECK_MS = 24 * 60 * 60 * 1000;
+// When each caught-up series was last looked at, this session.
+const rechecked = new Map<string, number>();
 
 /**
  * Progress saved before Continue Watching existed has no card with the
@@ -26,16 +33,23 @@ let filling = false;
  * such title the row could show, and saves a card when it answers. It walks
  * history as far as the row does: only titles that can take a place count
  * towards the row's limit.
+ *
+ * It also looks again, once a day, at the series the viewer is caught up on
+ * (caughtUpSeries): when the addon now lists an episode after the last one
+ * watched, the card learns of it, and the series comes back to the row once
+ * that episode airs. The meta is the cached one the calendar and Details read.
  */
 export function fillPlayedCards(): void {
   if (filling) return;
   filling = true;
   try {
     for (;;) {
-      const pass = `${progress.version()}:${playedVideos.version()}`;
+      const day = Math.floor(Date.now() / RECHECK_MS);
+      const pass = `${progress.version()}:${playedVideos.version()}:${day}`;
       if (pass === lastPass) return;
       lastPass = pass;
       walk();
+      recheckCaughtUp();
     }
   } finally {
     filling = false;
@@ -68,6 +82,8 @@ function walk(): void {
     if (asked.has(entry.metaId)) return;
     asked.add(entry.metaId);
     waiting.add(entry.metaId);
+    // The card made from this answer knows what comes next as of now: no second look today.
+    rechecked.set(entry.metaId, Date.now());
     const query = addonClient.meta(entry.type, entry.metaId);
     const save = (meta: MetaDetail | undefined) => {
       // An error with nothing cached: the title stays as it is this session.
@@ -97,6 +113,30 @@ function walk(): void {
   });
 }
 
+function recheckCaughtUp(): void {
+  const now = Date.now();
+  for (const { entry, card } of caughtUpSeries(progress, playedVideos.get)) {
+    const last = rechecked.get(entry.metaId);
+    if (last !== undefined && now - last < RECHECK_MS) continue;
+    rechecked.set(entry.metaId, now);
+    const query = addonClient.meta(entry.type, entry.metaId);
+    const done = () => {
+      const state = query.get();
+      if (state.status === 'idle' || state.status === 'loading') return;
+      if (state.stale && !state.error) return;
+      unsubscribe();
+      const next = state.data && cardNext(state.data, entry.videoId);
+      // Nothing new yet, or the player saved the card meanwhile and knows better.
+      if (!next || playedVideos.get(entry.videoId) !== card) return;
+      // record() gives it a new time and keeps a filled card filled only when told.
+      playedVideos.record({ ...card, next }, { filled: card.filled === true });
+    };
+    const unsubscribe = query.subscribe(done);
+    query.load();
+    done();
+  }
+}
+
 /**
  * Walks history as far as the row reaches, handing on each title the row
  * could show that has no usable card. Only titles that can take a place count
@@ -110,14 +150,16 @@ function eachWithoutCard(
   let places = 0;
   for (const entry of progress.recent()) {
     if (places >= CONTINUE_LIMIT) break;
-    if (seen.has(entry.metaId)) continue;
+    // Marked not watched: the row passes over it, as continueWatching does.
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
     // Kept only to resume, as a sports replay is: never on the row, so no addon is asked
     // for its page. A fan-out would ask addons that never listed it.
     if (entry.continueRow === false) continue;
     // A film with nothing left to resume is never on the row, so needs no card;
-    // nor is a video of unknown length, such as a live broadcast.
-    if (entry.duration <= 0) continue;
+    // nor is a video of unknown length, such as a live broadcast, unless it was
+    // marked watched: an episode marked so offers the next one.
+    if (entry.duration <= 0 && !entry.watched) continue;
     if (entry.type === 'movie' && progress.resumeAt(entry.videoId) === undefined) continue;
     const card = playedVideos.get(entry.videoId);
     if (card && (card.type === 'movie' || card.episode !== undefined)) {
