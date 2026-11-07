@@ -4,7 +4,12 @@ import {
   installIdOf,
   type SportsSetting,
 } from '@bannertv/core';
-import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import {
+  FocusContext,
+  getCurrentFocusKey,
+  setFocus,
+  useFocusable,
+} from '@noriginmedia/norigin-spatial-navigation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -38,6 +43,7 @@ const RESOURCE_LABELS: ReadonlyArray<readonly [resource: string, key: string]> =
 
 const upKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-up`;
 const removeKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-remove`;
+const checkKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-check`;
 const settingsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-settings`;
 const sportsKey = (addon: InstalledAddon) => `${addonFocusId(addon.transportUrl)}-sports`;
 const SPORTS_SETTINGS: readonly SportsSetting[] = ['auto', 'yes', 'no'];
@@ -171,7 +177,7 @@ function AddonCard(props: AddonCardProps) {
         )}
         {answering !== undefined && (
           <Button
-            focusKey={`${id}-check`}
+            focusKey={checkKey(addon)}
             label={t('addonState.checkNowLabel', { name: manifest.name })}
             onFocus={onFocus}
             onPress={onCheck}
@@ -240,7 +246,10 @@ export function AddonsScreen() {
 
   /**
    * Asks the addon for its manifest once and says how it went. A good answer
-   * takes Check now away, so focus moves to the button in its place first.
+   * takes Check now away, so focus moves to the button in its place first,
+   * but only while focus is still on Check now: the answer can take up to the
+   * manifest's time-out, and by then the person may have moved to another
+   * button or left Addons, and focus must stay where they put it.
    */
   const check = (addon: InstalledAddon) => {
     const installId = installIdOf(addon);
@@ -251,7 +260,7 @@ export function AddonsScreen() {
       const state = addonHealth.get().get(installId)?.state;
       const name = addon.manifest.name;
       if (state === 'fine') {
-        void setFocus(removeKey(addon));
+        if (getCurrentFocusKey() === checkKey(addon)) void setFocus(removeKey(addon));
         setNotice(t('addonState.answering', { name }));
       } else {
         setNotice(

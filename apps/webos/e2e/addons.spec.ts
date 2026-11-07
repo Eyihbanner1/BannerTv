@@ -277,6 +277,48 @@ test('an addon that stops answering says since when, and Check now asks it again
   await expectFocusLabel(page, 'Remove Test Streams');
 });
 
+test('an answer to Check now leaves focus where the person moved it while waiting', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await mockPlayback(page);
+  await seedStreamAddon(page);
+  // Test Streams answers nothing at first; once back, its answer waits until the test lets it go.
+  let down = true;
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = () => resolve();
+  });
+  await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, async (route) => {
+    if (down) return route.abort();
+    await held;
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'addons');
+  await expectFocusLabel(page, 'Move Cinemeta up');
+  const line = page.getByRole('status').filter({ hasText: /^Not answering since / });
+  await expect(line).toHaveCount(1, { timeout: 15000 });
+
+  await downToSecond(page, 'Test Streams');
+  await walkTo(page, 'ArrowRight', 'Check Test Streams now');
+  down = false;
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Checking…' })).toHaveCount(1);
+  await settle(page);
+  await page.keyboard.press('ArrowLeft');
+  await settle(page);
+  const moved = await page.locator('[data-focused="true"]').getAttribute('aria-label');
+  expect(moved).not.toBe('Check Test Streams now');
+
+  release();
+  await expect(page.getByText('Test Streams is answering.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Check .* now$/ })).toHaveCount(0);
+  await settle(page);
+  await expectFocusLabel(page, moved!);
+});
+
 test('the player names the addon that did not answer', async ({ page }) => {
   await mockAddons(page);
   await mockPlayback(page);
