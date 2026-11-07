@@ -3,6 +3,7 @@ import { parseManifest } from '@bannertv/protocol';
 import {
   catalogsFromManyAddons,
   discoverSelection,
+  genreSource,
   moreLikeSource,
   resolveDiscover,
 } from './browse';
@@ -114,7 +115,9 @@ describe('moreLikeSource', () => {
     name: id,
     extra: [{ name: 'genre', options, isRequired }],
   });
-  const other = addon('other', ['yt'], [byGenre('all', [])]);
+  const other = addon('other', ['yt'], [byGenre('all', ['Jazz', 'Drama'])]);
+  // A genre of free text, which Discover cannot offer.
+  const freeText = addon('free', ['ft'], [byGenre('any', [])]);
   const cinemeta = addon(
     'cinemeta',
     ['tt'],
@@ -143,5 +146,22 @@ describe('moreLikeSource', () => {
     );
     expect(moreLikeSource([needsMore], film, 'movie')).toBeUndefined();
     expect(moreLikeSource([cinemeta], { id: 'tt1', genres: [] }, 'movie')).toBeUndefined();
+  });
+
+  it("finds where any of the title's genres leads, by the same rules", () => {
+    expect(genreSource([other, cinemeta], film, 'movie', 'Action')).toMatchObject({
+      addon: { manifest: { id: 'cinemeta' } },
+      catalog: { id: 'top' },
+      genre: 'Action',
+    });
+    // A genre the title's own addon cannot filter by goes to one that can.
+    expect(genreSource([other, cinemeta], film, 'movie', 'Jazz')).toMatchObject({
+      addon: { manifest: { id: 'other' } },
+      genre: 'Jazz',
+    });
+    expect(genreSource([cinemeta], film, 'movie', 'Jazz')).toBeUndefined();
+    expect(genreSource([cinemeta], film, 'series', 'Drama')).toBeUndefined();
+    expect(genreSource([freeText], { id: 'ft1' }, 'movie', 'Jazz')).toBeUndefined();
+    expect(moreLikeSource([freeText], { id: 'ft1', genres: ['Jazz'] }, 'movie')).toBeUndefined();
   });
 });

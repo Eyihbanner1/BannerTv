@@ -44,6 +44,7 @@ import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
 import { Icon, type IconName, OutlineIcon } from '../ui/icons';
 import { Sheet, SheetOption } from '../ui/Sheet';
+import { CastList, GenreLinks } from './TitleLinks';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
 
@@ -290,7 +291,6 @@ export function TitleScreen({
   const certificate = extra?.certificate;
   const saved = library.has(item.id);
   const trailer = item.trailers[0];
-  const cast = meta?.cast.slice(0, 6) ?? [];
   const heroHeight = Math.max(phone.backdropH, Math.round((width * 9) / 16) + insets.top);
 
   const header = (
@@ -326,9 +326,7 @@ export function TitleScreen({
             {certificate ? <Text style={styles.certificate}>{certificate}</Text> : null}
           </View>
         ) : null}
-        {item.genres.length > 0 ? (
-          <Text style={styles.facts}>{item.genres.slice(0, 4).join(' · ')}</Text>
-        ) : null}
+        <GenreLinks item={item} type={titleType} />
 
         {kids && kidsDecided && !kidsAllowed ? (
           <Text style={styles.notice}>{t('kids.notForKids')}</Text>
@@ -420,9 +418,7 @@ export function TitleScreen({
             </Text>
           </Pressable>
         ) : null}
-        {cast.length > 0 ? (
-          <Text style={styles.facts}>{t('details.cast', { names: cast.join(', ') })}</Text>
-        ) : null}
+        <CastList people={extra?.cast} names={meta?.cast ?? []} />
         {meta && meta.directors.length > 0 ? (
           <Text style={styles.facts}>
             {t('details.directors', { names: meta.directors.join(', ') })}

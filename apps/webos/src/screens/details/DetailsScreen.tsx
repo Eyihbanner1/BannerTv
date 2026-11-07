@@ -22,7 +22,9 @@ import { useQuery } from '../../data/use-query';
 import { playTrailer } from '../../platform/youtube';
 import { formatTime } from '../../player/media';
 import { usePrefetch } from '../../player/prefetch';
+import { CastFaces } from './CastFaces';
 import { EpisodeList } from './EpisodeList';
+import { GenreLinks } from './GenreLinks';
 import { MoreLikeThis } from './MoreLikeThis';
 import { MyListButton } from './MyListButton';
 import {
@@ -51,6 +53,14 @@ interface DetailsScreenProps {
   type: string;
   id: string;
   preview?: MetaPreview;
+  /** An episode to open the episodes on, as a Watch Next card names it. */
+  video?: string;
+  /**
+   * This visit to the page, the same when Back comes back to it: where it
+   * was left is kept per visit, so a page opened afresh opens where the
+   * viewer is up to, and one come back to is as it was left.
+   */
+  visit: number;
 }
 
 function SeasonTabs({
@@ -109,8 +119,8 @@ function SeasonTabs({
   );
 }
 
-// The season last shown per title, for this session.
-const seasonMemory = new Map<string, number>();
+// The season last shown on each visit to a series' page, for this session.
+const seasonMemory = new Map<number, number>();
 
 type MarkChoice = 'episode' | 'season';
 
@@ -139,6 +149,7 @@ function markOptions(t: TFunction, offer: MarkOffer): MenuOption[] {
 }
 
 function Episodes({
+  visit,
   route,
   meta,
   seasons,
@@ -147,6 +158,7 @@ function Episodes({
   onPress,
   onFocusVideo,
 }: {
+  visit: number;
   route: TitleRoute;
   meta: MetaDetail;
   seasons: readonly Season[];
@@ -157,7 +169,7 @@ function Episodes({
   onFocusVideo: (video: Video) => void;
 }) {
   const [selected, setSelected] = useState(() => {
-    const saved = seasonMemory.get(meta.id);
+    const saved = seasonMemory.get(visit);
     return saved !== undefined && saved < seasons.length ? saved : opening.season;
   });
   const season = seasons[Math.min(selected, seasons.length - 1)]!;
@@ -187,7 +199,7 @@ function Episodes({
           seasons={seasons}
           selected={selected}
           onSelect={(index) => {
-            seasonMemory.set(meta.id, index);
+            seasonMemory.set(visit, index);
             setSelected(index);
           }}
         />
@@ -195,7 +207,7 @@ function Episodes({
       <EpisodeList
         key={selected}
         focusKey="details-episodes"
-        memoryKey={`details-${meta.id}-${selected}`}
+        memoryKey={`details-${visit}-${selected}`}
         videos={season.videos}
         startIndex={selected === opening.season ? opening.index : 0}
         extras={extras}
@@ -242,7 +254,7 @@ function startLabel(t: TFunction, point: StartPoint): string {
  * episodes in a panel on the right. It draws what the tile knew at once and
  * fills in the rest when the addon answers.
  */
-export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
+export function DetailsScreen({ type, id, preview, video, visit }: DetailsScreenProps) {
   const { t } = useTranslation();
   const query = useMemo(() => addonClient.meta(type, id), [type, id]);
   const state = useQuery(query);
@@ -300,7 +312,13 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   const start = reader && meta ? startPoint(meta, seasons, reader, now) : undefined;
   // Read by the episodes as they first show only, so the list never jumps
   // about when progress is saved behind it or a Trakt sync comes in.
-  const opening = reader ? openingEpisode(seasons, start, reader) : null;
+  const opening = reader ? openingEpisode(seasons, start, reader, video) : null;
+  // A Watch Next card for another episode than the one to resume has focus go to that episode.
+  const askedOther =
+    video !== undefined &&
+    video !== start?.video.id &&
+    opening !== null &&
+    seasons[opening.season]?.videos[opening.index]?.id === video;
 
   // Streams are looked for while focus rests on what would play.
   const [resting, setResting] = useState<string | null>(null);
@@ -345,7 +363,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
   // button when there is one to resume, as Resume did before.
   const defaultFocus = failed
     ? 'details-retry'
-    : start?.kind === 'resume'
+    : start?.kind === 'resume' && !askedOther
       ? 'details-start'
       : hasEpisodes && kidsAllowed
         ? 'details-episodes'
@@ -405,9 +423,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
             )}
           </div>
           {facts.length > 0 && <p className={styles.facts}>{facts.join(' · ')}</p>}
-          {item && item.genres.length > 0 && (
-            <p className={styles.genres}>{item.genres.slice(0, 4).join(' · ')}</p>
-          )}
+          {item && <GenreLinks item={item} type={type} onFocus={restOn(null)} />}
           {item?.description && (
             <p
               className={
@@ -505,20 +521,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
           {kids && meta && kidsDecided && !kidsAllowed && (
             <p className={styles.note}>{t('kids.notForKids')}</p>
           )}
-          {faces.length > 0 && (
-            <ul className={styles.cast} aria-label={t('details.castTitle')}>
-              {faces.map((person, index) => (
-                <li key={index} className={styles.person}>
-                  <Artwork
-                    src={tmdbImageUrl(person.profilePath, 'w185')}
-                    className={styles.face}
-                    fallback={<span className={styles.face} />}
-                  />
-                  <span className={styles.personName}>{person.name}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {faces.length > 0 && <CastFaces faces={faces} onFocus={restOn(null)} />}
           {item && kidsAllowed && !failed && (
             <div className={isMovie ? `${styles.more} ${styles.moreWide}` : styles.more}>
               <MoreLikeThis item={item} type={type} onFocus={onMoreFocus} />
@@ -530,6 +533,7 @@ export function DetailsScreen({ type, id, preview }: DetailsScreenProps) {
         <div className={styles.panel}>
           {meta && hasEpisodes && opening ? (
             <Episodes
+              visit={visit}
               route={route}
               meta={meta}
               seasons={seasons}

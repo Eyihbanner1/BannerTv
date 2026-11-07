@@ -153,6 +153,14 @@ describe('startPoint and openingEpisode', () => {
     });
   });
 
+  it('opens on the episode it was opened for, when the series lists it', () => {
+    const r = reader(entry('s1e2', 2400, 2400, true));
+    const start = startPoint(meta, seasons, r, now);
+    expect(openingEpisode(seasons, start, r, 's2e2')).toEqual({ season: 1, index: 1 });
+    // An id the addon no longer lists: where the viewer is up to.
+    expect(openingEpisode(seasons, start, r, 'gone')).toEqual({ season: 1, index: 0 });
+  });
+
   it('plays an episode stopped in its first seconds again', () => {
     expect(point(reader(entry('s1e2', 12, 2400)))).toEqual(['again', 's1e2']);
   });

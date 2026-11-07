@@ -84,6 +84,20 @@
   color: var(--bt-text-muted);
 }
 
+/* A genre that opens Discover: the words as before, a pill when focused. */
+.genre {
+  display: inline-block;
+  margin: 0 -10px;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.genreFocused {
+  background: var(--bt-action-focused);
+  color: #fff;
+  box-shadow: var(--bt-focus-ring);
+}
+
 .description {
   margin-top: 24px;
   font: var(--bt-text-body);
@@ -129,16 +143,31 @@
 
 /* Cast with TMDB's photos, under the buttons. */
 .cast {
-  margin-top: 48px;
+  margin-top: 40px;
   white-space: nowrap;
 }
 
-.person {
+.personSlot {
   display: inline-block;
   vertical-align: top;
-  width: 120px;
   margin-right: 24px;
+}
+
+.person {
+  display: block;
+  width: 120px;
+  padding: 8px 0;
+  border-radius: 16px;
   text-align: center;
+}
+
+.personFocused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.personFocused .personName {
+  color: var(--bt-text);
 }
 
 .face {

@@ -119,3 +119,35 @@ test('a long press on an episode marks it watched, and its season', async ({ pag
   await expect(first).not.toHaveAttribute('aria-label', /, watched$/);
   expect(errors).toEqual([]);
 });
+
+test('a genre on a title opens its catalog on it, and a name in the cast opens Search', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const requests = await mockAddons(page);
+  await openApp(page);
+  await page
+    .getByLabel(/^Elephants Dream/)
+    .first()
+    .click();
+  // Animation is one of Cinemeta's film genres; Short is not.
+  await expect(page.getByText('Short', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Browse Animation from Cinemeta' }).click();
+  await expect(page.getByText('Animation from Cinemeta')).toBeVisible();
+  await expect.poll(() => requests.catalogs).toContain('movie/top/genre=Animation');
+
+  await page.locator('[aria-label="Back"]:visible').first().click();
+  await page.getByRole('button', { name: 'Emo, search for more with them' }).click();
+  await expect(page.getByLabel('Search', { exact: true })).toHaveValue('Emo');
+
+  // Again from a title opened while Search is open below it: the Search on show takes the name.
+  await page.getByRole('tab', { name: 'Home' }).click();
+  await page
+    .getByLabel(/^Elephants Dream/)
+    .first()
+    .click();
+  await page.getByRole('button', { name: 'Proog, search for more with them' }).click();
+  await expect(page.locator('input[aria-label="Search"]:visible')).toHaveValue('Proog');
+  await expect(page.locator('input[aria-label="Search"]')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { mockPlayback, readKv, type SeedPlayed, seedStreamAddon } from './play';
-import { APP_URL, expectFocus, expectFocusLabel, press, watchErrors } from './tv';
+import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
 
 const CONTINUE_ROW = 'home-continue';
 /** Morevna Project, whose first season has eight episodes and second three. */
@@ -74,6 +74,17 @@ test('Details opens a series at the episode after the one finished, with Next on
   await expect(page.locator('[data-focus-key="details-start"]')).toHaveText('Next: S2:E1');
   await expect(page.getByText('1. Season 2 episode 1')).toBeVisible();
   await expect(page.getByText('1. Season 1 episode 1')).toHaveCount(0);
+
+  // Looking back at season 1 does not stop the page opening where the viewer is up to next time.
+  await press(page, 'ArrowUp', 'details-season-1');
+  await press(page, 'ArrowLeft', 'details-season-0');
+  await press(page, 'ArrowDown', 'details-episodes-0');
+  await press(page, 'ArrowDown', 'details-episodes-1');
+  await pressBack(page);
+  await expectFocus(page, `${SERIES_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-episodes-0');
+  await expect(page.locator('[data-focus-key="details-start"]')).toHaveText('Next: S2:E1');
+  await expect(page.getByText('1. Season 2 episode 1')).toBeVisible();
   expect(errors).toEqual([]);
 });
 

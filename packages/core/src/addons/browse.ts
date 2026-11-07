@@ -82,8 +82,8 @@ export interface MoreLikeSource {
 
 /**
  * "More Drama from Cinemeta": the first installed addon with a catalog of the
- * title's type that can be filtered by its first genre and needs nothing
- * else. Addons that list the title's own ids go first. Catalogs `leaveOut`
+ * title's type that lists its first genre among its genre options and
+ * needs nothing else, so its See all opens Discover on that genre. Addons that list the title's own ids go first. Catalogs `leaveOut`
  * names, such as sport, are passed over. Undefined with no genre or no such
  * catalog.
  */
@@ -94,7 +94,23 @@ export function moreLikeSource(
   leaveOut?: CatalogFilter,
 ): MoreLikeSource | undefined {
   const genre = item.genres[0];
-  if (!genre) return undefined;
+  return genre ? genreSource(addons, item, type, genre, leaveOut) : undefined;
+}
+
+/**
+ * Where a genre on a title's page leads: the catalog `moreLikeSource` would
+ * take for it, as if it were the title's first genre. Undefined when no
+ * catalog of the type lists it. A catalog whose genre is free text lists
+ * none: Discover only offers a genre a catalog lists, so it could not open
+ * on one.
+ */
+export function genreSource(
+  addons: readonly InstalledAddon[],
+  item: Pick<MetaPreview, 'id'>,
+  type: string,
+  genre: string,
+  leaveOut?: CatalogFilter,
+): MoreLikeSource | undefined {
   const own = (addon: InstalledAddon) =>
     addon.manifest.idPrefixes?.some((prefix) => item.id.indexOf(prefix) === 0) ? 0 : 1;
   // Chromium 68 sorts unstably, so ties keep the addons' order by hand.
@@ -107,7 +123,7 @@ export function moreLikeSource(
       if (catalog.type !== type || leaveOut?.(addon, catalog)) continue;
       const byGenre = catalog.extra.find((extra) => extra.name === 'genre');
       if (!byGenre) continue;
-      if (byGenre.options.length > 0 && byGenre.options.indexOf(genre) === -1) continue;
+      if (byGenre.options.indexOf(genre) === -1) continue;
       if (catalog.extra.some((extra) => extra.isRequired && extra.name !== 'genre')) continue;
       return { addon, catalog, genre };
     }

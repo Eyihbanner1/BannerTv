@@ -765,6 +765,9 @@
     "findingStream": "Finding the best stream",
     "noStreamYet": "No stream found yet",
     "newEpisodeNote": "New: S{{season}}:E{{episode}}",
-    "newNote": "New episode"
+    "newNote": "New episode",
+    "browseGenre": "Browse {{genre}} from {{addon}}",
+    "genreFrom": "{{genre}} from {{addon}}",
+    "searchPerson": "{{name}}, search for more with them"
   }
 }

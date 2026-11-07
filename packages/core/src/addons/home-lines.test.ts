@@ -91,6 +91,40 @@ describe('Home lines', () => {
     ]);
   });
 
+  it('keeps the place of rows and lines not listed while another moves', () => {
+    // Live sport moved under B, then B's addon is switched off and the sports addon is gone.
+    const layout = moveLine(board, EMPTY_LAYOUT, OWN, LIVE_SPORT_LINE, 1);
+    expect(layout.order).toEqual([MY_LIST_LINE, A, B, LIVE_SPORT_LINE, C]);
+    const withoutB = board.filter((row) => rowIdentity(row) !== B);
+    const withoutSport = OWN.filter((line) => line.id !== LIVE_SPORT_LINE);
+    const moved = moveLine(withoutB, layout, withoutSport, C, -1);
+    expect(ids(homeLines(withoutB, moved, withoutSport))).toEqual([
+      CONTINUE_LINE,
+      MY_LIST_LINE,
+      C,
+      A,
+    ]);
+    // Both come back where they were: only C and A changed places.
+    expect(ids(homeLines(board, moved, OWN))).toEqual([
+      CONTINUE_LINE,
+      MY_LIST_LINE,
+      C,
+      B,
+      LIVE_SPORT_LINE,
+      A,
+    ]);
+    // A screen that knows only rows keeps Home's own lines where they were too.
+    const older = moveRow(board, layout, C, -1);
+    expect(ids(homeLines(board, older, OWN))).toEqual([
+      CONTINUE_LINE,
+      MY_LIST_LINE,
+      A,
+      C,
+      LIVE_SPORT_LINE,
+      B,
+    ]);
+  });
+
   it('hides and shows lines of either kind, and Home counts only what it shows', () => {
     let layout = setLineHidden(board, EMPTY_LAYOUT, CONTINUE_LINE, true);
     layout = setLineHidden(board, layout, A, true);

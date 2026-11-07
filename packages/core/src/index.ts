@@ -79,6 +79,7 @@ export {
   type DiscoverResolved,
   type DiscoverSelection,
   discoverSelection,
+  genreSource,
   moreLikeSource,
   type MoreLikeSource,
   resolveDiscover,

@@ -54,6 +54,19 @@ describe('Home layout', () => {
     expect(reordered[0]!.key).not.toBe(board[board.length - 1]!.key);
   });
 
+  it('keeps the place of an addon’s rows while it is off, when other rows move', () => {
+    const trending = 'com.example.shorts|movie|trending|';
+    // Shorts moved up to second, then switched off.
+    let layout = EMPTY_LAYOUT;
+    for (let i = ids.length - 1; i > 1; i--) layout = moveRow(board, layout, trending, -1);
+    expect(names(orderedRows(board, layout)).slice(0, 3)).toEqual([ids[0], trending, ids[1]]);
+    const without = buildBoard(cinemeta);
+    layout = moveRow(without, layout, ids[1]!, -1);
+    expect(names(orderedRows(without, layout)).slice(0, 2)).toEqual([ids[1], ids[0]]);
+    // Back on: still second, and the two rows that moved changed places.
+    expect(names(orderedRows(board, layout)).slice(0, 3)).toEqual([ids[1], trending, ids[0]]);
+  });
+
   it('leaves the board alone with no layout', () => {
     expect(arrangeBoard(board, EMPTY_LAYOUT)).toEqual(board);
   });
@@ -113,6 +126,39 @@ describe('Home layout', () => {
       expect(order.indexOf(trendingOf(swapped, english.transportUrl))).toBe(
         order.indexOf(trendingOf(swapped, shorts.transportUrl)) - 1,
       );
+    });
+
+    it('keeps a row that is not on screen after both copies one saved name places', () => {
+      const other = installed(
+        {
+          id: 'com.other',
+          version: '1.0.0',
+          name: 'Other',
+          types: ['movie'],
+          resources: ['catalog'],
+          catalogs: [{ type: 'movie', id: 'top', name: 'Top' }],
+        },
+        'https://other.example/manifest.json',
+      );
+      const first = rowIdentity(twice[0]!);
+      // Saved where Shorts was installed once and Other was installed too.
+      const layout: HomeLayout = { order: [base, 'com.other|movie|top|', first], hidden: [] };
+      const moved = moveRow(twice, layout, first, -1);
+      const shorts1 = trendingOf(twice, shorts.transportUrl);
+      const english1 = trendingOf(twice, english.transportUrl);
+      expect(orderedRows(twice, moved).slice(0, 3)).toEqual([shorts1, twice[0], english1]);
+      // With Other back, it is still between the two that changed places.
+      const all = buildBoard([...cinemeta, shorts, english, other]);
+      expect(
+        orderedRows(all, moved)
+          .slice(0, 4)
+          .map((row) => `${row.addon.transportUrl} ${row.catalog.id}`),
+      ).toEqual([
+        `${shorts.transportUrl} trending`,
+        `${twice[0]!.addon.transportUrl} ${twice[0]!.catalog.id}`,
+        `${other.transportUrl} top`,
+        `${english.transportUrl} trending`,
+      ]);
     });
 
     it('keeps settings saved for the addon on both copies until one is changed', () => {

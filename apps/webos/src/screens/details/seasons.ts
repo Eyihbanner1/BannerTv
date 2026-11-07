@@ -191,17 +191,23 @@ export function startPoint(
 
 /**
  * The season a series' page opens on, and the episode in it that focus goes
- * to: where the viewer starts, else the last episode played or ticked (a
- * caught-up viewer sees where they got to), else Season 1's first.
+ * to: the episode the page was opened for (`asked`, as a Watch Next card
+ * names it) when the series lists it, else where the viewer starts, else
+ * the last episode played or ticked (a caught-up viewer sees where they got
+ * to), else Season 1's first.
  */
 export function openingEpisode(
   seasons: readonly Season[],
   point: StartPoint | undefined,
   reader: StartReader,
+  asked?: string,
 ): { season: number; index: number } {
-  const target =
-    point?.video.id ?? reader.latest?.videoId ?? furthestTicked(seasons, reader.ticked)?.id;
-  if (target !== undefined) {
+  const targets = [
+    asked,
+    point?.video.id ?? reader.latest?.videoId ?? furthestTicked(seasons, reader.ticked)?.id,
+  ];
+  for (const target of targets) {
+    if (target === undefined) continue;
     for (let season = 0; season < seasons.length; season++) {
       const index = seasons[season]!.videos.findIndex((video) => video.id === target);
       if (index !== -1) return { season, index };

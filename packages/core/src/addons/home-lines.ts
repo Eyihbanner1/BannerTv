@@ -2,9 +2,11 @@ import type { BoardRow } from './board';
 import {
   type HomeLayout,
   hiddenRowIds,
+  moveAmong,
   orderedRows,
   rowIdentities,
   rowIdentity,
+  savedRowNames,
   setRowHidden,
 } from './layout';
 
@@ -110,7 +112,9 @@ export function ownLinePlaces(lines: readonly HomeLine[]): Map<string, number> {
 /**
  * The layout with line `id` moved one place up (-1) or down (1) among the
  * lines that can move. Every such line is then saved in order, Home's own
- * included, so each keeps its place among the rows.
+ * included, so each keeps its place among the rows. What the layout holds
+ * for lines not listed now, such as the rows of an addon switched off or
+ * Live sport without its addon, stays where it was (moveAmong).
  */
 export function moveLine(
   rows: readonly BoardRow[],
@@ -120,14 +124,18 @@ export function moveLine(
   by: -1 | 1,
 ): HomeLayout {
   const fixed = new Set(own.filter((line) => line.fixed).map((line) => line.id));
-  const order = homeLines(rows, layout, own)
-    .filter((line) => !fixed.has(line.id))
-    .map((line) => line.id);
-  const from = order.indexOf(id);
-  const to = from + by;
-  if (from < 0 || to < 0 || to >= order.length) return layout;
-  order.splice(to, 0, order.splice(from, 1)[0]!);
-  return { order, hidden: layout.hidden };
+  const listed = new Set(own.map((line) => line.id));
+  const names = savedRowNames(rows, layout.order);
+  const order = moveAmong(
+    layout.order,
+    homeLines(rows, layout, own)
+      .filter((line) => !fixed.has(line.id))
+      .map((line) => line.id),
+    (name) => names.get(name) ?? (listed.has(name) ? [name] : undefined),
+    id,
+    by,
+  );
+  return order ? { order, hidden: layout.hidden } : layout;
 }
 
 /** The layout with line `id` hidden or shown: an addon's row, or one of Home's own. */
