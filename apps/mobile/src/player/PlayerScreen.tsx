@@ -882,84 +882,90 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('phone.audioAndSubtitles')}
         onClose={() => setPanel(null)}
       >
-        <View style={styles.columns}>
-          {state.audio.length > 0 ? (
-            <PanelColumn title={t('phone.audio')}>
+        {() => (
+          <View style={styles.columns}>
+            {state.audio.length > 0 ? (
+              <PanelColumn title={t('phone.audio')}>
+                <ScrollView>
+                  {state.audio.map((track) => {
+                    const detail = audioDetail(track);
+                    return (
+                      <PanelOption
+                        key={track.id}
+                        label={audioSummary(track)}
+                        {...(detail ? { detail } : {})}
+                        selected={track.active}
+                        onPress={() => {
+                          session?.selectAudio(track.id);
+                          if (track.lang) chooseAudioLanguage(metaId, track.lang);
+                          setPanel(null);
+                        }}
+                      />
+                    );
+                  })}
+                </ScrollView>
+              </PanelColumn>
+            ) : null}
+            <PanelColumn title={t('phone.subtitles')}>
               <ScrollView>
-                {state.audio.map((track) => {
-                  const detail = audioDetail(track);
+                <PanelOption
+                  label={t('phone.subtitlesOff')}
+                  selected={subtitles.choice === null}
+                  onPress={() => chooseSubtitle(null)}
+                />
+                {subtitles.tracks.map((track) => (
+                  <PanelOption
+                    key={`track-${track.id}`}
+                    label={languageName(track.lang) || track.label || t('common.unknown')}
+                    detail={t('phone.embeddedSubtitles')}
+                    selected={
+                      subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id
+                    }
+                    onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
+                  />
+                ))}
+                {subtitles.options.map((option) => {
+                  const status = subtitles.statusOf({ kind: 'file', key: option.key });
                   return (
                     <PanelOption
-                      key={track.id}
-                      label={audioSummary(track)}
-                      {...(detail ? { detail } : {})}
-                      selected={track.active}
-                      onPress={() => {
-                        session?.selectAudio(track.id);
-                        if (track.lang) chooseAudioLanguage(metaId, track.lang);
-                        setPanel(null);
-                      }}
+                      key={`file-${option.key}`}
+                      label={languageName(option.lang) || option.lang}
+                      detail={[
+                        t('phone.fromAddon', { addon: option.source }),
+                        status === 'loading' ? t('common.loading') : '',
+                        status === 'failed' ? t('player.subtitlesFailed') : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                      selected={
+                        subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key
+                      }
+                      onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
                     />
                   );
                 })}
+                {subtitles.pending > 0 ? (
+                  <Text style={styles.sheetNote}>{t('common.loading')}</Text>
+                ) : null}
               </ScrollView>
             </PanelColumn>
-          ) : null}
-          <PanelColumn title={t('phone.subtitles')}>
-            <ScrollView>
-              <PanelOption
-                label={t('phone.subtitlesOff')}
-                selected={subtitles.choice === null}
-                onPress={() => chooseSubtitle(null)}
-              />
-              {subtitles.tracks.map((track) => (
-                <PanelOption
-                  key={`track-${track.id}`}
-                  label={languageName(track.lang) || track.label || t('common.unknown')}
-                  detail={t('phone.embeddedSubtitles')}
-                  selected={subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id}
-                  onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
-                />
-              ))}
-              {subtitles.options.map((option) => {
-                const status = subtitles.statusOf({ kind: 'file', key: option.key });
-                return (
-                  <PanelOption
-                    key={`file-${option.key}`}
-                    label={languageName(option.lang) || option.lang}
-                    detail={[
-                      t('phone.fromAddon', { addon: option.source }),
-                      status === 'loading' ? t('common.loading') : '',
-                      status === 'failed' ? t('player.subtitlesFailed') : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    selected={
-                      subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key
-                    }
-                    onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
-                  />
-                );
-              })}
-              {subtitles.pending > 0 ? (
-                <Text style={styles.sheetNote}>{t('common.loading')}</Text>
-              ) : null}
-            </ScrollView>
-          </PanelColumn>
-        </View>
+          </View>
+        )}
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
-        <PanelColumn>
-          <PanelOption
-            label={t('player.quality')}
-            detail={qualityValue}
-            accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
-            disabled={!state.entry}
-            onPress={() => setPanel('quality')}
-          />
-          <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
-        </PanelColumn>
+        {() => (
+          <PanelColumn>
+            <PanelOption
+              label={t('player.quality')}
+              detail={qualityValue}
+              accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+              disabled={!state.entry}
+              onPress={() => setPanel('quality')}
+            />
+            <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
+          </PanelColumn>
+        )}
       </SidePanel>
 
       <SidePanel
@@ -967,35 +973,37 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('player.quality')}
         onClose={() => setPanel(null)}
       >
-        <ScrollView>
-          {choices.length <= 1 ? (
-            <Text style={styles.sheetNote}>
-              {choices.length === 1
-                ? t('player.onlyQuality', {
-                    quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
-                  })
-                : t('player.noOtherQuality')}
-            </Text>
-          ) : null}
-          {choices.map((choice) => {
-            const value = choice.resolution ?? 'other';
-            return (
-              <PanelOption
-                key={value}
-                label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
-                {...(choice.otherLanguages
-                  ? {
-                      detail: t('player.otherAudio', {
-                        languages: choice.otherLanguages.map(languageName).join(', '),
-                      }),
-                    }
-                  : {})}
-                selected={value === currentQuality}
-                onPress={() => pickQuality(value)}
-              />
-            );
-          })}
-        </ScrollView>
+        {() => (
+          <ScrollView>
+            {choices.length <= 1 ? (
+              <Text style={styles.sheetNote}>
+                {choices.length === 1
+                  ? t('player.onlyQuality', {
+                      quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
+                    })
+                  : t('player.noOtherQuality')}
+              </Text>
+            ) : null}
+            {choices.map((choice) => {
+              const value = choice.resolution ?? 'other';
+              return (
+                <PanelOption
+                  key={value}
+                  label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
+                  {...(choice.otherLanguages
+                    ? {
+                        detail: t('player.otherAudio', {
+                          languages: choice.otherLanguages.map(languageName).join(', '),
+                        }),
+                      }
+                    : {})}
+                  selected={value === currentQuality}
+                  onPress={() => pickQuality(value)}
+                />
+              );
+            })}
+          </ScrollView>
+        )}
       </SidePanel>
 
       <SidePanel
@@ -1003,11 +1011,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('phone.sources')}
         onClose={() => setPanel(null)}
       >
-        <StreamList
-          finder={finder}
-          {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
-          onPick={pickStream}
-        />
+        {() => (
+          <StreamList
+            finder={finder}
+            {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
+            onPick={pickStream}
+          />
+        )}
       </SidePanel>
     </View>
   );
