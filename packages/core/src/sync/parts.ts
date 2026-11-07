@@ -3,6 +3,7 @@ import { DEFAULT_ADDONS } from '../addons/defaults';
 import { createHomeLayout, type HomeLayout, type HomeLayoutStore } from '../addons/layout';
 import { createLibrary, type Library, type LibraryItem } from '../library/library';
 import { createPlayedVideos, type PlayedVideo, type PlayedVideos } from '../playback/continue';
+import { createSubtitleDrifts, type DriftChoice, type SubtitleDrifts } from '../playback/drifts';
 import { createSubtitleOffsets, type SubtitleOffsets } from '../playback/offsets';
 import { createProgressStore, type ProgressEntry, type ProgressStore } from '../playback/progress';
 import { createTrackMemory, type TrackChoice, type TrackMemory } from '../playback/tracks';
@@ -127,11 +128,18 @@ function cardValue(card: PlayedVideo): Fields {
   return value;
 }
 
+/** A time a video was marked not watched, as the merge counts one (sync/merge.ts). */
+function isUnmarkTime(value: unknown): value is number {
+  return typeof value === 'number' && isFinite(value) && value > 0;
+}
+
 /**
  * Continue Watching as `p/<id>/watch`: one item per video, at the time its
  * progress was saved, with the card that played beside it. The card is not
  * compared, beyond whether there is one; a card this screen filled in from
- * the meta addon never rides along.
+ * the meta addon never rides along. `unmarkedAt` (when the viewer last marked
+ * the video not watched) rides along so the merge can let that unwatch beat
+ * older watched ticks from other screens.
  */
 export function watchPart(
   profileId: string,
@@ -151,6 +159,7 @@ export function watchPart(
       watched: entry.watched,
     };
     if (entry.continueRow === false) value.continueRow = false;
+    if (isUnmarkTime(entry.unmarkedAt)) value.unmarkedAt = entry.unmarkedAt;
     if (card && !card.filled) value.card = cardValue(card);
     const part: PartItem = { v: value, t: entry.updatedAt };
     if (entry.from === 'trakt') part.trakt = true;
@@ -175,6 +184,7 @@ export function watchPart(
         'duration',
         'watched',
         'continueRow',
+        'unmarkedAt',
       ]);
       compared.card = value.card !== undefined;
       return compared;
@@ -203,6 +213,7 @@ export function watchPart(
           watched: value.watched === true,
         } as ProgressEntry;
         if (value.continueRow === false) entry.continueRow = false;
+        if (isUnmarkTime(value.unmarkedAt)) entry.unmarkedAt = value.unmarkedAt;
         entries.push(entry);
         if (isObject(value.card)) {
           cards.push({
@@ -382,6 +393,37 @@ export function subtitleOffsetsPart(profileId: string, offsets: SubtitleOffsets)
   };
 }
 
+const DRIFT = 'drift/';
+/** The drift choices the account carries, as agreed with the sync format (ADR 0006). */
+const DRIFT_WORDS: readonly string[] = ['ahead', 'behind', 'none', 'auto'];
+
+/**
+ * Subtitle drift fixes as `drift/<fileKey>`, beside the timings they were
+ * tuned with: 'ahead', 'behind', 'none' (the player's own fix taken off) or
+ * 'auto' (the player's own fix, worked out again for each stream, kept with
+ * the viewer's timing). No choice is a removal. The key is the same hash as
+ * the timing's, never a link.
+ */
+export function subtitleDriftsPart(profileId: string, drifts: SubtitleDrifts): SyncPart {
+  return {
+    document: `p/${profileId}/settings`,
+    prefixes: [DRIFT],
+    load: () => drifts.load(),
+    snapshot() {
+      const items = new Map<string, PartItem>();
+      for (const saved of drifts.drifts()) items.set(DRIFT + saved.key, { v: saved.drift });
+      return items;
+    },
+    subscribe: (listener) => drifts.subscribe(listener),
+    adopt(change) {
+      const set = oldestFirst(change.set)
+        .filter(([, item]) => typeof item.v === 'string' && DRIFT_WORDS.indexOf(item.v) !== -1)
+        .map(([key, item]) => ({ key: key.slice(DRIFT.length), drift: item.v as DriftChoice }));
+      return drifts.adopt({ set, remove: change.remove.map((key) => key.slice(DRIFT.length)) });
+    },
+  };
+}
+
 const ADDON = 'a/';
 
 /**
@@ -472,6 +514,7 @@ export interface ProfileStores {
   homeLayout: HomeLayoutStore;
   trackMemory: TrackMemory;
   subtitleOffsets: SubtitleOffsets;
+  subtitleDrifts: SubtitleDrifts;
 }
 
 /**
@@ -491,6 +534,7 @@ export function createProfileStores(
     homeLayout: createHomeLayout({ storage }),
     trackMemory: createTrackMemory({ storage }),
     subtitleOffsets: createSubtitleOffsets({ storage }),
+    subtitleDrifts: createSubtitleDrifts({ storage }),
   };
 }
 
@@ -502,5 +546,6 @@ export function profileParts(profileId: string, stores: ProfileStores): SyncPart
     homeLayoutPart(profileId, stores.homeLayout),
     trackMemoryPart(profileId, stores.trackMemory),
     subtitleOffsetsPart(profileId, stores.subtitleOffsets),
+    subtitleDriftsPart(profileId, stores.subtitleDrifts),
   ];
 }

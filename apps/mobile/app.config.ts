@@ -33,6 +33,14 @@ const config: ExpoConfig = {
     },
     // No cloud backup: storage holds addon addresses that can carry debrid keys, and Trakt tokens.
     allowBackup: false,
+    // Addon install links: Stremio's own (stremio://host/path/manifest.json, as an addon's
+    // settings page gives them), and an address shared from another app ("Share to BannerTV").
+    // Both open Addons to ask before adding, for grown-ups only (src/nav/addon-links.ts); the
+    // share is read by modules/banner-share.
+    intentFilters: [
+      { action: 'VIEW', category: ['DEFAULT', 'BROWSABLE'], data: [{ scheme: 'stremio' }] },
+      { action: 'SEND', category: ['DEFAULT'], data: [{ mimeType: 'text/plain' }] },
+    ],
     predictiveBackGestureEnabled: false,
   },
   web: {
@@ -46,7 +54,16 @@ const config: ExpoConfig = {
       { backgroundColor: BACKGROUND, image: './assets/images/splash-icon.png', imageWidth: 96 },
     ],
     'expo-sqlite',
-    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: false }],
+    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: true }],
+    [
+      // Match reminders are local notifications: nothing is pushed, so no push service is set up.
+      'expo-notifications',
+      {
+        icon: './assets/images/android-icon-foreground.png',
+        color: '#6A3BF0',
+        enableRemoteNotifications: false,
+      },
+    ],
     [
       'expo-font',
       {

@@ -1835,6 +1835,16 @@
     "aliases": ["RWC", "World Cup"]
   },
   {
+    "id": "rugby.world-cup-women",
+    "name": "Women's Rugby World Cup",
+    "sport": "rugby",
+    "country": "INT",
+    "kind": "international",
+    "women": true,
+    "priority": 1063,
+    "aliases": ["Women's RWC", "Rugby World Cup Women"]
+  },
+  {
     "id": "rugby.nations-championship",
     "name": "Nations Championship",
     "sport": "rugby",
@@ -1977,6 +1987,15 @@
     "kind": "cup",
     "priority": 1090,
     "aliases": ["State of Origin Series", "Ampol State of Origin"]
+  },
+  {
+    "id": "rugby-league.world-cup",
+    "name": "Rugby League World Cup",
+    "sport": "rugby",
+    "country": "INT",
+    "kind": "international",
+    "priority": 1091,
+    "aliases": ["RLWC", "IRL World Cup", "Men's Rugby League World Cup"]
   },
 
   {
@@ -2193,6 +2212,26 @@
     "women": true,
     "priority": 1142,
     "aliases": ["WPL", "TATA WPL"]
+  },
+  {
+    "id": "icc.wt20wc",
+    "name": "Women's T20 World Cup",
+    "sport": "cricket",
+    "country": "INT",
+    "kind": "international",
+    "women": true,
+    "priority": 1144,
+    "aliases": ["ICC Women's T20 World Cup"]
+  },
+  {
+    "id": "icc.wcwc",
+    "name": "Women's Cricket World Cup",
+    "sport": "cricket",
+    "country": "INT",
+    "kind": "international",
+    "women": true,
+    "priority": 1146,
+    "aliases": ["ICC Women's Cricket World Cup", "ICC Women's World Cup"]
   },
 
   {
@@ -2911,6 +2950,66 @@
     "kind": "league",
     "priority": 1472,
     "aliases": ["ONE Fight Night"]
+  },
+  {
+    "id": "bellator",
+    "name": "Bellator",
+    "sport": "mma",
+    "country": "US",
+    "kind": "league",
+    "priority": 1473,
+    "aliases": ["Bellator MMA", "Bellator Champions Series", "PFL Champions Series"]
+  },
+  {
+    "id": "oktagon",
+    "name": "Oktagon MMA",
+    "sport": "mma",
+    "country": "CZ",
+    "kind": "league",
+    "priority": 1475,
+    "aliases": ["Oktagon"]
+  },
+  {
+    "id": "cage-warriors",
+    "name": "Cage Warriors",
+    "sport": "mma",
+    "country": "GB",
+    "kind": "league",
+    "priority": 1476,
+    "aliases": ["Cage Warriors Fighting Championship", "CWFC"]
+  },
+  {
+    "id": "ksw",
+    "name": "KSW",
+    "sport": "mma",
+    "country": "PL",
+    "kind": "league",
+    "priority": 1477,
+    "aliases": ["Konfrontacja Sztuk Walki", "KSW MMA"]
+  },
+  {
+    "id": "rizin",
+    "name": "Rizin",
+    "sport": "mma",
+    "country": "JP",
+    "kind": "league",
+    "priority": 1478,
+    "aliases": ["Rizin FF", "Rizin Fighting Federation"]
+  },
+  {
+    "id": "boxing.world-title",
+    "name": "World title fights",
+    "sport": "boxing",
+    "country": "INT",
+    "kind": "cup",
+    "priority": 1490,
+    "aliases": [
+      "World Title",
+      "World Title Fight",
+      "World Championship Boxing",
+      "Championship Boxing",
+      "Title Fight"
+    ]
   },
   {
     "id": "afl",

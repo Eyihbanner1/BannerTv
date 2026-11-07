@@ -4,7 +4,7 @@ The Android app for Android TV, Google TV, Fire TV (Fire OS 6 and later) and pho
 
 - The web build is packed into the APK and served from `https://appassets.androidplatform.net/assets/web/index.html` by androidx.webkit's `WebViewAssetLoader`.
 - Video plays in a native Media3 ExoPlayer `PlayerView` that sits under the transparent, full-screen WebView.
-- The page talks to the app through `window.BannerAndroid` (protocol version 1), set out in [ADR 0005](../../docs/adr/0005-android-tv-app.md). The Kotlin side is `Protocol.kt` and the classes beside it; the page's side is `apps/webos/src/platform/android.ts` and the Android player engine. Installing on devices: [docs/ANDROID_TV_SETUP.md](../../docs/ANDROID_TV_SETUP.md).
+- The page talks to the app through `window.BannerAndroid` (protocol version 1), set out in [ADR 0005](../../docs/adr/0005-android-tv-app.md). The Kotlin side is `Protocol.kt` and the classes beside it; the page's side is `apps/webos/src/platform/android.ts` and the Android player engine. The stream helper's server and rules are in `helper-core/`, which the phone app builds too. Installing on devices: [docs/ANDROID_TV_SETUP.md](../../docs/ANDROID_TV_SETUP.md).
 
 This is a plain Gradle build with no `package.json`, so `pnpm -r` skips it and the web build never needs the Android SDK.
 
@@ -19,6 +19,16 @@ You need JDK 17 or newer and the Android SDK (API 37). Android Studio brings bot
 `./gradlew testDebugUnitTest` runs the JVM unit tests. `./gradlew assembleRelease` writes `app/build/outputs/apk/release/app-release.apk`.
 
 The debug build installs beside the real app as `com.bannertv.app.debug`, named "BannerTV test", and its WebView can be inspected from `chrome://inspect`.
+
+## Watch Next and links to a title
+
+On Android TV and Google TV (Android 8 and later, not Fire TV), the app puts the profile in use's Continue Watching on the system's Watch Next row, "Continue watching" on Google TV. The page works out the cards; `WatchNextPublisher.kt` writes them through androidx.tvprovider, and `WatchNextPlan.kt` decides what to insert, update and delete. ADR 0005 sets out when the row changes and why a profile with a PIN empties it.
+
+Each card opens `bannertv://open?type=…&meta=…&video=…` (`DeepLink.kt`), which opens the title's Details, with Resume focused when there is a place to resume. To try a link without the row, send one to the debug build with adb. The whole command is quoted so the device's shell leaves the `&` alone:
+
+```sh
+adb shell 'am start -a android.intent.action.VIEW -d "bannertv://open?type=movie&meta=tt0807840&video=tt0807840" com.bannertv.app.debug'
+```
 
 ## Version
 

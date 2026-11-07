@@ -1,5 +1,5 @@
 import { createStore } from '@bannertv/core';
-import type { AndroidEvent, AndroidPlayerCommand, AndroidTrack } from '@tv/platform/android';
+import type { AndroidEvent, AndroidPlayerCommand } from '@tv/platform/android';
 import { requireOptionalNativeModule } from 'expo';
 import Constants from 'expo-constants';
 import {
@@ -15,6 +15,8 @@ import {
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
 import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { toAndroidTrack, trackId } from './tracks';
+import { videoSource } from './video-source';
 
 /**
  * The phone's side of the Android bridge (ADR 0005, protocol version 1), over expo-video's player
@@ -49,6 +51,16 @@ const PHONE_CAPABILITIES = {
 /** Whether a stream is open, so the player screen draws Android's picture. */
 export const pictureShown = createStore(false);
 
+/** Whether the film plays in a small window over other apps (picture-in-picture). */
+export const pictureInPicture = createStore(false);
+
+/**
+ * How long a move to the background waits before it pauses. Android may report the app going to
+ * the background just before it says the film went to picture-in-picture, and that film must
+ * keep playing.
+ */
+export const BACKGROUND_PAUSE_DELAY_MS = 600;
+
 let player: VideoPlayer | null = null;
 let loadId = 0;
 let hasMedia = false;
@@ -61,6 +73,8 @@ let ended = false;
 let openedUrl: string | null = null;
 let openedStartAt = 0;
 let openedType: ContentType = 'auto';
+/** The addon's request headers for the stream opened last, sent again when it is opened again. */
+let openedHeaders: Readonly<Record<string, string>> | undefined;
 /** Whether the link's kind is known; an unknown one is tried as HLS once (as the TV app does). */
 let typeSettled = false;
 let firstError: string | undefined;
@@ -114,34 +128,6 @@ function emitTime(): void {
   });
 }
 
-function trackId(prefix: string, track: AudioTrack | SubtitleTrack, index: number): string {
-  return `${prefix}:${track.id ?? index}`;
-}
-
-function sameTrack(
-  track: AudioTrack | SubtitleTrack,
-  active: AudioTrack | SubtitleTrack | null,
-): boolean {
-  if (!active) return false;
-  if (track.id !== undefined || active.id !== undefined) return track.id === active.id;
-  return track.language === active.language && track.label === active.label;
-}
-
-function toTrack(
-  prefix: string,
-  track: AudioTrack | SubtitleTrack,
-  index: number,
-  active: AudioTrack | SubtitleTrack | null,
-): AndroidTrack {
-  return {
-    id: trackId(prefix, track, index),
-    lang: track.language || 'und',
-    label: track.label || track.name || '',
-    active: sameTrack(track, active),
-    supported: true,
-  };
-}
-
 function emitTracks(): void {
   if (!player || !hasMedia) return;
   audioTracks = player.availableAudioTracks;
@@ -152,8 +138,8 @@ function emitTracks(): void {
     type: 'player',
     event: 'tracks',
     load: loadId,
-    audio: audioTracks.map((track, index) => toTrack('a', track, index, audio)),
-    text: textTracks.map((track, index) => toTrack('t', track, index, text)),
+    audio: audioTracks.map((track, index) => toAndroidTrack('a', track, index, audio)),
+    text: textTracks.map((track, index) => toAndroidTrack('t', track, index, text)),
   });
 }
 
@@ -248,6 +234,52 @@ function onSourceLoad(): void {
   emitTracks();
 }
 
+/**
+ * modules/banner-cues: the lines of the file's own subtitle track as they show, so the page draws
+ * them in the profile's style (ADR 0005, decision 6). Missing on the web.
+ */
+interface CuesModule {
+  watch(player: VideoPlayer): void;
+  draw(on: boolean): void;
+  addListener(
+    event: 'cues',
+    listener: (news: Pick<Extract<AndroidEvent, { event: 'cues' }>, 'at' | 'cues'>) => void,
+  ): { remove(): void };
+}
+
+let cuesModule: CuesModule | null = null;
+/** The subtitle track whose lines the page draws, and the stream it was chosen for. */
+let drawnText: { id: string; load: number } | null = null;
+/** Whether the page draws the chosen text track's lines, as the last subtitle choice said. */
+let pageDrawsText = false;
+
+/**
+ * The page's lines can't show in picture-in-picture's small window, which shows only the picture,
+ * so Media3 draws the file's own lines there, in its own look, until the window closes.
+ */
+function sendDraw(): void {
+  cuesModule?.draw(pageDrawsText && !pictureInPicture.get());
+}
+
+function watchCues(created: VideoPlayer): void {
+  cuesModule = requireOptionalNativeModule<CuesModule>('BannerCues');
+  if (!cuesModule) return;
+  cuesModule.watch(created);
+  pictureInPicture.subscribe(sendDraw);
+  cuesModule.addListener('cues', ({ at, cues }) => {
+    // Only lines of the track the page chose, for the stream open now.
+    if (!hasMedia || !drawnText || drawnText.load !== loadId) return;
+    emit({ type: 'player', event: 'cues', load: loadId, track: drawnText.id, at, cues });
+  });
+}
+
+/** The page chose subtitle track `id` (or none), and whether it draws the lines itself. */
+function drawText(id: string | null, pageDraws: boolean): void {
+  drawnText = id !== null && pageDraws ? { id, load: loadId } : null;
+  pageDrawsText = pageDraws;
+  sendDraw();
+}
+
 function ensurePlayer(): VideoPlayer {
   if (player) return player;
   const created = createVideoPlayer(null);
@@ -265,6 +297,7 @@ function ensurePlayer(): VideoPlayer {
   created.addListener('audioTrackChange', emitTracks);
   created.addListener('availableSubtitleTracksChange', emitTracks);
   created.addListener('subtitleTrackChange', emitTracks);
+  watchCues(created);
   player = created;
   return created;
 }
@@ -280,7 +313,7 @@ function open(url: string, startAt: number, type: ContentType): void {
   readyOnce = false;
   nativeStatus = 'idle';
   startChecked = false;
-  current.replace({ uri: url, contentType: type }, true);
+  current.replace(videoSource(url, type, openedHeaders), true);
   if (startAt > 0 && isFinite(startAt)) current.currentTime = startAt;
   if (wantPlay) current.play();
   else current.pause();
@@ -298,6 +331,7 @@ function load(command: Extract<AndroidPlayerCommand, { op: 'load' }>): void {
   loadId = command.id;
   openedUrl = command.url;
   openedStartAt = command.startAt;
+  openedHeaders = command.headers;
   typeSettled = command.mime !== '';
   firstError = undefined;
   textChosen = false;
@@ -314,6 +348,7 @@ function release(): void {
   ended = false;
   wantPlay = false;
   openedUrl = null;
+  openedHeaders = undefined;
   audioTracks = [];
   textTracks = [];
   if (player) {
@@ -374,10 +409,14 @@ function handle(json: string): void {
       textChosen = true;
       if (command.id === null) {
         current.subtitleTrack = null;
+        drawText(null, command.cues === true);
         return;
       }
       const track = textTracks.find((item, index) => trackId('t', item, index) === command.id);
-      if (track) current.subtitleTrack = track;
+      if (track) {
+        current.subtitleTrack = track;
+        drawText(command.id, command.cues === true);
+      }
       return;
     }
     case 'release':
@@ -417,9 +456,37 @@ const host = {
     if (/^https:\/\//i.test(url)) Linking.openURL(url).catch(() => undefined);
   },
   player: (command: string) => handle(command),
+  ...helperBridge(),
 };
 
 let installed = false;
+
+/** modules/stream-helper: the stream helper for an LG on the home network (ADR 0005, decision 13). */
+interface StreamHelperModule {
+  /** The same JSON as the Android TV app's helperState(). */
+  state(): string;
+  command(command: string): void;
+}
+
+/**
+ * The bridge's helper() and helperState(), only when the build has the native module. The web
+ * build has none, so the shared androidHelperState() reads null there and Settings hides it.
+ */
+function helperBridge(): { helper?(command: string): void; helperState?(): string } {
+  const native = requireOptionalNativeModule<StreamHelperModule>('BannerStreamHelper');
+  if (!native) return {};
+  return {
+    helperState: () => native.state(),
+    helper: (command: string) => {
+      if (command !== 'start' && command !== 'stop' && command !== 'forget') return;
+      try {
+        native.command(command);
+      } catch {
+        // Android refused to start the service: the helper stays off, and its state says so.
+      }
+    },
+  };
+}
 
 /** modules/banner-relaunch: BannerTV opened again from the launcher while running. */
 interface RelaunchModule {
@@ -440,12 +507,17 @@ export function installPhoneHost(): void {
     emit({ type: 'relaunch' }),
   );
   AppState.addEventListener('change', (next) => {
-    // Nothing plays in the background (the TV app does the same). The player screen pauses the
-    // session too; the state news follows its pause command, so the session knows the viewer
-    // paused. Sent from here first, it would leave a stream still opening stuck as loading.
-    if (next === 'background' && hasMedia && player) {
-      wantPlay = false;
-      player.pause();
-    }
+    // Nothing plays in the background (the TV app does the same), except in picture-in-picture.
+    // The player screen pauses the session too; the state news follows its pause command, so
+    // the session knows the viewer paused. Sent from here first, it would leave a stream still
+    // opening stuck as loading.
+    if (next !== 'background') return;
+    setTimeout(() => {
+      if (AppState.currentState === 'active' || pictureInPicture.get()) return;
+      if (hasMedia && player) {
+        wantPlay = false;
+        player.pause();
+      }
+    }, BACKGROUND_PAUSE_DELAY_MS);
   });
 }

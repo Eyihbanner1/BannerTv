@@ -1,5 +1,6 @@
 import type { Matcher } from './dictionary';
 import { replayedKeys } from './events';
+import { isFollowed, type FollowSet } from './follows';
 import { sortStable } from './sort';
 import { liveWindow } from './sport';
 import { foldText, slugOf, teamKey } from './text';
@@ -23,6 +24,8 @@ export interface ViewOptions {
   replayed?: ReadonlySet<string>;
   /** Country names, to tell apart two competitions with the same name. */
   matcher?: Matcher;
+  /** The teams and competitions the profile follows, whose matches go in the Following row. */
+  follows?: FollowSet;
 }
 
 /** Where an event stands now, worked out from its kick-off, never from the addon's label alone. */
@@ -72,10 +75,11 @@ function byKickOff(a: SportEvent, b: SportEvent): number {
 }
 
 const KIND_ORDER: Record<SportsGroup['kind'], number> = {
-  competition: 0,
-  'unknown-live': 1,
-  earlier: 2,
-  replays: 3,
+  following: 0,
+  competition: 1,
+  'unknown-live': 2,
+  earlier: 3,
+  replays: 4,
 };
 
 /** Rows in priority order; competitions BannerTV does not rank, by how many matches they have. */
@@ -123,7 +127,9 @@ function uniqueKeys(groups: SportsGroup[]): void {
  * The rows for one day of the strip (docs/PLAN.md, Screens). Live now: what
  * is live or starting soon, by competition, then "Live, time unknown". A
  * date: that day's events by competition, ended ones in "Earlier today",
- * events with no time at the end of Today, and Replays last.
+ * events with no time at the end of Today, and Replays last. Matches of a
+ * followed team or competition that are still to watch go first, in
+ * Following, and not in their own row too, so a day counts each match once.
  */
 export function buildDay(
   events: readonly SportEvent[],
@@ -171,6 +177,12 @@ export function buildDay(
     return group;
   };
 
+  const follows = options.follows;
+  const following = (event: SportEvent) =>
+    follows !== undefined && isFollowed(event, follows)
+      ? specialGroup('following', 'Following', event)
+      : undefined;
+
   for (const event of events) {
     if (event.kind === 'replay') {
       if (day === today) specialGroup('replays', 'Replays', event).events.push(event);
@@ -179,17 +191,18 @@ export function buildDay(
     const state = eventState(event, stateOptions);
     let group: SportsGroup | undefined;
     if (day === 'live') {
-      if (state === 'live' || state === 'soon') group = competitionGroup(event);
+      if (state === 'live' || state === 'soon') group = following(event) ?? competitionGroup(event);
       else if (state === 'live-unknown')
-        group = specialGroup('unknown-live', 'Live, time unknown', event);
+        group = following(event) ?? specialGroup('unknown-live', 'Live, time unknown', event);
     } else if (state === 'no-time' || state === 'live-unknown') {
       // No time to place them by: at the end of their competition's row on Today.
-      if (day === today) group = competitionGroup(event);
+      if (day === today) group = following(event) ?? competitionGroup(event);
     } else if (eventDay(event) === day) {
+      // A followed match that is over has nothing left to watch live: it stays in Earlier today.
       group =
         state === 'ended' && day === today
           ? specialGroup('earlier', 'Earlier today', event)
-          : competitionGroup(event);
+          : (following(event) ?? competitionGroup(event));
     }
     if (!group) continue;
     group.events.push(event);

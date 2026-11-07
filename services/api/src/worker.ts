@@ -5,9 +5,10 @@
  * repository does.
  *
  * The TV posts Trakt calls to /trakt as a plain-text JSON body and gets
- * Trakt's status and data back as JSON; it asks TMDB through /tmdb/<path>.
- * Only the paths BannerTV uses are passed on, and TMDB's answers are cached
- * for a day at the edge. Requests carry viewers' Trakt tokens, so nothing
+ * Trakt's status and data back as JSON; it asks TMDB through /tmdb/<path>,
+ * and Search asks /search/<route> (search.ts), which answers with titles by
+ * IMDb id. Only the paths BannerTV uses are passed on, and TMDB's answers
+ * are cached for a day at the edge. Requests carry viewers' Trakt tokens, so nothing
  * here logs, and no answer repeats a secret, a token or a request body.
  *
  * A Worker module may export only its handler and Durable Object classes (and
@@ -29,6 +30,7 @@ import {
   UPSTREAM_TIMEOUT_MS,
   type UpstreamRequest,
 } from './rules';
+import { readSearchCall, runSearch, searchCacheKey, type TmdbAnswer, type TmdbGet } from './search';
 
 // The Workers runtime's own cache, which the WebWorker types do not know.
 declare global {
@@ -169,6 +171,46 @@ async function cached(cache: Cache | undefined, key: Request): Promise<string | 
   }
 }
 
+/** One TMDB call for Search: its status and JSON, or undefined when none came or it is not JSON. */
+async function tmdbGet(call: TmdbGet, key: string): Promise<TmdbAnswer> {
+  const upstream = await send(tmdbRequest(call, key, USER_AGENT));
+  if (!upstream) return undefined;
+  try {
+    return { status: upstream.status, data: JSON.parse(upstream.text) as unknown };
+  } catch {
+    return undefined;
+  }
+}
+
+async function search(request: Request, env: Env, ctx: Context): Promise<Response> {
+  const key = secret(env.TMDB_API_KEY);
+  if (!key) return json({ error: 'unconfigured' }, 503);
+  const url = new URL(request.url);
+  const call = readSearchCall(url.pathname.slice('/search/'.length), url.search);
+  if (!call) return json({ error: 'path' }, 400);
+
+  const cache = edgeCache();
+  const cacheKey = new Request(searchCacheKey(url.origin, call));
+  const hit = await cached(cache, cacheKey);
+  if (hit !== undefined) return answer(hit, 200, CACHED);
+
+  const result = await runSearch(call, (get) => tmdbGet(get, key), Date.now());
+  if (result.status !== 200) return json(result.body, result.status);
+  // An answer missing titles TMDB failed to give is not kept, and says so, so the app does
+  // not keep it either: the next search may do better.
+  if (!result.complete) {
+    return answer(JSON.stringify({ ...(result.body as object), partial: true }), 200);
+  }
+  const body = JSON.stringify(result.body);
+  if (cache) {
+    const copy = new Response(body, {
+      headers: { 'Cache-Control': CACHED, 'Content-Type': JSON_TYPE },
+    });
+    ctx.waitUntil(cache.put(cacheKey, copy).catch(() => undefined));
+  }
+  return answer(body, 200, CACHED);
+}
+
 async function tmdb(request: Request, env: Env, ctx: Context): Promise<Response> {
   const key = secret(env.TMDB_API_KEY);
   if (!key) return json({ error: 'unconfigured' }, 503);
@@ -215,10 +257,15 @@ export default {
       return json({
         trakt: Boolean(secret(env.TRAKT_CLIENT_ID)),
         tmdb: Boolean(secret(env.TMDB_API_KEY)),
+        // This Worker answers /search: an app finding it false or missing does not ask.
+        search: Boolean(secret(env.TMDB_API_KEY)),
       });
     }
     if (request.method === 'POST' && pathname === '/trakt') return trakt(request, env);
     if (request.method === 'GET' && pathname.startsWith('/tmdb/')) return tmdb(request, env, ctx);
+    if (request.method === 'GET' && pathname.startsWith('/search/')) {
+      return search(request, env, ctx);
+    }
     return json({ error: 'not-found' }, 404);
   },
 };

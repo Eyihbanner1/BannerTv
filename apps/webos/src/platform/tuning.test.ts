@@ -21,6 +21,16 @@ describe('TUNING_DEFAULTS', () => {
       heroFade: false,
       marks: false,
       meter: false,
+      idbPrune: 'open',
+      idbRelaxed: false,
+      matcherAt: 'launch',
+      prefetchRestMs: 1500,
+      settleAfterFirstMs: 2000,
+      playFirst: false,
+      metadataTimeoutMs: 0,
+      aheadMode: 'decode',
+      aheadOversize: 1.5,
+      gridAhead: false,
     });
   });
 });
@@ -56,6 +66,42 @@ describe('parseTuning', () => {
     });
   });
 
+  it('reads the switches for starting playback', () => {
+    expect(parseTuning('{"prefetchRestMs":500}')).toEqual({
+      ...TUNING_DEFAULTS,
+      prefetchRestMs: 500,
+    });
+    // No rest at all is a choice too.
+    expect(parseTuning('{"prefetchRestMs":0}').prefetchRestMs).toBe(0);
+    expect(parseTuning('{"prefetchRestMs":-1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"prefetchRestMs":60000}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"prefetchRestMs":"500"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"settleAfterFirstMs":1000}').settleAfterFirstMs).toBe(1000);
+    expect(parseTuning('{"settleAfterFirstMs":0}').settleAfterFirstMs).toBe(0);
+    expect(parseTuning('{"settleAfterFirstMs":-1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"settleAfterFirstMs":true}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"playFirst":true}').playFirst).toBe(true);
+    expect(parseTuning('{"playFirst":1}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"metadataTimeoutMs":12000}').metadataTimeoutMs).toBe(12000);
+    expect(parseTuning('{"metadataTimeoutMs":60000}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"metadataTimeoutMs":-1}')).toEqual(TUNING_DEFAULTS);
+  });
+
+  it('takes the second round of decoding-ahead switches', () => {
+    expect(parseTuning('{"aheadMode":"raster","aheadOversize":2,"gridAhead":true}')).toEqual({
+      ...TUNING_DEFAULTS,
+      aheadMode: 'raster',
+      aheadOversize: 2,
+      gridAhead: true,
+    });
+    expect(parseTuning('{"aheadOversize":1.5}')).toEqual(TUNING_DEFAULTS);
+    // Stored before these switches came, decodeAhead keeps its meaning.
+    expect(parseTuning('{"decodeAhead":false}')).toEqual({
+      ...TUNING_DEFAULTS,
+      decodeAhead: false,
+    });
+  });
+
   it('ignores values out of range or of the wrong kind', () => {
     const value = parseTuning(
       '{"motion":"fly","screenMotion":"layer","zoom":1,"heroDelayMs":-5,"heroBusyMs":9999,"heroArt":"small","wideArt":"large","rowsAround":"3","overscan":99,"heroPan":"no","decoding":"sync","mips":0,"homeLayer":1,"decodeAhead":"yes","heroFade":null,"marks":[],"meter":"on"}',
@@ -63,6 +109,12 @@ describe('parseTuning', () => {
     expect(value).toEqual(TUNING_DEFAULTS);
     // Every row and tile beside focus is always drawn, so 0 would mean nothing.
     expect(parseTuning('{"rowsAround":0,"overscan":0}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadMode":"upload"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadMode":true}')).toEqual(TUNING_DEFAULTS);
+    // Only the two rules there are: 1.5 times the width, or the browser's.
+    expect(parseTuning('{"aheadOversize":3}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"aheadOversize":"2"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"gridAhead":"yes"}')).toEqual(TUNING_DEFAULTS);
   });
 });
 
@@ -113,7 +165,22 @@ describe('applyTuning', () => {
     ]);
     // Switches that work in code add no class.
     expect(
+      classesFor({
+        ...TUNING_DEFAULTS,
+        decodeAhead: false,
+        marks: true,
+        meter: true,
+        prefetchRestMs: 500,
+        settleAfterFirstMs: 1000,
+        playFirst: true,
+        metadataTimeoutMs: 12000,
+      }),
+    ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
+    expect(
       classesFor({ ...TUNING_DEFAULTS, decodeAhead: false, marks: true, meter: true }),
+    ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
+    expect(
+      classesFor({ ...TUNING_DEFAULTS, aheadMode: 'raster', aheadOversize: 2, gridAhead: true }),
     ).toEqual(classesFor({ ...TUNING_DEFAULTS }));
     expect(
       classesFor({
@@ -126,5 +193,31 @@ describe('applyTuning', () => {
         heroFade: true,
       }),
     ).toEqual([]);
+  });
+});
+
+// Launch switches.
+describe('the launch switches', () => {
+  it('default to what shipped before them', () => {
+    expect(TUNING_DEFAULTS.idbPrune).toBe('open');
+    expect(TUNING_DEFAULTS.idbRelaxed).toBe(false);
+    expect(TUNING_DEFAULTS.matcherAt).toBe('launch');
+  });
+
+  it('take valid values and keep the default for the rest', () => {
+    expect(parseTuning('{"idbPrune":"later"}')).toEqual({ ...TUNING_DEFAULTS, idbPrune: 'later' });
+    expect(parseTuning('{"idbPrune":"never"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"idbPrune":true}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"idbRelaxed":true}')).toEqual({ ...TUNING_DEFAULTS, idbRelaxed: true });
+    expect(parseTuning('{"idbRelaxed":"yes"}')).toEqual(TUNING_DEFAULTS);
+    expect(parseTuning('{"matcherAt":"idle"}')).toEqual({ ...TUNING_DEFAULTS, matcherAt: 'idle' });
+    expect(parseTuning('{"matcherAt":"later"}')).toEqual(TUNING_DEFAULTS);
+  });
+
+  it('are listed when changed', () => {
+    expect(changedTuning({ ...TUNING_DEFAULTS, idbPrune: 'later', idbRelaxed: true })).toEqual({
+      idbPrune: 'later',
+      idbRelaxed: true,
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { Cue, CueLine, CueSpan } from '@bannertv/core';
+import { type Cue, type CueLine, type CueSpan, isForcedName } from '@bannertv/core';
 import type shakaNs from 'shaka-player/dist/shaka-player.dash';
 import { channelName, codecFamily, formatName } from '../audio';
 import { resetVideo } from './native';
@@ -50,6 +50,19 @@ export function shakaAudioId(track: ShakaAudio): string {
     codecFamily(track.codecs ?? ''),
     track.spatialAudio ? 'spatial' : '',
   ].join('|');
+}
+
+/** A subtitle track as the player lists it: forced lines only by Shaka's flag or its name. */
+export function shakaTextTrack(track: shakaNs.extern.TextTrack): EngineTrack {
+  const label = track.label ?? '';
+  const listed: EngineTrack = {
+    id: String(track.id),
+    lang: track.language,
+    label,
+    active: track.active,
+  };
+  if (track.forced || isForcedName(label)) listed.forced = true;
+  return listed;
 }
 
 /** An audio track as the player lists it, with its channels, format and role. */
@@ -258,12 +271,7 @@ export const createShakaEngine: EngineFactory = (video, listener) => {
 
     textTracks() {
       if (!player) return [];
-      return player.getTextTracks().map((track) => ({
-        id: String(track.id),
-        lang: track.language,
-        label: track.label ?? '',
-        active: track.active,
-      }));
+      return player.getTextTracks().map(shakaTextTrack);
     },
 
     selectText(id) {

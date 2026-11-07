@@ -40,8 +40,12 @@ export const DOCUMENT_CAPS = {
   watchCards: 200,
   track: 300,
   offset: 300,
+  /** Subtitle drift fixes, `drift/<fileKey>`, as many as the timings. */
+  drift: 300,
   /** Home row ids in `home/order` and `home/hidden`. */
   rows: 300,
+  /** Followed teams and competitions, `follow/team/*` and `follow/comp/*` together. */
+  follows: 100,
 } as const;
 
 /** A profile's existence item (`<id>`), as against one of its fields (`<id>/name`). */
@@ -68,14 +72,29 @@ function watchedOf(value: unknown): boolean {
 }
 
 /**
+ * When the video was last marked not watched, or 0. Watched ticks count
+ * only under the newest of these, so an unwatch crosses screens while a
+ * tick made after it still wins.
+ */
+function unmarkedAtOf(value: unknown): number {
+  if (typeof value !== 'object' || value === null) return 0;
+  const at = (value as { unmarkedAt?: unknown }).unmarkedAt;
+  return typeof at === 'number' && isFinite(at) && at > 0 ? at : 0;
+}
+
+/** The fields of a `watch` value joined rather than chosen. */
+const JOINED: readonly string[] = ['watched', 'unmarkedAt'];
+
+/**
  * What breaks a tie of times between two live values. In `watch`, the
- * watched mark is left out, since it is joined rather than chosen.
+ * watched mark and the time of the last unwatch are left out, since they are
+ * joined rather than chosen.
  */
 function tieText(kind: DocumentKind | undefined, value: unknown): string {
   if (kind === 'watch' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const rest: { [key: string]: unknown } = {};
     for (const key of Object.keys(value)) {
-      if (key !== 'watched') rest[key] = (value as { [key: string]: unknown })[key];
+      if (JOINED.indexOf(key) === -1) rest[key] = (value as { [key: string]: unknown })[key];
     }
     return canon(rest);
   }
@@ -99,7 +118,10 @@ function compare(kind: DocumentKind | undefined, key: string, a: Item, b: Item):
 /**
  * The merge of two items under one key (ADR 0006, decision 2): the newer
  * time wins; on equal times a removal wins, then the larger canonical JSON.
- * In `watch`, the result is watched if either was.
+ * In `watch`, the result keeps the newer `unmarkedAt` of the two, and is
+ * watched if either was under that same `unmarkedAt` (none counting as 0):
+ * the pair (unmarkedAt, watched) is the larger of the two, so the join stays
+ * commutative and associative.
  */
 export function mergeItem(
   document: string,
@@ -114,14 +136,17 @@ export function mergeItem(
   if (!right) return left;
   const winner = compare(kind, key, left, right) >= 0 ? left : right;
   const loser = winner === left ? right : left;
-  if (
-    kind === 'watch' &&
-    !isRemoval(winner) &&
-    !isRemoval(loser) &&
-    watchedOf(loser.v) &&
-    !watchedOf(winner.v)
-  ) {
-    return { t: winner.t, v: { ...(winner.v as object), watched: true } };
+  if (kind === 'watch' && !isRemoval(winner) && !isRemoval(loser)) {
+    const winnerAt = unmarkedAtOf(winner.v);
+    const loserAt = unmarkedAtOf(loser.v);
+    const at = Math.max(winnerAt, loserAt);
+    const watched =
+      (winnerAt === at && watchedOf(winner.v)) || (loserAt === at && watchedOf(loser.v));
+    if (winnerAt === at && watched === watchedOf(winner.v)) return winner;
+    const value: { [key: string]: unknown } = { ...(winner.v as object), watched };
+    if (at > 0) value.unmarkedAt = at;
+    else delete value.unmarkedAt;
+    return { t: winner.t, v: value };
   }
   return winner;
 }
@@ -239,14 +264,20 @@ export function tidyItems(document: string, items: Items, now: number): Items {
   } else if (kind === 'settings') {
     const tracks: string[] = [];
     const offsets: string[] = [];
+    const drifts: string[] = [];
+    const follows: string[] = [];
     for (const key of keys) {
       if (key.indexOf('track/') === 0) tracks.push(key);
       else if (key.indexOf('offset/') === 0) offsets.push(key);
+      else if (key.indexOf('drift/') === 0) drifts.push(key);
+      else if (key.indexOf('follow/') === 0) follows.push(key);
       else if (key === 'home/order' || key === 'home/hidden') kept[key] = cutList(working[key]!);
       else kept[key] = working[key]!;
     }
     cap(working, tracks, DOCUMENT_CAPS.track, kept);
     cap(working, offsets, DOCUMENT_CAPS.offset, kept);
+    cap(working, drifts, DOCUMENT_CAPS.drift, kept);
+    cap(working, follows, DOCUMENT_CAPS.follows, kept);
   } else if (kind === 'profiles') {
     for (const key of keys) {
       const slash = key.indexOf('/');

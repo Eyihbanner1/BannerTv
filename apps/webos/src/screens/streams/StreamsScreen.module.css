@@ -21,6 +21,20 @@
   margin-right: 48px;
 }
 
+/* Filter, then Sort: Up from the list lands on Sort, the rightmost, as before. */
+.buttons {
+  flex: none;
+  white-space: nowrap;
+}
+
+.buttons > :first-child {
+  max-width: 560px;
+  margin-right: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
 .name {
   margin: 0;
   font: var(--bt-text-title);

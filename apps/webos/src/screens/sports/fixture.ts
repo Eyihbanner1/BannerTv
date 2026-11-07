@@ -9,6 +9,7 @@ import {
   type SportsGroup,
 } from '@bannertv/core';
 import type { TFunction } from 'i18next';
+import { dateFormatter } from '../../data/date-format';
 
 /** What a fixture tile says, worked out once per event and minute. Text only. */
 export interface FixtureText {
@@ -27,13 +28,15 @@ export interface FixtureText {
   label: string;
 }
 
+const weekdayName = dateFormatter('en-GB', { weekday: 'short' });
+
 /** "Today", "Tomorrow" or "Fri 30", for a local date. */
 export function dayName(t: TFunction, day: string, now: number): string {
   const today = localDate(now);
   if (day === today) return t('sports.today');
   if (day === addDays(today, 1)) return t('sports.tomorrow');
   const date = new Date(localDayStart(day));
-  const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' });
+  const weekday = weekdayName(date);
   return t('sports.dayLabel', { weekday, day: date.getDate() });
 }
 
@@ -111,6 +114,9 @@ export function fixtureText(
 export function groupTitle(t: TFunction, group: SportsGroup): string {
   let title: string;
   switch (group.kind) {
+    case 'following':
+      title = t('sportsFollow.row');
+      break;
     case 'earlier':
       title = t('sports.earlier');
       break;
@@ -123,7 +129,7 @@ export function groupTitle(t: TFunction, group: SportsGroup): string {
     default:
       title = group.title;
   }
-  return group.live > 0 && group.kind === 'competition'
+  return group.live > 0 && (group.kind === 'competition' || group.kind === 'following')
     ? t('sports.liveCount', { title, live: group.live, count: group.events.length })
     : title;
 }

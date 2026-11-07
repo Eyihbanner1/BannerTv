@@ -42,6 +42,15 @@ const TRAKT_ROUTES = new Set([
 ]);
 
 /**
+ * Trakt calls whose path carries an id, as method and a pattern for the whole
+ * path. They take no query: removing one paused item from Continue Watching
+ * names it by Trakt's playback id, read from GET /sync/playback.
+ */
+const TRAKT_ID_ROUTES: readonly { method: TraktMethod; path: RegExp }[] = [
+  { method: 'DELETE', path: /^\/sync\/playback\/\d{1,12}$/ },
+];
+
+/**
  * The one field the TV sends to each OAuth path (none for a new device code).
  * The Worker builds the rest of the body itself, so the TV cannot change the
  * client id, the secret or the grant.
@@ -154,8 +163,12 @@ export function readTraktCall(value: unknown): TraktCall | undefined {
   if (typeof path !== 'string') return undefined;
   const mark = path.indexOf('?');
   const pathname = mark === -1 ? path : path.slice(0, mark);
-  if (!TRAKT_ROUTES.has(`${method} ${pathname}`)) return undefined;
-  const params = readQuery(mark === -1 ? '' : path.slice(mark + 1), TRAKT_QUERY);
+  const query = mark === -1 ? '' : path.slice(mark + 1);
+  const withId = TRAKT_ID_ROUTES.some(
+    (route) => route.method === method && route.path.test(pathname),
+  );
+  if (withId ? query !== '' : !TRAKT_ROUTES.has(`${method} ${pathname}`)) return undefined;
+  const params = readQuery(query, TRAKT_QUERY);
   if (!params) return undefined;
   if (token !== undefined && token !== null && !isToken(token)) return undefined;
 

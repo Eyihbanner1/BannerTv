@@ -1,30 +1,41 @@
 import {
   askStillWatching,
+  BACK_TO_MS,
   bingeEntry,
   bingeHint,
   endAction,
   inLastStretch,
   languageName,
   nextVideo,
+  offersBackTo,
   parseRuntime,
   playedCard,
   qualityChoices,
   type QualityReference,
   rearms,
   secondsToEnd,
+  SKIP_LANDS_AFTER_MS,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  skipRearms,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
-import { playedVideos, progress } from '@tv/data/playback';
+import { addonsDidntAnswer } from '@tv/data/describe';
+import { playedVideos, progress, releaseMemory, rememberedRelease } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
+import { useSkipSegments } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
-import { audioDetail, audioSummary, pickAudio } from '@tv/player/audio';
-import { resolutionLabel } from '@tv/player/describe';
+import { audioDetail, audioSummary, audioSwitch, pickAudio } from '@tv/player/audio';
+import { problemText, resolutionLabel } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
+import { formatTime } from '@tv/player/media';
+import { playProblem } from '@tv/player/problem';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -34,6 +45,7 @@ import { autoplaysSinceInput, countAutoplay } from '@tv/player/sleep';
 import { type SubtitleChoice, useSubtitles } from '@tv/screens/player/use-subtitles';
 import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { motion } from '@brand/tokens/design';
+import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -42,6 +54,7 @@ import {
   ActivityIndicator,
   AppState,
   BackHandler,
+  type GestureResponderEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -58,20 +71,44 @@ import { StreamList } from '../ui/StreamList';
 import { colors, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
 import { holdLandscape } from './orientation';
-import { phonePlayer, pictureShown } from './phone-host';
+import {
+  BACKGROUND_PAUSE_DELAY_MS,
+  phonePlayer,
+  pictureInPicture,
+  pictureShown,
+} from './phone-host';
+import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
+import { SkipRipple } from './SkipRipple';
+import { SubtitleStyleChoices } from './SubtitleStyle';
 import { SubtitleText } from './SubtitleText';
+import { isSwipe, startsAtEdge, swipeMoves, swipeTarget } from './swipe-seek';
+import {
+  addSkip,
+  DOUBLE_TAP_MS,
+  type PendingSkip,
+  readTap,
+  skipTotal,
+  type TapSide,
+  tapSide,
+} from './tap-skip';
+import { TracksPanel } from './TracksPanel';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
 const CONTROLS_HIDE_MS = motion.controlsHide;
-const DOUBLE_TAP_MS = 280;
+/** A skip on a broadcast, which goes at once rather than adding up. */
 const SKIP_S = 10;
 /** The next episode's streams are looked up this long before the end. */
 const PREFETCH_NEXT_S = 120;
+/** The Skip intro pill's height, and how far up it sits while the controls show the seek bar. */
+const SKIP_PILL_H = 40;
+const SKIP_RAISED = 112;
+/** The Back to pill sits just under the title row: its padding, its buttons and a small gap. */
+const BACK_TO_TOP = space.m + touch.min + space.s;
 const noop = () => () => undefined;
 
-type Panel = 'tracks' | 'more' | 'streams' | 'quality' | null;
+type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -82,7 +119,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const { type: titleType, metaId, videoId } = route;
   // A sports event: streams from the addons that listed it only, and no Continue Watching card.
   const sportsEvent = route.event;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
   const element = useMemo(() => new PhoneVideoElement(), []);
   const finder = useMemo(
@@ -100,6 +137,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   );
   const finderState = useSyncExternalStore(finder.subscribe, finder.get);
   const shown = useSyncExternalStore(pictureShown.subscribe, pictureShown.get);
+  const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
+  const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
@@ -133,14 +172,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setSession(created);
     finder.start();
     let cancelled = false;
-    void progress
-      .load()
+    void Promise.all([progress.load(), releaseMemory.load()])
       .catch(() => undefined)
       .then(async () => {
         if (cancelled) return;
-        const start = route.startAt ?? progress.resumeAt(videoId) ?? 0;
+        // From saved progress a few seconds early (resumeLeadIn); a place carried over exactly.
+        const start = route.startAt ?? progress.resumeFrom(videoId) ?? 0;
         setResumedAt(start);
-        const entry = route.stream ?? (await finder.choose(route.binge));
+        // The release played last for the title goes first, as the next episode's does.
+        const release =
+          remembersPlace(route) && !sportsEvent ? rememberedRelease(metaId) : undefined;
+        const entry = route.stream ?? (await finder.choose(route.binge ?? release));
         if (cancelled) return;
         if (entry) created.play(entry, start);
         else setNothing(true);
@@ -159,6 +201,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
+  const problemWords = problem ? problemText(t, playProblem(nothing, finderState, state)) : null;
   const buffering = state.status === 'buffering';
   const playing = state.status === 'playing' || buffering;
   const ended = state.status === 'ended';
@@ -185,20 +228,43 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // A problem closes the other sheets; its Sources button opens the stream list over it.
   if (problem && panel !== null && panel !== 'streams') setPanel(null);
 
-  // The app going to the background pauses and saves, as hiding the TV app does.
+  // The app going to the background saves, and pauses unless the film went on in a small
+  // window (picture-in-picture), as hiding the TV app does.
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const subscription = AppState.addEventListener('change', (next) => {
+      clearTimeout(timer);
       if (next === 'background' && session) {
-        session.pause();
         session.saveProgress();
+        timer = setTimeout(() => {
+          if (AppState.currentState !== 'active' && !pictureInPicture.get()) session.pause();
+        }, BACKGROUND_PAUSE_DELAY_MS);
       } else if (next === 'active') {
         setControls(true);
       }
     });
-    return () => subscription.remove();
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
   }, [session]);
+  // Leaving the player ends the small window too.
+  useEffect(() => () => pictureInPicture.set(false), []);
+  const startPip = () => {
+    setPanel(null);
+    void videoView.current?.startPictureInPicture();
+  };
 
-  const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
+  const subtitles = useSubtitles(
+    titleType,
+    videoId,
+    metaId,
+    state.entry,
+    session,
+    state,
+    // The title's own running time judges a file's length until the video's is known.
+    parseRuntime(item?.runtime),
+  );
   useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
 
   // The language the viewer chose before, once per stream and engine.
@@ -336,9 +402,49 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     return () => subscription.remove();
   }, [panel, counting, ended, decision]);
 
-  // Taps: one shows or hides the controls; two on a side skip ten seconds.
-  const lastTap = useRef<{ at: number; side: 'left' | 'right' } | null>(null);
+  // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
+  // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
+  // going back offers nothing more. Never on a broadcast.
+  const [backTo, setBackTo] = useState<{ at: number } | null>(null);
+  useEffect(() => {
+    if (!backTo) return;
+    const timer = setTimeout(() => setBackTo(null), BACK_TO_MS);
+    return () => clearTimeout(timer);
+  }, [backTo]);
+  /** Goes to `to` from `from`: where the video was, trusted, as the jump began. */
+  const jump = useCallback(
+    (from: number, to: number) => {
+      if (!session) return;
+      session.seek(to);
+      if (!session.get().live && offersBackTo(from, to)) setBackTo({ at: from });
+    },
+    [session],
+  );
+
+  // Taps: one shows or hides the controls; two on a side start a skip of ten seconds, and each
+  // tap after that adds ten more (tap-skip.ts). The 10 s buttons add to the same total. It
+  // shows in a ripple on that side and lands once, a moment after the last tap or press, with
+  // a light buzz, as the TV's remote adds up presses. Not on a broadcast, where taps and the
+  // buttons skip at once as they always have, nor while a stream opens or fails, a panel is
+  // open or a finger is on the bar or swiping. A skip adding up as one of those comes is let
+  // go: what it counted from is no longer playing, or the viewer has chosen another way.
+  const lastTap = useRef<{ at: number; side: TapSide } | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [pending, setPending] = useState<PendingSkip | null>(null);
+  const skipsAddUp =
+    !!session && !waiting && !problem && !state.live && panel === null && !scrubbing;
+  if (pending && !skipsAddUp) setPending(null);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => {
+      setPending(null);
+      // Taps that came back to where they began go nowhere, and say nothing.
+      if (skipTotal(pending) === 0) return;
+      jump(pending.origin, pending.target);
+      Haptics.selectionAsync().catch(() => undefined);
+    }, SKIP_LANDS_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [pending, jump]);
   const skip = useCallback(
     (seconds: number) => {
       if (!session) return;
@@ -347,18 +453,25 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     },
     [session],
   );
+  /** One tap or press of a skip: -1 back, 1 forward. */
+  const skipBy = (direction: -1 | 1) => {
+    if (!session) return;
+    if (state.live) {
+      skip(direction * SKIP_S);
+      return;
+    }
+    if (!skipsAddUp) return;
+    const position = session.trustedPosition() ?? state.position;
+    setPending((adding) => addSkip(adding, direction, position, state.duration));
+  };
   const onSurfaceTap = (x: number, width: number) => {
     noteInput();
-    const side = x < width / 2 ? 'left' : 'right';
+    const side = tapSide(x, width);
     const now = Date.now();
-    if (
-      lastTap.current &&
-      now - lastTap.current.at < DOUBLE_TAP_MS &&
-      lastTap.current.side === side
-    ) {
+    if (readTap(lastTap.current, pending !== null, now, side) !== 'single') {
       clearTimeout(tapTimer.current);
       lastTap.current = null;
-      skip(side === 'left' ? -SKIP_S : SKIP_S);
+      skipBy(side === 'left' ? -1 : 1);
       return;
     }
     lastTap.current = { at: now, side };
@@ -366,6 +479,114 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     tapTimer.current = setTimeout(() => setControls((shownNow) => !shownNow), DOUBLE_TAP_MS);
   };
   const surfaceWidth = useRef(1);
+
+  // Swipe to seek: a finger dragged sideways across the picture moves where to play from, with
+  // a still of that scene, and the player goes there as it lifts. Taps and double taps work as
+  // before; a touch only becomes a swipe once it has moved sideways, and one starting at the
+  // screen's edge is left to Android's back gesture. Not on a broadcast, while a stream opens or
+  // fails, or with a panel open.
+  const [swipe, setSwipe] = useState<{ origin: number; target: number } | null>(null);
+  // Where a finger on the seek bar is, and where the video was as it went down, for the same
+  // scene preview and for Back to.
+  const [barAt, setBarAt] = useState<number | null>(null);
+  const [barFrom, setBarFrom] = useState(0);
+  // Where the finger went down, in the page.
+  const touchStart = useRef({ x: 0, y: 0 });
+  const swipeAllowed = !!session && !waiting && !problem && !state.live && panel === null;
+  const swipeLands = (origin: number, pageX: number) =>
+    swipeTarget(origin, pageX - touchStart.current.x, surfaceWidth.current, state.duration);
+  const endSwipe = (pageX: number | null) => {
+    const from = swipe;
+    setSwipe(null);
+    setScrubbing(false);
+    if (!from || pageX === null || !session) return;
+    const target = swipeLands(from.origin, pageX);
+    if (!swipeMoves(from.origin, target)) return;
+    jump(from.origin, target);
+    Haptics.selectionAsync().catch(() => undefined);
+  };
+  const swipeHandlers = {
+    onStartShouldSetResponderCapture: (event: GestureResponderEvent) => {
+      touchStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      // The tap below still takes the touch; it only becomes a swipe once it moves sideways.
+      return false;
+    },
+    onMoveShouldSetResponderCapture: (event: GestureResponderEvent) => {
+      if (!swipeAllowed || swipe) return false;
+      const start = touchStart.current;
+      return (
+        !startsAtEdge(start.x, surfaceWidth.current) &&
+        isSwipe(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y)
+      );
+    },
+    onResponderGrant: () => {
+      if (!session) return;
+      const origin = session.trustedPosition() ?? session.get().position;
+      noteInput();
+      clearTimeout(tapTimer.current);
+      lastTap.current = null;
+      setScrubbing(true);
+      setControls(false);
+      setSwipe({ origin, target: origin });
+    },
+    onResponderMove: (event: GestureResponderEvent) => {
+      if (!swipe) return;
+      const target = swipeLands(swipe.origin, event.nativeEvent.pageX);
+      if (target !== swipe.target) setSwipe({ origin: swipe.origin, target });
+    },
+    onResponderRelease: (event: GestureResponderEvent) => endSwipe(event.nativeEvent.pageX),
+    onResponderTerminate: () => endSwipe(null),
+    onResponderTerminationRequest: () => false,
+  };
+  // Frames for the scene preview come from the stream playing; another stream starts over.
+  const frameKey =
+    shown && state.entry && !state.live ? `${entryKey(state.entry)}|${state.engine ?? ''}` : null;
+  useEffect(() => sceneFrames.reset(frameKey), [frameKey]);
+
+  // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
+  // few seconds as the intro or recap starts, and again whenever the controls are up during it.
+  // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
+  const skips = useSkipSegments(titleType, videoId, !sportsEvent);
+  const skipping =
+    state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
+  // The intro or recap the pill was for, and where it first showed.
+  const [skipShown, setSkipShown] = useState<{ key: string; at: number } | null>(null);
+  if (skipping && !waiting) {
+    const key = skipKey(skipping);
+    if (!skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position)) {
+      setSkipShown({ key, at: state.position });
+    }
+  }
+  const skipFresh =
+    !!skipping &&
+    skipShown?.key === skipKey(skipping) &&
+    !skipCardDone(skipShown.at, state.position, state.rate);
+  const skipUp =
+    !!skipping && !waiting && !problem && panel === null && !scrubbing && (controls || skipFresh);
+  const skipSegment = () => {
+    if (!session || !skipping) return;
+    noteInput();
+    // A skip still adding up would undo it.
+    setPending(null);
+    jump(session.trustedPosition() ?? state.position, skipping.end);
+  };
+  const goBackTo = () => {
+    if (!session || !backTo) return;
+    noteInput();
+    setPending(null);
+    setBackTo(null);
+    session.seek(backTo.at);
+  };
+
+  // The scene preview, for a swipe or a finger on the bar, names the intro or recap it lands in.
+  const previewAt = swipe ? swipe.target : barAt;
+  const previewIn =
+    previewAt === null
+      ? undefined
+      : skips.find((segment) => previewAt >= segment.start && previewAt < segment.end);
+  const previewTag = previewIn
+    ? t(previewIn.kind === 'intro' ? 'phone.sceneIntro' : 'phone.sceneRecap')
+    : undefined;
 
   // Quality, as on the TV: at each resolution, the stream closest to what plays, in the
   // language heard and at its length, never a clip.
@@ -412,6 +633,32 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     });
     const label = resolutionLabel(choice.resolution);
     setSwitching(label ? { entry: choice.entry, label } : { entry: choice.entry });
+  };
+
+  // "English audio: switch stream", as on the TV: audio in the language wanted (the app's own
+  // when none was chosen) from another stream, when this one has no track in it.
+  const switchLanguage = wantedAudio(metaId) || i18n.language;
+  const switchTo = useMemo(
+    () =>
+      reference
+        ? audioSwitch(
+            state.audio,
+            reference,
+            finderState.candidates,
+            switchLanguage,
+            finder.orderOptions(),
+          )
+        : undefined,
+    [state.audio, reference, finderState.candidates, switchLanguage, finder],
+  );
+  const switchDetail = switchTo && resolutionLabel(switchTo.facts.resolution);
+  /** Plays the other stream from where the film is, and keeps the language for the title. */
+  const switchForAudio = (entry: StreamEntry, language: string) => {
+    setPanel(null);
+    if (!session) return;
+    chooseAudioLanguage(metaId, language);
+    session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
+    setSwitching({ entry });
   };
 
   const clock = useCallback(() => element.currentTime, [element]);
@@ -474,28 +721,49 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <StatusBar hidden />
       {shown ? (
         <VideoView
+          ref={videoView}
           player={phonePlayer()}
           style={styles.video}
           contentFit="contain"
           nativeControls={false}
-          allowsPictureInPicture={false}
+          allowsPictureInPicture
+          // Home or a swipe away while a film plays keeps it going in a small window.
+          startsPictureInPictureAutomatically={playing && !problem}
+          onPictureInPictureStart={() => {
+            pictureInPicture.set(true);
+            setPanel(null);
+            setControls(false);
+          }}
+          onPictureInPictureStop={() => {
+            pictureInPicture.set(false);
+            // The small window was closed rather than opened full again: stop there.
+            if (AppState.currentState !== 'active' && session) {
+              session.pause();
+              session.saveProgress();
+            }
+          }}
         />
       ) : null}
 
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={(event) => onSurfaceTap(event.nativeEvent.locationX, surfaceWidth.current)}
-        accessibilityLabel={controls ? undefined : t('phone.playLabel')}
-      />
+      <View style={StyleSheet.absoluteFill} {...swipeHandlers}>
+        {/* Measured in the page, as the swipe is: the picture fills the screen, and the web
+            build's taps arrive as clicks, which have no locationX. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={(event) => onSurfaceTap(event.nativeEvent.pageX, surfaceWidth.current)}
+          accessibilityLabel={controls ? undefined : t('phone.playLabel')}
+        />
+      </View>
 
       <SubtitleText
         cues={subtitles.cues}
         offset={subtitles.offset}
         clock={clock}
         raised={controls}
+        look={prefs.subtitleStyle}
       />
 
-      {waiting || problem ? (
+      {!pip && (waiting || problem) ? (
         <View style={StyleSheet.absoluteFill}>
           {backdrop ? (
             <Artwork
@@ -509,7 +777,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {waiting ? (
+      {waiting && !pip ? (
         <View style={styles.centre} pointerEvents="none">
           <ActivityIndicator color={colors.prismTop} size="large" />
           <Text style={styles.waitTitle}>{title}</Text>
@@ -518,27 +786,23 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {buffering ? (
+      {buffering && !pip ? (
         <View style={styles.centre} pointerEvents="none">
           <ActivityIndicator color={colors.prismTop} size="large" />
         </View>
       ) : null}
 
-      {problem ? (
+      {problem && !pip ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
-            <Text style={styles.problemTitle}>
-              {t(nothing ? 'player.problem.nothingTitle' : 'player.problem.failedTitle')}
-            </Text>
-            <Text style={styles.problemText}>
-              {nothing
-                ? t('player.problem.nothing')
-                : t(`player.problem.${state.error?.kind ?? 'other'}`)}
-            </Text>
-            {finderState.failed.length > 0 ? (
-              <Text style={styles.problemText}>
-                {t('player.problem.addonsFailed', { count: finderState.failed.length })}
+            <Text style={styles.problemTitle}>{problemWords?.title}</Text>
+            {problemWords?.lines.map((line) => (
+              <Text key={line} style={styles.problemText}>
+                {line}
               </Text>
+            ))}
+            {finderState.failed.length > 0 ? (
+              <Text style={styles.problemText}>{addonsDidntAnswer(t, finderState.failed)}</Text>
             ) : null}
             <View style={styles.problemButtons}>
               {!nothing && session?.hasNext() ? (
@@ -556,7 +820,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {controls && !problem ? (
+      {controls && !problem && !pip ? (
         <View
           style={[
             StyleSheet.absoluteFill,
@@ -608,12 +872,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             </Pressable>
           </View>
 
-          {!waiting ? (
+          {/* The scene preview takes the middle while a finger is on the bar. */}
+          {!waiting && barAt === null ? (
             <View style={styles.middle} pointerEvents="box-none">
               <Pressable
                 onPress={() => {
                   poke();
-                  skip(-SKIP_S);
+                  skipBy(-1);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={t('phone.back10')}
@@ -635,7 +900,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               <Pressable
                 onPress={() => {
                   poke();
-                  skip(SKIP_S);
+                  skipBy(1);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={t('phone.forward10')}
@@ -651,13 +916,20 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <View style={[styles.bottom, { paddingBottom: Math.max(insets.bottom, space.l) }]}>
             {!state.live ? (
               <SeekBar
-                position={state.position}
+                // While a skip adds up, the bar shows where it will land.
+                position={pending ? pending.target : state.position}
                 duration={state.duration}
                 onSeek={(seconds) => {
                   poke();
-                  session?.seek(seconds);
+                  jump(barFrom, seconds);
                 }}
                 onScrubbing={setScrubbing}
+                onScrubAt={(seconds) => {
+                  if (seconds !== null && barAt === null) {
+                    setBarFrom(session?.trustedPosition() ?? state.position);
+                  }
+                  setBarAt(seconds);
+                }}
                 {...(offersNext && next
                   ? {
                       right: (
@@ -682,8 +954,72 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
+      {/* Over the controls, so its total reads while they are up; it takes no touches. Keyed by
+          side, so it fades in afresh where the total turns round. */}
+      {pending ? (
+        <SkipRipple
+          key={pending.side}
+          side={pending.side}
+          total={skipTotal(pending)}
+          target={pending.target}
+        />
+      ) : null}
+
+      {previewAt !== null && !problem ? (
+        <ScenePreview
+          at={previewAt}
+          origin={swipe ? swipe.origin : barFrom}
+          duration={state.duration}
+          swiping={swipe !== null}
+          {...(previewTag ? { tag: previewTag } : {})}
+        />
+      ) : null}
+
+      {skipUp && skipping ? (
+        <Pressable
+          onPress={skipSegment}
+          accessibilityRole="button"
+          hitSlop={(touch.min - SKIP_PILL_H) / 2}
+          style={({ pressed }) => [
+            styles.skipPill,
+            {
+              right: Math.max(insets.right, space.xl),
+              // Over the seek bar while the controls are up.
+              bottom: controls ? SKIP_RAISED + insets.bottom : Math.max(insets.bottom, space.xl),
+            },
+            pressed && styles.skipPillPressed,
+          ]}
+        >
+          <Text style={styles.skipPillText}>
+            {t(skipping.kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap')}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {/* Top centre, under the title row: Skip intro, Up Next and Next episode all sit bottom
+          right and subtitles at the bottom, so it never covers any of them, and it stays where
+          it is as the controls come and go. It makes way for the scene preview. */}
+      {backTo && !waiting && !problem && !state.live && previewAt === null ? (
+        <Pressable
+          onPress={goBackTo}
+          accessibilityRole="button"
+          accessibilityLabel={t('phone.backToLabel', { time: formatTime(backTo.at) })}
+          hitSlop={(touch.min - SKIP_PILL_H) / 2}
+          style={({ pressed }) => [
+            styles.skipPill,
+            styles.backToPill,
+            pressed && styles.skipPillPressed,
+          ]}
+        >
+          <Text style={styles.skipPillText}>
+            {t('phone.backTo', { time: formatTime(backTo.at) })}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {!controls &&
       !problem &&
+      !pip &&
       ((counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
@@ -702,7 +1038,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {ended && decision === 'ask' && next ? (
+      {ended && decision === 'ask' && next && !pip ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
             <Text style={styles.problemTitle}>{t('phone.stillWatching')}</Text>
@@ -722,7 +1058,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {toast && !waiting ? (
+      {toast && !waiting && !pip ? (
         <View style={styles.toast} pointerEvents="none">
           <Text style={styles.toastText}>{toast}</Text>
         </View>
@@ -733,84 +1069,72 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('phone.audioAndSubtitles')}
         onClose={() => setPanel(null)}
       >
-        <View style={styles.columns}>
-          {state.audio.length > 0 ? (
-            <PanelColumn title={t('phone.audio')}>
-              <ScrollView>
-                {state.audio.map((track) => {
-                  const detail = audioDetail(track);
-                  return (
-                    <PanelOption
-                      key={track.id}
-                      label={audioSummary(track)}
-                      {...(detail ? { detail } : {})}
-                      selected={track.active}
-                      onPress={() => {
-                        session?.selectAudio(track.id);
-                        if (track.lang) chooseAudioLanguage(metaId, track.lang);
-                        setPanel(null);
-                      }}
-                    />
-                  );
-                })}
-              </ScrollView>
-            </PanelColumn>
-          ) : null}
-          <PanelColumn title={t('phone.subtitles')}>
-            <ScrollView>
-              <PanelOption
-                label={t('phone.subtitlesOff')}
-                selected={subtitles.choice === null}
-                onPress={() => chooseSubtitle(null)}
-              />
-              {subtitles.tracks.map((track) => (
-                <PanelOption
-                  key={`track-${track.id}`}
-                  label={languageName(track.lang) || track.label || t('common.unknown')}
-                  detail={t('phone.embeddedSubtitles')}
-                  selected={subtitles.choice?.kind === 'track' && subtitles.choice.id === track.id}
-                  onPress={() => chooseSubtitle({ kind: 'track', id: track.id })}
-                />
-              ))}
-              {subtitles.options.map((option) => {
-                const status = subtitles.statusOf({ kind: 'file', key: option.key });
-                return (
-                  <PanelOption
-                    key={`file-${option.key}`}
-                    label={languageName(option.lang) || option.lang}
-                    detail={[
-                      t('phone.fromAddon', { addon: option.source }),
-                      status === 'loading' ? t('common.loading') : '',
-                      status === 'failed' ? t('player.subtitlesFailed') : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    selected={
-                      subtitles.choice?.kind === 'file' && subtitles.choice.key === option.key
-                    }
-                    onPress={() => chooseSubtitle({ kind: 'file', key: option.key })}
-                  />
-                );
-              })}
-              {subtitles.pending > 0 ? (
-                <Text style={styles.sheetNote}>{t('common.loading')}</Text>
-              ) : null}
-            </ScrollView>
-          </PanelColumn>
-        </View>
+        {/* SidePanel builds its body only while it can be seen, so the panel mounts afresh at
+            each opening and its rows take their places anew. */}
+        {() => (
+          <TracksPanel
+            subtitles={subtitles}
+            entry={state.entry}
+            onChoose={chooseSubtitle}
+            onStyle={() => setPanel('style')}
+            audioRows={
+              // The Audio tab: the stream's audio tracks, then another stream in the language
+              // wanted when this one has none in it.
+              state.audio.length > 0 || switchTo
+                ? [
+                    ...state.audio.map((track) => {
+                      const detail = audioDetail(track);
+                      return (
+                        <PanelOption
+                          key={track.id}
+                          label={audioSummary(track)}
+                          {...(detail ? { detail } : {})}
+                          selected={track.active}
+                          onPress={() => {
+                            session?.selectAudio(track.id);
+                            if (track.lang) chooseAudioLanguage(metaId, track.lang);
+                            setPanel(null);
+                          }}
+                        />
+                      );
+                    }),
+                    switchTo ? (
+                      <PanelOption
+                        key="audio-switch"
+                        label={t('player.audioSwitch', { language: languageName(switchLanguage) })}
+                        {...(switchDetail ? { detail: switchDetail } : {})}
+                        onPress={() => switchForAudio(switchTo, switchLanguage)}
+                      />
+                    ) : null,
+                  ]
+                : null
+            }
+          />
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'style'}
+        title={t('player.style')}
+        onClose={() => setPanel('tracks')}
+      >
+        {() => <SubtitleStyleChoices />}
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
-        <PanelColumn>
-          <PanelOption
-            label={t('player.quality')}
-            detail={qualityValue}
-            accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
-            disabled={!state.entry}
-            onPress={() => setPanel('quality')}
-          />
-          <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
-        </PanelColumn>
+        {() => (
+          <PanelColumn>
+            <PanelOption
+              label={t('player.quality')}
+              detail={qualityValue}
+              accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+              disabled={!state.entry}
+              onPress={() => setPanel('quality')}
+            />
+            <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
+            {shown ? <PanelOption label={t('phone.pictureInPicture')} onPress={startPip} /> : null}
+          </PanelColumn>
+        )}
       </SidePanel>
 
       <SidePanel
@@ -818,35 +1142,37 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('player.quality')}
         onClose={() => setPanel(null)}
       >
-        <ScrollView>
-          {choices.length <= 1 ? (
-            <Text style={styles.sheetNote}>
-              {choices.length === 1
-                ? t('player.onlyQuality', {
-                    quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
-                  })
-                : t('player.noOtherQuality')}
-            </Text>
-          ) : null}
-          {choices.map((choice) => {
-            const value = choice.resolution ?? 'other';
-            return (
-              <PanelOption
-                key={value}
-                label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
-                {...(choice.otherLanguages
-                  ? {
-                      detail: t('player.otherAudio', {
-                        languages: choice.otherLanguages.map(languageName).join(', '),
-                      }),
-                    }
-                  : {})}
-                selected={value === currentQuality}
-                onPress={() => pickQuality(value)}
-              />
-            );
-          })}
-        </ScrollView>
+        {() => (
+          <ScrollView>
+            {choices.length <= 1 ? (
+              <Text style={styles.sheetNote}>
+                {choices.length === 1
+                  ? t('player.onlyQuality', {
+                      quality: resolutionLabel(choices[0]?.resolution) ?? t('player.otherQuality'),
+                    })
+                  : t('player.noOtherQuality')}
+              </Text>
+            ) : null}
+            {choices.map((choice) => {
+              const value = choice.resolution ?? 'other';
+              return (
+                <PanelOption
+                  key={value}
+                  label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
+                  {...(choice.otherLanguages
+                    ? {
+                        detail: t('player.otherAudio', {
+                          languages: choice.otherLanguages.map(languageName).join(', '),
+                        }),
+                      }
+                    : {})}
+                  selected={value === currentQuality}
+                  onPress={() => pickQuality(value)}
+                />
+              );
+            })}
+          </ScrollView>
+        )}
       </SidePanel>
 
       <SidePanel
@@ -854,11 +1180,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         title={t('phone.sources')}
         onClose={() => setPanel(null)}
       >
-        <StreamList
-          finder={finder}
-          {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
-          onPick={pickStream}
-        />
+        {() => (
+          <StreamList
+            finder={finder}
+            {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
+            onPick={pickStream}
+          />
+        )}
       </SidePanel>
     </View>
   );
@@ -941,8 +1269,22 @@ const styles = StyleSheet.create({
     borderColor: colors.barBuffer,
   },
   pillPressed: { backgroundColor: colors.controlPress },
+  // Skip intro: quiet, as the controls are: a dark pill with a fine edge, no fill colour.
+  skipPill: {
+    position: 'absolute',
+    height: SKIP_PILL_H,
+    justifyContent: 'center',
+    paddingHorizontal: space.l,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.barBuffer,
+    backgroundColor: colors.scrim,
+  },
+  skipPillPressed: { backgroundColor: colors.controlPress },
+  skipPillText: { ...type.label, color: colors.text },
+  // Back to looks as Skip intro does.
+  backToPill: { top: BACK_TO_TOP, alignSelf: 'center' },
   pillText: { ...type.meta, fontWeight: '700', color: colors.text },
-  columns: { flex: 1, flexDirection: 'row', gap: 18 },
   upNext: {
     position: 'absolute',
     bottom: space.xl,

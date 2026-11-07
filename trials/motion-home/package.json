@@ -1,0 +1,26 @@
+{
+  "name": "@bannertv/motion-trial",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trial: BannerTV Home drawn by the Lightning 3 WebGL renderer, against HTML with the same motion",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --dir src",
+    "check:bundle": "npx --yes es-check@9.8.1 es2017 'dist/**/*.js'",
+    "e2e": "playwright test",
+    "package": "npx --yes -p @webos-tools/cli@3.2.6 ares-package --no-minify --outdir out dist"
+  },
+  "dependencies": {
+    "@lightningjs/renderer": "3.7.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^24.0.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

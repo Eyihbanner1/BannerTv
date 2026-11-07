@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { describe, expect, it } from 'vitest';
-import { bringTotal, joinPlan, statusLine } from './account-text';
+import { bringTotal, joinPlan, matchesLastFour, statusLine } from './account-text';
 
 const t = ((key: string, options?: Record<string, unknown>) =>
   options ? `${key} ${JSON.stringify(options)}` : key) as unknown as TFunction;
@@ -70,5 +70,18 @@ describe('bringTotal', () => {
       { id: 'b2', name: 'B2' },
     ];
     expect(bringTotal(here, account)).toEqual({ total: 7, tooMany: true });
+  });
+});
+
+describe('matchesLastFour', () => {
+  const code = 'ABCD2345EFGH6789JKLM';
+  it('takes the last four in any case, with spaces and dashes', () => {
+    expect(matchesLastFour('JKLM', code)).toBe(true);
+    expect(matchesLastFour(' jk-lm ', code)).toBe(true);
+  });
+  it('refuses anything else', () => {
+    expect(matchesLastFour('', code)).toBe(false);
+    expect(matchesLastFour('KLM', code)).toBe(false);
+    expect(matchesLastFour('HJKLM', code)).toBe(false);
   });
 });

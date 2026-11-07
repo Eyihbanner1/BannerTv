@@ -3,6 +3,7 @@
  * items, their merge, the parts that tie the stores to documents, and the
  * engine that syncs them. `./testing` is for tests only and is not here.
  */
+export { type AsideCopy, type AsideProfile, asideProfileIds, describeAside } from './aside';
 export { fromBase64Url, toBase64Url, utf8Decode, utf8Encode } from './bytes';
 export { type AccountClock, type AccountClockOptions, createAccountClock } from './clock';
 export {
@@ -15,6 +16,7 @@ export {
 export { checkSyncCrypto, type CryptoCheck, type SyncCrypto } from './crypto';
 export {
   type ActiveProfile,
+  type BroughtBack,
   type CodeCheck,
   type CreateOptions,
   createSyncEngine,
@@ -43,16 +45,21 @@ export { type AccountKeys, deriveAccountKeys, wireName } from './keys';
 export {
   ASIDE_DAYS,
   ASIDE_KEY,
+  type AsideItem,
   asideUntil,
   deleteSyncKeys,
   type DocumentBase,
+  dropAside,
   emptyBase,
   expireAside,
   type JoinMode,
+  loadAside,
   loadBase,
   loadPending,
   loadSyncState,
+  readAside,
   readSyncState,
+  saveAside,
   saveBase,
   savePending,
   saveSyncState,
@@ -86,6 +93,7 @@ export {
   mergeRowOrder,
   type ProfileStores,
   profileParts,
+  subtitleDriftsPart,
   subtitleOffsetsPart,
   trackMemoryPart,
   watchPart,
