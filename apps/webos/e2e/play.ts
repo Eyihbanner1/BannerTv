@@ -129,24 +129,29 @@ function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
     .join('\n');
 }
 
-/** A line every `every` seconds from `from` seconds until `until`, numbered after `name`. */
+/**
+ * A line every `every` seconds from `from` seconds until `until`, numbered after `name`; with
+ * `sounds`, every so many lines is a sound in brackets instead, as for the hard of hearing.
+ */
 function dialogue(
   name: string,
   from: number,
   until: number,
   every = 10,
+  sounds = 0,
 ): Array<[number, number, string]> {
   const lines: Array<[number, number, string]> = [];
   for (let at = from, n = 1; at < until; at += every, n++)
-    lines.push([at, at + 4, `${name}, line ${n}`]);
+    lines.push([at, at + 4, sounds && n % sounds === 0 ? '[door creaks]' : `${name}, line ${n}`]);
   return lines;
 }
 
 /**
- * Three English files for the 10-minute video (any /long- path), as an
- * addon might send them, best last: a few signs only; one whose lines run on
- * past the video's end (timed for another frame rate); and the full one, with
- * the advert OpenSubtitles adds at its start and end.
+ * Four English files for the 10-minute video (any /long- path), as an addon
+ * might send them, best last: a few signs only; one for the hard of hearing;
+ * one timed for film speed on this faster video, whose lines run on past the
+ * video's end; and the full one, with the advert OpenSubtitles adds at its
+ * start and end.
  */
 export const LONG_SUBTITLES = {
   signs: srt([
@@ -154,13 +159,15 @@ export const LONG_SUBTITLES = {
     [240, 243, 'A SIGN ON THE ROAD'],
     [560, 563, 'A SIGN AT THE END'],
   ]),
-  // Its last lines end up to 25 s past the video's end, line after line: by more than half
-  // of what timing for film speed on a 25 fps video gives (4.3%), so its drift is fixed.
-  past: srt(dialogue('Running past the end', 1, 625, 5)),
+  sdh: srt(dialogue('For the hard of hearing', 3, 588, 2, 5)),
+  // Its last lines end up to 15 s past the video's end, line after line, and about 4% after the
+  // other two that fit, which agree on their end: timed for film speed on a 25 fps video, so its
+  // drift is fixed. On its own, so little past the end could be another release's ending.
+  past: srt(dialogue('Running past the end', 1, 612, 2)),
   full: srt([
     [0.2, 2.5, 'Advertise your product or brand here\ncontact www.OpenSubtitles.org today'],
-    ...dialogue('The full file', 3, 575),
-    [585, 590, 'Support us and become VIP member\nto remove all ads from www.OpenSubtitles.org'],
+    ...dialogue('The full file', 3, 588, 2),
+    [592, 596, 'Support us and become VIP member\nto remove all ads from www.OpenSubtitles.org'],
   ]),
 };
 

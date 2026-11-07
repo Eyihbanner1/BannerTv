@@ -3208,7 +3208,7 @@ test('each version says where it is from and how it is doing, and its timing is 
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   const missing = page.locator(`[data-focus-key="${OPENSUBTITLES}#missing"]`);
   // The release names it sends, and a best guess at which matches the stream (1080p WEB-DL).
-  await expect(en1).toHaveText('OpenSubtitles v3 1Open.Movie.1080p.WEB-DL · Matches your video');
+  await expect(en1).toHaveText('OpenSubtitles v3 1Matches your video · Open.Movie.1080p.WEB-DL');
   await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
 
@@ -3294,7 +3294,7 @@ function drawnText(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { drawnText: string[] }).drawnText.join('\n'));
 }
 
-test('the first subtitles to show are the full file: signs only and a file running past the end are passed over, and adverts never show', async ({
+test('the first subtitles to show are the full file: signs only, lines for the hard of hearing and a file running past the end are passed over, and adverts never show', async ({
   page,
 }) => {
   await mockAddons(page);
@@ -3305,6 +3305,7 @@ test('the first subtitles to show are the full file: signs only and a file runni
     // As OpenSubtitles might list them: the worst first, and no release names.
     subtitleList: [
       { id: 'signs', lang: 'eng' },
+      { id: 'sdh', lang: 'eng' },
       { id: 'past', lang: 'eng' },
       { id: 'full', lang: 'eng' },
     ],
@@ -3321,23 +3322,28 @@ test('the first subtitles to show are the full file: signs only and a file runni
   const drawn = await drawnText(page);
   expect(drawn).not.toContain('OpenSubtitles.org');
   expect(drawn).not.toContain('Advertise your product');
-  // The signs file listed first, and the one running past the end, never showed a line.
+  // The signs file listed first, the one for the hard of hearing and the one running past the
+  // end never showed a line. Neither of the first two fits as it is, so the next two were read.
   expect(drawn).not.toContain('A SIGN');
+  expect(drawn).not.toContain('For the hard of hearing');
   expect(drawn).not.toContain('Running past the end');
 
   // The sheet says why: the signs file has only a few lines, and is dimmed.
   await openSheet(page, 'player-tracks-lang-en');
   await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toHaveAttribute(
     'aria-label',
-    'English, 3 versions',
+    'English, 4 versions',
   );
   const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
+  const sdh = page.locator(`[data-focus-key="${OPENSUBTITLES}#sdh"]`);
   const past = page.locator(`[data-focus-key="${OPENSUBTITLES}#past"]`);
   const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
   await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
   await expect(signs).toHaveClass(/dim/);
-  await expect(past).toHaveText('OpenSubtitles v3 2');
-  await expect(full).toHaveText('OpenSubtitles v3 3');
+  await expect(sdh).toHaveText('OpenSubtitles v3 2For the hard of hearing');
+  await expect(past).toHaveText('OpenSubtitles v3 3');
+  await expect(full).toHaveText('OpenSubtitles v3 4');
+  await expect(sdh).not.toHaveClass(/dim/);
   await expect(past).not.toHaveClass(/dim/);
   await expect(full).not.toHaveClass(/dim/);
   await press(page, 'ArrowRight', `${OPENSUBTITLES}#full`);
@@ -3346,8 +3352,11 @@ test('the first subtitles to show are the full file: signs only and a file runni
   // pick is kept for this release by who the file is, never its link.
   await press(page, 'ArrowUp', `${OPENSUBTITLES}#past`);
   await page.keyboard.press('Enter');
-  await expect(page.getByText(/^Running past the end, line \d+$/)).toBeVisible({ timeout: 12000 });
-  await expect(past).toHaveText('OpenSubtitles v3 2Drift fixed for you');
+  // Its lines come every 2 s and last 4, so two show at once.
+  await expect(page.getByText(/^Running past the end, line \d+$/).first()).toBeVisible({
+    timeout: 12000,
+  });
+  await expect(past).toHaveText('OpenSubtitles v3 3Drift fixed for you');
   await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
     'drift fixed',
   );
@@ -3363,8 +3372,8 @@ test('the first subtitles to show are the full file: signs only and a file runni
   // Nothing of the fix is kept while the player made it.
   expect((await readKv(page, 'subtitleDrift')) ?? []).toEqual([]);
 
-  // A tenth of a second later: the timing moves by that, and the fix stays on, kept now as
-  // the viewer's own for this file.
+  // A tenth of a second later: the timing moves by that, and the fix stays on, kept with the
+  // timing as the player's own, so another release of the film works it out again.
   await pressBack(page);
   await press(page, 'ArrowRight', 'player-tracks-tab-audio');
   await press(page, 'ArrowRight', 'player-tracks-tab-timing');
@@ -3383,7 +3392,7 @@ test('the first subtitles to show are the full file: signs only and a file runni
   );
   await expect
     .poll(async () => readKv(page, 'subtitleDrift'))
-    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'behind' }]);
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'auto' }]);
   await expect
     .poll(async () => readKv(page, 'subtitleOffsets'))
     .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.1 }]);
