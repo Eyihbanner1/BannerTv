@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CREDITS_COUNT_S,
+  type CreditsCard,
+  creditsCardAt,
+  creditsCount,
   endAction,
   type EndState,
   inLastStretch,
@@ -8,6 +12,7 @@ import {
   UP_NEXT_AFTER_END_S,
   UP_NEXT_BEFORE_END_S,
   UP_NEXT_REARM_S,
+  upNextStage,
 } from './up-next';
 
 describe('secondsToEnd', () => {
@@ -217,5 +222,71 @@ describe('endAction', () => {
     expect(at({ countedOnScreen: false })).toBe('hold');
     // The countdown ran out on screen.
     expect(at({ countedOnScreen: true })).toBe('play');
+  });
+});
+
+describe('upNextStage', () => {
+  it('is due from the credits, then counts the last stretch', () => {
+    expect(upNextStage(2400, 2600, 1, 2500)).toBe('none');
+    expect(upNextStage(2500, 2600, 1, 2500)).toBe('credits');
+    expect(upNextStage(2600 - UP_NEXT_BEFORE_END_S, 2600, 1, 2500)).toBe('last');
+    expect(upNextStage(2700, 2600, 1, 2500)).toBe('last');
+  });
+
+  it('has only the last stretch without a credits mark, and nothing while the length is unknown', () => {
+    expect(upNextStage(2500, 2600)).toBe('none');
+    expect(upNextStage(2580, 2600)).toBe('last');
+    expect(upNextStage(2500, 0, 1, 2400)).toBe('none');
+    expect(upNextStage(2500, 2600, 0, 2400)).toBe('none');
+  });
+});
+
+describe('creditsCardAt', () => {
+  const counts = () => true;
+
+  it('comes up as playback passes the credits mark, and stays', () => {
+    expect(creditsCardAt(null, 2499, 2500, counts)).toBeNull();
+    const card = creditsCardAt(null, 2500.4, 2500, counts);
+    expect(card).toEqual({ at: 2500.4, counts: true, gone: false });
+    expect(creditsCardAt(card, 2560, 2500, counts)).toBe(card);
+  });
+
+  it('asks whether it counts only as it comes up', () => {
+    let asked = 0;
+    const ask = () => {
+      asked += 1;
+      return false;
+    };
+    const card = creditsCardAt(null, 2500, 2500, ask);
+    creditsCardAt(card, 2510, 2500, ask);
+    expect(asked).toBe(1);
+    expect(card?.counts).toBe(false);
+  });
+
+  it('is forgotten after a rewind well before the credits, not one just before them', () => {
+    const gone: CreditsCard = { at: 2500, counts: false, gone: true };
+    expect(creditsCardAt(gone, 2500 - UP_NEXT_REARM_S / 2, 2500, counts)).toBe(gone);
+    expect(creditsCardAt(gone, 2500 - UP_NEXT_REARM_S - 0.1, 2500, counts)).toBeNull();
+  });
+
+  it('has none without a mark', () => {
+    expect(creditsCardAt({ at: 1, counts: true, gone: false }, 2550, undefined, counts)).toBeNull();
+  });
+});
+
+describe('creditsCount', () => {
+  const card: CreditsCard = { at: 2500, counts: true, gone: false };
+
+  it('counts CREDITS_COUNT_S watching seconds from where it came up, rounded up', () => {
+    expect(creditsCount(card, 2500, 2600)).toBe(CREDITS_COUNT_S);
+    expect(creditsCount(card, 2503.5, 2600)).toBe(7);
+    expect(creditsCount(card, 2510, 2600)).toBe(0);
+    expect(creditsCount(card, 2530, 2600)).toBe(0);
+    // At double speed, twice the media seconds.
+    expect(creditsCount(card, 2510, 2600, 2)).toBe(5);
+  });
+
+  it('never counts past the real end', () => {
+    expect(creditsCount({ ...card, at: 2595 }, 2595, 2600)).toBe(5);
   });
 });

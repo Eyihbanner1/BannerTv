@@ -16,8 +16,9 @@ function percent(state: SessionState, runtimeSeconds: number): number {
 /**
  * Tells Trakt what plays: start when the video plays, pause when it is
  * paused, and stop when it ends or the player closes, which Trakt counts as
- * watched from 80% on. Nothing for the Lab, a live broadcast, a title Trakt
- * cannot name, or a profile not signed in.
+ * watched from 80% on. Closed in the end credits (`creditsAt`), it stops at
+ * 100%: the episode was seen, as its saved progress says. Nothing for the
+ * Lab, a live broadcast, a title Trakt cannot name, or a profile not signed in.
  */
 export function useScrobble(
   session: PlaybackSession | null,
@@ -25,11 +26,15 @@ export function useScrobble(
   ids: { type: string; metaId: string; videoId: string; lab?: boolean },
   /** The title's running time, or a guess at it, in seconds. */
   runtimeSeconds: () => number,
+  /** Where the end credits start in the file playing, when IntroDB's mark fits it. */
+  creditsAt?: number,
 ): void {
   const { type, metaId, videoId, lab } = ids;
   const runtime = useRef(runtimeSeconds);
+  const credits = useRef(creditsAt);
   useEffect(() => {
     runtime.current = runtimeSeconds;
+    credits.current = creditsAt;
   });
   const scrobbler = useMemo(() => {
     if (lab || !traktAvailable()) return null;
@@ -66,7 +71,9 @@ export function useScrobble(
       const played = sent.current !== 'none';
       if (played && sent.current !== 'stopped' && !latest.current.live) {
         sent.current = 'stopped';
-        void scrobbler.stop(percent(latest.current, runtime.current()));
+        const at = credits.current;
+        const inCredits = at !== undefined && latest.current.position >= at;
+        void scrobbler.stop(inCredits ? 100 : percent(latest.current, runtime.current()));
       }
       if (played) syncTraktSoon();
     };

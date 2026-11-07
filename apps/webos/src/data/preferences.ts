@@ -33,6 +33,12 @@ export interface Preferences {
   tmdb: boolean;
   /** The third episode in a row to start by itself asks "Still watching?" first. */
   stillWatching: boolean;
+  /**
+   * Up Next starts the next episode a few seconds into the credits, where
+   * IntroDB marks them, instead of at the end. Off: it only offers it there.
+   * Kept on this screen, not synced yet.
+   */
+  nextAtCredits: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -44,6 +50,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
   tmdb: true,
   stillWatching: true,
+  nextAtCredits: false,
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
@@ -108,6 +115,8 @@ export function readPreferences(raw: string | null): Preferences {
     tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
     stillWatching:
       typeof stored.stillWatching === 'boolean' ? stored.stillWatching : d.stillWatching,
+    nextAtCredits:
+      typeof stored.nextAtCredits === 'boolean' ? stored.nextAtCredits : d.nextAtCredits,
   };
 }
 

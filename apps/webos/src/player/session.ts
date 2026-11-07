@@ -162,6 +162,13 @@ export interface PlaybackSession {
   selectText(id: string | null): void;
   /** Saves where playback is now, for leaving or hiding the app. */
   saveProgress(): void;
+  /**
+   * Where the episode's end credits start in the file playing (IntroDB's
+   * mark, when it fits the file's length), or undefined. From there
+   * progress counts it watched. The player says again as the length
+   * changes, so another stream gets its own; a clip's clock never counts.
+   */
+  markCredits(at: number | undefined): void;
   /** The trusted position: never the 0 that webOS reads right after a resume. */
   trustedPosition(): number | undefined;
   /**
@@ -265,6 +272,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   // trailer, or a debrid service's "not ready yet". Nothing it plays is kept
   // as the video's place, so it never marks the video watched.
   let clip = false;
+  // Where the end credits start, as the player last said (markCredits).
+  let creditsAt: number | undefined;
   // An episode of season 0 ("tt0386676:0:3"): a special, as long as it likes.
   const special = options.type === 'series' && /:0:\d+$/.test(options.videoId);
   let stallTimer: number | undefined;
@@ -406,6 +415,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     if (!keep || clip) return;
     const update: ProgressUpdate = { metaId, type, videoId, position, duration };
     if (offRow) update.continueRow = false;
+    if (creditsAt !== undefined) update.creditsAt = creditsAt;
     progress.record(update);
   }
 
@@ -1102,6 +1112,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     },
 
     saveProgress: save,
+    markCredits(at) {
+      creditsAt = at !== undefined && isFinite(at) && at > 0 ? at : undefined;
+    },
 
     trustedPosition: () => tracker?.position(),
 

@@ -404,6 +404,7 @@
     "playNow": "Play now",
     "playNowCounting": "Play now. {{count}}",
     "keepWatching": "Keep watching",
+    "watchCredits": "Watch credits",
     "skipIntro": "Skip intro",
     "skipRecap": "Skip recap",
     "audio": "Audio",
@@ -557,6 +558,7 @@
     "trakt": "Trakt",
     "tmdb": "Extra details from TMDB: {{value}}",
     "stillWatching": "Ask \"Still watching?\": {{value}}",
+    "nextAtCredits": "Start next episode at the credits: {{value}}",
     "tmdbCredit": "Extra details, images and some search results come from TMDB. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
     "account": "BannerTV account"
   },

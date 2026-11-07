@@ -1,6 +1,6 @@
 import { type FetchJson, HttpError } from '../../http';
 import type { Limiter } from '../../limiter';
-import { readSkipSegments, type SkipSegment } from '../../playback/skips';
+import { type EpisodeMarks, readEpisodeMarks } from '../../playback/skips';
 import type { CachePolicy, Query, QueryCache, QueryState } from '../../query';
 
 /**
@@ -27,8 +27,9 @@ export const INTRODB_POLICY: CachePolicy = {
   errorFor: HOUR,
 };
 
-// Kept as read, not as IntroDB sent them, so the keys carry a version.
-const KEY = 'introdb:1';
+// Kept as read, not as IntroDB sent them, so the keys carry a version:
+// 2 added the end credits.
+const KEY = 'introdb:2';
 
 export interface IntroDbClientOptions {
   /** IntroDB's address; INTRODB_URL unless a test or a proxy says otherwise. */
@@ -40,11 +41,11 @@ export interface IntroDbClientOptions {
 
 export interface IntroDbClient {
   /**
-   * The intro and recap of a series episode, in the order they play. Only
-   * episodes with Stremio's IMDb ids (tt123:2:5) are looked up; anything
-   * else, films included, has none without a request.
+   * The intro and recap of a series episode, in the order they play, and its
+   * end credits. Only episodes with Stremio's IMDb ids (tt123:2:5) are looked
+   * up; anything else, films included, has none without a request.
    */
-  segments(type: string, videoId: string): Query<readonly SkipSegment[]>;
+  marks(type: string, videoId: string): Query<EpisodeMarks>;
 }
 
 /** The IMDb id, season and episode in a Stremio series video id, such as tt0903747:2:5. */
@@ -60,9 +61,9 @@ export function episodeOf(
   return { imdbId: match[1]!, season, episode };
 }
 
-const NONE: readonly SkipSegment[] = Object.freeze([]);
-const NO_SEGMENTS: Query<readonly SkipSegment[]> = (() => {
-  const state: QueryState<readonly SkipSegment[]> = { status: 'success', data: NONE, stale: false };
+const NONE: EpisodeMarks = Object.freeze({ segments: Object.freeze([]) });
+const NO_MARKS: Query<EpisodeMarks> = (() => {
+  const state: QueryState<EpisodeMarks> = { status: 'success', data: NONE, stale: false };
   return {
     get: () => state,
     subscribe: () => () => undefined,
@@ -84,17 +85,17 @@ export function createIntroDbClient(options: IntroDbClientOptions): IntroDbClien
     const url = `${base}/segments?imdb_id=${imdbId}&season=${season}&episode=${episode}`;
     const request = () => fetchJson(url, { timeoutMs: INTRODB_TIMEOUT_MS });
     try {
-      return readSkipSegments(await (limiter ? limiter.run(request) : request()));
+      return readEpisodeMarks(await (limiter ? limiter.run(request) : request()));
     } catch (error) {
-      if (isNotFound(error)) return [];
+      if (isNotFound(error)) return NONE;
       throw error;
     }
   }
 
   return {
-    segments(type, videoId) {
+    marks(type, videoId) {
       const found = type === 'series' ? episodeOf(videoId) : null;
-      if (!found) return NO_SEGMENTS;
+      if (!found) return NO_MARKS;
       const { imdbId, season, episode } = found;
       return queries.query(`${KEY}:${imdbId}:${season}:${episode}`, {
         policy: INTRODB_POLICY,

@@ -18,6 +18,7 @@ test('a seek left over from a failed load does not move the next one', async ({ 
   await press(page, 'ArrowDown', 'settings-probing');
   await press(page, 'ArrowDown', 'settings-subtitle-style');
   await press(page, 'ArrowDown', 'settings-still-watching');
+  await press(page, 'ArrowDown', 'settings-next-at-credits');
   await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'ArrowDown', 'settings-lab');
   await press(page, 'Enter', 'lab-start-mode');

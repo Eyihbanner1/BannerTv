@@ -227,6 +227,15 @@ export {
   skipStep,
 } from './playback/seeking';
 export {
+  CREDITS_EXACT_S,
+  CREDITS_FIT_S,
+  CREDITS_LONGEST_S,
+  type CreditsCue,
+  creditsCue,
+  type CreditsMark,
+  type EpisodeMarks,
+  readCredits,
+  readEpisodeMarks,
   readSkipSegments,
   SKIP_CARD_S,
   SKIP_REARM_S,
@@ -239,6 +248,25 @@ export {
   type SkipSegment,
 } from './playback/skips';
 export {
+  createLearnedIntros,
+  guessIntro,
+  guessSettles,
+  type IntroGuess,
+  LEARN_LONGEST_S,
+  LEARN_SETTLE_S,
+  LEARN_SHORTEST_S,
+  LEARN_UNDONE_S,
+  LEARN_WITHIN_S,
+  type LearnedIntro,
+  type LearnedIntros,
+  MAX_LEARNED,
+  withLearnedIntro,
+} from './playback/learned-intros';
+export {
+  CREDITS_COUNT_S,
+  type CreditsCard,
+  creditsCardAt,
+  creditsCount,
   type EndAction,
   endAction,
   type EndState,
@@ -248,6 +276,8 @@ export {
   UP_NEXT_AFTER_END_S,
   UP_NEXT_BEFORE_END_S,
   UP_NEXT_REARM_S,
+  upNextStage,
+  type UpNextStage,
 } from './playback/up-next';
 export {
   AWAY_MS,

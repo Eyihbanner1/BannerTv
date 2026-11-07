@@ -3,7 +3,14 @@ import {
   BACK_TO_MS,
   bingeEntry,
   bingeHint,
+  type CreditsCard,
+  creditsCardAt,
+  creditsCount,
+  creditsCue,
   endAction,
+  guessIntro,
+  guessSettles,
+  type IntroGuess,
   inLastStretch,
   languageName,
   nextVideo,
@@ -21,13 +28,14 @@ import {
   skipRearms,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
+  upNextStage,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
 import { addonsDidntAnswer } from '@tv/data/describe';
 import { playedVideos, progress } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
-import { useSkipSegments } from '@tv/data/skips';
+import { learnedIntros, useEpisodeMarks } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
@@ -228,8 +236,23 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     return () => subscription.remove();
   }, [session]);
 
+  // What IntroDB marks in this episode, as on the TV: the intro and recap (with an intro
+  // learned from the viewer's own skips where it has none) and the end credits, for Up Next
+  // when its mark fits this file. Never for sports.
+  const marks = useEpisodeMarks(titleType, metaId, videoId, !sportsEvent);
+  const cue = state.clip || state.live ? undefined : creditsCue(marks.credits, state.duration);
+
   const subtitles = useSubtitles(titleType, videoId, metaId, state.entry, session, state);
-  useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
+  useScrobble(
+    session,
+    state,
+    { type: titleType, metaId, videoId },
+    finder.runtimeSeconds,
+    cue?.start,
+  );
+  // The progress saved counts the episode watched from the credits.
+  const creditsAt = cue?.start;
+  useEffect(() => session?.markCredits(creditsAt), [session, creditsAt]);
 
   // The language the viewer chose before, once per stream and engine.
   const audioDecided = useRef('');
@@ -302,9 +325,55 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const held = panel !== null || waiting || problem || scrubbing;
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
   const counting = inStretch && !dismissed && !held;
+  // As the credits start, the pill offers the next episode or Watch credits; with "Start next
+  // at credits" on and a mark for this very release, it counts a few seconds and plays it,
+  // unless "Still watching?" is due. Otherwise the last 30 seconds count down as before.
+  const stage = offersNext
+    ? upNextStage(state.position, state.duration, state.rate, cue?.start)
+    : 'none';
+  const [creditsCard, setCreditsCard] = useState<CreditsCard | null>(null);
+  if (!waiting) {
+    const counts = () =>
+      prefs.nextAtCredits &&
+      !!cue?.startsNext &&
+      !(
+        prefs.stillWatching &&
+        askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
+      );
+    const card =
+      offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
+    if (card !== creditsCard) setCreditsCard(card);
+  }
+  const creditsCounts = !!creditsCard && creditsCard.counts && !creditsCard.gone && !dismissed;
+  const creditsUp =
+    !!creditsCard &&
+    !creditsCard.gone &&
+    !ended &&
+    !held &&
+    playing &&
+    (stage === 'credits' || creditsCounts);
+  const creditsLeft =
+    creditsCard && creditsCounts
+      ? creditsCount(creditsCard, state.position, state.duration, state.rate)
+      : null;
+  // Run out while something held it: it counts no more, and the ending plays out.
+  if (creditsCard && creditsCounts && creditsLeft === 0 && !creditsUp && !waiting) {
+    setCreditsCard({ ...creditsCard, counts: false });
+  }
+  const creditsDue = creditsUp && creditsCounts && creditsLeft === 0;
+  useEffect(() => {
+    if (!creditsDue || !next) return;
+    countAutoplay();
+    playEpisode(next);
+    // Only the count running out matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditsDue]);
   const count = ended
     ? (afterEnd ?? UP_NEXT_AFTER_END_S)
     : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
+  // What Next episode counts with the controls up: to the next episode at the credits, or to
+  // the end, or nothing over credits it only offers it over.
+  const nextCount = creditsUp ? creditsLeft : counting ? count : null;
   if (dismissed && !waiting && !ended && rearms(state.position, state.duration, state.rate)) {
     setDismissed(false);
   }
@@ -375,15 +444,39 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     const timer = setTimeout(() => setBackTo(null), BACK_TO_MS);
     return () => clearTimeout(timer);
   }, [backTo]);
-  /** Goes to `to` from `from`: where the video was, trusted, as the jump began. */
+  // A skip by hand that looks like the intro, until playback shows it was (learned-intros.ts):
+  // one of an intro's length early in an episode is learned once playback goes on from where
+  // it landed, and the series' next episode offers Skip intro at the same place, as on the TV.
+  const introGuess = useRef<IntroGuess | null>(null);
+  const learnsIntro = titleType === 'series' && !sportsEvent && !state.live && !state.clip;
+  /**
+   * Goes to `to` from `from`: where the video was, trusted, as the jump began. `byHand`: a tap,
+   * swipe or the bar, which may be the intro skipped; not Skip intro or Skip recap.
+   */
   const jump = useCallback(
-    (from: number, to: number) => {
+    (from: number, to: number, byHand = true) => {
       if (!session) return;
       session.seek(to);
       if (!session.get().live && offersBackTo(from, to)) setBackTo({ at: from });
+      if (!byHand) return;
+      // A jump from inside IntroDB's recap is that recap's.
+      const inRecap = marks.segments.some(
+        (segment) => segment.kind === 'recap' && from >= segment.start && from < segment.end,
+      );
+      if (!learnsIntro) introGuess.current = null;
+      else if (!inRecap) introGuess.current = guessIntro(introGuess.current, from, to);
     },
-    [session],
+    [session, marks.segments, learnsIntro],
   );
+  const position = state.position;
+  useEffect(() => {
+    const guess = introGuess.current;
+    if (!guess || waiting) return;
+    const verdict = guessSettles(guess, position);
+    if (verdict === 'wait') return;
+    introGuess.current = null;
+    if (verdict === 'learn') learnedIntros.learn(metaId, guess);
+  }, [position, waiting, metaId]);
 
   // Taps: one shows or hides the controls; two on a side start a skip of ten seconds, and each
   // tap after that adds ten more (tap-skip.ts). The 10 s buttons add to the same total. It
@@ -510,7 +603,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.
   // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
-  const skips = useSkipSegments(titleType, videoId, !sportsEvent);
+  const skips = marks.segments;
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
   // The intro or recap the pill was for, and where it first showed.
@@ -532,7 +625,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     noteInput();
     // A skip still adding up would undo it.
     setPending(null);
-    jump(session.trustedPosition() ?? state.position, skipping.end);
+    jump(session.trustedPosition() ?? state.position, skipping.end, false);
+    // A learned intro skipped can be corrected as the skip it was learned from.
+    introGuess.current = skipping.learned ? { start: skipping.start, end: skipping.end } : null;
   };
   const goBackTo = () => {
     if (!session || !backTo) return;
@@ -863,8 +958,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                           style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
                         >
                           <Text style={styles.pillText}>
-                            {counting
-                              ? t('phone.nextIn', { seconds: count })
+                            {nextCount !== null
+                              ? t('phone.nextIn', { seconds: nextCount })
                               : t('phone.nextEpisode')}
                           </Text>
                         </Pressable>
@@ -942,7 +1037,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
       {!controls &&
       !problem &&
-      ((counting && playing) || (ended && decision === 'hold')) &&
+      (creditsUp || (counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
           <Text style={styles.upNextTitle}>{t('phone.upNext')}</Text>
@@ -952,10 +1047,21 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <View style={styles.upNextButtons}>
             <Button
               kind="primary"
-              label={`${t('phone.playNow')} (${count})`}
+              label={
+                creditsUp && creditsLeft === null
+                  ? t('phone.playNow')
+                  : `${t('phone.playNow')} (${creditsUp ? creditsLeft : count})`
+              }
               onPress={() => playEpisode(next)}
             />
-            <Button label={t('phone.keepWatching')} onPress={() => setDismissed(true)} />
+            {creditsUp ? (
+              <Button
+                label={t('phone.watchCredits')}
+                onPress={() => setCreditsCard((card) => card && { ...card, gone: true })}
+              />
+            ) : (
+              <Button label={t('phone.keepWatching')} onPress={() => setDismissed(true)} />
+            )}
           </View>
         </View>
       ) : null}

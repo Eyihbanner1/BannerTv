@@ -125,6 +125,7 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
   await press(page, 'ArrowDown', 'settings-probing');
   await press(page, 'ArrowDown', 'settings-subtitle-style');
   await press(page, 'ArrowDown', 'settings-still-watching');
+  await press(page, 'ArrowDown', 'settings-next-at-credits');
   await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'Enter', 'diagnostics-refresh');
   await expect(page.getByText('classic script')).toBeVisible();

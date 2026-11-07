@@ -102,6 +102,14 @@ function FullSettings() {
         />
         <Button
           block
+          focusKey="settings-next-at-credits"
+          label={t('settings.nextAtCredits', {
+            value: t(prefs.nextAtCredits ? 'common.on' : 'common.off'),
+          })}
+          onPress={() => setPreference('nextAtCredits', !prefs.nextAtCredits)}
+        />
+        <Button
+          block
           focusKey="settings-diagnostics"
           label={t('settings.diagnostics')}
           onPress={() => push({ name: 'diagnostics' })}
