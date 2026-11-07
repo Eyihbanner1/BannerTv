@@ -212,7 +212,9 @@ function keepOrSwitch<T extends PickableSubtitle>(
  *
  * - A version picked by hand for this release, or one whose release name
  *   matches the video, is chosen at once, and no other is read while it
- *   reads whole and plain (or for the hard of hearing, as wanted). The
+ *   reads whole and plain (or for the hard of hearing, as wanted), nor,
+ *   for one whose name matches, while it is on its way and not yet a slow
+ *   download. The
  *   first two in the list are read beside the version picked by hand, for
  *   their checks only, when its lines run on past the video's end, line
  *   after line (`runsOn`): a drift only files agreeing on an end can show
@@ -291,12 +293,14 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
     }
     // Others of the same standing, best first. Those placed above the one showing may be read;
     // all of them once it has read as less than whole and plain (or as wanted for the hard of
-    // hearing), as a copy placed below it, not read yet, may be.
+    // hearing), as a copy placed below it, not read yet, may be; and while it is a slow
+    // download, as the first of them read shows at once (keepOrSwitch).
     const peers = ranked.filter(peerOf);
-    const pool =
-      isRead(current) && tierOf(current) > 0
-        ? peers.filter((option) => option !== current)
-        : peers.slice(0, peers.indexOf(current));
+    const others =
+      (isRead(current) && tierOf(current) > 0) || (!isRead(current) && !!input.slow?.(current.url));
+    const pool = others
+      ? peers.filter((option) => option !== current)
+      : peers.slice(0, peers.indexOf(current));
     const toRead = pool.filter(unread).slice(0, Math.max(0, input.readsLeft));
     return keepOrSwitch(peers, current, toRead, input);
   }

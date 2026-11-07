@@ -438,6 +438,29 @@ describe('useSubtitles', () => {
     expect(player.subtitles.cues).toHaveLength(1200);
   });
 
+  it('shows another copy made for the release when the one chosen is a slow download', async () => {
+    const release = 'Some.Film.2021.1080p.BluRay.x264-GROUP';
+    const entry = streamEntry(release);
+    const first = file('first', FULL, { label: release, ms: 14000 });
+    const second = file('second', FULL, { label: release, ms: 500 });
+    const other = file('other', FULL, { ms: 300 });
+    offer(entry, [first, second, other]);
+    const player = play(entry);
+    await player.flush();
+    expect(player.subtitles.choice).toEqual(fileChoice(first));
+    // Until it is slow, the copy chosen is waited for, and nothing else is read.
+    await player.wait(1500);
+    expect(world.loads).toEqual([first.url]);
+    // Then the other copy made for the release is read, and shows.
+    await player.wait(1500);
+    expect(player.subtitles.choice).toEqual(fileChoice(second));
+    expect(player.subtitles.cues).toHaveLength(1200);
+    expect(world.loads).not.toContain(other.url);
+    // The first, read in the end, is no better: the second stays.
+    await player.wait(12000);
+    expect(player.subtitles.choice).toEqual(fileChoice(second));
+  });
+
   it('forgets the files read once the player closes', async () => {
     const entry = streamEntry('film');
     offer(entry, [file('full', FULL)]);

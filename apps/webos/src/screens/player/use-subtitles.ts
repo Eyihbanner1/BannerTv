@@ -442,6 +442,15 @@ export function useSubtitles(
           }
         }
         if (due !== Infinity) wakeAt(due, now);
+      } else if (
+        result.pick &&
+        !checks.profile(result.pick.url) &&
+        (checks.reading(result.pick.url) || result.pick.key !== current)
+      ) {
+        // Planned again when the file chosen, on its way or about to be, turns slow: other copies
+        // made for the release are read then. It counts from when its load started.
+        const due = (asked.get(result.pick.url) ?? now) + HOLD_MS;
+        if (due > now) wakeAt(due, now);
       }
       if (result.pick && result.pick.key !== current) {
         // Landing on the version picked by hand, it stays: a track listed later does not take over.
@@ -635,6 +644,11 @@ export function useSubtitles(
           : current,
       );
     };
+    // Its download counts from now, to tell when it turns slow (`asked`).
+    const counted = checkedIn.current;
+    if (counted.entry === entry && !checks.reading(option.url) && !checks.profile(option.url)) {
+      counted.asked.set(option.url, Date.now());
+    }
     checks.read(option).then(
       (cues) => {
         // A file that failed once and reads now is no longer marked.

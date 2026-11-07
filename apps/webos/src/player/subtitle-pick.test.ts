@@ -449,6 +449,14 @@ describe('planSubtitlePick', () => {
     const label = 'Some.Film.2021.1080p.BluRay-GROUP';
     const copies = [file('a', 'eng', label), file('b', 'eng', label)];
     expect(plan(copies, { b: SDH }, waiting)).toEqual({ pick: 'b', ...settled });
+    // A copy made for the release that is still on its way does not keep the others made for
+    // it from being read: the first of them read shows, not counted as a switch.
+    const slowCopy = { ...waiting, holding: false };
+    expect(plan(copies, {}, slowCopy)).toEqual({ ...settled, pick: 'a', read: ['b'] });
+    expect(plan(copies, {}, { ...slowCopy, readsLeft: 0 })).toEqual({ ...settled, pick: 'a' });
+    expect(plan(copies, { b: FITS }, slowCopy)).toEqual({ pick: 'b', ...settled });
+    // Not yet slow, it is waited for as before.
+    expect(plan(copies, {}, { ...slowCopy, slow: undefined })).toEqual({ pick: 'a', ...settled });
     // Once its lines show, only a file that fits clearly better takes over, as a switch.
     expect(plan(two, { a: SDH, b: SDH }, waiting).pick).toBe('a');
     expect(plan(two, { a: SDH, b: FITS }, waiting)).toEqual({
