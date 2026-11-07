@@ -292,15 +292,40 @@ function competitionSport(members: readonly Combined[]): Sport | undefined {
   return best?.sport;
 }
 
+// A fight card's number after its promotion: "UFC 320", "PFL 10", "Oktagon #96".
+const CARD_NUMBER = /^(.*\S)\s+#?\d{1,4}$/;
+
+/**
+ * The competition the dictionary knows by a name, and for a fight sport by
+ * the name without its card's number: "UFC 320: Jones vs Aspinall" is the
+ * UFC's, as most cards are named. No other sport numbers its competitions
+ * this way, and a number there can be part of the name ("Formula 1").
+ */
+function knownCompetition(
+  matcher: Matcher,
+  text: string,
+  sport: Sport,
+): CompetitionEntry | undefined {
+  const entry = matcher.competition(text, sport);
+  if (entry || (sport !== 'mma' && sport !== 'boxing')) return entry;
+  const card = CARD_NUMBER.exec(text.trim());
+  return card ? matcher.competition(card[1]!, sport) : undefined;
+}
+
 /**
  * Whether a fight the addon tagged with a word for any fight sport ("Fight",
  * read as boxing) names an MMA competition the dictionary knows: "ONE
- * Championship" in a Fight catalog is MMA, and gets its row there.
+ * Championship" or "UFC 320" in a Fight catalog is MMA, and gets its row
+ * there. A card with no fighters in its title names it in front ("UFC 320:
+ * Prelims").
  */
 function namesMma(members: readonly Combined[], matcher: Matcher): boolean {
   for (const member of members) {
     for (const { text } of member.competitions) {
-      if (matcher.competition(text, 'mma')) return true;
+      if (knownCompetition(matcher, text, 'mma')) return true;
+    }
+    for (const suffix of member.suffixes) {
+      if (knownCompetition(matcher, suffix, 'mma')) return true;
     }
   }
   return false;
@@ -456,7 +481,7 @@ function namedCompetition(
     for (const { text, source } of member.competitions) {
       const rank = SOURCE_RANK[source];
       if (best && rank > best.rank) break;
-      let entry = matcher?.competition(text, sport);
+      let entry = matcher ? knownCompetition(matcher, text, sport) : undefined;
       // A bare "League Cup" is the EFL Cup only when both teams are English.
       if (!entry && matcher && /^(?:england\W+)?league cup$/i.test(foldText(text).trim())) {
         if (teams[0]?.country === 'GB-ENG' && teams[1]?.country === 'GB-ENG') {
@@ -468,7 +493,7 @@ function namedCompetition(
     }
     if (matcher) {
       for (const suffix of member.suffixes) {
-        const entry = matcher.competition(suffix, sport);
+        const entry = knownCompetition(matcher, suffix, sport);
         if (entry)
           consider(competitionFromEntry(entry, 'name-suffix'), SOURCE_RANK['name-suffix'], true);
       }

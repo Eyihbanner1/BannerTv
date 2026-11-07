@@ -348,6 +348,26 @@ describe('names the captures do not have, with the bundled dictionary', () => {
     expect(club!.note).toBe('Interprovincial');
   });
 
+  it('gives a numbered fight card its promotion’s row, in a Fight catalog too', () => {
+    const [ufc, fight, prelims, pfl, wrestling] = buildEvents(
+      [
+        listing({ name: 'UFC 320: Jones vs Aspinall', genres: ['MMA'] }, 0),
+        listing({ name: 'UFC 321: Pereira vs Ankalaev', genres: ['Fight'] }, 0),
+        listing({ name: 'UFC 322: Prelims', genres: ['Fight'] }, 0),
+        listing({ name: 'PFL 10: Nurmagomedov vs Eblen', genres: ['MMA'] }, 0),
+        // Not a promotion the dictionary knows: the number is no reason to move it.
+        listing({ name: 'RAW #1745', genres: ['Fight', 'WWE'] }, 0),
+      ],
+      { matcher },
+    );
+    expect(ufc!.competition).toMatchObject({ key: 'ufc', name: 'UFC' });
+    expect(ufc!.note).toBeUndefined();
+    expect(fight).toMatchObject({ sport: 'mma', competition: { key: 'ufc' } });
+    expect(prelims).toMatchObject({ sport: 'mma', competition: { key: 'ufc' } });
+    expect(pfl!.competition.key).toBe('pfl');
+    expect(wrestling!.competition.name).toBe('Boxing');
+  });
+
   it('keeps the cricket stage of a women’s match out of the men’s competitions', () => {
     const [women] = buildEvents(
       [listing({ name: 'England Women vs India Women - 2nd ODI', genres: ['Cricket'] }, 0)],
