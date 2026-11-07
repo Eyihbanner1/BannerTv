@@ -73,7 +73,8 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           full=false
-          if [ "$EVENT" = workflow_dispatch ] || [ "$HEAD_REF" = test/all-together ] || [ "$LABEL" = full-ci ]; then
+          if [ "$LABEL" != phone-apk ] && { [ "$EVENT" = workflow_dispatch ] ||
+            [ "$HEAD_REF" = test/all-together ] || [ "$LABEL" = full-ci ]; }; then
             full=true
           fi
           androidtv=false
@@ -342,9 +343,9 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
-          WANT_APK: >-
-            ${{ github.event.label.name == 'phone-apk'
-            || contains(github.event.pull_request.labels.*.name, 'phone-apk') }}
+          # Only the run the label's adding starts, as with full-ci: a label left on the pull request
+          # does not turn a later full-ci run into an APK build.
+          WANT_APK: ${{ github.event.label.name == 'phone-apk' }}
         run: |
           fingerprint() {
             (cd "$1/apps/mobile" && pnpm exec fingerprint fingerprint:generate --platform android) |
@@ -356,12 +357,13 @@ jobs:
                 }
                 process.stdout.write(f.hash);'
           }
-          # The top of this file (triggers, settings) and the phone job, without comments or blank
-          # lines: a change to another job does not touch the APK.
+          # This file's top-level settings and this job, without comments or blank lines: a change
+          # to another job does not touch the APK.
           phone_job() {
             git show "$1:.github/workflows/ci.yml" |
-              awk '/^[[:space:]]*(#|$)/ { next } /^jobs:/ { jobs = 1 } !jobs { print; next }
-                /^  [A-Za-z0-9_-]+:/ { mine = ($0 ~ /^  mobile:[[:space:]]*$/) } mine { print }'
+              awk -v job="$GITHUB_JOB" '/^[[:space:]]*(#|$)/ { next }
+                /^[^ ]/ { jobs = ($0 ~ /^jobs:/) } !jobs { print; next }
+                /^  [A-Za-z0-9_-]+:/ { mine = ($0 ~ ("^  " job ":[[:space:]]*(#.*)?$")) } mine { print }'
           }
           # pnpm's settings, overrides and patches sit at the top of the lockfile.
           lock_head() {
@@ -371,9 +373,11 @@ jobs:
           if [ "$EVENT" != pull_request ] || [ "$HEAD_REF" = test/all-together ]; then
             why='this is the combined test build or a run started by hand'
           elif [ "$WANT_APK" = true ]; then
-            why='the pull request has the phone-apk label'
+            why='the phone-apk label was added'
           elif ! git rev-parse -q --verify HEAD^2 > /dev/null; then
             why='there is no base commit to compare with'
+          elif ! phone_job HEAD | grep -q "^  $GITHUB_JOB:"; then
+            why="job $GITHUB_JOB was not found in ci.yml"
           elif [ "$(phone_job HEAD^1)" != "$(phone_job HEAD)" ]; then
             why='the phone job in ci.yml changed'
           elif [ "$(lock_head HEAD^1)" != "$(lock_head HEAD)" ]; then
@@ -403,7 +407,8 @@ jobs:
           if [ "$build" = true ]; then
             echo "Phone APK: building one, because $why." | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            echo "No phone APK: $why. Add the phone-apk label for one." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No phone APK: $why. Add the phone-apk label for one (remove it first if it is on)." |
+              tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       # Touch journeys on the web build with the TV journeys' fake addons, before the long
@@ -460,11 +465,12 @@ jobs:
       # phones it is tested on: each architecture's C++ is built in full, and 32-bit Arm cost about
       # 7 to 10 minutes of each build. Add armeabi-v7a back to PHONE_ABIS (comma-separated) for a
       # 32-bit-only phone.
-      # Three more cuts for a test APK installed by hand, about 6 minutes of each build:
+      # Three more cuts for a test APK installed by hand, about 4 minutes of each build (Gradle took
+      # 18m 45s on PR #48, against 22m 50s before):
       # - no R8: Expo SDK 58's template turns code shrinking on in gradle.properties, and it took
-      #   about 6 minutes; D8 dexes the code instead, as on SDK 57 and earlier (-P outranks that
-      #   file). Resource shrinking needs R8, so it is held off too. Turn both back on, and run the
-      #   store build's checks, before any store release;
+      #   about 6 minutes; D8 dexes the code instead, in about 2, as on SDK 57 and earlier (-P
+      #   outranks that file). Resource shrinking needs R8, so it is held off too. Turn both back
+      #   on, and run the store build's checks, before any store release;
       # - no lint vital, the check that gates store builds;
       # - the app alone (:app:), not every library's own .aar as well.
       - name: Build
