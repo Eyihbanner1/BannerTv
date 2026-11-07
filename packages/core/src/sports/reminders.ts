@@ -163,7 +163,9 @@ export interface Reminders {
   remove(key: string): Promise<void>;
   /**
    * Moves reminders to the kick-offs the listing gives their matches now,
-   * since addons correct their times, and drops those too late to show.
+   * since addons correct their times, and to the keys it gives them, since
+   * an addon listed above can move a match's key; drops those too late to
+   * show.
    */
   refresh(events: readonly SportEvent[], now: number): Promise<void>;
   /** Told of every change, and once when the saved reminders have been read. */
@@ -216,13 +218,21 @@ export function createReminders(options: { storage: KeyValueStore }): Reminders 
         let changed = false;
         const next: Reminder[] = [];
         for (const reminder of current) {
-          const at = findReminded(events, reminder)?.kickOff?.at ?? reminder.at;
+          const event = findReminded(events, reminder);
+          const at = event?.kickOff?.at ?? reminder.at;
           if (now >= at + REMIND_LATE_MS) {
             changed = true;
             continue;
           }
-          if (at !== reminder.at) changed = true;
-          next.push(at === reminder.at ? reminder : { ...reminder, at });
+          // Found by its sides under another key: the match page asks by the key it has now,
+          // and would otherwise offer Remind me again for a match that has one.
+          const key = event?.key ?? reminder.key;
+          if (at === reminder.at && key === reminder.key) {
+            next.push(reminder);
+            continue;
+          }
+          changed = true;
+          next.push({ ...reminder, key, at });
         }
         return changed ? tidy(next) : current;
       }),
