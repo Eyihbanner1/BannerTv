@@ -1,5 +1,6 @@
 import {
   languageName,
+  type ProblemExplained,
   type Resolution,
   SEVERE_WARNINGS,
   type StreamEntry,
@@ -118,4 +119,79 @@ export function streamsStatus(
     : state.failed.length > 0
       ? t('streams.failed', { count: state.failed.length })
       : t('streams.count', { count });
+}
+
+/** The problem box's words: a title and one or more plain sentences. */
+export interface ProblemText {
+  title: string;
+  lines: string[];
+}
+
+/**
+ * What the problem box says, from why Play stopped: which addon to set up,
+ * what to turn on, or how many streams were tried and why the last stopped.
+ * One stream tried says only why it stopped, as before.
+ */
+export function problemText(t: TFunction, explained: ProblemExplained): ProblemText {
+  const { problem, torrentsToo } = explained;
+  const lines: string[] = [];
+  let tried = 0;
+  switch (problem.kind) {
+    case 'no-stream-addon':
+      lines.push(t('player.problem.noStreamAddon'));
+      break;
+    case 'stream-addons-off':
+      lines.push(t('player.problem.streamAddonsOff'));
+      break;
+    case 'no-addon-for-title':
+      lines.push(t('player.problem.noAddonForTitle'));
+      if (problem.someOff) lines.push(t('player.problem.someStreamAddonsOff'));
+      break;
+    case 'addons-down':
+      lines.push(t('player.problem.addonsDown', { count: problem.count }));
+      break;
+    case 'no-streams':
+      lines.push(t('player.problem.noStreams'));
+      break;
+    case 'failed-recently':
+      lines.push(t('player.problem.failedRecently', { count: problem.count }));
+      break;
+    case 'torrents':
+      lines.push(
+        problem.addon
+          ? t('player.problem.torrents', { addon: problem.addon, count: problem.count })
+          : t('player.problem.torrentsUnnamed', { count: problem.count }),
+      );
+      break;
+    case 'needs-helper':
+      lines.push(t('player.problem.needsHelper', { count: problem.count }));
+      break;
+    case 'web-only':
+      lines.push(t('player.problem.webOnly', { count: problem.count }));
+      break;
+    case 'helper-off':
+      tried = problem.tried;
+      lines.push(t('player.problem.helperOff'));
+      break;
+    case 'uncached':
+      tried = problem.tried;
+      lines.push(t('player.problem.uncached'));
+      break;
+    case 'tried':
+      tried = problem.tried;
+      lines.push(t(`player.problem.${problem.last}`));
+      break;
+  }
+  // After failovers: how many were tried goes first, then why the last one stopped.
+  if (tried > 1) lines.unshift(t('player.problem.tried', { count: tried }));
+  if (torrentsToo && torrentsToo.addon) {
+    lines.push(
+      t('player.problem.torrentsToo', { addon: torrentsToo.addon, count: torrentsToo.count }),
+    );
+  }
+  const nothing =
+    problem.kind !== 'helper-off' && problem.kind !== 'uncached' && problem.kind !== 'tried';
+  const title =
+    nothing || tried > 1 ? t('player.problem.nothingTitle') : t('player.problem.failedTitle');
+  return { title, lines };
 }

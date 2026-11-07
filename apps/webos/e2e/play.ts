@@ -69,6 +69,8 @@ export interface TestStream {
   path?: string;
   infoHash?: string;
   bingeGroup?: string;
+  /** Request headers the addon asks for (behaviorHints.proxyHeaders.request). */
+  requestHeaders?: Record<string, string>;
   /** Subtitles that come with the stream, as paths on SUBTITLE_HOST, with a release name if given. */
   subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
 }
@@ -110,12 +112,74 @@ export const DEFAULT_STREAMS: readonly TestStream[] = [
   },
 ];
 
+/** Seconds as an SRT time: 00:01:02,500. */
+function srtTime(seconds: number): string {
+  const ms = Math.round(seconds * 1000);
+  const two = (n: number) => String(n).padStart(2, '0');
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor(ms / 60_000) % 60;
+  const secs = Math.floor(ms / 1000) % 60;
+  return `${two(hours)}:${two(minutes)}:${two(secs)},${String(ms % 1000).padStart(3, '0')}`;
+}
+
+/** SRT text of these lines: start and end in seconds, then the text. */
+function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
+  return lines
+    .map(([start, end, text], i) => `${i + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`)
+    .join('\n');
+}
+
+/**
+ * A line every `every` seconds from `from` seconds until `until`, numbered after `name`; with
+ * `sounds`, every so many lines is a sound in brackets instead, as for the hard of hearing.
+ */
+function dialogue(
+  name: string,
+  from: number,
+  until: number,
+  every = 10,
+  sounds = 0,
+): Array<[number, number, string]> {
+  const lines: Array<[number, number, string]> = [];
+  for (let at = from, n = 1; at < until; at += every, n++)
+    lines.push([at, at + 4, sounds && n % sounds === 0 ? '[door creaks]' : `${name}, line ${n}`]);
+  return lines;
+}
+
+/**
+ * English files for the 10-minute video (any /long- path), as an addon might
+ * send them, best last: a few signs only; one for the hard of hearing; one
+ * timed for film speed on this faster video, whose lines run on past the
+ * video's end; and the full one, with the advert OpenSubtitles adds at its
+ * start and end. Then a copy of the full one, as good as it.
+ */
+export const LONG_SUBTITLES = {
+  signs: srt([
+    [1, 4, 'A SIGN ON THE DOOR'],
+    [240, 243, 'A SIGN ON THE ROAD'],
+    [560, 563, 'A SIGN AT THE END'],
+  ]),
+  sdh: srt(dialogue('For the hard of hearing', 3, 588, 2, 5)),
+  // Its last lines end up to 15 s past the video's end, line after line, and about 4% after the
+  // other two that fit, which agree on their end: timed for film speed on a 25 fps video, so its
+  // drift is fixed. On its own, so little past the end could be another release's ending.
+  past: srt(dialogue('Running past the end', 1, 612, 2)),
+  full: srt([
+    [0.2, 2.5, 'Advertise your product or brand here\ncontact www.OpenSubtitles.org today'],
+    ...dialogue('The full file', 3, 588, 2),
+    [592, 596, 'Support us and become VIP member\nto remove all ads from www.OpenSubtitles.org'],
+  ]),
+  // Another full file, from another uploader: it fits as well as the full one, no better.
+  copy: srt(dialogue('Another full file', 3, 588, 2)),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
   en2: '1\n00:00:00,500 --> 00:00:40,000\nThe second English file\n',
   fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
   fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
+  ...LONG_SUBTITLES,
 };
 
 export interface PlaybackMock {
@@ -150,6 +214,8 @@ export interface PlaybackOptions {
   subtitleList?: readonly TestSubtitle[];
   /** How long each subtitle file, by id, takes to arrive. Default at once. */
   subtitleDelayMs?: Readonly<Record<string, number>>;
+  /** Subtitle files, by id, that arrive only once this settles, so a test decides when. */
+  subtitleGates?: Readonly<Record<string, Promise<unknown>>>;
   /** OpenSubtitles answers once this settles, so a test decides when. Default at once. */
   subtitlesGate?: Promise<unknown>;
   /** IntroDB's timings, in seconds, by video id (tt…:season:episode). Others have none. */
@@ -330,6 +396,7 @@ export async function mockPlayback(
         ...(stream.infoHash && { infoHash: stream.infoHash }),
         behaviorHints: {
           ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
+          ...(stream.requestHeaders && { proxyHeaders: { request: stream.requestHeaders } }),
           filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
         ...(stream.subtitles && {
@@ -433,6 +500,7 @@ export async function mockPlayback(
     const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
     const delay = options.subtitleDelayMs?.[id];
     if (delay) await new Promise((done) => setTimeout(done, delay));
+    await options.subtitleGates?.[id];
     const text = SUBTITLE_FILES[id];
     if (text === undefined) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({

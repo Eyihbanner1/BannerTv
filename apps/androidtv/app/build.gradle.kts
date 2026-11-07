@@ -139,6 +139,9 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(copyWebBuild, CopyWebBuild::outputDir)
+        // The stream helper's server and rules, plain Kotlin that the phone app's stream-helper
+        // module compiles too (helper-core/README.md). Their unit tests stay in app/src/test.
+        variant.sources.kotlin?.addStaticSourceDirectory("../helper-core/src/main/java")
     }
 }
 

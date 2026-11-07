@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHlsEngine } from './hls';
+import { createHlsEngine, hlsTextTrack } from './hls';
 
 const script = vi.hoisted(() => {
   let resolve = () => undefined as void;
@@ -79,6 +79,21 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('hlsTextTrack', () => {
+  it('marks a rendition of forced lines only, by FORCED=YES or its name', () => {
+    const rendition = (name: string, forced: boolean) =>
+      ({ id: 0, lang: 'en', name, forced }) as unknown as Parameters<typeof hlsTextTrack>[0];
+    expect(hlsTextTrack(rendition('English', false), true)).toEqual({
+      id: 'en|English',
+      lang: 'en',
+      label: 'English',
+      active: true,
+    });
+    expect(hlsTextTrack(rendition('English', true), false).forced).toBe(true);
+    expect(hlsTextTrack(rendition('English (Forced)', false), false).forced).toBe(true);
+  });
 });
 
 describe('the hls.js engine', () => {

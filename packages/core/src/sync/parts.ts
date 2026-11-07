@@ -3,6 +3,7 @@ import { DEFAULT_ADDONS } from '../addons/defaults';
 import { createHomeLayout, type HomeLayout, type HomeLayoutStore } from '../addons/layout';
 import { createLibrary, type Library, type LibraryItem } from '../library/library';
 import { createPlayedVideos, type PlayedVideo, type PlayedVideos } from '../playback/continue';
+import { createSubtitleDrifts, type DriftChoice, type SubtitleDrifts } from '../playback/drifts';
 import { createSubtitleOffsets, type SubtitleOffsets } from '../playback/offsets';
 import { createProgressStore, type ProgressEntry, type ProgressStore } from '../playback/progress';
 import { createTrackMemory, type TrackChoice, type TrackMemory } from '../playback/tracks';
@@ -392,6 +393,37 @@ export function subtitleOffsetsPart(profileId: string, offsets: SubtitleOffsets)
   };
 }
 
+const DRIFT = 'drift/';
+/** The drift choices the account carries, as agreed with the sync format (ADR 0006). */
+const DRIFT_WORDS: readonly string[] = ['ahead', 'behind', 'none', 'auto'];
+
+/**
+ * Subtitle drift fixes as `drift/<fileKey>`, beside the timings they were
+ * tuned with: 'ahead', 'behind', 'none' (the player's own fix taken off) or
+ * 'auto' (the player's own fix, worked out again for each stream, kept with
+ * the viewer's timing). No choice is a removal. The key is the same hash as
+ * the timing's, never a link.
+ */
+export function subtitleDriftsPart(profileId: string, drifts: SubtitleDrifts): SyncPart {
+  return {
+    document: `p/${profileId}/settings`,
+    prefixes: [DRIFT],
+    load: () => drifts.load(),
+    snapshot() {
+      const items = new Map<string, PartItem>();
+      for (const saved of drifts.drifts()) items.set(DRIFT + saved.key, { v: saved.drift });
+      return items;
+    },
+    subscribe: (listener) => drifts.subscribe(listener),
+    adopt(change) {
+      const set = oldestFirst(change.set)
+        .filter(([, item]) => typeof item.v === 'string' && DRIFT_WORDS.indexOf(item.v) !== -1)
+        .map(([key, item]) => ({ key: key.slice(DRIFT.length), drift: item.v as DriftChoice }));
+      return drifts.adopt({ set, remove: change.remove.map((key) => key.slice(DRIFT.length)) });
+    },
+  };
+}
+
 const ADDON = 'a/';
 
 /**
@@ -482,6 +514,7 @@ export interface ProfileStores {
   homeLayout: HomeLayoutStore;
   trackMemory: TrackMemory;
   subtitleOffsets: SubtitleOffsets;
+  subtitleDrifts: SubtitleDrifts;
 }
 
 /**
@@ -501,6 +534,7 @@ export function createProfileStores(
     homeLayout: createHomeLayout({ storage }),
     trackMemory: createTrackMemory({ storage }),
     subtitleOffsets: createSubtitleOffsets({ storage }),
+    subtitleDrifts: createSubtitleDrifts({ storage }),
   };
 }
 
@@ -512,5 +546,6 @@ export function profileParts(profileId: string, stores: ProfileStores): SyncPart
     homeLayoutPart(profileId, stores.homeLayout),
     trackMemoryPart(profileId, stores.trackMemory),
     subtitleOffsetsPart(profileId, stores.subtitleOffsets),
+    subtitleDriftsPart(profileId, stores.subtitleDrifts),
   ];
 }

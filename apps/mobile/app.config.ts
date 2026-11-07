@@ -54,7 +54,7 @@ const config: ExpoConfig = {
       { backgroundColor: BACKGROUND, image: './assets/images/splash-icon.png', imageWidth: 96 },
     ],
     'expo-sqlite',
-    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: false }],
+    ['expo-video', { supportsBackgroundPlayback: false, supportsPictureInPicture: true }],
     [
       // Match reminders are local notifications: nothing is pushed, so no push service is set up.
       'expo-notifications',

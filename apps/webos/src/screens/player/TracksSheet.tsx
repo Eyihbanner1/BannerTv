@@ -1,13 +1,4 @@
-import {
-  groupByLanguage,
-  keepOrder,
-  type LanguageGroup,
-  languageKey,
-  languageName,
-  numberBySource,
-  releaseMatch,
-  type StreamEntry,
-} from '@bannertv/core';
+import { languageKey, languageName, numberBySource, type StreamEntry } from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { Fragment, type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -17,8 +8,23 @@ import { preferences } from '../../data/preferences';
 import { focusedKey } from '../../navigation/spatial';
 import { inputMode } from '../../platform/input-mode';
 import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
-import { streamTitle } from '../../player/describe';
+import { resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
+import {
+  createOrderMemory,
+  DRIFT_CHOICES,
+  isUnfit,
+  languageFirstPick,
+  playingRelease,
+  sameChoice,
+  subtitlesValue,
+  subtitleVersions,
+  type SubtitleVersion,
+  VERSION_NOTES,
+  versionDetail,
+  versionGroups,
+  versionNotes,
+} from '../../player/subtitle-versions';
 import { formatOffset, offsetWay, stepOffset, TIMING_STEPS } from '../../player/timing';
 import { type SheetRow, SheetList } from './SheetList';
 import { Pane, SheetTabs } from './SheetTabs';
@@ -33,50 +39,11 @@ const TABS: readonly SheetTab[] = ['subtitles', 'audio', 'timing', 'style'];
 /** Rows a column shows at a time. */
 const VISIBLE = 4;
 
-/** A subtitle file or one of the stream's own tracks, as one version of its language. */
-interface Version {
-  choice: NonNullable<SubtitleChoice>;
-  lang: string;
-  source: string;
-  /** The release name an addon sent. */
-  release?: string;
-}
-
-const versionId = (choice: NonNullable<SubtitleChoice>) =>
-  choice.kind === 'file' ? `file:${choice.key}` : `track:${choice.id}`;
+// The chip beside the player's controls reads it from here.
+export { subtitlesValue };
 
 const versionKey = (choice: NonNullable<SubtitleChoice>) =>
   choice.kind === 'file' ? `${SHEET}-file-${choice.key}` : `${SHEET}-track-${choice.id}`;
-
-const sameChoice = (a: SubtitleChoice, b: SubtitleChoice) =>
-  a !== null && b !== null && versionId(a) === versionId(b);
-
-/** The language of the subtitles showing, for the chip and the tab; none when off. */
-export function subtitlesValue(subtitles: Subtitles): string | undefined {
-  const { choice } = subtitles;
-  if (!choice) return undefined;
-  if (choice.kind === 'track') {
-    const track = subtitles.tracks.find((candidate) => candidate.id === choice.id);
-    return (track?.lang && languageName(track.lang)) || track?.label || undefined;
-  }
-  const option = subtitles.options.find((candidate) => candidate.key === choice.key);
-  return option ? languageName(option.lang) || undefined : undefined;
-}
-
-/**
- * Puts items in the order first seen under a scope (the languages, each
- * language's versions): those shown keep their places, new ones go after.
- * The same items give the same order, so drawing twice lands on it again.
- */
-function rememberOrder() {
-  const seen = new Map<string, string[]>();
-  return <T,>(scope: string, items: readonly T[], id: (item: T) => string): T[] => {
-    const byId = new Map(items.map((item) => [id(item), item]));
-    const order = keepOrder(seen.get(scope) ?? [], Array.from(byId.keys()));
-    seen.set(scope, order);
-    return order.map((key) => byId.get(key)!);
-  };
-}
 
 interface TracksSheetProps {
   audio: readonly EngineTrack[];
@@ -87,6 +54,11 @@ interface TracksSheetProps {
   /** Focused again when it closes: read at closing time. */
   returnFocusKey: () => string;
   onAudio: (track: EngineTrack) => void;
+  /**
+   * A stream to switch to for audio in a language this one lacks, as the
+   * Audio tab's last row ("English audio: switch stream").
+   */
+  audioSwitch?: { language: string; entry: StreamEntry; onPress: () => void };
   /** Back from the tabs: the sheet closes onto the controls. */
   onBack: () => void;
   /** Blue, or a click above it. */
@@ -107,48 +79,19 @@ function Note({ children }: { children: ReactNode }) {
  * one. Rows keep their places while the sheet is open, as more addons answer.
  */
 export function TracksSheet(props: TracksSheetProps) {
-  const { audio, subtitles, entry, tab, onTab, onAudio } = props;
+  const { audio, subtitles, entry, tab, onTab, onAudio, audioSwitch } = props;
   const { t } = useTranslation();
   const styleSummary = useStyleSummary();
   const { choice } = subtitles;
   // The language last chosen comes first, as it was when the sheet opened.
   const [firstLanguage] = useState(() => preferences.get().subtitleLanguage);
   // Languages and versions keep the places they had when first shown.
-  const [stable] = useState(rememberOrder);
+  const [stable] = useState(createOrderMemory);
 
-  // Every version, the stream's own tracks first: they are always in step.
-  const versions: Version[] = [
-    ...subtitles.tracks.map((track) => ({
-      choice: { kind: 'track', id: track.id } as const,
-      lang: track.lang,
-      source: t('player.inTheStream'),
-      release:
-        track.label && track.label.toLowerCase() !== languageName(track.lang).toLowerCase()
-          ? track.label
-          : undefined,
-    })),
-    ...subtitles.options.map((option) => ({
-      choice: { kind: 'file', key: option.key } as const,
-      lang: option.lang,
-      source: option.source,
-      release: option.label,
-    })),
-  ];
-  // The stream's own tracks stay first, even one listed after the files.
-  const inOrder = (group: LanguageGroup<Version>, kind: Version['choice']['kind']) =>
-    stable(
-      `${group.key}|${kind}`,
-      group.items.filter((item) => item.choice.kind === kind),
-      (item) => versionId(item.choice),
-    );
-  const groups = stable(
-    '',
-    groupByLanguage(versions, firstLanguage).map((group): LanguageGroup<Version> => ({
-      ...group,
-      items: inOrder(group, 'track').concat(inOrder(group, 'file')),
-    })),
-    (group) => group.key,
-  );
+  // Every version, the stream's own tracks first: they are always in step, and stay
+  // first even when listed after the files.
+  const versions = subtitleVersions(subtitles, t('player.inTheStream'));
+  const groups = versionGroups(versions, firstLanguage, stable);
   const chosen = choice ? versions.find((v) => sameChoice(v.choice, choice)) : undefined;
   const chosenLanguage = chosen ? languageKey(chosen.lang) : null;
   const [view, setView] = useState(chosenLanguage);
@@ -157,29 +100,24 @@ export function TracksSheet(props: TracksSheetProps) {
     groups.find((group) => group.key === chosenLanguage) ??
     groups[0];
 
-  const video = entry
-    ? { filename: entry.stream.behaviorHints.filename, title: streamTitle(entry) }
-    : {};
-  const versionRow = ({ item, number }: { item: Version; number?: number }): SheetRow => {
+  const video = playingRelease(entry);
+  const versionRow = ({ item, number }: { item: SubtitleVersion; number?: number }): SheetRow => {
     const selected = sameChoice(item.choice, choice);
     const status = subtitles.statusOf(item.choice);
-    const said =
-      status === 'loading'
-        ? t('player.versionLoading')
-        : status === 'failed'
-          ? t(selected ? 'player.versionFailed' : 'player.versionSkipped')
-          : releaseMatch(item.release, video)
-            ? t('player.matchesVideo')
-            : undefined;
+    const check = subtitles.checkOf(item.choice);
+    const said = versionNotes(item, selected, status, video, check).map((note) =>
+      t(VERSION_NOTES[note]),
+    );
     return {
       focusKey: versionKey(item.choice),
       label:
         number === undefined
           ? item.source
           : t('player.sourceNumber', { source: item.source, number }),
-      detail: [item.release, said].filter(Boolean).join(' · ') || undefined,
+      detail: versionDetail(said, item.release),
       selected,
-      dim: status === 'failed',
+      // Passed over, for good reason: still there to pick by hand.
+      dim: status === 'failed' || isUnfit(check),
       onPress: () => subtitles.choose(item.choice),
     };
   };
@@ -204,15 +142,13 @@ export function TracksSheet(props: TracksSheetProps) {
       },
       onPress: () => {
         setView(group.key);
-        // The language showing: on to its versions. Another: its first that loads.
+        // The language showing: on to its versions. Another starts on its best placed version,
+        // and the player reads its files and may move to one that fits better.
         if (group.key === chosenLanguage && chosen) {
           if (inputMode.get() !== 'pointer') void setFocus(versionKey(chosen.choice));
           return;
         }
-        const first =
-          group.items.find((item) => subtitles.statusOf(item.choice) !== 'failed') ??
-          group.items[0]!;
-        subtitles.choose(first.choice);
+        subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
       },
     })),
   ];
@@ -275,6 +211,14 @@ export function TracksSheet(props: TracksSheetProps) {
       selected: track.active,
       onPress: () => onAudio(track),
     }));
+    if (audioSwitch) {
+      rows.push({
+        focusKey: `${SHEET}-audio-switch`,
+        label: t('player.audioSwitch', { language: languageName(audioSwitch.language) }),
+        detail: resolutionLabel(audioSwitch.entry.facts.resolution),
+        onPress: audioSwitch.onPress,
+      });
+    }
     content =
       rows.length > 0 ? (
         <Pane focusKey={`${SHEET}-audio`} className={styles.content}>
@@ -341,7 +285,33 @@ export function TracksSheet(props: TracksSheetProps) {
               {t('player.timingReset')}
             </Pressable>
           </div>
-          <p className={styles.kept}>{t('player.timingKept')}</p>
+          {/* For a file timed for another frame rate, which slides further out as the film goes on.
+              Not for the lines Android hands over from inside the file, which keep in step. */}
+          {subtitles.canFixDrift && (
+            <div className={styles.steps}>
+              <span className={styles.rowLabel}>{t('player.drift')}</span>
+              {DRIFT_CHOICES.map(({ name, drift, label }) => {
+                const on = subtitles.drift === drift;
+                return (
+                  <Pressable
+                    key={name}
+                    focusKey={`${SHEET}-drift-${name}`}
+                    label={on ? `${t(label)}, ${t('player.driftChosen')}` : t(label)}
+                    className={on ? `${styles.step} ${styles.stepOn}` : styles.step}
+                    focusedClassName={styles.stepFocused}
+                    onPress={() => subtitles.setDrift(drift)}
+                  >
+                    {t(label)}
+                  </Pressable>
+                );
+              })}
+            </div>
+          )}
+          <p className={styles.kept}>
+            {subtitles.canFixDrift
+              ? `${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`
+              : t('player.timingKept')}
+          </p>
         </Pane>
       );
   } else {
@@ -362,7 +332,9 @@ export function TracksSheet(props: TracksSheetProps) {
   const values: Record<SheetTab, string> = {
     subtitles: subtitlesValue(subtitles) ?? t('player.subtitlesOff'),
     audio: active ? audioSummary(active) : t('player.audioDefault'),
-    timing: formatOffset(subtitles.offset),
+    timing: subtitles.drift
+      ? `${formatOffset(subtitles.offset)} · ${t('player.driftFixed')}`
+      : formatOffset(subtitles.offset),
     style: styleSummary,
   };
 

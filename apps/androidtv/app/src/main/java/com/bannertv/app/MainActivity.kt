@@ -32,6 +32,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.ui.PlayerView
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
+import com.bannertv.app.helper.StreamHelper
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicReference
 
@@ -139,6 +140,7 @@ class MainActivity : ComponentActivity() {
                 emit = js::send,
                 onPlayingChanged = ::keepScreenOn,
             )
+        val app = applicationContext
         val publisher = WatchNextPublisher(this)
         val bridge =
             WebBridge(
@@ -146,6 +148,8 @@ class MainActivity : ComponentActivity() {
                 onExit = { finish() },
                 onOpenExternal = ::openExternal,
                 onPlayerCommand = controller::handle,
+                onHelperCommand = ::helperCommand,
+                readHelperState = { StreamHelper.state(app).toString() },
                 onWatchNext = publisher::publish,
                 onTakeLink = { pendingLink.getAndSet(null)?.let(::linkJson) ?: "" },
             )
@@ -268,6 +272,21 @@ class MainActivity : ComponentActivity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** The stream helper keeps running after the app closes, until stopped here or from its notification. */
+    private fun helperCommand(command: String) {
+        when (command) {
+            "start" -> {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    // The helper's notification (with its Stop button) needs this from Android 13.
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
+                }
+                StreamHelper.start(this)
+            }
+            "stop" -> StreamHelper.stop(this)
+            "forget" -> StreamHelper.forgetTvs(this)
         }
     }
 
