@@ -87,10 +87,29 @@ export const sportsState = createStore<SportsState>({
 /** The team and league data, once loaded. Grouping works without it, by what addons say. */
 export const sportsMatcher = createStore<Matcher | undefined>(undefined);
 
+/** "Show in Sports" by addon id, with no prototype: the ids are the addons' to choose. */
+type Settings = { [manifestId: string]: SportsSetting };
+
+const hasOwn = Object.prototype.hasOwnProperty;
+
+function noSettings(): Settings {
+  return Object.create(null) as Settings;
+}
+
+function copySettings(...from: Settings[]): Settings {
+  const out = noSettings();
+  for (const each of from) for (const id of Object.keys(each)) out[id] = each[id]!;
+  return out;
+}
+
 // "Show in Sports" per addon id, and what first pages looked like. Both small,
 // both keyed by the addon's id and never by its address, which can carry a key.
-let settings: Record<string, SportsSetting> = {};
+let settings: Settings = noSettings();
 let evidence = new Map<string, boolean>();
+
+function settingOf(id: string): SportsSetting | undefined {
+  return hasOwn.call(settings, id) ? settings[id] : undefined;
+}
 let stored: Promise<void> | undefined;
 
 function evidenceKey(addon: InstalledAddon, catalog: ManifestCatalog): string {
@@ -126,7 +145,7 @@ function detect(): void {
   if (!SPORTS_IN_BUILD) return;
   const { addons, ready } = addonCollection.get();
   const catalogs = sportsCatalogs(addons, {
-    setting: (addon) => settings[addon.manifest.id] ?? 'auto',
+    setting: (addon) => settingOf(addon.manifest.id) ?? 'auto',
     evidence: (addon, catalog) => evidence.get(evidenceKey(addon, catalog)),
   });
   const current = sportsState.get();
@@ -142,8 +161,8 @@ function detect(): void {
   if (catalogs.length > 0) loadMatcher();
 }
 
-function readSettings(value: unknown): Record<string, SportsSetting> {
-  const out: Record<string, SportsSetting> = {};
+function readSettings(value: unknown): Settings {
+  const out = noSettings();
   if (typeof value !== 'object' || value === null) return out;
   for (const id of Object.keys(value)) {
     const setting = (value as Record<string, unknown>)[id];
@@ -182,7 +201,8 @@ export function startSports(): Promise<void> {
     storage.kv.get(EVIDENCE_KEY).catch(() => undefined),
   ]).then(([savedSettings, savedEvidence]) => {
     // Set while they were loading: those win.
-    settings = { ...readSettings(savedSettings), ...settings };
+    settings = copySettings(readSettings(savedSettings), settings);
+    chosen = choicesOf(settings);
     const loaded = readEvidence(savedEvidence);
     evidence.forEach((value, key) => loaded.set(key, value));
     evidence = loaded;
@@ -239,11 +259,11 @@ function followCollection(before: readonly InstalledAddon[], now: readonly Insta
 /** What was kept about an addon, under the id it came back with. */
 function moveAddon(from: string, to: string): void {
   kickoffs.move(from, to);
-  const setting = settings[from];
+  const setting = settingOf(from);
   if (setting) {
-    const next = { ...settings };
+    const next = copySettings(settings);
     delete next[from];
-    if (!next[to]) next[to] = setting;
+    if (!hasOwn.call(next, to)) next[to] = setting;
     settings = next;
     saveSettings();
   }
@@ -267,8 +287,8 @@ function moveAddon(from: string, to: string): void {
 
 function forgetAddon(id: string): void {
   kickoffs.forget(id);
-  if (settings[id]) {
-    const next = { ...settings };
+  if (settingOf(id)) {
+    const next = copySettings(settings);
     delete next[id];
     settings = next;
     saveSettings();
@@ -284,20 +304,78 @@ function forgetAddon(id: string): void {
 }
 
 export function sportsSetting(addon: InstalledAddon): SportsSetting {
-  return settings[addon.manifest.id] ?? 'auto';
+  return settingOf(addon.manifest.id) ?? 'auto';
 }
 
 /** "Show in Sports" for one addon; every install of it shares the setting. */
 export function setSportsSetting(addon: InstalledAddon, setting: SportsSetting): void {
   const id = addon.manifest.id;
   if (sportsSetting(addon) === setting) return;
-  const next = { ...settings };
+  const next = copySettings(settings);
   if (setting === 'auto') delete next[id];
   else next[id] = setting;
   settings = next;
   saveSettings();
   detect();
+  // The person chose it, so the BannerTV account takes it.
+  const choices = new Map(chosen);
+  if (setting === 'auto') choices.delete(id);
+  else choices.set(id, setting);
+  setChoices(choices);
 }
+
+/**
+ * "Show in Sports" as the person set it and the BannerTV account says
+ * (ADR 0006, `s/<manifestId>` in `addons`). What follows an addon coming
+ * and going (moveAddon, forgetAddon) changes the settings but not this, so
+ * removing an addon on one screen never turns its setting off everywhere.
+ */
+let chosen = new Map<string, 'yes' | 'no'>();
+const choiceListeners = new Set<() => void>();
+
+function choicesOf(from: Settings): Map<string, 'yes' | 'no'> {
+  const out = new Map<string, 'yes' | 'no'>();
+  for (const id of Object.keys(from)) {
+    const setting = from[id];
+    if (setting === 'yes' || setting === 'no') out.set(id, setting);
+  }
+  return out;
+}
+
+function setChoices(next: Map<string, 'yes' | 'no'>): void {
+  chosen = next;
+  choiceListeners.forEach((listener) => listener());
+}
+
+export const sportsChoices = {
+  /** Resolves once the saved settings have been read. */
+  load: (): Promise<void> => startSports(),
+  /** The choices by addon id. A new map whenever they change. */
+  get: (): ReadonlyMap<string, 'yes' | 'no'> => chosen,
+  subscribe(listener: () => void): () => void {
+    choiceListeners.add(listener);
+    return () => {
+      choiceListeners.delete(listener);
+    };
+  },
+  /** The account's choices: `set` to yes or no, `remove` back to automatic. */
+  adopt(set: ReadonlyArray<readonly [string, 'yes' | 'no']>, remove: readonly string[]): void {
+    const next = copySettings(settings);
+    const choices = new Map(chosen);
+    for (const [id, setting] of set) {
+      next[id] = setting;
+      choices.set(id, setting);
+    }
+    for (const id of remove) {
+      delete next[id];
+      choices.delete(id);
+    }
+    settings = next;
+    saveSettings();
+    detect();
+    setChoices(choices);
+  },
+};
 
 /**
  * Whether the addon could hold sport: it has a sports catalog now, a setting,
@@ -306,7 +384,7 @@ export function setSportsSetting(addon: InstalledAddon, setting: SportsSetting):
  */
 export function mayHoldSports(addon: InstalledAddon): boolean {
   if (!SPORTS_IN_BUILD) return false;
-  if (settings[addon.manifest.id]) return true;
+  if (settingOf(addon.manifest.id)) return true;
   if (sportsState.get().catalogs.some((entry) => entry.addon === addon)) return true;
   return addon.manifest.catalogs.some((c) => c.type !== 'movie' && c.type !== 'series');
 }

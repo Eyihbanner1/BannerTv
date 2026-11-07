@@ -40,14 +40,35 @@ export interface PlayedVideo {
   next?: { videoId: string; season?: number; episode?: number; name?: string; released?: number };
   /** Milliseconds since 1970. */
   updatedAt: number;
+  /**
+   * Set on a card this screen made from the meta addon for progress that had
+   * none, rather than from what played: the BannerTV account does not send
+   * it (ADR 0006, decision 4).
+   */
+  filled?: true;
+}
+
+/** What the BannerTV account changes in the cards. */
+export interface PlayedAdoption {
+  set?: readonly PlayedVideo[];
+  remove?: readonly string[];
 }
 
 export interface PlayedVideos {
   /** Reads what was saved. Safe to call more than once. */
   load(): Promise<void>;
   get(videoId: string): PlayedVideo | undefined;
-  /** Saves or replaces a video's card. */
-  record(card: Omit<PlayedVideo, 'updatedAt'>): void;
+  /**
+   * Saves or replaces a video's card. `filled` says the card was made from
+   * the meta addon for progress without one, not from playing the video.
+   */
+  record(card: Omit<PlayedVideo, 'updatedAt' | 'filled'>, options?: { filled?: boolean }): void;
+  /**
+   * Makes the cards match a change from the BannerTV account: cards in `set`
+   * are kept as given, their time included, and videos in `remove` lose theirs.
+   * Once the cards have been read, the change is made before adopt() returns.
+   */
+  adopt(change: PlayedAdoption): Promise<void>;
   /** Bumps on every change, for screens that show the cards. */
   version(): number;
   subscribe(listener: Listener): () => void;
@@ -143,6 +164,7 @@ function readCard(value: unknown): PlayedVideo | undefined {
   if (isCount(raw.episode)) card.episode = raw.episode;
   const next = readNext(raw.next);
   if (next) card.next = next;
+  if (raw.filled === true) card.filled = true;
   return card;
 }
 
@@ -224,17 +246,56 @@ export function createPlayedVideos(options: {
     }
   }
 
+  function save() {
+    dirty = true;
+    if (writing) return;
+    writing = true;
+    void writeLatest();
+  }
+
   return {
     load,
     get: (videoId) => cards.get(videoId),
-    record(card) {
-      put({ ...card, updatedAt: now() });
-      dirty = true;
-      if (!writing) {
-        writing = true;
-        void writeLatest();
-      }
+    record(card, options = {}) {
+      const saved: PlayedVideo = { ...card, updatedAt: now() };
+      delete saved.filled;
+      if (options.filled) saved.filled = true;
+      put(saved);
+      save();
       changed();
+    },
+    adopt(change) {
+      const take = () => {
+        let touched = false;
+        for (const videoId of change.remove ?? []) {
+          if (cards.delete(videoId)) touched = true;
+        }
+        const set = (change.set ?? [])
+          .map(readCard)
+          .filter((card): card is PlayedVideo => card !== undefined);
+        if (set.length === 0 && !touched) return;
+        const replaced = new Set(set.map((card) => card.videoId));
+        // Least recently played first again, so the limit drops the oldest wherever they came from.
+        const all = Array.from(cards.values())
+          .filter((card) => !replaced.has(card.videoId))
+          .concat(set)
+          .map((card, index) => ({ card, index }))
+          .sort((a, b) => a.card.updatedAt - b.card.updatedAt || a.index - b.index);
+        cards.clear();
+        all.forEach(({ card }) => put(card));
+        save();
+        changed();
+      };
+      // Once the cards have been read, the change is made before adopt() returns (SyncPart.adopt).
+      if (loaded) {
+        take();
+        return Promise.resolve();
+      }
+      return load()
+        .catch(() => undefined)
+        .then(() => {
+          if (loaded) take();
+        });
     },
     version: () => changes,
     subscribe(listener) {

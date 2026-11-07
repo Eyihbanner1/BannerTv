@@ -70,6 +70,12 @@ async function prune(db: IDBDatabase, max: number): Promise<void> {
 export interface Storage {
   kv: KeyValueStore;
   cache: CacheStore;
+  /**
+   * False once the database failed to open and everything lives in memory
+   * for this session. The BannerTV account stays off then: an empty store
+   * would read as a screen with no account (ADR 0006, decision 13).
+   */
+  persistent: Promise<boolean>;
 }
 
 /**
@@ -90,6 +96,7 @@ export function createStorage(): Storage {
   });
 
   return {
+    persistent: db.then((database) => database !== null),
     kv: {
       async get(key) {
         const database = await db;

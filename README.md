@@ -15,6 +15,7 @@ Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, pac
 - [ADR 0003](docs/adr/0003-playback.md): playback, automatic stream choice and subtitles.
 - [ADR 0004](docs/adr/0004-library-profiles-trakt.md): library, household profiles, Trakt and TMDB.
 - [ADR 0005](docs/adr/0005-android-tv-app.md): the Android TV app, its player and the bridge between the two.
+- [ADR 0006](docs/adr/0006-account-and-sync.md): the BannerTV account, how screens sync through it, and the `sync` Worker.
 - [Android setup](docs/ANDROID_TV_SETUP.md): installing the Android app on a phone, an Android TV, a Fire TV or the emulator.
 
 ## At a glance

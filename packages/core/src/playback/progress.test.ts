@@ -600,3 +600,66 @@ describe('createProgressStore', () => {
     });
   });
 });
+
+describe('the Trakt mark and the BannerTV account', () => {
+  const traktEntry: ProgressEntry = {
+    metaId: 'tt1',
+    type: 'movie',
+    videoId: 'tt1',
+    position: 600,
+    duration: 3000,
+    updatedAt: 2000,
+    watched: false,
+    from: 'trakt',
+  };
+
+  it('keeps the mark of progress from Trakt through a save, and drops it when played here', async () => {
+    const storage = memoryKeyValueStore();
+    let time = 5000;
+    const progress = createProgressStore({ storage, now: () => time });
+    await progress.load();
+    expect(await progress.merge([traktEntry])).toBe(1);
+    expect(progress.get('tt1')?.from).toBe('trakt');
+    await vi.waitFor(async () => expect(await storage.get('progress')).toHaveLength(1));
+
+    const again = createProgressStore({ storage, now: () => time });
+    await again.load();
+    expect(again.get('tt1')?.from).toBe('trakt');
+    time = 6000;
+    again.record({ metaId: 'tt1', type: 'movie', videoId: 'tt1', position: 700, duration: 3000 });
+    expect(again.get('tt1')?.from).toBeUndefined();
+  });
+
+  it('adopts entries as given, without rescaling, and forgets others', async () => {
+    const storage = memoryKeyValueStore();
+    const progress = createProgressStore({ storage, now: () => 5000 });
+    await progress.load();
+    progress.record({ metaId: 'tt2', type: 'movie', videoId: 'tt2', position: 60, duration: 100 });
+    progress.record({ metaId: 'tt3', type: 'movie', videoId: 'tt3', position: 60, duration: 100 });
+    const listener = vi.fn();
+    progress.subscribe(listener);
+    await progress.adopt({
+      set: [
+        { ...traktEntry, from: undefined, position: 1500, updatedAt: 9000 },
+        { ...traktEntry, videoId: 'tt2', metaId: 'tt2', position: 10, updatedAt: 1000 },
+      ],
+      remove: ['tt3'],
+    });
+    expect(progress.get('tt1')).toEqual({
+      metaId: 'tt1',
+      type: 'movie',
+      videoId: 'tt1',
+      position: 1500,
+      duration: 3000,
+      updatedAt: 9000,
+      watched: false,
+    });
+    // Older than the TV's own, but the account's merge already chose it.
+    expect(progress.get('tt2')).toMatchObject({ position: 10, updatedAt: 1000, from: 'trakt' });
+    expect(progress.get('tt3')).toBeUndefined();
+    expect(progress.recent().map((e) => e.videoId)).toEqual(['tt1', 'tt2']);
+    expect(listener).toHaveBeenCalledTimes(1);
+    await progress.adopt({ remove: ['tt3'] });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});

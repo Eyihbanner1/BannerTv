@@ -1,0 +1,41 @@
+# The BannerTV account's sync service (ADR 0006). It keeps each account's documents
+# sealed with keys only the screens hold. Its one secret, CREATE_KEY, is the setup key
+# a create must carry; it is added in the Cloudflare dashboard, never here. Deploy
+# steps: README.md.
+name = "sync"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+logpush = false
+
+# Each setting works with quotes or without: "1" and 1 are the same.
+[vars]
+# How many accounts may exist. "1" until the ICO fee, the privacy notice, and delete
+# and export in the app are in place, so only Eyitayo's account can. Deleting it frees
+# the place. Missing or unreadable, it closes account creation.
+MAX_ACCOUNTS = "1"
+# How often screens pull, in minutes (15 to 1440). Raise it to slow every screen down
+# without a release.
+PULL_MINUTES = "30"
+
+# Wrangler finds the database by its name at every deploy, so there is no id to paste.
+# Never point this at another database: every screen would leave the account.
+[[d1_databases]]
+binding = "DB"
+database_name = "bannertv-sync"
+
+# No request logs, traces or log pushes: requests carry account keys and sealed
+# documents, and the privacy notice will promise none.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[observability.issues]
+enabled = false
