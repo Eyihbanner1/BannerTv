@@ -147,11 +147,11 @@ function dialogue(
 }
 
 /**
- * Four English files for the 10-minute video (any /long- path), as an addon
- * might send them, best last: a few signs only; one for the hard of hearing;
- * one timed for film speed on this faster video, whose lines run on past the
+ * English files for the 10-minute video (any /long- path), as an addon might
+ * send them, best last: a few signs only; one for the hard of hearing; one
+ * timed for film speed on this faster video, whose lines run on past the
  * video's end; and the full one, with the advert OpenSubtitles adds at its
- * start and end.
+ * start and end. Then a copy of the full one, as good as it.
  */
 export const LONG_SUBTITLES = {
   signs: srt([
@@ -169,6 +169,8 @@ export const LONG_SUBTITLES = {
     ...dialogue('The full file', 3, 588, 2),
     [592, 596, 'Support us and become VIP member\nto remove all ads from www.OpenSubtitles.org'],
   ]),
+  // Another full file, from another uploader: it fits as well as the full one, no better.
+  copy: srt(dialogue('Another full file', 3, 588, 2)),
 };
 
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
@@ -212,6 +214,8 @@ export interface PlaybackOptions {
   subtitleList?: readonly TestSubtitle[];
   /** How long each subtitle file, by id, takes to arrive. Default at once. */
   subtitleDelayMs?: Readonly<Record<string, number>>;
+  /** Subtitle files, by id, that arrive only once this settles, so a test decides when. */
+  subtitleGates?: Readonly<Record<string, Promise<unknown>>>;
   /** OpenSubtitles answers once this settles, so a test decides when. Default at once. */
   subtitlesGate?: Promise<unknown>;
   /** IntroDB's timings, in seconds, by video id (tt…:season:episode). Others have none. */
@@ -496,6 +500,7 @@ export async function mockPlayback(
     const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
     const delay = options.subtitleDelayMs?.[id];
     if (delay) await new Promise((done) => setTimeout(done, delay));
+    await options.subtitleGates?.[id];
     const text = SUBTITLE_FILES[id];
     if (text === undefined) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({
