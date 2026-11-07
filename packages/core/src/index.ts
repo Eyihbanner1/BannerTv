@@ -204,6 +204,7 @@ export {
 export {
   createSubtitleDrifts,
   type DriftAdoption,
+  type DriftChoice,
   MAX_SUBTITLE_DRIFTS,
   type SavedDrift,
   SUBTITLE_DRIFTS,

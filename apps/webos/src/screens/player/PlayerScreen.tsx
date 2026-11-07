@@ -407,6 +407,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     state.entry,
     session,
     state,
+    // The title's own running time judges a file's length until the video's is known.
+    parseRuntime(item?.runtime),
   );
 
   useScrobble(session, state, { type, metaId, videoId, lab: props.lab }, finder.runtimeSeconds);

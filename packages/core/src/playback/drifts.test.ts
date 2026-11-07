@@ -20,6 +20,20 @@ describe('createSubtitleDrifts', () => {
     expect(again.get('b')).toBe('behind');
   });
 
+  it('keeps "none" for a file whose fix made by the player was taken off, until it is forgotten', async () => {
+    const storage = memoryKeyValueStore();
+    const drifts = createSubtitleDrifts({ storage });
+    await drifts.remember('a', 'none');
+    expect(drifts.get('a')).toBe('none');
+    const again = createSubtitleDrifts({ storage });
+    await again.load();
+    expect(again.get('a')).toBe('none');
+    await again.remember('a', 'behind');
+    expect(again.get('a')).toBe('behind');
+    await again.remember('a', null);
+    expect(again.get('a')).toBeUndefined();
+  });
+
   it('drops damaged entries and the least recently changed past the limit', async () => {
     const storage = memoryKeyValueStore();
     await storage.set('subtitleDrift', [
