@@ -9,7 +9,10 @@ import { activeProfile, activeProfileId, askAgainOnRelaunch, profiles } from './
 export interface OpenLink {
   type: string;
   meta: string;
-  /** The video the card was for. Details is what opens, with Resume on it. */
+  /**
+   * The video the card was for. Details is what opens, and it works out what
+   * to resume from progress itself, so nothing uses this yet.
+   */
   video?: string;
 }
 

@@ -24,7 +24,7 @@ The debug build installs beside the real app as `com.bannertv.app.debug`, named 
 
 On Android TV and Google TV (Android 8 and later, not Fire TV), the app puts the profile in use's Continue Watching on the system's Watch Next row, "Continue watching" on Google TV. The page works out the cards; `WatchNextPublisher.kt` writes them through androidx.tvprovider, and `WatchNextPlan.kt` decides what to insert, update and delete. ADR 0005 sets out when the row changes and why a profile with a PIN empties it.
 
-Each card opens `bannertv://open?type=…&meta=…&video=…` (`DeepLink.kt`), which opens the title's Details with Resume focused. To try a link without the row, send one to the debug build with adb. The whole command is quoted so the device's shell leaves the `&` alone:
+Each card opens `bannertv://open?type=…&meta=…&video=…` (`DeepLink.kt`), which opens the title's Details, with Resume focused when there is a place to resume. To try a link without the row, send one to the debug build with adb. The whole command is quoted so the device's shell leaves the `&` alone:
 
 ```sh
 adb shell 'am start -a android.intent.action.VIEW -d "bannertv://open?type=movie&meta=tt0807840&video=tt0807840" com.bannertv.app.debug'
