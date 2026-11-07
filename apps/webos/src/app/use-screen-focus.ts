@@ -22,21 +22,25 @@ import { useScreenSlot } from './screen-slot';
  * what was focused has gone once the screen has drawn, focus goes to the
  * screen's `defaultFocusKey` as it is then. A screen that waits a while
  * passes `keep`: if it says the pointer has already put focus on the screen
- * meanwhile, a first showing leaves focus there.
+ * meanwhile, a first showing leaves focus there. `onPlaced` is told each
+ * time focus has been placed (or left with the pointer) on a showing.
  */
 export function useScreenFocus(
   defaultFocusKey?: string,
   ready = true,
   fallBack = false,
   keep?: () => boolean,
+  onPlaced?: () => void,
 ): void {
   const slot = useScreenSlot();
   const placed = useRef(false);
   const latestDefault = useRef(defaultFocusKey);
   const latestKeep = useRef(keep);
+  const latestPlaced = useRef(onPlaced);
   useLayoutEffect(() => {
     latestDefault.current = defaultFocusKey;
     latestKeep.current = keep;
+    latestPlaced.current = onPlaced;
   });
   useEffect(() => {
     const place = () => {
@@ -47,10 +51,14 @@ export function useScreenFocus(
       if (!ready || placed.current) return;
       placed.current = true;
       const pending = takePendingFocus();
-      if (pending === undefined && latestKeep.current?.()) return;
+      if (pending === undefined && latestKeep.current?.()) {
+        latestPlaced.current?.();
+        return;
+      }
       const target = pending ?? defaultFocusKey;
       if (!target) return;
       const focusing = Promise.resolve(setFocus(target));
+      latestPlaced.current?.();
       if (!fallBack) return;
       // Norigin applies focus a step later, after the screen has drawn with what is new.
       void focusing.then(() => {

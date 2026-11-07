@@ -29,6 +29,22 @@ describe('problemText', () => {
     );
   });
 
+  it('says to switch a stream addon on, not to add one, when they are all off', () => {
+    expect(problemText(t, { problem: { kind: 'stream-addons-off' } })).toEqual({
+      title: 'No stream could play',
+      lines: ['Your stream addons are all switched off. Switch one on in Addons, then try again.'],
+    });
+    expect(
+      problemText(t, { problem: { kind: 'no-addon-for-title', someOff: true } }).lines,
+    ).toEqual([
+      'None of your addons finds streams for this kind of title.',
+      "Some of your stream addons are switched off, so they weren't asked. You can switch them on in Addons.",
+    ]);
+    expect(
+      problemText(t, { problem: { kind: 'no-addon-for-title', someOff: false } }).lines,
+    ).toEqual(['None of your addons finds streams for this kind of title.']);
+  });
+
   it('keeps the old words for one stream that would not play', () => {
     expect(problemText(t, { problem: { kind: 'tried', tried: 1, last: 'format' } })).toEqual({
       title: "This stream won't play",

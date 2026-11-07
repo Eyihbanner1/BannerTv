@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
-import { addonCollection } from '../../data/addons';
+import { allAddons } from '../../data/addons';
 import { describeInstallError } from '../../data/describe';
 import styles from './AddonsScreen.module.css';
 import { PhonePanel } from './PhonePanel';
@@ -63,7 +63,7 @@ export function ConfigureDialog(props: ConfigureDialogProps) {
     busy.current = true;
     setWorking(true);
     setError(null);
-    addonCollection.install(received, { replaces: addon.transportUrl }).then(
+    allAddons.install(received, { replaces: addon.transportUrl }).then(
       (next) => {
         updated.current = focusAfterUpdate(next);
         onUpdated(next, pending.current !== null);

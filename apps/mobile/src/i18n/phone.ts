@@ -32,6 +32,11 @@ const PHONE = {
   stop: 'Stop',
   back10: 'Back 10 seconds',
   forward10: 'Forward 10 seconds',
+  seekingTo: 'Going to {{time}}',
+  sceneIntro: 'Intro',
+  sceneRecap: 'Recap',
+  backTo: 'Back to {{time}}',
+  backToLabel: 'Go back to {{time}}, where you were',
   playLabel: 'Play',
   pauseLabel: 'Pause',
   leavePlayer: 'Leave the player',
@@ -49,7 +54,8 @@ const PHONE = {
   whoIsWatching: "Who's watching?",
   pinFor: 'Enter the PIN for {{name}}',
   addons: 'Addons',
-  addonsLead: 'Addons are shared by every profile on this phone.',
+  addonsLead:
+    'Addons give BannerTV its catalogs, titles, streams and subtitles, for every profile on this phone. Higher addons answer first, and their rows come first on Home.',
   addAddon: 'Add an addon',
   addonUrl: 'Addon link',
   addonUrlHint: 'Paste the link to an addon’s manifest.json',
@@ -67,10 +73,13 @@ const PHONE = {
   account: 'BannerTV account',
   accountLead:
     'Your profiles, addons, My List and Continue Watching, the same on your phone and your TV.',
+  accountMakeOrJoin: 'Make one, or join with a code',
   accountJoinLead:
     'Type the account code from the TV, or from where you made the account. Capitals, spaces and dashes don’t matter.',
-  accountCreateOnTv:
-    'This first phone build can join an account but not make one. Make it on the TV, then join here with its code.',
+  copyCode: 'Copy the code',
+  codeCopied:
+    'Copied. Keep it somewhere private as well as written down: anyone with the code can see everything in the account.',
+  codeNotCopied: 'The code wasn’t copied. Write it down instead.',
   playback: 'Playback',
   stillWatchingSetting: 'Ask “Still watching?”',
   about: 'BannerTV for phones {{version}} (test build)',
@@ -96,6 +105,26 @@ const PHONE = {
   streamHelperSwitch: 'Use the stream helper',
   streamHelperNotificationsOff:
     'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
+  // Search: what only the phone's list needs.
+  search: {
+    /** The line that opens each addon's own results, under Top results. */
+    eachAddon: 'Results from each addon',
+  },
+  profilesCount_one: '{{count}} profile',
+  profilesCount_other: '{{count}} profiles',
+  askAtLaunch: 'Ask who’s watching when BannerTV opens',
+  addonLink: {
+    confirm: 'Add {{name}}?',
+    lead: 'This link came from another app. Addons are shared by every profile on this phone.',
+  },
+  reminders: {
+    title: '{{name}} is starting',
+    body: 'Starts at {{time}}. Tap to open the match.',
+    channel: 'Match reminders',
+    note: 'Your phone reminds you at {{time}}.',
+    denied:
+      'Notifications are off for BannerTV. Turn them on in your phone’s settings to get reminders.',
+  },
 } as const;
 
 const OVERRIDES = {
@@ -106,6 +135,22 @@ const OVERRIDES = {
     },
   },
   search: { hint: PHONE.searchHint },
+  profiles: {
+    full: 'This phone already has six profiles.',
+    deleteMessage:
+      'Their Continue Watching, My List, history and settings are deleted from this phone. Anything synced to Trakt stays on Trakt.',
+  },
+  forgotPin: {
+    resetTitle: 'Reset BannerTV on this phone?',
+    resetMessage:
+      'Without a BannerTV account, {{name}}’s PIN can only come off by starting again. Every profile, addon, My List, Continue Watching and setting on this phone is deleted, and BannerTV starts as new. What Trakt has stays on Trakt.',
+    reset: 'Reset this phone',
+  },
+  // The phone has no subtitle style row yet (it comes with the phone's subtitle style work), so
+  // a kids profile's Settings only says who can change them.
+  settings: {
+    kidsLead: 'Grown-ups can change the settings from their own profile.',
+  },
   library: { emptyList: PHONE.emptyList },
   details: { trailerFailed: 'The trailer didn’t open.' },
   welcome: {
@@ -120,6 +165,10 @@ const OVERRIDES = {
       format: "This phone can't play this stream's format.",
       decode: "This phone couldn't decode this stream.",
       noStreamAddon: 'You have no addon that finds streams yet. Add one in Settings, Addons.',
+      streamAddonsOff:
+        'Your stream addons are all switched off. Switch one on in Settings, Addons, then try again.',
+      someStreamAddonsOff:
+        "Some of your stream addons are switched off, so they weren't asked. You can switch them on in Settings, Addons.",
       failedRecently_one:
         "The stream found didn't play a moment ago. Try again to give it another go, or open Streams.",
       failedRecently_other:

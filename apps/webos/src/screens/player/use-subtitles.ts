@@ -15,6 +15,7 @@ import { addonCollection } from '../../data/addons';
 import { subtitleDrifts, subtitleOffsets } from '../../data/library';
 import { subtitlePicks } from '../../data/playback';
 import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
+import { mark } from '../../platform/marks';
 import { streamTitle } from '../../player/describe';
 import {
   driftInUse,
@@ -42,6 +43,7 @@ import {
   type SubtitleListState,
   type SubtitleOption,
 } from '../../player/subtitles';
+import { sameAsLast } from './same-as-last';
 
 /** A subtitle file from an addon, or one of the stream's own tracks (HLS through hls.js). */
 export type SubtitleChoice = { kind: 'file'; key: string } | { kind: 'track'; id: string } | null;
@@ -352,6 +354,8 @@ export function useSubtitles(
       );
     };
     const settle = (next: SubtitleChoice, remembered = false) => {
+      // For a trace of starting a video: when the subtitles were settled, and how.
+      mark(`sub:chosen:${next ? next.kind : 'off'}`);
       decided.current = {
         entry,
         choice: next,
@@ -590,21 +594,10 @@ export function useSubtitles(
     };
     wake.current = decide;
     // The session tells of every step of the clock; only what the choice weighs counts.
-    let seen: SessionState | undefined;
+    const nothingNew = sameAsLast();
     const onSession = () => {
-      const now = session.get();
-      if (
-        seen &&
-        now.text === seen.text &&
-        now.audio === seen.audio &&
-        now.status === seen.status &&
-        now.engine === seen.engine &&
-        now.duration === seen.duration &&
-        now.live === seen.live
-      ) {
-        return;
-      }
-      seen = now;
+      const { text, audio, status, engine, duration, live } = session.get();
+      if (nothingNew([text, audio, status, engine, duration, live])) return;
       decide();
     };
     const stopList = list.subscribe(decide);

@@ -1,10 +1,11 @@
 import { ease, motion, phone } from '@brand/tokens/design';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Animated,
   Easing,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OutlineIcon } from '../ui/icons';
 import { colors, radius, space, touch, type } from '../ui/theme';
+import { drawsPanelBody } from './panel-body';
 
 /** How far the panel travels as it slides in from the right edge. */
 const SLIDE_FROM = 48;
@@ -32,12 +34,25 @@ export function SidePanel({
   visible: boolean;
   title: string;
   onClose: () => void;
-  children: ReactNode;
+  /**
+   * Builds the panel's body. It is called only while the panel can be seen, so the player's
+   * renders (two a second with the clock) do not build the rows of every closed panel.
+   */
+  children: () => ReactNode;
 }) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [slide] = useState(() => new Animated.Value(0));
+  // One interpolation for the panel's life, not a new native node on every render.
+  const [slideX] = useState(() =>
+    slide.interpolate({ inputRange: [0, 1], outputRange: [SLIDE_FROM, 0] }),
+  );
+  // The body is kept from opening until a closing Modal has faded it out (iOS and the web).
+  const [kept, setKept] = useState(visible);
+  if (visible && !kept) setKept(true);
+  const gone = useCallback(() => setKept(false), []);
+  const drawn = drawsPanelBody(visible, kept, Platform.OS);
   useEffect(() => {
     if (!visible) return;
     slide.setValue(0);
@@ -58,6 +73,7 @@ export function SidePanel({
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      onDismiss={gone}
       statusBarTranslucent
       navigationBarTranslucent
       supportedOrientations={['landscape', 'portrait']}
@@ -78,14 +94,7 @@ export function SidePanel({
               paddingTop: Math.max(insets.top, 18),
               paddingBottom: Math.max(insets.bottom, 18),
               opacity: slide,
-              transform: [
-                {
-                  translateX: slide.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [SLIDE_FROM, 0],
-                  }),
-                },
-              ],
+              transform: [{ translateX: slideX }],
             },
           ]}
           accessibilityViewIsModal
@@ -103,7 +112,7 @@ export function SidePanel({
               <OutlineIcon name="close" size={20} />
             </Pressable>
           </View>
-          <View style={styles.body}>{children}</View>
+          <View style={styles.body}>{drawn ? children() : null}</View>
         </Animated.View>
       </View>
     </Modal>

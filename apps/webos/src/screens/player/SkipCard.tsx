@@ -15,16 +15,20 @@ interface SkipCardProps {
   onDismiss: () => void;
   /** Up or Down: the controls come up in its place. */
   onControls: () => void;
+  /** Left or Right: a skip of 10 s that adds up, as over the picture. */
+  onScrub: (direction: -1 | 1) => void;
 }
 
 /**
  * "Skip intro" or "Skip recap", one quiet button in the corner where Up Next
  * shows. It comes as the intro or recap starts, while nothing else is on
  * screen, and goes again after a few seconds: OK skips, Back lets it go, Up
- * or Down brings the controls. It never skips by itself, and the wheel never
- * presses it (the player keeps the wheel off cards).
+ * or Down brings the controls, and Left or Right skip 10 s as they do over
+ * the picture, so the card never leaves the arrows doing nothing. It never
+ * skips by itself, and the wheel never presses it (the player keeps the
+ * wheel off cards).
  */
-export function SkipCard({ kind, onSkip, onDismiss, onControls }: SkipCardProps) {
+export function SkipCard({ kind, onSkip, onDismiss, onControls, onScrub }: SkipCardProps) {
   const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-skip',
@@ -37,6 +41,13 @@ export function SkipCard({ kind, onSkip, onDismiss, onControls }: SkipCardProps)
     return true;
   });
   const label = t(kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap');
+  const upDown = cardArrows(onControls);
+  // False takes the press from spatial navigation, whose focus boundary would swallow it.
+  const onArrowPress = (direction: string) => {
+    if (direction !== 'left' && direction !== 'right') return upDown(direction);
+    onScrub(direction === 'left' ? -1 : 1);
+    return false;
+  };
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className={styles.skipCard} role="dialog" aria-label={label}>
@@ -45,7 +56,7 @@ export function SkipCard({ kind, onSkip, onDismiss, onControls }: SkipCardProps)
           variant="primary"
           label={label}
           onPress={onSkip}
-          onArrowPress={cardArrows(onControls)}
+          onArrowPress={onArrowPress}
         />
       </div>
     </FocusContext.Provider>

@@ -1,12 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, png, SERIES_ROW } from './addons';
+import { mockPlayback, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
 
 /**
  * The switches the TV comparisons of the first walk down Home tried (see
  * src/platform/tuning.ts): decoding ahead, Home's rows box on its own layer,
  * the hero without its fade, small wide art, and timing marks. Decoding
- * ahead and the hero without its fade are the defaults.
+ * ahead and the hero without its fade are the defaults. Then the second
+ * round's: getting art ready by drawing it under the rail, the browser's
+ * own rule for which art is too big to decode ahead, and poster grids.
  */
 
 /** Home's first rows from the mock Cinemeta, top to bottom. Featured rows have wide tiles. */
@@ -52,14 +55,18 @@ async function recordDecodes(page: Page): Promise<void> {
     (window as unknown as { decodes: Decodes }).decodes = record;
     const original = HTMLImageElement.prototype.decode;
     HTMLImageElement.prototype.decode = function decode(this: HTMLImageElement) {
-      const row = this.closest('[data-row-key]');
       const tile = this.closest('[data-focus-key]');
+      const tileKey = tile ? tile.getAttribute('data-focus-key')! : '';
+      // A poster grid's tiles have no row of their own: they count as the row "grid".
+      const row = /^discover-tile-/.test(tileKey)
+        ? 'grid'
+        : this.closest('[data-row-key]')?.getAttribute('data-row-key');
       // Artwork itself decodes an image that finished with no size, to tell an SVG from a failure.
       if (!row || !tile || this.naturalWidth === 0) return original.call(this);
       const src = this.getAttribute('src')!;
       record.calls.push({
-        row: row.getAttribute('data-row-key')!,
-        tile: tile.getAttribute('data-focus-key')!,
+        row,
+        tile: tileKey,
         src,
         at: performance.now(),
         again: seen.has(src),
@@ -96,6 +103,51 @@ const marks = (page: Page) =>
       .map((entry) => ({ name: entry.name, at: entry.startTime })),
   );
 const markNames = async (page: Page) => (await marks(page)).map((entry) => entry.name);
+
+interface DrawnArt {
+  src: string;
+  /** Its drawn size in CSS px, to a tenth. */
+  size: [number, number];
+}
+
+/** The art drawn ahead under the rail, with the aheadMode raster switch, oldest first. */
+const warmArt = (page: Page) =>
+  page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-warm-ahead] img'), (image): DrawnArt => {
+      const box = image.getBoundingClientRect();
+      const tenth = (value: number) => Math.round(value * 10) / 10;
+      return { src: image.getAttribute('src')!, size: [tenth(box.width), tenth(box.height)] };
+    }),
+  );
+
+/** The same for the art of some tiles of a row, tile by tile. */
+const drawnTileArt = (page: Page, row: string, tiles: number[]) =>
+  page.evaluate(
+    ({ row, tiles }) =>
+      tiles.flatMap((n) =>
+        Array.from(
+          document.querySelectorAll(`[data-focus-key="${row}-tile-${n}"] img`),
+          (image): DrawnArt => {
+            const box = image.getBoundingClientRect();
+            const tenth = (value: number) => Math.round(value * 10) / 10;
+            return { src: image.getAttribute('src')!, size: [tenth(box.width), tenth(box.height)] };
+          },
+        ),
+      ),
+    { row, tiles },
+  );
+
+/** The art of those tiles once all `count` images have loaded, so each has its drawn size. */
+async function tileArt(page: Page, row: string, tiles: number[], count: number) {
+  let art: DrawnArt[] = [];
+  await expect
+    .poll(async () => {
+      art = await drawnTileArt(page, row, tiles);
+      return art.length === count && art.every((drawn) => drawn.size[0] > 0);
+    })
+    .toBe(true);
+  return art;
+}
 
 /** Presses a key and waits for focus to land anywhere in `row`. */
 async function pressToRow(page: Page, key: string, row: string): Promise<void> {
@@ -171,6 +223,76 @@ test.describe('on a 4K TV', () => {
     expect(record.mostPending).toBe(1);
   });
 
+  test('aheadMode raster draws the art of the row the next press shows under the rail, wide art too, and goes with the rail', async ({
+    page,
+  }) => {
+    const art = { poster: png(500, 750), logo: png(500, 150), background: png(1920, 1080) };
+    await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+      }),
+    );
+    await seedStreamAddon(page);
+    await mockPlayback(page);
+    await tune(page, { aheadMode: 'raster', marks: true });
+    await recordDecodes(page);
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+
+    // From the first row, the Featured row's wide art and logos across the
+    // screen, each at the size its tile draws it, and none of it decoded.
+    const across = [0, 1, 2, 3, 4];
+    const featured = await tileArt(page, FEATURED_MOVIES, across, 10);
+    expect(featured.map((drawn) => drawn.size[0])).toContain(384);
+    await expect.poll(() => warmArt(page)).toEqual(featured);
+    expect(await allDecodes(page)).toEqual([]);
+    // Drawn under the rail, which covers it: nothing shows.
+    const covered = await page.evaluate(() => {
+      const box = document.querySelector('[data-warm-ahead]')!;
+      const rect = box.getBoundingClientRect();
+      const top = document.elementFromPoint(rect.left, rect.top);
+      return {
+        rect: [rect.left, rect.top, rect.width, rect.height],
+        byRail: !!top && !!top.closest('nav') && !box.contains(top),
+      };
+    });
+    expect(covered).toEqual({ rect: [0, 1079, 1, 1], byRail: true });
+    // One image at a time, never two drawn in the same frame.
+    const own = (await markNames(page)).filter((name) => /^ahead(-done)?:/.test(name));
+    expect(own.slice(0, 4)).toEqual([
+      `ahead:${FEATURED_MOVIES}`,
+      `ahead-done:${FEATURED_MOVIES}`,
+      `ahead:${FEATURED_MOVIES}`,
+      `ahead-done:${FEATURED_MOVIES}`,
+    ]);
+
+    // Moving on, at most ten are kept drawn, and the newest are the next row's.
+    await pressToRow(page, 'ArrowDown', SERIES_ROW);
+    const seriesFeatured = await tileArt(page, FEATURED_SERIES, across, 10);
+    await expect.poll(async () => (await warmArt(page)).slice(-10)).toEqual(seriesFeatured);
+    expect(await warmArt(page)).toHaveLength(10);
+    await pressToRow(page, 'ArrowDown', FEATURED_MOVIES);
+    const posters = [0, 1, 2, 3, 4, 5, 6];
+    const action = await tileArt(page, ACTION, posters, 7);
+    await expect.poll(async () => (await warmArt(page)).slice(-7)).toEqual(action);
+    expect((await warmArt(page)).length).toBeLessThanOrEqual(10);
+    expect(await allDecodes(page)).toEqual([]);
+
+    // The player takes the whole screen, rail and all: the box goes, with its art.
+    await pressToRow(page, 'ArrowUp', SERIES_ROW);
+    await pressToRow(page, 'ArrowUp', FIRST_ROW);
+    await press(page, 'Enter', 'details-watch');
+    await press(page, 'Enter', 'player-surface');
+    await expect(page.locator('[data-warm-ahead]')).toHaveCount(0);
+    await expect(page.locator('nav')).toHaveCount(0);
+    // Back to the title: the rail is back, and the box with it.
+    await pressBack(page);
+    await expectFocus(page, 'details-watch');
+    await expect(page.locator('[data-warm-ahead]')).toHaveCount(1);
+  });
+
   test('with small wide art, decoding ahead takes the Featured row’s art too', async ({ page }) => {
     const art = { poster: png(500, 750), logo: png(500, 150), background: png(480, 270) };
     await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
@@ -189,6 +311,74 @@ test.describe('on a 4K TV', () => {
       .toEqual([0, 1, 2, 3, 4]);
     await expect.poll(() => decodedTiles(page, FEATURED_MOVIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
     expect((await decodes(page)).mostPending).toBe(1);
+  });
+
+  // Wide tiles are drawn at 768x432 device px. The browser draws 1920x1080
+  // art from a half-size copy, and anything between that and the drawn size,
+  // or cropped to fill the tile, from its full-size copy.
+  for (const [backdrop, oversize, decoded] of [
+    [[1280, 720], 1.5, false],
+    [[1280, 720], 2, true],
+    [[1920, 1080], 2, false],
+    [[1920, 1200], 2, true],
+  ] as const) {
+    test(`with aheadOversize ${oversize}, ${backdrop.join('x')} wide art is ${decoded ? '' : 'not '}decoded ahead`, async ({
+      page,
+    }) => {
+      const art = {
+        poster: png(500, 750),
+        logo: png(500, 150),
+        background: png(backdrop[0], backdrop[1]),
+      };
+      await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+        }),
+      );
+      // 1.5 is the default: tune nothing for it.
+      await tune(page, oversize === 2 ? { aheadOversize: 2 } : {});
+      await recordDecodes(page);
+      await page.goto(APP_URL);
+      await expectFocus(page, `${FIRST_ROW}-tile-0`);
+      await expect.poll(() => decodedTiles(page, FEATURED_MOVIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
+      await page.waitForTimeout(300);
+      expect(await decodedTiles(page, FEATURED_MOVIES, 'background')).toEqual(
+        decoded ? [0, 1, 2, 3, 4] : [],
+      );
+      // Posters 500 wide drawn at 440 are taken either way.
+      await pressToRow(page, 'ArrowDown', SERIES_ROW);
+      await pressToRow(page, 'ArrowDown', FEATURED_MOVIES);
+      await expect.poll(() => decodedTiles(page, ACTION)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+      expect((await decodes(page)).mostPending).toBe(1);
+    });
+  }
+});
+
+// A 1080p Android TV gives its WebView a 960x540 window at 2 device px each,
+// and the page is scaled down to fit it (main.tsx).
+test.describe('scaled to fit a smaller window', () => {
+  test.use({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 2 });
+
+  test('aheadMode raster draws the art under the rail at the size its tile shows it', async ({
+    page,
+  }) => {
+    const art = { poster: png(500, 750), logo: png(500, 150), background: png(1920, 1080) };
+    await page.route(/^https:\/\/images\.metahub\.space\/(poster|logo|background)\//, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: art[new URL(route.request().url()).pathname.split('/')[1] as keyof typeof art],
+      }),
+    );
+    await tune(page, { aheadMode: 'raster' });
+    await page.goto(APP_URL);
+    await expectFocus(page, `${FIRST_ROW}-tile-0`);
+    const featured = await tileArt(page, FEATURED_MOVIES, [0, 1, 2, 3, 4], 10);
+    // Wide tiles are 384 px wide in the page, and half that on the screen.
+    expect(featured.map((drawn) => drawn.size[0])).toContain(192);
+    await expect.poll(() => warmArt(page)).toEqual(featured);
   });
 });
 
@@ -434,6 +624,67 @@ test('timing marks name the remote keys, slides, rows and hero changes, and noth
   ).toEqual([]);
 });
 
+interface BootReport {
+  launch: string;
+  steps: Record<string, number>;
+}
+
+const readBoot = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __bannertvBoot: () => BootReport }).__bannertvBoot());
+
+test('launch marks follow the start to Home’s first focus and rows, and say whether it was a reload', async ({
+  page,
+}) => {
+  await tune(page, { marks: true });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // A first launch has nothing cached: the first rows come from the addons.
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-network');
+  const first = await readBoot(page);
+  expect(first.launch).toBe('cold');
+  const steps = Object.keys(first.steps);
+  for (const step of [
+    'nav:domInteractive',
+    'boot:script',
+    'boot:start-end',
+    'boot:idb-open',
+    'boot:addons-read',
+    'boot:layout-read',
+    'boot:continue-read',
+    'boot:first-focus',
+  ]) {
+    expect(steps).toContain(step);
+  }
+  expect(steps.indexOf('boot:script')).toBeLessThan(steps.indexOf('boot:start-end'));
+  expect(steps.indexOf('boot:layout-read')).toBeLessThan(steps.indexOf('boot:first-focus'));
+  expect(steps.filter((step) => step.indexOf('boot:first-row-cached') === 0)).toEqual([]);
+  // Only launch steps and the page's own: no key presses, rows or addresses.
+  expect(steps.filter((step) => !/^(?:nav|paint|boot|matcher):/.test(step))).toEqual([]);
+  expect(steps.filter((step) => /https?:|\/\//.test(step))).toEqual([]);
+
+  // Starting again, as a profile switch does: the first rows come from the cache now.
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-cached');
+  expect((await readBoot(page)).launch).toBe('reload');
+});
+
+test('with the cache trimmed later and written without waiting, Home’s rows still come back from it', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  await tune(page, { idbPrune: 'later', idbRelaxed: true, marks: true });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-network');
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await page.reload();
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => markNames(page)).toContain('boot:first-row-cached');
+  expect(errors).toEqual([]);
+});
+
 test('by default art is decoded ahead, nothing is marked, the rows box has no layer, and the hero does not fade', async ({
   page,
 }) => {
@@ -449,11 +700,86 @@ test('by default art is decoded ahead, nothing is marked, the rows box has no la
   await press(page, 'ArrowDown', `${FEATURED_MOVIES}-tile-0`);
   await expect.poll(() => decodedTiles(page, ACTION)).toEqual([0, 1, 2, 3, 4, 5, 6]);
   expect((await decodes(page)).mostPending).toBe(1);
+  // Nothing is drawn under the rail.
+  await expect(page.locator('[data-warm-ahead]')).toHaveCount(0);
   expect(await page.evaluate(() => performance.getEntriesByType('mark').length)).toBe(0);
   await expect(page.locator('[data-row-key]').first().locator('xpath=..')).toHaveCSS(
     'will-change',
     'auto',
   );
+});
+
+const GRID_ROW = (row: number) => Array.from({ length: 7 }, (_, n) => row * 7 + n);
+
+test('gridAhead decodes ahead the posters of the grid row the next press shows, down and up', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true, marks: true });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  // The grid shows rows 0 and 1 and the top of row 2: Down brings row 3 in.
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual(GRID_ROW(3));
+  // Row 4 has no titles until the next page comes, at row 2.
+  await press(page, 'ArrowDown', 'discover-tile-7');
+  await press(page, 'ArrowDown', 'discover-tile-14');
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual([...GRID_ROW(3), ...GRID_ROW(5)]);
+  // After an Up, the row above too: row 0, and row 4 below.
+  await press(page, 'ArrowUp', 'discover-tile-7');
+  await expect
+    .poll(() => decodedTiles(page, 'grid'))
+    .toEqual([...GRID_ROW(0), ...GRID_ROW(3), ...GRID_ROW(4), ...GRID_ROW(5)]);
+  const record = await decodes(page);
+  expect(record.calls.filter((call) => call.again)).toEqual([]);
+  expect(record.mostPending).toBe(1);
+  // Marks say where the grid is, never an address.
+  expect(await markNames(page)).toContain('ahead:grid-1');
+});
+
+test('gridAhead works in See all over Home, and Home takes over again once it closes', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  for (let n = 1; n <= 14; n++) await press(page, 'ArrowRight', `${FIRST_ROW}-tile-${n}`);
+  await press(page, 'Enter', 'discover-tile-0');
+  await expect.poll(() => decodedTiles(page, 'grid')).toEqual(GRID_ROW(3));
+  await pressBack(page);
+  await expectFocus(page, `${FIRST_ROW}-tile-14`);
+  await pressToRow(page, 'ArrowDown', SERIES_ROW);
+  await expect.poll(() => decodedTiles(page, FEATURED_SERIES, 'logo')).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('gridAhead with aheadMode raster draws the grid row the next press shows under the rail', async ({
+  page,
+}) => {
+  await tune(page, { gridAhead: true, aheadMode: 'raster' });
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  // Grid tiles are discover-tile-N, as a row's are <row>-tile-N.
+  const next = await tileArt(page, 'discover', GRID_ROW(3), 7);
+  expect(next[0]!.size).toEqual([220, 330]);
+  await expect.poll(async () => (await warmArt(page)).slice(-7)).toEqual(next);
+  expect(await allDecodes(page)).toEqual([]);
+});
+
+test('without gridAhead, the poster grid decodes nothing ahead', async ({ page }) => {
+  await recordDecodes(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  await press(page, 'ArrowDown', 'discover-tile-7');
+  await press(page, 'ArrowDown', 'discover-tile-14');
+  await page.waitForTimeout(500);
+  expect(await decodedTiles(page, 'grid')).toEqual([]);
 });
 
 test('decodeAhead false decodes nothing ahead', async ({ page }) => {

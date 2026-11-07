@@ -7,9 +7,10 @@ import {
   profiles,
   profileSwitcher,
 } from '@tv/data/profiles';
+import { refreshAccount } from '@tv/data/sync';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack } from '../nav/routes';
 import { Avatar } from '../ui/Avatar';
@@ -17,6 +18,8 @@ import { Button } from '../ui/Button';
 import { Icon } from '../ui/icons';
 import { PinPad } from '../ui/PinPad';
 import { colors, space, type } from '../ui/theme';
+import { ForgotPin } from './profiles/ForgotPin';
+import { useAccountRefresh } from './profiles/refresh';
 
 /**
  * "Who's watching?": at launch (mode 'launch') or from the avatar on Home ('switch'). Picking
@@ -30,12 +33,19 @@ export function ProfilePicker({ mode }: { mode: 'launch' | 'switch' }) {
   const hidden = useSyncExternalStore(hiddenProfiles.subscribe, hiddenProfiles.get);
   const [asking, setAsking] = useState<Profile | null>(null);
   const [message, setMessage] = useState<string | undefined>();
+  const [forgetting, setForgetting] = useState<Profile | null>(null);
+  const { refreshing, onRefresh } = useAccountRefresh();
 
   // While the picker is open, an account join waits to start the app again.
   useEffect(() => {
     if (mode !== 'switch') return;
     profileSwitcher.set(true);
     return () => profileSwitcher.set(false);
+  }, [mode]);
+  // Switching shows the account's profiles now, not as of the last sync (item A8). At launch
+  // the account only starts once a profile is chosen, so the list is the last sync's.
+  useEffect(() => {
+    if (mode === 'switch') void refreshAccount();
   }, [mode]);
 
   const lockedMessage = (id: string) =>
@@ -67,7 +77,21 @@ export function ProfilePicker({ mode }: { mode: 'launch' | 'switch' }) {
       <Text style={styles.title} accessibilityRole="header">
         {t('phone.whoIsWatching')}
       </Text>
-      <ScrollView contentContainerStyle={styles.grid}>
+      <ScrollView
+        contentContainerStyle={styles.grid}
+        {...(mode === 'switch'
+          ? {
+              refreshControl: (
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={colors.accent}
+                  colors={[colors.action]}
+                />
+              ),
+            }
+          : {})}
+      >
         {list.map((profile) => {
           const label = [
             profile.name,
@@ -109,7 +133,21 @@ export function ProfilePicker({ mode }: { mode: 'launch' | 'switch' }) {
         {...(message ? { message } : {})}
         onPin={(digits) => asking && tryPin(asking, digits)}
         onCancel={() => setAsking(null)}
+        onForgot={() => {
+          setForgetting(asking);
+          setAsking(null);
+        }}
       />
+      {forgetting ? (
+        <ForgotPin
+          profile={forgetting}
+          onCleared={() => {
+            setForgetting(null);
+            chooseProfile(forgetting.id);
+          }}
+          onClose={() => setForgetting(null)}
+        />
+      ) : null}
     </View>
   );
 }

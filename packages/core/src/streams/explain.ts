@@ -15,8 +15,14 @@ export interface PlayAttempt {
 export type PlayProblem =
   /** No installed addon finds streams (the demo addon aside). */
   | { kind: 'no-stream-addon' }
-  /** Stream addons are installed, but none of them finds streams for this kind of title. */
-  | { kind: 'no-addon-for-title' }
+  /** Stream addons are installed, but every one of them is switched off, so none was asked. */
+  | { kind: 'stream-addons-off' }
+  /**
+   * Stream addons are switched on, but none of them finds streams for this
+   * kind of title. `someOff`: others are installed but switched off, so they
+   * were not asked.
+   */
+  | { kind: 'no-addon-for-title'; someOff: boolean }
   /** Every addon asked failed to answer. */
   | { kind: 'addons-down'; count: number }
   /** The addons answered, with no streams. */
@@ -52,8 +58,11 @@ export interface ProblemInput {
   candidates: readonly StreamEntry[];
   /** The streams opened since anything last played, oldest first. */
   attempts: readonly PlayAttempt[];
-  /** Whether any installed addon finds streams at all. */
-  hasStreamAddon: boolean;
+  /**
+   * The installed addons that find streams (the demo addon aside): whether
+   * any is switched on, and whether any is switched off, which is never asked.
+   */
+  streamAddons: { on: boolean; off: boolean };
 }
 
 export interface ProblemExplained {
@@ -94,7 +103,9 @@ function unavailable(entries: readonly StreamEntry[], reason: 'torrent' | 'proxy
 function explainNothing(input: ProblemInput): PlayProblem {
   const { asked, entries } = input;
   if (asked.length === 0) {
-    return input.hasStreamAddon ? { kind: 'no-addon-for-title' } : { kind: 'no-stream-addon' };
+    const { on, off } = input.streamAddons;
+    if (on) return { kind: 'no-addon-for-title', someOff: off };
+    return off ? { kind: 'stream-addons-off' } : { kind: 'no-stream-addon' };
   }
   if (entries.length === 0) {
     return input.failedAddons >= asked.length && input.failedAddons > 0

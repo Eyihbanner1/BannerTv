@@ -1,0 +1,18 @@
+.title {
+  margin-bottom: 8px;
+  font: var(--bt-text-heading);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.when {
+  margin-bottom: 28px;
+  color: var(--bt-accent);
+}
+
+/* Buttons side by side; margins instead of flex gap for Chromium 68. */
+.actions > * {
+  margin-right: 24px;
+}

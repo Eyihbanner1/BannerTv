@@ -140,8 +140,12 @@ export function problemText(t: TFunction, explained: ProblemExplained): ProblemT
     case 'no-stream-addon':
       lines.push(t('player.problem.noStreamAddon'));
       break;
+    case 'stream-addons-off':
+      lines.push(t('player.problem.streamAddonsOff'));
+      break;
     case 'no-addon-for-title':
       lines.push(t('player.problem.noAddonForTitle'));
+      if (problem.someOff) lines.push(t('player.problem.someStreamAddonsOff'));
       break;
     case 'addons-down':
       lines.push(t('player.problem.addonsDown', { count: problem.count }));

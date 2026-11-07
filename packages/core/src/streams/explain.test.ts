@@ -61,7 +61,7 @@ function input(overrides: Partial<ProblemInput>): ProblemInput {
     entries: [],
     candidates: [],
     attempts: [],
-    hasStreamAddon: true,
+    streamAddons: { on: true, off: false },
     ...overrides,
   };
 }
@@ -72,11 +72,29 @@ function attempt(e: StreamEntry, kind = 'network', detail?: string): PlayAttempt
 
 describe('explainProblem, when nothing could start', () => {
   it('says no stream addon is installed, or none finds this title', () => {
-    expect(explainProblem(input({ asked: [], hasStreamAddon: false })).problem).toEqual({
+    const none = { on: false, off: false };
+    expect(explainProblem(input({ asked: [], streamAddons: none })).problem).toEqual({
       kind: 'no-stream-addon',
     });
-    expect(explainProblem(input({ asked: [], hasStreamAddon: true })).problem).toEqual({
+    expect(explainProblem(input({ asked: [] })).problem).toEqual({
       kind: 'no-addon-for-title',
+      someOff: false,
+    });
+  });
+
+  it('says the stream addons are switched off, rather than missing', () => {
+    // Torrentio installed but switched off: the addon client asks no one.
+    const off = { on: false, off: true };
+    expect(explainProblem(input({ asked: [], streamAddons: off })).problem).toEqual({
+      kind: 'stream-addons-off',
+    });
+    // One switched on finds nothing for this title, another is switched off.
+    expect(
+      explainProblem(input({ asked: [], streamAddons: { on: true, off: true } })).problem,
+    ).toEqual({ kind: 'no-addon-for-title', someOff: true });
+    // Once an addon was asked, the switches no longer explain anything.
+    expect(explainProblem(input({ streamAddons: { on: true, off: true } })).problem).toEqual({
+      kind: 'no-streams',
     });
   });
 

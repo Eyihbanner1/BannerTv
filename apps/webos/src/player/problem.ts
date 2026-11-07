@@ -1,5 +1,5 @@
 import { explainProblem, type PlayAttempt, type ProblemExplained } from '@bannertv/core';
-import { hasStreamAddon } from '../data/addons';
+import { streamAddons } from '../data/addons';
 import { entryKey, type FinderState } from './finder';
 import type { SessionState } from './session';
 
@@ -25,6 +25,6 @@ export function playProblem(
     entries: finder.entries,
     candidates: finder.candidates,
     attempts,
-    hasStreamAddon: hasStreamAddon(),
+    streamAddons: streamAddons(),
   });
 }

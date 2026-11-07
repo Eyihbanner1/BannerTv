@@ -3,7 +3,15 @@ import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { trackMemory } from '../data/library';
 import { setPreference } from '../data/preferences';
-import { BINGE_WAIT_MS, entryKey, isHeavy, SETTLE_AFTER_FIRST_MS, streamFinder } from './finder';
+import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
+import {
+  BINGE_WAIT_MS,
+  entryKey,
+  isHeavy,
+  putPlayerFirst,
+  SETTLE_AFTER_FIRST_MS,
+  streamFinder,
+} from './finder';
 
 interface FakeQuery {
   listeners: Set<() => void>;
@@ -21,9 +29,16 @@ const addons = vi.hoisted(() => ({
   // Every stream request made for a sports source, and every one loaded again.
   asked: [] as string[],
   loaded: [] as string[],
+  // The videos put first for a player, and whether each was let go.
+  first: [] as Array<{ videos: Array<{ type: string; id: string }>; released: boolean }>,
 }));
 
 vi.mock('../data/addons', () => ({
+  putVideosFirst: (videos: Array<{ type: string; id: string }>) => {
+    const put = { videos, released: false };
+    addons.first.push(put);
+    return () => (put.released = true);
+  },
   addonCollection: {
     get: () => ({ ready: true, addons: addons.collection }),
     subscribe: () => () => undefined,
@@ -84,6 +99,14 @@ vi.mock('../data/addons', () => ({
       }),
   },
 }));
+// The tester's switches, which a test can change.
+const tuned = vi.hoisted(() => ({}) as Tuning);
+
+vi.mock(import('../platform/tuning'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, tuning: Object.assign(tuned, actual.TUNING_DEFAULTS) };
+});
+
 // The connection's limit, which a test can lower as the session would after buffering.
 const limit = vi.hoisted(() => ({ maxBitrate: 40e6, listeners: new Set<() => void>() }));
 
@@ -128,9 +151,24 @@ function lowerLimit(maxBitrate: number) {
 const listening = (videoId: string) =>
   (addons.queries[videoId] ?? []).reduce((sum, query) => sum + query.listeners.size, 0);
 
+/** Answers one install's request, as its addon would. */
+function answer(videoId: string, index: number) {
+  const query = addons.queries[videoId]![index]!;
+  const install = addons.installs[index]!;
+  query.state = {
+    status: 'success',
+    stale: false,
+    data: install.streams.map((raw) =>
+      parseStream(typeof raw === 'string' ? { url: raw, name: 'Test\n1080p' } : raw)!,
+    ),
+  };
+  query.listeners.forEach((listener) => listener());
+}
+
 beforeEach(() => {
   vi.stubGlobal('window', globalThis);
   vi.useFakeTimers();
+  Object.assign(tuned, TUNING_DEFAULTS);
   addons.installs = [{ id: 'org.test.streams', streams: ['https://media.example.com/a.mp4'] }];
   addons.answering = true;
   limit.maxBitrate = 40e6;
@@ -191,6 +229,65 @@ describe('streamFinder', () => {
     finder.markFailed(first!);
     expect(finder.get().candidates.map((entry) => entry.stream)).toEqual([second!.stream]);
     expect(finder.next(new Set([entryKey(first!)]))?.stream).toBe(second!.stream);
+  });
+});
+
+describe('settling', () => {
+  beforeEach(() => {
+    addons.answering = false;
+    addons.installs = [
+      { id: 'org.test.quick', streams: ['https://media.example.com/quick.mkv'] },
+      { id: 'org.test.slow', streams: ['https://media.example.com/slow.mkv'] },
+    ];
+  });
+
+  it('gives slower addons two seconds once one stream could play', async () => {
+    expect(TUNING_DEFAULTS.settleAfterFirstMs).toBe(SETTLE_AFTER_FIRST_MS);
+    const finder = streamFinder('movie', 'tt-settle');
+    finder.start();
+    answer('tt-settle', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS - 1);
+    expect(finder.get().settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(finder.get()).toMatchObject({ settled: true, pending: 1 });
+  });
+
+  it('settles as soon as every addon has answered', () => {
+    const finder = streamFinder('movie', 'tt-settle-all');
+    finder.start();
+    answer('tt-settle-all', 0);
+    answer('tt-settle-all', 1);
+    expect(finder.get()).toMatchObject({ settled: true, pending: 0 });
+  });
+
+  it('marks its stages for a trace when the marks switch is on', async () => {
+    tuned.marks = true;
+    const finder = streamFinder('movie', 'tt-settle-marked');
+    // The oldest finder it pushed out settles as it goes: not this one's.
+    await vi.advanceTimersByTimeAsync(0);
+    const marked: string[] = [];
+    const spy = vi.spyOn(performance, 'mark').mockImplementation((name: string) => {
+      marked.push(name);
+      return undefined as unknown as PerformanceMark;
+    });
+    finder.start();
+    answer('tt-settle-marked', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS);
+    answer('tt-settle-marked', 1);
+    expect(marked).toEqual(['play:finder-start', 'play:first-stream', 'play:settled']);
+    spy.mockRestore();
+  });
+
+  it('gives them the time the settleAfterFirstMs switch says', async () => {
+    tuned.settleAfterFirstMs = 500;
+    const finder = streamFinder('movie', 'tt-settle-tuned');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose().then((entry) => (chosen = fileOf(entry)));
+    answer('tt-settle-tuned', 0);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(chosen).toBe('none yet');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(chosen).toBe('quick');
   });
 });
 
@@ -274,6 +371,32 @@ describe('sports events', () => {
     expect(addons.asked).toEqual(['second-x:7']);
     expect(addons.loaded).toEqual(['second-x:7']);
     expect(finder.get().entries).toHaveLength(1);
+  });
+
+  it("puts the player's video and each of the event's sources first, until let go", () => {
+    const [a, b] = [install('a'), install('b', 'org.other.sports')];
+    addons.collection = [a, b];
+    addons.first = [];
+    const release = putPlayerFirst('tv', 'a:first', {
+      key: '0-a-first',
+      sources: [source(a, 'a:first'), source(b, 'b:first', 1)],
+      replay: false,
+    });
+    expect(addons.first).toEqual([
+      {
+        videos: [
+          { type: 'tv', id: 'a:first' },
+          { type: 'tv', id: 'a:first' },
+          { type: 'tv', id: 'b:first' },
+        ],
+        released: false,
+      },
+    ]);
+    release();
+    expect(addons.first[0]!.released).toBe(true);
+
+    putPlayerFirst('movie', 'tt1');
+    expect(addons.first[1]!.videos).toEqual([{ type: 'movie', id: 'tt1' }]);
   });
 
   it('leaves out the sources of addons no longer installed', () => {
@@ -371,18 +494,6 @@ describe('the next episode', () => {
     behaviorHints: { bingeGroup },
   });
   const hint = { addonId: 'org.test.second', bingeGroup: 'second-720p' };
-
-  /** Answers one install's request, as its addon would. */
-  function answer(videoId: string, index: number) {
-    const query = addons.queries[videoId]![index]!;
-    const install = addons.installs[index]!;
-    query.state = {
-      status: 'success',
-      stale: false,
-      data: install.streams.map((raw) => parseStream(raw as Record<string, unknown>)!),
-    };
-    query.listeners.forEach((listener) => listener());
-  }
 
   beforeEach(() => {
     addons.installs = [

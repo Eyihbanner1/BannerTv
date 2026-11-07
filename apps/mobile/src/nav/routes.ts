@@ -2,6 +2,7 @@ import type { BingeHint, SportEvent, StreamEntry } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import type { EventPlay } from '@tv/app/router';
 import { router } from 'expo-router';
+import { requestSearch } from '../data/search-request';
 
 export type { EventPlay };
 
@@ -96,6 +97,22 @@ export function openStreams(route: StreamsRoute, how: 'push' | 'replace' = 'push
 
 export function openCatalog(route: CatalogRoute): void {
   router.push({ pathname: '/catalog', params: { key: keep(route) } });
+}
+
+/** Browse: every catalog, by type, catalog and genre (the TV's Discover). */
+export function openBrowse(): void {
+  router.push('/browse');
+}
+
+/**
+ * The Search tab on `term`, as if typed: a full name brings a row of that
+ * person's titles. From a title opened over the tabs, the screens over them
+ * close (navigate would stack another set of tabs, whose Search would not be
+ * the one that takes the term).
+ */
+export function openSearch(term: string): void {
+  requestSearch(term);
+  router.dismissTo('/search');
 }
 
 export function goBack(): void {

@@ -729,7 +729,10 @@ test('a title left part way through resumes from where it stopped', async ({ pag
 
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).time).toBeGreaterThanOrEqual(35);
+  // A few seconds before it (10 s: the seeded progress is long ago), to pick up the line it left.
+  const resumed = (await video(page)).time;
+  expect(resumed).toBeGreaterThanOrEqual(25);
+  expect(resumed).toBeLessThan(33);
 });
 
 test('a title with no stream left to try keeps its resume point through All streams', async ({
@@ -756,7 +759,8 @@ test('a title with no stream left to try keeps its resume point through All stre
   await press(page, 'Enter', 'streams-item-0');
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).time).toBeGreaterThanOrEqual(35);
+  // The resume's own start, 10 s early, kept through All streams.
+  expect((await video(page)).time).toBeGreaterThanOrEqual(25);
 });
 
 test('subtitles come from the subtitles addon: a language on the left, its versions on the right, numbered by source', async ({
@@ -858,11 +862,11 @@ test('near the end of an episode, Up Next plays the next one from the same relea
     'player-upnext-play',
     { timeout: 15000 },
   );
-  await expect(page.getByText('Up next')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toBeVisible();
   await expectCountToEnd(
     page,
     page.locator('[data-focus-key="player-upnext-play"]'),
-    /^Play now \((\d+)\)$/,
+    /^Play now\. Next episode in (\d+) s$/,
   );
 
   // The pointer heading for the card does not bring the controls up and move it.
@@ -881,7 +885,7 @@ test('near the end of an episode, Up Next plays the next one from the same relea
 
   // Pause closes it, and focus goes to the controls Pause brought up. Paused, nothing counts.
   await page.keyboard.press('Pause');
-  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
   await expectFocus(page, 'player-play');
   const nextButton = page.locator('[data-focus-key="player-next"]');
   await expect(nextButton).toHaveAttribute('aria-label', 'Next episode');
@@ -951,6 +955,53 @@ test('Up or Down on the Up Next card brings the controls up in its place, counti
   await expectCountToEnd(page, nextButton, /^Next in (\d+) s$/);
 });
 
+test('Up Next says what plays next and when, the pointer picks its buttons, and a click beside it brings the controls', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await playFirstEpisode(page);
+  const card = page.getByRole('dialog', { name: 'Up next' });
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
+  // "Next episode in 12 s", then the episode's number and its name.
+  await expect(card.getByText(/^Next episode in \d+ s$/)).toBeVisible();
+  await expect(card.getByText('S1:E2', { exact: true })).toBeVisible();
+  await expect(card.locator('[data-focus-key="player-upnext-play"]')).toHaveText('Play now');
+
+  // The pointer over Keep watching takes focus there, and back over Play now.
+  const keep = await page.locator('[data-focus-key="player-upnext-dismiss"]').boundingBox();
+  const playNow = await page.locator('[data-focus-key="player-upnext-play"]').boundingBox();
+  if (!keep || !playNow) throw new Error('Up Next has no buttons on screen');
+  await page.mouse.move(keep.x - 200, keep.y - 200);
+  await page.mouse.move(keep.x + keep.width / 2, keep.y + keep.height / 2, { steps: 4 });
+  await expectFocus(page, 'player-upnext-dismiss');
+  await page.mouse.move(playNow.x + playNow.width / 2, playNow.y + playNow.height / 2, {
+    steps: 4,
+  });
+  await expectFocus(page, 'player-upnext-play');
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+
+  // A click on the card's own words is the card's: it stays, and the controls do not come.
+  const words = (await card.getByText('S1:E2', { exact: true }).boundingBox())!;
+  await page.mouse.move(words.x + words.width / 2, words.y + words.height / 2, { steps: 4 });
+  await page.mouse.click(words.x + words.width / 2, words.y + words.height / 2);
+  await page.waitForTimeout(300);
+  await expect(card).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+
+  // A click on the picture beside it brings the controls in its place, still playing.
+  await page.mouse.move(400, 300, { steps: 4 });
+  await page.mouse.click(400, 300);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
+  await expect(card).toHaveCount(0);
+  expect((await video(page)).playing).toBe(true);
+});
+
 /**
  * Up Next's count, on `where`, is the seconds left to the end of the 40 s
  * file: its ending is never cut.
@@ -999,10 +1050,10 @@ test('Up Next comes back after a rewind, and the next episode starts as this one
     { timeout: 15000 },
   );
   await pressBack(page);
-  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
   await expectFocus(page, 'player-surface');
   await page.waitForTimeout(1500);
-  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
 
   // A rewind well back from the end brings it back for the end.
   await pressCode(page, REWIND);
@@ -1045,7 +1096,7 @@ test('an end held by a sheet waits for it, then counts 10 s to the next episode'
   await pressCode(page, BLUE);
   const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
   await expect(sheet).toBeVisible();
-  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -1065,10 +1116,10 @@ test('an end held by a sheet waits for it, then counts 10 s to the next episode'
   await pressCode(page, BLUE);
   await expect(sheet).toHaveCount(0);
   const play = page.locator('[data-focus-key="player-upnext-play"]');
-  await expect(play).toHaveAttribute('aria-label', /^Play now \((10|9)\)$/);
+  await expect(play).toHaveAttribute('aria-label', /^Play now\. Next episode in (10|9) s$/);
   await expectFocus(page, 'player-upnext-play');
   await page.waitForTimeout(3000);
-  await expect(play).toHaveAttribute('aria-label', /^Play now \([5-7]\)$/);
+  await expect(play).toHaveAttribute('aria-label', /^Play now\. Next episode in [5-7] s$/);
   await expect.poll(async () => (await video(page)).time, { timeout: 12000 }).toBeLessThan(5);
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect(await episodePlaying(page)).toMatch(/^S1:E2/);
@@ -1358,7 +1409,7 @@ test('"End of episode" pauses at its end in place of the next one, and waking co
   await pressCode(page, FAST_FORWARD);
   await pressCode(page, FAST_FORWARD);
   await expectFocus(page, 'player-sleepwarn-off');
-  await expect(page.getByText('Up next')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
   // Then 91 minutes without a key, so "Still watching?" would ask before the next one.
   await page.clock.fastForward(91 * 60 * 1000);
 
@@ -1636,12 +1687,14 @@ test('a live broadcast plays with no end shown, and saves nothing to resume or c
   await expect.poll(async () => (await video(page)).playing).toBe(true);
   expect((await video(page)).src).toMatch(/^blob:/);
 
-  // Rewind jumps back within the broadcast at once, and the controls show where it is.
+  // Rewind goes back within the broadcast as on a film: it lands a moment
+  // later, and the note says how far behind live. The controls stay hidden.
   // hls.js joins a few seconds behind the live edge of the 10 s window, so there is room.
   const before = (await video(page)).time;
   await pressCode(page, REWIND);
+  await expect(page.locator('[class*="skipNote"]').getByText(/^0:0\d behind live$/)).toBeVisible();
   await expect.poll(async () => (await video(page)).time).toBeLessThan(before);
-  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 
   // The controls give no length to a broadcast: on the right is how far behind live it is.
   await press(page, 'ArrowUp', 'player-play');
@@ -1695,12 +1748,24 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   await page.keyboard.press('Enter');
   await page.waitForTimeout(500);
   expect(await seeks()).toBe(0);
-  // Back 10 s and Forward 10 s jump at once within what the broadcast keeps, as Rewind and Fast forward do.
+  // Back 10 s and Forward 10 s add up and land once, a moment after the last press, within
+  // what the broadcast keeps, as on a film.
   await press(page, 'ArrowRight', 'player-back10');
   const live = (await video(page)).time;
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(1);
-  await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 5);
+  await page.keyboard.press('Enter');
+  // Waiting to land, Forward 10 s has somewhere to come back from.
+  await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
+    'aria-label',
+    'Forward 10 s',
+  );
+  await page.waitForTimeout(300);
+  expect(await seeks()).toBe(0);
+  await expect.poll(seeks, { timeout: 2000 }).toBe(1);
+  // To the oldest moment kept, and on from there as it plays.
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(live - 3);
+  await page.waitForTimeout(1000);
+  expect(await seeks()).toBe(1);
   await press(page, 'ArrowRight', 'player-play');
   await press(page, 'ArrowRight', 'player-fwd10');
   await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
@@ -1709,7 +1774,7 @@ test('a broadcast an older build saved to resume opens at the live edge, and off
   );
   const behind = (await video(page)).time;
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expect.poll(seeks, { timeout: 2000 }).toBe(2);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 5);
   // Never past live: playing live, it has nowhere further to go.
   await expect(page.locator('[data-focus-key="player-fwd10"]')).toHaveAttribute(
@@ -1758,29 +1823,31 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   const seeks = await countSeeks(page);
   await press(page, 'ArrowLeft', 'player-back10');
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(1);
+  await expect.poll(seeks, { timeout: 2000 }).toBe(1);
   await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
   await expect(behindTime).toHaveText(/^−0:0\d$/);
   await expect(page.locator('[class*="liveBehind"]')).toHaveText('LIVE');
   await expect(goToLive).toHaveAttribute('aria-label', 'Go to live');
   await expect(forward).toHaveAttribute('aria-label', 'Forward 10 s');
 
-  // Go to live, from where Next episode would be.
+  // Go to live, from where Next episode would be. A rewind still to land gives way to it.
   await press(page, 'ArrowRight', 'player-play');
   await press(page, 'ArrowRight', 'player-fwd10');
   await press(page, 'ArrowRight', 'player-live');
   const behind = (await video(page)).time;
+  await pressCode(page, REWIND);
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 500 }).toBe(2);
+  await expectSeekAtOnce(seeks, 2, OK);
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(behind + 3);
   await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
   await expect(behindTime).toHaveText('');
   await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live');
   await expect(page.locator('[class*="liveBehind"]')).toHaveCount(0);
-  // Dimmed now, it does nothing.
+  // Dimmed now, it does nothing, and the rewind never lands.
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1200);
   expect(await seeks()).toBe(2);
+  await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
 
   // The pointer: the bar is what the broadcast keeps, the time over it how
   // far behind live a click lands, and the click goes there.
@@ -1791,17 +1858,69 @@ test('behind a broadcast, LIVE goes grey with how far behind, and Go to live com
   await expectFocus(page, 'player-seek');
   await expect(bar.getByText(/^−0:0\d$/)).toBeVisible();
   await page.mouse.click(box.x + 4, box.y + box.height / 2);
-  await expect.poll(seeks, { timeout: 500 }).toBe(3);
+  await expectSeekAtOnce(seeks, 3, 'click');
   await expect(seekBar).toHaveAttribute('aria-valuetext', /^0:0\d behind live$/);
   // The right end is live: a click there goes to live, and playing live does nothing.
   await page.mouse.click(box.x + box.width, box.y + box.height / 2);
-  await expect.poll(seeks, { timeout: 500 }).toBe(4);
+  await expectSeekAtOnce(seeks, 4, 'click');
   await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
   await page.waitForTimeout(1000);
   await page.mouse.click(box.x + box.width, box.y + box.height / 2);
   await page.waitForTimeout(500);
   expect(await seeks()).toBe(4);
   await expect(seekBar).toHaveAttribute('aria-valuetext', 'Playing live');
+});
+
+test('on a broadcast, Left and Right with the controls hidden add up behind live and land once', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        { name: 'Test Streams\nLive', description: 'Open Movie live', path: LIVE_HLS_PATH },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  const goToLive = page.locator('[data-focus-key="player-live"]');
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live', {
+    timeout: 10000,
+  });
+  const note = page.locator('[class*="skipNote"]');
+  const seeks = await countSeeks(page);
+
+  // Playing live, Right has nowhere to go, and says so.
+  await page.keyboard.press('ArrowRight');
+  await expect(note).toHaveText('Playing live');
+  await page.waitForTimeout(1200);
+  expect(await seeks()).toBe(0);
+
+  // Left twice: one total, never further back than the broadcast keeps (10 s
+  // here, so it stops short of 20), how far behind live it lands, and nothing moves yet.
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(note.getByText(/^−\d s$/)).toBeVisible();
+  await expect(note.getByText(/^0:0\d behind live$/)).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await seeks()).toBe(0);
+  await expectFocus(page, 'player-surface');
+  // It lands once, a moment after the last press, and the controls stay hidden.
+  await expect.poll(seeks, { timeout: 2000 }).toBe(1);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live');
+
+  // Right twice comes back to live: it goes to live, once.
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(note.getByText('Playing live', { exact: true })).toBeVisible();
+  await expect.poll(seeks, { timeout: 2000 }).toBe(2);
+  await expect(goToLive).toHaveAttribute('aria-label', 'Go to live. Playing live', {
+    timeout: 5000,
+  });
 });
 
 test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({
@@ -1876,19 +1995,71 @@ async function expectControlsHidden(page: Page) {
 const FAST_FORWARD = 417;
 const REWIND = 412;
 const BLUE = 406;
+const OK = 13;
 
-/** Counts the player's seeks from now on. */
-async function countSeeks(page: Page): Promise<() => Promise<number>> {
-  await page.locator('video:not([aria-hidden])').evaluate((element: HTMLVideoElement) => {
+/** A skip lands by itself this long after its last press: SCRUB_COMMIT_MS in PlayerScreen.tsx. */
+const SKIP_LANDS_MS = 800;
+
+/** A remote key by its keyCode, or 'click' for the pointer going down. */
+type Input = number | 'click';
+type SeekWindow = Window & { seekInputs?: Array<[Input, number]> };
+type SeekVideo = HTMLVideoElement & { seekTimes?: number[] };
+
+/** The player's seeks since countSeeks. */
+interface Seeks {
+  /** How many have begun. */
+  (): Promise<number>;
+  /** How long the `nth` began after the last `input` before it, in ms by the page's clock. */
+  after(nth: number, input: Input): Promise<number>;
+}
+
+/** Counts the player's seeks from now on, and keeps when each began and each key or click went down. */
+async function countSeeks(page: Page): Promise<Seeks> {
+  const video = page.locator('video:not([aria-hidden])');
+  await video.evaluate((element: SeekVideo) => {
+    const w = window as SeekWindow;
+    if (!w.seekInputs) {
+      const inputs: Array<[Input, number]> = (w.seekInputs = []);
+      // On the window, capturing: it hears each key and click before the app can stop it.
+      window.addEventListener(
+        'keydown',
+        (event) => inputs.push([event.keyCode, performance.now()]),
+        true,
+      );
+      window.addEventListener('pointerdown', () => inputs.push(['click', performance.now()]), true);
+    }
+    const times: number[] = (element.seekTimes = []);
     element.dataset.seeks = '0';
     element.addEventListener('seeking', () => {
+      times.push(performance.now());
       element.dataset.seeks = String(Number(element.dataset.seeks) + 1);
     });
   });
-  return () =>
-    page
-      .locator('video:not([aria-hidden])')
-      .evaluate((element: HTMLVideoElement) => Number(element.dataset.seeks));
+  const seeks = (() =>
+    video.evaluate((element: HTMLVideoElement) => Number(element.dataset.seeks))) as Seeks;
+  seeks.after = (nth, input) =>
+    video.evaluate(
+      (element: SeekVideo, [index, wanted]) => {
+        const began = element.seekTimes?.[index] ?? NaN;
+        const before = ((window as SeekWindow).seekInputs ?? []).filter(
+          ([what, at]) => what === wanted && at <= began,
+        );
+        return began - (before[before.length - 1]?.[1] ?? NaN);
+      },
+      [nth - 1, input] as const,
+    );
+  return seeks;
+}
+
+/**
+ * Waits for the player's `nth` seek, and checks it began at once after `since`, the press that
+ * asked for it: sooner than a skip lands by itself. Timed in the page, so slow round trips on
+ * a busy runner cannot fail a seek that came at once, and one that waited for the skip delay
+ * still fails.
+ */
+async function expectSeekAtOnce(seeks: Seeks, nth: number, since: Input): Promise<void> {
+  await expect.poll(seeks).toBe(nth);
+  expect(await seeks.after(nth, since)).toBeLessThan(SKIP_LANDS_MS);
 }
 
 async function playMovie(page: Page) {
@@ -1928,7 +2099,7 @@ test('every way of skipping adds 10 s a press and lands once, with a note while 
   // OK lands a skip there and then, well before it would land by itself, and leaves the film playing.
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
-  await expect.poll(seeks, { timeout: 400 }).toBe(3);
+  await expectSeekAtOnce(seeks, 3, FAST_FORWARD);
   await page.waitForTimeout(1000);
   expect(await seeks()).toBe(3);
   expect((await video(page)).playing).toBe(true);
@@ -2674,11 +2845,15 @@ test('on a series, Next episode sits after Forward 10 s and plays the next one; 
 });
 
 /** Plays the series' first episode from its page, as the viewer would. */
-async function playFirstEpisode(page: Page) {
+/** `opensAt`: the episode Details opens on, the one after the furthest Trakt ticks. */
+async function playFirstEpisode(page: Page, opensAt = 0) {
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
-  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'Enter', `details-episodes-${opensAt}`);
+  for (let index = opensAt - 1; index >= 0; index--) {
+    await press(page, 'ArrowUp', `details-episodes-${index}`);
+  }
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 }
@@ -2698,7 +2873,8 @@ test('Episodes opens on the episode playing, says where each one is, and plays a
   await mockAddons(page, { upcoming: ['tt8000001:2:3'] });
   await seedStreamAddon(page, { kv: { traktWatched: ['tt8000001:1:2'] } });
   const mock = await mockPlayback(page);
-  await playFirstEpisode(page);
+  // Details opens on the episode after the one Trakt ticks.
+  await playFirstEpisode(page, 2);
 
   // The 720p release, picked in Quality: auto-play chooses 1080p.
   await press(page, 'ArrowUp', 'player-play');
@@ -3099,7 +3275,7 @@ test('a click on the picture hides the controls and another brings them back; th
   await pressCode(page, FAST_FORWARD);
   await page.keyboard.press('Enter');
   await page.mouse.click(960, 420);
-  await expect.poll(seeks, { timeout: 400 }).toBe(2);
+  await expectSeekAtOnce(seeks, 2, FAST_FORWARD);
   await expectFocus(page, 'player-streams-button');
   await expect(play).toBeVisible();
 
@@ -3839,4 +4015,54 @@ test('Settings shows subtitle style in the same sheet, with a sample line above 
   await pressBack(page);
   await expect(page.getByRole('dialog', { name: 'Subtitle style' })).toHaveCount(0);
   await expectFocus(page, 'settings-subtitle-style');
+});
+
+test('with timing marks on, the stages of a Play read in order, and no mark names an address', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('bannertv.tuning', JSON.stringify({ marks: true })),
+  );
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await openMovie(page);
+
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  const read = () =>
+    page.evaluate(() => (window as { __bannertvPlay?: () => unknown }).__bannertvPlay?.());
+  await expect
+    .poll(async () => {
+      const marks = (await read()) as { stages: Record<string, number> } | null;
+      return marks ? Object.keys(marks.stages).sort() : [];
+    })
+    .toEqual(
+      [
+        'press',
+        'open',
+        'finder-start',
+        'first-stream',
+        'settled',
+        'chosen',
+        'load',
+        'metadata',
+        'first-frame',
+      ].sort(),
+    );
+  const { stages, streams } = (await read()) as {
+    stages: Record<string, number>;
+    streams: number;
+  };
+  expect(stages.press).toBe(0);
+  expect(stages.open).toBeGreaterThanOrEqual(0);
+  expect(stages.chosen).toBeGreaterThanOrEqual(stages.open!);
+  expect(stages.load).toBeGreaterThanOrEqual(stages.chosen!);
+  expect(stages['first-frame']).toBeGreaterThanOrEqual(stages.load!);
+  expect(streams).toBe(1);
+  const names = await page.evaluate(() =>
+    performance.getEntriesByType('mark').map((entry) => entry.name),
+  );
+  expect(names).toContain('play:press');
+  expect(names.filter((name) => /https?:|\/\//.test(name))).toEqual([]);
 });

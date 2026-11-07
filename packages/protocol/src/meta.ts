@@ -182,10 +182,15 @@ export function parseMetaDetail(
   if (!preview || !record) return undefined;
 
   const links = readLinks(record.links);
+  // Long-running dailies list thousands of episodes: a Set keeps this linear.
   const videos: Video[] = [];
+  const seen = new Set<string>();
   for (const item of readList(record.videos)) {
     const video = parseVideo(item);
-    if (video && !videos.some((v) => v.id === video.id)) videos.push(video);
+    if (video && !seen.has(video.id)) {
+      seen.add(video.id);
+      videos.push(video);
+    }
   }
   const hints = asRecord(record.behaviorHints) ?? {};
   const detail: MetaDetail = {
@@ -218,11 +223,14 @@ export function parseCatalogResponse(value: unknown, type?: ContentType): Catalo
     throw new ProtocolError('The catalog response has no metas list');
   }
   const metas: MetaPreview[] = [];
+  const seen = new Set<string>();
   let dropped = 0;
   for (const item of record.metas) {
     const preview = parseMetaPreview(item, type);
-    if (preview && !metas.some((m) => m.id === preview.id)) metas.push(preview);
-    else dropped++;
+    if (preview && !seen.has(preview.id)) {
+      seen.add(preview.id);
+      metas.push(preview);
+    } else dropped++;
   }
   return { metas, dropped, cache: readCacheHints(record) };
 }

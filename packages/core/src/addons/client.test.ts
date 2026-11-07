@@ -32,7 +32,11 @@ const ADULT = {
   behaviorHints: { adult: true },
 };
 
-async function setup(answers: Record<string, () => Promise<unknown>>, kids = false) {
+async function setup(
+  answers: Record<string, () => Promise<unknown>>,
+  kids = false,
+  options: Partial<Pick<Parameters<typeof createAddonClient>[0], 'limiter' | 'playPriority'>> = {},
+) {
   const fetchJson = vi.fn((url: string) => {
     if (url === ANIME_URL) return Promise.resolve(ANIME);
     if (url === ADULT_URL) return Promise.resolve(ADULT);
@@ -48,9 +52,10 @@ async function setup(answers: Record<string, () => Promise<unknown>>, kids = fal
   const client = createAddonClient({
     collection,
     queries: createQueryCache(),
-    limiter: createLimiter(6),
+    limiter: options.limiter ?? createLimiter(6),
     fetchJson,
     kidsOnly: () => kids,
+    playPriority: options.playPriority,
   });
   return { client, collection, fetchJson };
 }
@@ -132,6 +137,135 @@ describe('createAddonClient', () => {
         kids ? [] : ['org.adult'],
       );
     }
+  });
+
+  it('keeps the details shown when they come back the same, and Home rows keep their items', async () => {
+    const metaUrl = 'https://v3-cinemeta.strem.io/meta/series/tt0944947.json';
+    const rowUrl = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
+    const otherUrl = 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Drama.json';
+    let name = 'Game of Thrones';
+    const list = () => ({
+      metas: [
+        { id: 'tt1', type: 'movie', name: 'One' },
+        { id: 'tt2', type: 'movie', name: 'Two' },
+      ],
+    });
+    const { client, collection } = await setup({
+      [metaUrl]: () =>
+        Promise.resolve({
+          meta: {
+            id: 'tt0944947',
+            type: 'series',
+            name,
+            videos: [{ id: 'tt0944947:1:1', name: 'Winter Is Coming', season: 1, episode: 1 }],
+          },
+        }),
+      [rowUrl]: () => Promise.resolve(list()),
+      [otherUrl]: () => Promise.resolve(list()),
+    });
+
+    // Try again on a fresh copy asks again, as a refresh would.
+    const meta = client.meta('series', 'tt0944947');
+    meta.load();
+    await flush();
+    const first = meta.get().data!;
+    meta.retry();
+    await flush();
+    expect(meta.get().data).toBe(first);
+    name = 'A Game of Thrones';
+    meta.retry();
+    await flush();
+    expect(meta.get().data?.name).toBe('A Game of Thrones');
+    expect(meta.get().data?.videos).toBe(first.videos);
+
+    const cinemeta = collection.get().addons.find((a) => a.transportUrl === CINEMETA_URL)!;
+    const row = client.catalog(cinemeta, 'movie', 'top', [], { keepEqual: true });
+    const other = client.catalog(cinemeta, 'movie', 'top', [['genre', 'Drama']]);
+    for (const query of [row, other]) {
+      query.load();
+      await flush();
+      const items = query.get().data!;
+      query.retry();
+      await flush();
+      expect(query.get().data).toEqual(items);
+      // Only the row that asked keeps its items; other readers get new ones, as before.
+      expect(query.get().data === items).toBe(query === row);
+    }
+  });
+
+  it('never keeps the items of a catalog the sports readings may read', async () => {
+    const sportsUrl = 'https://sport.example/manifest.json';
+    const manifest = {
+      id: 'org.sport',
+      version: '1.0.0',
+      name: 'Sport',
+      types: ['movie', 'tv'],
+      resources: ['catalog'],
+      catalogs: [
+        { type: 'movie', id: 'football', name: 'Football' },
+        { type: 'tv', id: 'top', name: 'Popular' },
+      ],
+    };
+    const list = () => Promise.resolve({ metas: [{ id: 'tt1', type: 'movie', name: 'One' }] });
+    const { client, collection } = await setup({
+      [sportsUrl]: () => Promise.resolve(manifest),
+      'https://sport.example/catalog/movie/football.json': list,
+      'https://sport.example/catalog/tv/top.json': list,
+    });
+    const addon = await collection.install(sportsUrl);
+    for (const [type, id] of [
+      ['movie', 'football'],
+      ['tv', 'top'],
+    ] as const) {
+      const query = client.catalog(addon, type, id, [], { keepEqual: true });
+      query.load();
+      await flush();
+      const items = query.get().data!;
+      expect(items).toHaveLength(1);
+      query.retry();
+      await flush();
+      expect(query.get().data).not.toBe(items);
+    }
+  });
+
+  it('puts the stream and subtitles requests of the video playPriority names ahead of the rest waiting', async () => {
+    const top = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
+    const later = 'https://v3-cinemeta.strem.io/catalog/series/top.json';
+    let finishTop = () => undefined as void;
+    const asked: string[] = [];
+    const answer = (url: string, body: unknown) => () => {
+      asked.push(url);
+      return Promise.resolve(body);
+    };
+    const { client, collection } = await setup(
+      {
+        [top]: () => {
+          asked.push(top);
+          return new Promise((resolve) => (finishTop = () => resolve({ metas: [] })));
+        },
+        [later]: answer(later, { metas: [] }),
+        'https://adult.example/stream/movie/tt1.json': answer('stream tt1', { streams: [] }),
+        'https://adult.example/stream/movie/tt2.json': answer('stream tt2', { streams: [] }),
+        'https://opensubtitles-v3.strem.io/subtitles/movie/tt2.json': answer('subtitles tt2', {
+          subtitles: [],
+        }),
+      },
+      false,
+      { limiter: createLimiter(1), playPriority: (_type, videoId) => (videoId === 'tt2' ? 1 : 0) },
+    );
+    await collection.install(ADULT_URL);
+    const cinemeta = collection.get().addons.find((a) => a.transportUrl === CINEMETA_URL)!;
+    // One slot: the first catalog holds it while the rest queue in the order asked.
+    client.catalog(cinemeta, 'movie', 'top').load();
+    client.catalog(cinemeta, 'series', 'top').load();
+    client.streams('movie', 'tt1').forEach(({ query }) => query.load());
+    client.streams('movie', 'tt2').forEach(({ query }) => query.load());
+    client.subtitles('movie', 'tt2').forEach(({ query }) => query.load());
+    await flush();
+    expect(asked).toEqual([top]);
+    finishTop();
+    await flush();
+    expect(asked).toEqual([top, 'stream tt2', 'subtitles tt2', later, 'stream tt1']);
   });
 
   it('reports the network failure when no addon answered', async () => {

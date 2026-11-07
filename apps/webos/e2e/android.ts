@@ -20,18 +20,55 @@ const TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+/** A card on the system's Watch Next row, as the page sends it. */
+export interface WatchNextCard {
+  type: string;
+  meta: string;
+  video: string;
+  title: string;
+  episodeTitle?: string;
+  season?: number;
+  episode?: number;
+  description?: string;
+  landscape?: string;
+  poster?: string;
+  position: number;
+  duration: number;
+  next: boolean;
+  watchedAt: number;
+}
+
+/** A title a Watch Next card opens, as Android hands it to the page. */
+export interface AndroidLink {
+  type: string;
+  meta: string;
+  video?: string;
+}
+
 /** What the page asked of the Android app. */
 export interface AndroidCalls {
   player: Record<string, unknown>[];
   opened: string[];
   exits: number;
+  /** Each list of cards sent for the Watch Next row, oldest first. */
+  watchNext: WatchNextCard[][];
 }
+
+/**
+ * Where the stand-in keeps the link Android holds for the page. Android keeps it across the
+ * page's reloads until the page takes it, and so does sessionStorage.
+ */
+const LINK_KEY = 'test.androidLink';
 
 /**
  * Serves the build where the Android app serves it, and puts a stand-in for
  * Android's bridge in the page, which notes every call. Call after mockAddons.
+ * `link` is the card the app was started from, if any.
  */
-export async function openAsAndroid(page: Page): Promise<void> {
+export async function openAsAndroid(
+  page: Page,
+  options: { link?: AndroidLink } = {},
+): Promise<void> {
   await page.route(`${ANDROID_ORIGIN}/assets/web/**`, async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/assets\/web\//, '');
     try {
@@ -44,8 +81,23 @@ export async function openAsAndroid(page: Page): Promise<void> {
       return route.fulfill({ status: 404 });
     }
   });
-  await page.addInitScript(() => {
-    const calls = { player: [] as unknown[], opened: [] as string[], exits: 0 };
+  await page.addInitScript(
+    ({ key, link }) => {
+      // Started from the card once: a reload is the same run of the app.
+      if (link && !sessionStorage.getItem(`${key}.started`)) {
+        sessionStorage.setItem(`${key}.started`, '1');
+        sessionStorage.setItem(key, link);
+      }
+    },
+    { key: LINK_KEY, link: options.link ? JSON.stringify(options.link) : null },
+  );
+  await page.addInitScript((linkKey) => {
+    const calls = {
+      player: [] as unknown[],
+      opened: [] as string[],
+      exits: 0,
+      watchNext: [] as unknown[],
+    };
     Object.assign(window, {
       androidCalls: calls,
       BannerAndroid: {
@@ -76,8 +128,48 @@ export async function openAsAndroid(page: Page): Promise<void> {
         exit: () => calls.exits++,
         openExternal: (url: string) => calls.opened.push(url),
         player: (command: string) => calls.player.push(JSON.parse(command)),
+        watchNext: (cards: string) =>
+          calls.watchNext.push((JSON.parse(cards) as { cards: unknown }).cards),
+        takeLink: () => {
+          const link = sessionStorage.getItem(linkKey) ?? '';
+          sessionStorage.removeItem(linkKey);
+          return link;
+        },
       },
     });
+  }, LINK_KEY);
+}
+
+/** The cards the page sent for the Watch Next row last, or undefined before it sent any. */
+export async function watchNextRow(page: Page): Promise<WatchNextCard[] | undefined> {
+  const sent = (await androidCalls(page)).watchNext;
+  return sent[sent.length - 1];
+}
+
+/** Whether a link still waits in Android for the page to take it. */
+export function linkWaiting(page: Page): Promise<boolean> {
+  return page.evaluate((key) => sessionStorage.getItem(key) !== null, LINK_KEY);
+}
+
+/** A Watch Next card is pressed while the app runs: Android holds its link and tells the page. */
+export async function cardPressed(page: Page, link: AndroidLink): Promise<void> {
+  await page.evaluate(
+    ({ key, value }) => {
+      sessionStorage.setItem(key, value);
+      (
+        window as unknown as { __bannerAndroid: { event(event: unknown): void } }
+      ).__bannerAndroid.event({ type: 'open' });
+    },
+    { key: LINK_KEY, value: JSON.stringify(link) },
+  );
+}
+
+/** The app leaves the screen, as when Home is pressed on the remote: Android hides the page. */
+export async function leaveApp(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
   });
 }
 

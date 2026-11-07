@@ -254,6 +254,48 @@ describe('watchPart', () => {
     expect(played.get('tt1')).toBeUndefined();
   });
 
+  it('sends when a video was last marked not watched, compares it, and hands it on', async () => {
+    const { progress, played } = stores();
+    const unwatched = {
+      metaId: 'tt5',
+      type: 'movie' as const,
+      videoId: 'tt5',
+      position: 0,
+      duration: 6000,
+      updatedAt: 4000,
+      watched: false,
+      unmarkedAt: 4000,
+    };
+    // The progress store keeps the field once the Mark as unwatched work lands; here it is shown one.
+    const shown = { ...progress, recent: () => [unwatched], get: () => unwatched };
+    const part = watchPart('main', shown, played);
+    expect(part.snapshot().get('tt5')!.v).toEqual({
+      metaId: 'tt5',
+      type: 'movie',
+      position: 0,
+      duration: 6000,
+      watched: false,
+      unmarkedAt: 4000,
+    });
+    const base = { metaId: 'tt5', type: 'movie', position: 0, duration: 6000, watched: false };
+    expect(part.compare!('tt5', { ...base, unmarkedAt: 4000 })).not.toEqual(
+      part.compare!('tt5', base),
+    );
+
+    const adopt = vi.spyOn(progress, 'adopt');
+    const plain = watchPart('main', progress, played);
+    await plain.load();
+    await plain.adopt(
+      change({
+        tt5: { t: 4000, v: { ...base, unmarkedAt: 4000 } },
+        tt6: { t: 4100, v: { ...base, metaId: 'tt6', unmarkedAt: 'soon' } },
+      }),
+    );
+    const handed = adopt.mock.calls[0]![0].set!;
+    expect(handed.find((entry) => entry.videoId === 'tt5')!.unmarkedAt).toBe(4000);
+    expect('unmarkedAt' in handed.find((entry) => entry.videoId === 'tt6')!).toBe(false);
+  });
+
   it("marks Trakt's progress and leaves it out of the person's own data", async () => {
     const { progress, played, setTime } = stores(3000);
     const part = watchPart('main', progress, played);
@@ -481,6 +523,42 @@ describe('collectionPart', () => {
     ]);
     expect(part.ownData!()).toBe(true);
     expect(part.removedDefaults!()).toEqual([`a/${demo!.installId}`]);
+  });
+
+  it('sees no change from a daily refresh that finds the same manifests, which still saves the time', async () => {
+    // As from the network: equal JSON, never the same objects.
+    const fetchJson = vi.fn((url: string) => {
+      const addon = DEFAULT_ADDONS.find((a) => a.transportUrl === url)!;
+      return Promise.resolve(JSON.parse(JSON.stringify(addon.manifest)) as unknown);
+    });
+    const storage = memoryKeyValueStore();
+    let time = 1000;
+    const collection = createAddonCollection({
+      storage,
+      fetchJson,
+      defaults: DEFAULT_ADDONS,
+      now: () => time,
+    });
+    const part = collectionPart(collection);
+    await collection.load();
+    const before = part.snapshot();
+    const listener = vi.fn();
+    part.subscribe(listener);
+    time = 5000;
+    await collection.refreshManifests(1000);
+
+    expect(fetchJson).toHaveBeenCalledTimes(DEFAULT_ADDONS.length);
+    expect(listener).not.toHaveBeenCalled();
+    const after = part.snapshot();
+    before.forEach((item, key) => {
+      if (key !== 'order') expect(after.get(key)).toBe(item);
+    });
+    expect(after.get('order')).toEqual(before.get('order'));
+    expect(collection.toStored().map((item) => item.fetchedAt)).toEqual(
+      DEFAULT_ADDONS.map(() => 5000),
+    );
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.fetchedAt)).toEqual(DEFAULT_ADDONS.map(() => 5000));
   });
 
   it('counts defaults by address, whatever the given list', async () => {

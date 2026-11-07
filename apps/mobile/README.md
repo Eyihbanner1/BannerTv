@@ -6,6 +6,7 @@ The phone app: React Native through Expo, upright and touch-first, on the same d
 
 - `src/app`: the screens' routes (expo-router). `(tabs)` holds Home, Search, Sports (shown only with a sports addon), My List and Settings.
 - `modules/banner-relaunch`: a small native module that reports a launcher tap on the running app.
+- `modules/banner-share`: a small native module that hands the app text shared to BannerTV, such as an addon's address.
 - `modules/stream-helper`: runs the stream helper for an LG on the home network, with the Android TV app's server from `apps/androidtv/helper-core`.
 - `modules/banner-cues`: a small native module that hands over the lines of the subtitles inside the file, so they are drawn in the profile's subtitle style.
 - `src/screens`, `src/ui`: the phone's screens and their parts. Colours, type sizes and touch sizes come from `brand/tokens/design.json` (imported as `@brand/tokens/design`), the same tokens the TV apps use; change them there and run `node tools/scripts/build-tokens.mjs`.

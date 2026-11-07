@@ -51,8 +51,9 @@ jobs:
       - uses: actions/checkout@v5
 
       # Whether this run is a full build, and which apps it builds. The phone APK needs a branch
-      # with the phone app, and on a labelled pull request a change to phone or shared code (the
-      # phone app runs the TV app's data layer from apps/webos/src).
+      # with the phone app, and on a labelled pull request a change to a file the phone build
+      # reads: the TV app's data layer (apps/webos/src) and version (webos-meta), the brand
+      # tokens, and the stream helper's Kotlin core it compiles from apps/androidtv/helper-core.
       - name: Plan
         id: plan
         env:
@@ -75,7 +76,7 @@ jobs:
             phone=true
             if [ "$LABEL" = full-ci ]; then
               if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename'); then
-                shared='^(apps/mobile/|apps/webos/(src|e2e)/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
+                shared='^(apps/mobile/|apps/webos/(src|e2e|webos-meta)/|apps/androidtv/helper-core/|brand/tokens/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
                 if ! grep -Eq "$shared" <<< "$files"; then
                   phone=false
                 fi

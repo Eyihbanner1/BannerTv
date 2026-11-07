@@ -53,7 +53,34 @@
     "recent": "Recent searches",
     "clearRecent": "Clear recent searches",
     "nothingFound": "Nothing found for “{{term}}”.",
-    "noAddons": "None of your addons can search. Add one, such as Cinemeta, in Addons."
+    "noAddons": "None of your addons can search. Add one, such as Cinemeta, in Addons.",
+    "topResults": "Top results",
+    "genreFilms": "{{genre}} films",
+    "genreSeries": "{{genre}} series",
+    "genreOther": "{{genre}}: {{type}}",
+    "yearFilms": "Films from {{year}}",
+    "yearSeries": "Series from {{year}}",
+    "yearOther": "{{type}} from {{year}}",
+    "newFilms": "New films",
+    "newSeries": "New series",
+    "newOther": "New: {{type}}",
+    "didYouMean": "Did you mean “{{term}}”?",
+    "tryGenres": "Or look through a genre:",
+    "noAnswer": "None of your addons answered, so Search could not look. Check the connection, then try again.",
+    "someNoAnswer": "Some addons didn't answer, so there may be more to find.",
+    "personCast": "With {{name}}",
+    "personDirecting": "Directed by {{name}}",
+    "personWriting": "Written by {{name}}",
+    "like": "Like {{name}}",
+    "likeFilms": "Films like {{name}}",
+    "likeSeries": "Series like {{name}}",
+    "kidsTitles": "Suitable for kids",
+    "newWhatFilms": "New {{what}} films",
+    "newWhatSeries": "New {{what}} series",
+    "fromYear": "{{row}} from {{year}}",
+    "fromDecade": "{{row}} from the {{decade}}s",
+    "fromTmdb": "From TMDB",
+    "suggestions": "Suggestions"
   },
   "sports": {
     "title": "Sports",
@@ -91,6 +118,22 @@
     "notInLists": "Nothing in your sports addons' lists matches. They can be asked directly.",
     "searchAddons": "Search sports addons"
   },
+  "sportsFollow": {
+    "row": "Following",
+    "follow": "Follow {{name}}",
+    "following": "Following {{name}}",
+    "full": "You follow {{count}} teams and competitions, the most BannerTV keeps. Unfollow one to follow this."
+  },
+  "sportsRemind": {
+    "remind": "Remind me",
+    "on": "Reminder on",
+    "tvNote": "BannerTV reminds you at {{time}} if it's open then.",
+    "full": "You have {{count}} reminders, the most BannerTV keeps. Turn one off to add this.",
+    "starting": "{{name}} is starting",
+    "startsAt": "Starts at {{time}}",
+    "watch": "Watch",
+    "notNow": "Not now"
+  },
   "discover": {
     "type": "Type",
     "catalog": "Catalog",
@@ -100,7 +143,7 @@
     "noCatalogs": "None of your addons has a catalog to browse. Add one, such as Cinemeta, in Addons."
   },
   "addons": {
-    "lead": "Addons give BannerTV its catalogs and titles, and in Phase 2 its streams. Higher addons answer first, and their rows come first on Home.",
+    "lead": "Addons give BannerTV its catalogs, titles, streams and subtitles. Higher addons answer first, and their rows come first on Home.",
     "add": "Add an addon",
     "none": "You have no addons, so Home is empty. Add one, such as Cinemeta, with its address.",
     "version": "v{{version}}",
@@ -176,6 +219,25 @@
     "invalid": "{{addon}} sent something BannerTV cannot read.",
     "notFound": "None of your addons know this title.",
     "other": "{{addon}} did not answer."
+  },
+  "addonState": {
+    "removeEverywhere": "Its rows leave Home on every screen in your BannerTV account, and it stops answering for titles. You can add it again later from its address.",
+    "slow": "Slow to answer",
+    "notAnswering": "Not answering since {{time}}",
+    "notAnsweringDay": "Not answering since {{day}}, {{time}}",
+    "checking": "Checking…",
+    "checkNow": "Check now",
+    "checkNowLabel": "Check {{name}} now",
+    "answering": "{{name}} is answering.",
+    "answeringSlowly": "{{name}} answered, but slowly.",
+    "stillNotAnswering": "{{name}} still isn't answering.",
+    "switchOffLabel": "{{name}} is on. Switch it off",
+    "switchOnLabel": "{{name}} is off. Switch it on",
+    "switchLabel": "Use {{name}}",
+    "offLine": "Off: its settings are kept",
+    "switchedOff": "{{name}} is off: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOffEverywhere": "{{name}} is off on every screen in your BannerTV account: it gives no rows, titles, streams or subtitles until you switch it on again. Its settings are kept.",
+    "switchedOn": "{{name}} is on again."
   },
   "meta": {
     "rating": "IMDb {{rating}}"
@@ -338,7 +400,9 @@
     "buffering": "Loading",
     "skipWhere": "{{time}} of {{length}}",
     "upNext": "Up next",
-    "playNextIn": "Play now ({{seconds}})",
+    "nextEpisodeIn": "Next episode in {{seconds}} s",
+    "playNow": "Play now",
+    "playNowCounting": "Play now. {{count}}",
     "keepWatching": "Keep watching",
     "skipIntro": "Skip intro",
     "skipRecap": "Skip recap",
@@ -438,6 +502,8 @@
       "other": "Something went wrong playing this stream.",
       "noStreamAddon": "You have no addon that finds streams yet. Add one in Addons.",
       "noAddonForTitle": "None of your addons finds streams for this kind of title.",
+      "streamAddonsOff": "Your stream addons are all switched off. Switch one on in Addons, then try again.",
+      "someStreamAddonsOff": "Some of your stream addons are switched off, so they weren't asked. You can switch them on in Addons.",
       "addonsDown_one": "Your stream addon didn't answer. Check the connection, then try again.",
       "addonsDown_other": "None of your {{count}} stream addons answered. Check the connection, then try again.",
       "noStreams": "Your addons found no streams for this title.",
@@ -457,8 +523,8 @@
       "tried_other": "Tried {{count}} streams, and none of them played.",
       "torrentsToo_one": "{{addon}} also sent {{count}} torrent, which plays once a debrid service is set up in its settings.",
       "torrentsToo_other": "{{addon}} also sent {{count}} torrents, which play once a debrid service is set up in its settings.",
-      "addonsFailed_one": "One addon didn't answer.",
-      "addonsFailed_other": "{{count}} addons didn't answer.",
+      "addonsFailed_one": "{{name}} didn't answer.",
+      "addonsFailed_other": "{{name}} and {{more}} more didn't answer.",
       "tryAnother": "Try another stream",
       "back": "Back to the title"
     }
@@ -545,7 +611,7 @@
     "tmdb": "Extra details from TMDB: {{value}}",
     "stillWatching": "Ask \"Still watching?\": {{value}}",
     "streamHelper": "Stream helper",
-    "tmdbCredit": "Extra details and images from TMDB. BannerTV uses the TMDB API but is not endorsed or certified by TMDB.",
+    "tmdbCredit": "Extra details, images and some search results come from TMDB. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
     "account": "BannerTV account"
   },
   "languages": {
@@ -604,6 +670,9 @@
     "embedded": "Test embedded subtitles (Luna)",
     "inPlayer": "Open in BannerTV's player"
   },
+  "watchNext": {
+    "episodeTitle": "{{name}} S{{season}}:E{{episode}}"
+  },
   "welcome": {
     "title": "Welcome to BannerTV",
     "lead": "Films and series from the addons you choose, in one place and made for your remote.",
@@ -644,7 +713,8 @@
     "hidden_other": "The account has {{count}} more profiles. Screens show six, and deleting one here shows the next.",
     "delete": "Delete profile",
     "deleteTitle": "Delete {{name}}?",
-    "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt."
+    "deleteMessage": "Their Continue Watching, My List, history and settings are deleted from this TV. Anything synced to Trakt stays on Trakt.",
+    "deleteMessageAccount": "Their Continue Watching, My List, history and settings are deleted from every screen in your BannerTV account. Anything synced to Trakt stays on Trakt."
   },
   "pin": {
     "entered_one": "{{count}} digit entered",
@@ -659,7 +729,32 @@
     "choose": "Choose a four-digit PIN",
     "again": "Enter the PIN again",
     "mismatch": "Those PINs didn't match. Choose one again.",
-    "changedElsewhere": "This PIN was just changed on another screen. Enter the new one first."
+    "changedElsewhere": "This PIN was just changed on another screen. Enter the new one first.",
+    "forgot": "Forgot PIN?"
+  },
+  "forgotPin": {
+    "mainPinTitle": "Enter {{main}}'s PIN to take the PIN off {{name}}",
+    "warnTitle": "Take the PIN off {{name}}?",
+    "warnMessage": "{{main}} has no PIN, so anyone using BannerTV here can do this. Give {{main}} a PIN in Settings, Profiles to stop that.",
+    "takeOff": "Take the PIN off",
+    "codeTitle": "Enter your account code to take the PIN off {{name}}",
+    "codeHelp": "The code you wrote down when you made your BannerTV account proves it's you. The PIN then comes off on every screen in the account, and you can choose a new one in Settings, Profiles.",
+    "wrongCode": "That isn't this account's code.",
+    "checking": "Checking…",
+    "resetTitle": "Reset BannerTV on this TV?",
+    "resetMessage": "Without a BannerTV account, {{name}}'s PIN can only come off by starting again. Every profile, addon, My List, Continue Watching and setting on this TV is deleted, and BannerTV starts as new. What Trakt has stays on Trakt.",
+    "reset": "Reset this TV",
+    "resetting": "Resetting…",
+    "cleared": "The PIN is off {{name}}. You can choose a new one in Settings, Profiles."
+  },
+  "lockGrownUps": {
+    "title": "Lock the grown-up profiles?",
+    "lead": "A kids profile only keeps children to family titles if the grown-up profiles have PINs. Without one, anyone can pick them in Who's watching.",
+    "setFor": "Set a PIN for {{name}}",
+    "chooseFor": "Choose a four-digit PIN for {{name}}",
+    "locked": "{{name}} has a PIN",
+    "done": "Done",
+    "notNow": "Not now"
   },
   "homeRows": {
     "title": "Home rows",
@@ -671,7 +766,11 @@
     "show": "Show",
     "hideLabel": "Hide {{name}} from Home",
     "showLabel": "Show {{name}} on Home",
-    "hiddenFrom": "Hidden · {{addon}}"
+    "hiddenFrom": "Hidden · {{addon}}",
+    "hidden": "Hidden",
+    "continueNote": "Always first",
+    "myListNote": "Your list, newest first",
+    "liveSportNote": "Matches live now on your sports addons"
   },
   "library": {
     "show": "Show",
@@ -777,6 +876,27 @@
     "joining": "Joining the account. BannerTV starts again when it's done.",
     "profiles": "Bringing them would make more than six profiles. Use the account's profiles, or delete a profile on this screen first.",
     "joinOffline": "BannerTV couldn't reach its account service. Try again: joining carries on where it stopped.",
+    "aside": {
+      "title": "What this screen had before",
+      "lead": "When this screen joined with Use the account's profiles, it kept a copy of what it had. The copy is kept until {{date}}.",
+      "profiles_one": "Profile: {{names}}",
+      "profiles_other": "Profiles: {{names}}",
+      "list_one": "1 title on My List",
+      "list_other": "{{count}} titles on My List",
+      "watching_one": "1 film or episode part way through",
+      "watching_other": "{{count}} films and episodes part way through",
+      "addons": "Addons: {{names}}",
+      "bring": "Bring back what this screen had before",
+      "confirmTitle": "Bring back what this screen had before?",
+      "intoAccount": "Its profiles come back into the account, with their My List, Continue Watching and addons. Where the account has a setting, the account's is kept. Nothing is removed, and the copy is deleted once it's back.",
+      "onScreen": "Its profiles come back on this screen, with their My List, Continue Watching and addons. Where this screen has a setting now, it's kept. Nothing is removed, and the copy is deleted once it's back.",
+      "restarts": "BannerTV starts again when it's done.",
+      "confirm": "Bring back",
+      "bringing": "Bringing back what this screen had",
+      "done": "What this screen had is back.",
+      "profiles": "Bringing them back would make more than six profiles. Delete a profile in Settings, Profiles, then try again.",
+      "none": "The copy isn't there any more: it ran out, or was brought back already."
+    },
     "status": {
       "idle": "In sync",
       "justNow": "In sync just now",
@@ -852,5 +972,29 @@
       "wrong-code": "That code didn't match. Check the code on the helper and try again.",
       "unreachable": "Can't reach the helper at that address. Check it's on and on the same Wi-Fi."
     }
+  },
+  "browsing": {
+    "play": "Play",
+    "playEpisode": "Play S{{season}}:E{{episode}}",
+    "outOn": "Not out yet. Out on {{date}}",
+    "removeFromContinue": "Remove from Continue Watching",
+    "removeFromList": "Remove from My List",
+    "addToList": "Add to My List",
+    "markWatched": "Mark as watched",
+    "markUnwatched": "Mark as unwatched",
+    "markSeasonWatched": "Mark season {{season}} as watched",
+    "markSeasonUnwatched": "Mark season {{season}} as unwatched",
+    "watched": "Watched",
+    "markTitleWatched": "Mark {{name}} as watched",
+    "markTitleUnwatched": "Watched. Mark {{name}} as unwatched",
+    "moreFrom": "More {{genre}} from {{addon}}",
+    "streamReady": "Best stream ready",
+    "findingStream": "Finding the best stream",
+    "noStreamYet": "No stream found yet",
+    "newEpisodeNote": "New: S{{season}}:E{{episode}}",
+    "newNote": "New episode",
+    "browseGenre": "Browse {{genre}} from {{addon}}",
+    "genreFrom": "{{genre}} from {{addon}}",
+    "searchPerson": "{{name}}, search for more with them"
   }
 }

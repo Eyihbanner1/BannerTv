@@ -1,20 +1,26 @@
-import { otherLanguages, parseRuntime, type StreamEntry, type StreamOrder } from '@bannertv/core';
+import { parseRuntime, type StreamEntry, type StreamOrder } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { type EventPlay, type PlayerRoute, replace, topRoute } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
-import { Pressable } from '../../components/Pressable';
 import { addonClient, addonNames } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
 import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
-import { streamRowText } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, streamFinder } from '../../player/finder';
 import { leaveSleepTimer } from '../../player/sleep';
 import {
@@ -24,9 +30,9 @@ import {
   shownStreams,
 } from '../../player/stream-filter';
 import { StreamFilterMenu } from './StreamFilterMenu';
+import { STREAM_ROW_HEIGHT, StreamRow } from './StreamRow';
 import styles from './StreamsScreen.module.css';
 
-const ITEM_HEIGHT = 168;
 const VISIBLE = 5;
 const OVERSCAN = 2;
 const ORDERS: readonly StreamOrder[] = ['quality', 'fast', 'addon'];
@@ -132,6 +138,25 @@ export function StreamsScreen(props: StreamsScreenProps) {
     }
   };
 
+  // Rows get handlers that never change, so a move redraws the rows whose
+  // focus changed and the one that slid into view, not every one drawn.
+  const latest = useRef({ entries, anchor, open });
+  useLayoutEffect(() => {
+    latest.current = { entries, anchor, open };
+  });
+  const onRowFocus = useCallback(
+    (index: number) => {
+      const target = Math.max(0, index - 1);
+      if (canSlide() && target !== latest.current.anchor) setAnchor(target);
+    },
+    [setAnchor],
+  );
+  const onRowPress = useCallback((index: number) => {
+    const { entries: list, open: play } = latest.current;
+    const entry = list[index];
+    if (entry) play(entry);
+  }, []);
+
   // A filter changed elsewhere can leave fewer rows than the place slid to.
   const top = Math.min(anchor, Math.max(0, entries.length - 1));
   const first = Math.max(0, top - OVERSCAN);
@@ -139,40 +164,18 @@ export function StreamsScreen(props: StreamsScreenProps) {
   const rows = [];
   for (let index = first; index < last; index++) {
     const entry = entries[index]!;
-    const { title, badges, playable, note, notes } = streamRowText(t, entry, {
-      heavy: isHeavy(entry, finder.runtimeSeconds()),
-      languages: otherLanguages(entry.facts),
-    });
-    const probe = state.probes[entryKey(entry)];
-    const name = names.get(entry.addonId) ?? entry.addonId;
     rows.push(
-      <Pressable
+      <StreamRow
         key={`${generation}|${entryKey(entry)}`}
-        focusKey={`streams-item-${index}`}
-        label={[name, title, badges.join(', '), ...notes].filter(Boolean).join('. ')}
-        className={playable ? styles.stream : `${styles.stream} ${styles.unplayable}`}
-        focusedClassName={styles.focused}
-        style={{ top: index * ITEM_HEIGHT }}
-        onPress={() => open(entry)}
-        onFocus={() => {
-          const target = Math.max(0, index - 1);
-          if (canSlide() && target !== anchor) setAnchor(target);
-        }}
-      >
-        <div className={styles.addon}>{name}</div>
-        <div className={styles.text}>
-          <p className={styles.title}>{title}</p>
-          <p className={styles.badges}>
-            {badges.map((badge) => (
-              <span key={badge} className={styles.badge}>
-                {badge}
-              </span>
-            ))}
-            {probe === 'works' && <span className={styles.works}>{t('streams.tested')}</span>}
-          </p>
-          {note && <p className={playable ? styles.warning : styles.reason}>{note}</p>}
-        </div>
-      </Pressable>,
+        t={t}
+        index={index}
+        entry={entry}
+        addon={names.get(entry.addonId) ?? entry.addonId}
+        heavy={isHeavy(entry, finder.runtimeSeconds())}
+        tested={state.probes[entryKey(entry)] === 'works'}
+        onRowFocus={onRowFocus}
+        onRowPress={onRowPress}
+      />,
     );
   }
 
@@ -220,7 +223,7 @@ export function StreamsScreen(props: StreamsScreenProps) {
           )}
           <div
             className={styles.track}
-            style={{ transform: `translateY(${-top * ITEM_HEIGHT}px)` }}
+            style={{ transform: `translateY(${-top * STREAM_ROW_HEIGHT}px)` }}
           >
             {rows}
           </div>

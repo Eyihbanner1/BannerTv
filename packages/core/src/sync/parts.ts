@@ -128,11 +128,18 @@ function cardValue(card: PlayedVideo): Fields {
   return value;
 }
 
+/** A time a video was marked not watched, as the merge counts one (sync/merge.ts). */
+function isUnmarkTime(value: unknown): value is number {
+  return typeof value === 'number' && isFinite(value) && value > 0;
+}
+
 /**
  * Continue Watching as `p/<id>/watch`: one item per video, at the time its
  * progress was saved, with the card that played beside it. The card is not
  * compared, beyond whether there is one; a card this screen filled in from
- * the meta addon never rides along.
+ * the meta addon never rides along. `unmarkedAt` (when the viewer last marked
+ * the video not watched) rides along so the merge can let that unwatch beat
+ * older watched ticks from other screens.
  */
 export function watchPart(
   profileId: string,
@@ -152,6 +159,7 @@ export function watchPart(
       watched: entry.watched,
     };
     if (entry.continueRow === false) value.continueRow = false;
+    if (isUnmarkTime(entry.unmarkedAt)) value.unmarkedAt = entry.unmarkedAt;
     if (card && !card.filled) value.card = cardValue(card);
     const part: PartItem = { v: value, t: entry.updatedAt };
     if (entry.from === 'trakt') part.trakt = true;
@@ -176,6 +184,7 @@ export function watchPart(
         'duration',
         'watched',
         'continueRow',
+        'unmarkedAt',
       ]);
       compared.card = value.card !== undefined;
       return compared;
@@ -204,6 +213,7 @@ export function watchPart(
           watched: value.watched === true,
         } as ProgressEntry;
         if (value.continueRow === false) entry.continueRow = false;
+        if (isUnmarkTime(value.unmarkedAt)) entry.unmarkedAt = value.unmarkedAt;
         entries.push(entry);
         if (isObject(value.card)) {
           cards.push({
