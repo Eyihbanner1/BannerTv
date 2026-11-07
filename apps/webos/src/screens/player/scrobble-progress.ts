@@ -213,18 +213,19 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     if (earlier.length > KEPT) earlier.shift();
   };
   // Places this link reached before it showed a length, now that it shows it
-  // is a clip `upTo` long: they may be its own clock, which never passes it,
-  // or, unless that clock ran on by itself, show only where it started from
-  // (where the player opened it, or a move the viewer took in it). In a link
-  // that cannot seek, a move is only held, so the clock must have run on past
-  // the clip's length. A broadcast's clock may be anywhere.
+  // is a clip `upTo` long: unless their clock ran on by itself, they show
+  // only where it started from (where the player opened it, or a move the
+  // viewer took in it); and unless it ran past the clip's length, which a
+  // clip's never does, they may be its own clock. In a link that can seek, a
+  // place past that length is a move it made; in one that cannot, a move is
+  // only held. A broadcast's clock may be anywhere.
   const forgetUnmeasured = (entry: SessionState['entry'], upTo = Infinity) => {
     const clock = (place: Reached) =>
       place.duration === 0 &&
       place.entry === entry &&
-      (place.position <= upTo + SAME_PLACE_S ||
-        !place.ran ||
-        (linkCannotSeek && place.ranTo <= upTo + SAME_PLACE_S));
+      (!place.ran ||
+        (place.ranTo <= upTo + SAME_PLACE_S &&
+          (place.position <= upTo + SAME_PLACE_S || linkCannotSeek)));
     for (let index = earlier.length - 1; index >= 0; index--) {
       if (clock(earlier[index]!)) earlier.splice(index, 1);
     }
@@ -361,10 +362,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       }
       if (wasClip) return;
       if (!underWay && !moved) {
-        // A skip the player takes once the file played and failed (one
-        // pressed before the problem box lands behind it): the next file
-        // opens there. It is this opening's place, by the length it showed.
-        if (took && played && state.status === 'failed') {
+        // A skip the player takes once the file failed (one pressed before
+        // the problem box lands behind it), when it played or showed its
+        // length: the next file opens there. It is this opening's place, by
+        // the length it showed.
+        if (took && (played || (reached?.duration ?? 0) > 0) && state.status === 'failed') {
           reached = {
             position: state.position,
             duration: reached?.duration ?? 0,

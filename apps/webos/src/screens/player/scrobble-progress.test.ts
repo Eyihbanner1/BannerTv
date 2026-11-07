@@ -1425,6 +1425,84 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(43)', 'stop(43)']);
   });
 
+  it('keeps a skip back the player takes once a stream that showed its length failed before it played', () => {
+    // The film plays and is paused at 78%. Sources opens another stream of
+    // it there, paused: it shows its length but never plays. The viewer
+    // skips on 3 minutes, which the player takes, then back; that skip
+    // lands only once the stream has failed. Try another opens a 60 s clip.
+    const film: Parameters<typeof trakt>[0] = [
+      [played(2200, 2820, 'playing'), known, 2200, 0],
+      [played(2200, 2820, 'paused'), known, 2200, 0],
+      [played(2200, 0, 'loading', false, OTHER), known, 2200, 0],
+      [played(2200, 0, 'paused', false, OTHER), known, 2200, 0],
+      [played(2200, 2820, 'paused', false, OTHER), known, 2200, 0],
+      [played(2380, 2820, 'paused', false, OTHER), known, 2380, 1],
+      [played(2380, 2820, 'failed', false, OTHER), known, 2380, 1],
+      [played(2380, 0, 'failed', false, OTHER), known, 2380, 1],
+    ];
+    const clip: Parameters<typeof trakt>[0] = [
+      [played(2200, 0, 'loading', false, CLIP), known, 2200, 0],
+      [played(0, 60, 'playing', true), known, 2200, 0],
+    ];
+    expect(
+      trakt([...film, [played(2200, 0, 'failed', false, OTHER), known, 2200, 2], ...clip]),
+    ).toEqual(['start(78)', 'pause(78)', 'stop(78)']);
+    // Or with no length shown, the place the film reached is where it
+    // stays, by the film's own length.
+    const shorter: Parameters<typeof trakt>[0] = [
+      [played(1000, 2000, 'playing'), known, 1000, 0],
+      [played(1000, 2000, 'paused'), known, 1000, 0],
+      [played(1000, 0, 'loading', false, OTHER), known, 1000, 0],
+      [played(1000, 0, 'paused', false, OTHER), known, 1000, 0],
+      [played(1180, 0, 'paused', false, OTHER), known, 1180, 1],
+      [played(1180, 0, 'failed', false, OTHER), known, 1180, 1],
+    ];
+    expect(
+      trakt([
+        ...shorter,
+        [played(1000, 0, 'failed', false, OTHER), known, 1000, 2],
+        [played(1000, 0, 'loading', false, CLIP), known, 1000, 0],
+        [played(0, 60, 'playing', true), known, 1000, 0],
+      ]),
+    ).toEqual(['start(50)', 'pause(50)', 'stop(50)']);
+    // As when that skip lands before it fails.
+    expect(
+      trakt([
+        ...shorter.slice(0, 5),
+        [played(1000, 0, 'paused', false, OTHER), known, 1000, 2],
+        [played(1000, 0, 'failed', false, OTHER), known, 1000, 2],
+        [played(1000, 0, 'loading', false, CLIP), known, 1000, 0],
+        [played(0, 60, 'playing', true), known, 1000, 0],
+      ]),
+    ).toEqual(['start(50)', 'pause(50)', 'stop(50)']);
+  });
+
+  it('keeps a place inside a clip’s length whose clock ran past it, when Try again finds a clip', () => {
+    // A film that gives no length plays 600 s; Start over, which the player
+    // takes, and it plays 40 s and fails. Try again: the link now serves a
+    // 60 s clip. A clip's clock never runs past its length, so 40 s in was
+    // the film's.
+    const clip: Parameters<typeof trakt>[0] = [
+      [played(40, 0, 'loading'), known, 40, 0],
+      [played(40, 60, 'loading'), known, 40, 0],
+      [played(0, 60, 'playing', true, REAL), known, 40, 0],
+      [played(1, 60, 'paused', true, REAL), known, 40, 0],
+    ];
+    const film = (to: number): Parameters<typeof trakt>[0] => [
+      [played(0, 0, 'loading'), known, 0, 0],
+      [played(0, 0, 'playing'), known, 0, 0],
+      [played(to / 2, 0, 'playing'), known, to / 2, 0],
+      [played(to, 0, 'playing'), known, to, 0],
+      [played(0, 0, 'playing'), known, 0, 1],
+      [played(20, 0, 'playing'), known, 20, 1],
+      [played(40, 0, 'playing'), known, 40, 1],
+      [played(40, 0, 'failed'), known, 40, 1],
+    ];
+    expect(trakt([...film(600), ...clip])).toEqual(['start(0)', 'pause(1)', 'stop(1)']);
+    // Its clock ran no further than a clip's could: it may have been the clip's.
+    expect(trakt([...film(50), ...clip])).toEqual(['start(0)']);
+  });
+
   it('keeps a film’s place through a Try again that fails as soon as it plays, for a clip after it', () => {
     // The film gives no length and plays to 600 s, then fails. Try again
     // opens it there; it plays a second, or stops to buffer, and fails. Try
