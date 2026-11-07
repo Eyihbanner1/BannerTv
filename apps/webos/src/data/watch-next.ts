@@ -207,16 +207,18 @@ export function createWatchNextSchedule(options: {
  * read nothing is known. A profile with a PIN keeps its history to itself,
  * and the system's home screen is anyone's to see, so it empties the row. A
  * kids profile's titles that say they are not for children are left out, as
- * on its row.
+ * on its row. Until the addons have been read there is no telling which
+ * artwork could carry a key (hiddenArtwork), so the row waits for them too.
  */
 function profileCards(loaded: boolean): readonly WatchNextCard[] | null {
   const profile = activeProfile();
   if (!profile) return null;
   if (profile.pin) return [];
-  if (!loaded) return null;
+  const addons = addonCollection.get();
+  if (!loaded || !addons.ready) return null;
   let items = continueWatching(progress, playedVideos.get, Date.now());
   if (isKidsProfile()) items = items.filter((item) => kidsTitleAllowed(item.preview, true));
-  const addresses = addonCollection.get().addons.map((addon) => addon.transportUrl);
+  const addresses = addons.addons.map((addon) => addon.transportUrl);
   return watchNextCards(
     items,
     progress,
@@ -257,6 +259,8 @@ export function startWatchNext(publish: (cards: readonly WatchNextCard[]) => voi
   profiles.subscribe(followProfile);
   progress.subscribe(schedule.changed);
   playedVideos.subscribe(schedule.changed);
+  // Once the addons have been read, and when one comes or goes, which artwork stays off changes.
+  addonCollection.subscribe(schedule.changed);
   // Just after launch, Home fills in cards for titles that had none: the quiet wait lets them land.
   void Promise.all([progress.load(), playedVideos.load()])
     .catch(() => undefined)
