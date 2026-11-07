@@ -1,0 +1,84 @@
+name: Deploy api Worker
+
+# Deploys services/api, the Trakt and TMDB Worker at api.bannertv.workers.dev, from main. It runs
+# only when started by hand (Actions, Deploy api Worker, Run workflow), so nothing goes live by
+# itself when a pull request merges. It needs the repository secret CLOUDFLARE_API_TOKEN, a
+# Cloudflare API token made from the "Edit Cloudflare Workers" template, and, only if that token
+# reaches more than one Cloudflare account, the repository variable CLOUDFLARE_ACCOUNT_ID. The
+# Worker's own keys (TRAKT_CLIENT_ID, TMDB_API_KEY) stay Worker secrets in Cloudflare; a deploy
+# keeps them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a second waits for the first rather than cancelling it.
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy api Worker
+    # Production takes main only, whichever branch the run was started from.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the token is there
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Add the repository secret CLOUDFLARE_API_TOKEN (Settings, Secrets and variables, Actions) first."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter '@bannertv/api...'
+
+      - name: Typecheck
+        run: pnpm --filter @bannertv/api typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @bannertv/api test
+
+      - name: Deploy
+        working-directory: services/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          npx --yes wrangler@4 deploy
+
+      # A false means that service's key is missing from the Worker's secrets (README, Deploy).
+      - name: Check /status
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if status=$(curl -fsS --max-time 10 https://api.bannertv.workers.dev/status); then
+              echo "/status: $status" | tee -a "$GITHUB_STEP_SUMMARY"
+              node -e '
+                const s = JSON.parse(process.argv[1]);
+                const off = ["trakt", "tmdb", "search"].filter((k) => s[k] !== true);
+                if (off.length) {
+                  console.log("::error::/status says false for " + off.join(", ") + ".");
+                  process.exit(1);
+                }' "$status"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::/status did not answer after the deploy."
+          exit 1
