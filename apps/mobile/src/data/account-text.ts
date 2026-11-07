@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 
 /*
  * The account screen's wording, as the TV's settings/AccountScreen.tsx has it. That file draws
- * with the remote's focus library, so the phone keeps its own copy of these three pure helpers.
+ * with the remote's focus library, so the phone keeps its own copy of these pure helpers.
  */
 
 const MINUTE_MS = 60_000;
@@ -62,4 +62,12 @@ export function bringTotal(
   const total =
     account.length + here.filter((profile) => !account.some((a) => a.id === profile.id)).length;
   return { total, tooMany: total > MAX_PROFILES };
+}
+
+/**
+ * Whether `typed` is the last four characters of the new account's `code`, typed back so the
+ * person knows they have it. Capitals, spaces and dashes don't matter, as on the TV.
+ */
+export function matchesLastFour(typed: string, code: string): boolean {
+  return typed.toUpperCase().replace(/[\s-]+/g, '') === code.slice(-4);
 }

@@ -1,4 +1,4 @@
-import { kidsTitleAllowed, ratingAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
+import { kidsDetailsAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import type { TFunction } from 'i18next';
@@ -266,18 +266,14 @@ export function DetailsScreen({ type, id, preview, video, visit }: DetailsScreen
   const failed = state.status === 'error';
   const tmdb = useTmdbDetails(type, id);
   const extra = tmdb.details;
-  // A kids profile plays a title only once its full details show it is for
-  // children, and TMDB's UK rating, where it has one, is within the profile's.
+  // A kids profile plays a title only once its full details are in, by the
+  // rule the phone uses too (kidsDetailsAllowed): TMDB's strictest UK rating
+  // within the profile's, or without one, a Family listing.
   const kids = isKidsProfile();
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
   const kidsAllowed =
-    !kids ||
-    (kidsDecided &&
-      meta !== undefined &&
-      kidsTitleAllowed(meta) &&
-      (extra?.certificate === undefined ||
-        (kidsMax !== undefined && ratingAllowed(extra.certificate, kidsMax))));
+    !kids || (kidsDecided && meta !== undefined && kidsDetailsAllowed(meta, extra, kidsMax));
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
   // Titles without episodes get Watch, which plays the addon's default video.
   const canWatch = kidsAllowed && (isMovie || (meta !== undefined && !hasEpisodes));

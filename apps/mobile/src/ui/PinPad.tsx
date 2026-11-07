@@ -18,12 +18,15 @@ export function PinPad({
   message,
   onPin,
   onCancel,
+  onForgot,
 }: {
   visible: boolean;
   title: string;
   message?: string;
   onPin: (digits: string) => void;
   onCancel: () => void;
+  /** Shows "Forgot PIN?" under the keys, for a pad asking for a profile's own PIN. */
+  onForgot?: () => void;
 }) {
   const { t } = useTranslation();
   const [digits, setDigits] = useState('');
@@ -75,6 +78,19 @@ export function PinPad({
             </Pressable>
           ))}
         </View>
+        {onForgot ? (
+          <Pressable
+            onPress={() => {
+              setDigits('');
+              onForgot();
+            }}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={({ pressed }) => [styles.forgot, pressed && styles.forgotPressed]}
+          >
+            <Text style={styles.forgotText}>{t('pin.forgot')}</Text>
+          </Pressable>
+        ) : null}
       </View>
     </Sheet>
   );
@@ -97,4 +113,7 @@ const styles = StyleSheet.create({
   },
   keyPressed: { backgroundColor: colors.action },
   keyText: { ...type.title, color: colors.text },
+  forgot: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.l },
+  forgotPressed: { opacity: 0.6 },
+  forgotText: { ...type.label, color: colors.textMuted },
 });

@@ -530,6 +530,136 @@ test('Back waits while a join runs, and the copy Use keeps still holds what the 
   expect(await asideKeys(other, 'p/main/list')).toEqual([SINTEL]);
 });
 
+/**
+ * A second screen with Guest, Sintel on My List and Big Buck Bunny part way
+ * joins the account `page` made (with Ada) using the account's profiles,
+ * and starts again as the account's screen.
+ */
+async function joinedWithUse(page: Page, browser: Browser, sync: FakeSync): Promise<Page> {
+  await seedProfiles(page, { profiles: [main(), ADA], lastId: 'main', askAtLaunch: false });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await openAccount(page, 'account-create');
+  const code = await createAccount(page);
+
+  const other = await secondScreen(browser, sync);
+  await seedProfiles(other, { profiles: [main(), GUEST], lastId: 'main', askAtLaunch: false });
+  await seedWatching(other);
+  await other.goto(APP_URL);
+  await expectFocus(other, CONTINUE_TILE);
+  await openSettings(other);
+  await openAccount(other, 'account-create');
+  await typeCode(other, code);
+  await expectFocus(other, 'account-use');
+  await press(other, 'Enter', 'account-use-dialog-cancel');
+  await press(other, 'ArrowLeft', 'account-use-dialog-confirm');
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
+  await expect.poll(() => profileIds(other)).toEqual(['main', ADA.id]);
+  return other;
+}
+
+test('the copy Use kept says what it holds, and brings it back into the account', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  const other = await joinedWithUse(page, browser, sync);
+  const errors = watchErrors(other);
+
+  await openSettings(other);
+  await openAccount(other, 'account-sync');
+  const copy = other.getByRole('region', { name: 'What this screen had before' });
+  await expect(copy).toBeVisible();
+  await expect(
+    copy.getByText(/^When this screen joined with Use the account's profiles/),
+  ).toHaveText(/The copy is kept until \d{1,2} [A-Z][a-z]+ \d{4}\.$/);
+  await expect(copy.locator('li')).toHaveText([
+    'Profiles: Main, Guest',
+    '1 title on My List',
+    '1 film or episode part way through',
+    /^Addons: .*Cinemeta/,
+  ]);
+  for (const key of ['account-show-code', 'account-leave', 'account-delete']) {
+    await press(other, 'ArrowDown', key);
+  }
+  await press(other, 'ArrowDown', 'account-bring-back');
+
+  // Asked first, and Back leaves it as it was.
+  await press(other, 'Enter', 'account-back-dialog-cancel');
+  const dialog = other.getByRole('dialog', { name: 'Bring back what this screen had before?' });
+  await expect(dialog).toContainText("Where the account has a setting, the account's is kept.");
+  await expect(dialog).toContainText("BannerTV starts again when it's done.");
+  await pressBack(other);
+  await expectFocus(other, 'account-bring-back');
+  await press(other, 'Enter', 'account-back-dialog-cancel');
+  await press(other, 'ArrowLeft', 'account-back-dialog-confirm');
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+
+  // Guest is back beside the account's profiles, with Main's My List and Continue Watching.
+  await expectFocus(other, CONTINUE_TILE);
+  await expect.poll(() => profileIds(other)).toEqual(['main', ADA.id, GUEST_ID]);
+  expect(await libraryIds(other)).toEqual([SINTEL]);
+  expect(await readKv(other, 'sync-aside')).toBeUndefined();
+  expect(await other.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBe('1');
+  await openSettings(other);
+  await openAccount(other, 'account-sync');
+  await expect(other.getByRole('region', { name: 'What this screen had before' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+
+  // The first screen has Guest and Sintel after Sync now.
+  await page.keyboard.press('Enter');
+  await expect.poll(() => profileIds(page)).toEqual(['main', ADA.id, GUEST_ID]);
+  await expect.poll(() => libraryIds(page)).toEqual([SINTEL]);
+});
+
+test('signed out after Leave, the copy Use kept comes back on the screen alone', async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const sync = fakeSync();
+  await mockAddons(page);
+  await mockSync(page, sync);
+  const other = await joinedWithUse(page, browser, sync);
+  const errors = watchErrors(other);
+
+  await openSettings(other);
+  await openAccount(other, 'account-sync');
+  for (const key of ['account-show-code', 'account-leave']) {
+    await press(other, 'ArrowDown', key);
+  }
+  await press(other, 'Enter', 'account-leave-dialog-cancel');
+  await press(other, 'ArrowLeft', 'account-leave-dialog-confirm');
+  await other.keyboard.press('Enter');
+  await expect(other.getByText('This screen has left the account')).toBeVisible();
+  await expectFocus(other, 'account-create');
+
+  for (const key of ['account-join', 'account-bring-back']) {
+    await press(other, 'ArrowDown', key);
+  }
+  await press(other, 'Enter', 'account-back-dialog-cancel');
+  await expect(other.getByRole('dialog')).toContainText(
+    "Where this screen has a setting now, it's kept.",
+  );
+  await press(other, 'ArrowLeft', 'account-back-dialog-confirm');
+  const sent = sync.requests.length;
+  await reloadsAfter(other, () => other.keyboard.press('Enter'));
+
+  await expectFocus(other, CONTINUE_TILE);
+  await expect.poll(() => profileIds(other)).toEqual(['main', ADA.id, GUEST_ID]);
+  expect(await libraryIds(other)).toEqual([SINTEL]);
+  expect(await readKv(other, 'sync-aside')).toBeUndefined();
+  // Still out of the account, and nothing went to the service.
+  expect(await other.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBeNull();
+  expect(sync.requests.slice(sent).filter((request) => request !== 'GET /v1/status')).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("a join's reload that misses what the join wrote to localStorage puts it back", async ({
   page,
   browser,
