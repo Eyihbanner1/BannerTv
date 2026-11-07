@@ -15,6 +15,7 @@ import {
   subtitlesValue,
   subtitleVersions,
   versionGroups,
+  versionDetail,
   versionId,
   versionNotes,
 } from './subtitle-versions';
@@ -175,58 +176,105 @@ describe('subtitle versions', () => {
     expect(versionNotes(version, true, 'loading', video, { hearing: true })).toEqual(['loading']);
   });
 
-  it('picks a language’s first version that has not failed, or its first when all have', () => {
-    const versions = subtitleVersions(
-      { tracks: [], options: [option('os#1', 'eng'), option('os#2', 'eng')] },
-      IN_THE_STREAM,
+  /** What the sheet knows of the versions, for starting a language. */
+  function known(
+    over: {
+      failed?: string[];
+      checks?: Record<string, SubtitleCheck>;
+      remembered?: string;
+      hearing?: boolean;
+    } = {},
+  ) {
+    const key = (choice: NonNullable<SubtitleChoice>) => versionId(choice);
+    return {
+      statusOf: (choice: NonNullable<SubtitleChoice>): SubtitleStatus | undefined =>
+        (over.failed ?? []).indexOf(key(choice)) !== -1 ? 'failed' : undefined,
+      checkOf: (choice: NonNullable<SubtitleChoice>): SubtitleCheck | undefined =>
+        over.checks?.[key(choice)],
+      isRemembered: (choice: NonNullable<SubtitleChoice>) => key(choice) === over.remembered,
+      wantsHearing: () => !!over.hearing,
+    };
+  }
+  const video = { filename: 'Film.2024.1080p.WEB-DL.x264-GROUP.mkv' };
+  const firstOf = (
+    tracks: EngineTrack[],
+    options: SubtitleOption[],
+    over: Parameters<typeof known>[0] = {},
+  ) => {
+    const [group] = versionGroups(
+      subtitleVersions({ tracks, options }, IN_THE_STREAM),
+      null,
+      createOrderMemory(),
     );
-    const [group] = versionGroups(versions, null, createOrderMemory());
-    const failing =
-      (keys: string[]) =>
-      (choice: NonNullable<SubtitleChoice>): SubtitleStatus | undefined =>
-        choice.kind === 'file' && keys.indexOf(choice.key) !== -1 ? 'failed' : undefined;
-    expect(languageFirstPick(group!, failing([])).choice).toEqual({ kind: 'file', key: 'os#1' });
-    expect(languageFirstPick(group!, failing(['os#1'])).choice).toEqual({
-      kind: 'file',
-      key: 'os#2',
-    });
-    expect(languageFirstPick(group!, failing(['os#1', 'os#2'])).choice).toEqual({
-      kind: 'file',
-      key: 'os#1',
-    });
+    return versionId(languageFirstPick(group!, known(over), video).choice);
+  };
+
+  it('picks a language’s first version that has not failed, or its first when all have', () => {
+    const options = [option('os#1', 'eng'), option('os#2', 'eng')];
+    expect(firstOf([], options)).toBe('file:os#1');
+    expect(firstOf([], options, { failed: ['file:os#1'] })).toBe('file:os#2');
+    expect(firstOf([], options, { failed: ['file:os#1', 'file:os#2'] })).toBe('file:os#1');
   });
 
-  it('starts a language on a version that was not passed over for its checks, if it has one', () => {
-    const versions = subtitleVersions(
-      {
-        tracks: [],
-        options: [option('os#1', 'eng'), option('os#2', 'eng'), option('os#3', 'eng')],
-      },
-      IN_THE_STREAM,
-    );
-    const [group] = versionGroups(versions, null, createOrderMemory());
-    const none = () => undefined;
-    const checks =
-      (problems: Record<string, SubtitleCheck['problem']>) =>
-      (choice: NonNullable<SubtitleChoice>): SubtitleCheck | undefined =>
-        choice.kind === 'file' && problems[choice.key]
-          ? { hearing: false, problem: problems[choice.key] }
-          : undefined;
-    expect(
-      languageFirstPick(group!, none, checks({ 'os#1': 'signs', 'os#2': 'script' })).choice,
-    ).toEqual({ kind: 'file', key: 'os#3' });
-    // Part of the video is still better than nothing to pick from.
-    expect(languageFirstPick(group!, none, checks({ 'os#1': 'short' })).choice).toEqual({
-      kind: 'file',
-      key: 'os#1',
+  it('starts a language on its best placed version, as the automatic choice ranks them', () => {
+    const options = [option('os#1', 'eng'), option('os#2', 'eng'), option('os#3', 'eng')];
+    const problem = (found: SubtitleCheck['problem']): SubtitleCheck => ({
+      hearing: false,
+      problem: found,
     });
     expect(
-      languageFirstPick(
-        group!,
-        none,
-        checks({ 'os#1': 'signs', 'os#2': 'signs', 'os#3': 'script' }),
-      ).choice,
-    ).toEqual({ kind: 'file', key: 'os#1' });
+      firstOf([], options, {
+        checks: { 'file:os#1': problem('signs'), 'file:os#2': problem('script') },
+      }),
+    ).toBe('file:os#3');
+    // A file known to cover only part falls below one not read yet.
+    expect(firstOf([], options, { checks: { 'file:os#1': problem('short') } })).toBe('file:os#2');
+    // Plain lines before lines for the hard of hearing, unless those are wanted.
+    const sdh = { 'file:os#1': { hearing: true }, 'file:os#2': { hearing: false } };
+    expect(firstOf([], options, { checks: sdh })).toBe('file:os#2');
+    expect(firstOf([], options, { checks: sdh, hearing: true })).toBe('file:os#1');
+    // Nothing better: the first that was not passed over.
+    expect(
+      firstOf([], options, {
+        checks: {
+          'file:os#1': problem('signs'),
+          'file:os#2': problem('signs'),
+          'file:os#3': problem('script'),
+        },
+      }),
+    ).toBe('file:os#1');
+  });
+
+  it('starts a language on the version picked by hand, then one made for the release', () => {
+    const options = [
+      option('os#1', 'eng'),
+      option('os#2', 'eng', 'Film.2024.1080p.WEB-DL.x264-GROUP'),
+      option('os#3', 'eng'),
+    ];
+    expect(firstOf([], options)).toBe('file:os#2');
+    expect(firstOf([track('t1', 'eng')], options, { remembered: 'file:os#3' })).toBe('file:os#3');
+    // The stream's own track comes before the files, but not before the one picked by hand.
+    expect(firstOf([track('t1', 'eng')], options)).toBe('track:t1');
+  });
+
+  it('passes over the stream’s own track of forced lines only, as over an unfit file', () => {
+    const options = [option('os#1', 'eng')];
+    const forced = { ...track('t1', 'eng', 'English (Forced)'), forced: true };
+    expect(firstOf([forced], options)).toBe('file:os#1');
+    expect(firstOf([forced, track('t2', 'eng')], options)).toBe('track:t2');
+    // Nothing else left: the forced track.
+    expect(firstOf([forced], options, { failed: ['file:os#1'] })).toBe('track:t1');
+  });
+
+  it('puts the notes before the release name, which a row may cut short', () => {
+    expect(versionDetail(['Looks like another language'], 'Film.2023.1080p.BluRay-GROUP')).toBe(
+      'Looks like another language · Film.2023.1080p.BluRay-GROUP',
+    );
+    expect(versionDetail(['Matches your video', 'For the hard of hearing'])).toBe(
+      'Matches your video · For the hard of hearing',
+    );
+    expect(versionDetail([], 'Film.2023.1080p.BluRay-GROUP')).toBe('Film.2023.1080p.BluRay-GROUP');
+    expect(versionDetail([])).toBeUndefined();
   });
 
   it('tells choices apart by kind as well as id, and Off is no version', () => {

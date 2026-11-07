@@ -34,8 +34,9 @@ import {
   planSubtitlePick,
   type SubtitlePlan,
 } from '../../player/subtitle-pick';
-import { playingRelease } from '../../player/subtitle-versions';
+import { playingRelease, sameChoice } from '../../player/subtitle-versions';
 import {
+  clearSubtitleCache,
   loadSubtitles,
   subtitleList,
   type SubtitleListState,
@@ -57,11 +58,17 @@ export interface SubtitleCheck {
    * signs only, it covers only part of the video, or it runs well past its end.
    */
   problem?: 'script' | 'signs' | 'short' | 'long';
+  /** A drift its length gives away: the player fixes it by itself on the version showing. */
+  drift?: SubtitleDrift;
   /** The version showing, whose drift the player fixed by itself. */
   autoDrift?: boolean;
 }
 
-/** How the viewer chose: a version from a language's list, or a language (its first version). */
+/**
+ * How the viewer chose: a version from a language's list, which stays as
+ * picked; or a language, whose version is then chosen as at the start of a
+ * stream (the sheet starts it on its best placed version).
+ */
 export type ChoiceWay = 'version' | 'language';
 
 export interface Subtitles {
@@ -98,6 +105,10 @@ export interface Subtitles {
   statusOf(choice: NonNullable<SubtitleChoice>): SubtitleStatus | undefined;
   /** What reading the file found, once it has been read; undefined for the stream's tracks. */
   checkOf(choice: NonNullable<SubtitleChoice>): SubtitleCheck | undefined;
+  /** Whether it is the version picked by hand for the release playing: its language starts on it. */
+  isRemembered(choice: NonNullable<SubtitleChoice>): boolean;
+  /** Lines for the hard of hearing are wanted: the viewer picked such a version for this title. */
+  wantsHearing(): boolean;
 }
 
 const EMPTY: SubtitleListState = { options: [], pending: 0 };
@@ -169,14 +180,19 @@ interface AutoState {
 /**
  * Which subtitles show, and their cues. For each stream it picks the language
  * last chosen: the version the viewer picked by hand for this release first,
- * then the stream's own track in that language (always in sync), then the
- * addon file that fits best. The first few files are read before one shows
- * (for at most HOLD_MS after the first is read): one in another script or of
- * signs only is passed over, and a full plain file that lasts as long as the
- * video wins (`planSubtitlePick`). A file that fits clearly better, read
- * later, takes over soon after, at most twice; one made for the release that
- * arrives later takes over too. Never when the viewer chose. If a file cannot
- * be read, the next one in the same language is tried.
+ * even when its addon answers after the stream lists its own track; then the
+ * stream's own track in that language (always in sync), unless it holds
+ * forced lines only; then the addon file that fits best; a track of forced
+ * lines only when the language has nothing else. The first few files are read
+ * before one shows (for at most HOLD_MS after the first is read): one in
+ * another script or of signs only is passed over, and a full plain file that
+ * lasts as long as the video wins (`planSubtitlePick`). A file that fits
+ * clearly better, read later, takes over soon after, at most twice; one made
+ * for the release that arrives later takes over too. A language the viewer
+ * turns on from the sheet stays theirs, and its version is chosen the same
+ * way. Never once the viewer chose a version, or moved the timing or chose a
+ * drift fix of the one showing. If a file cannot be read, the next one in the
+ * same language is tried.
  */
 export function useSubtitles(
   type: string,
@@ -231,10 +247,21 @@ export function useSubtitles(
     wanted?: string | null;
     /** The version picked by hand for this release: a track listed later does not take over. */
     remembered?: boolean;
+    /**
+     * The language the viewer turned on from the sheet: theirs, whatever the
+     * audio heard, while its version is chosen here.
+     */
+    language?: string;
   } | null>(null);
   const auto = useRef<AutoState>({ entry: null, holding: false, switches: 0 });
-  // Files read for their checks in each language of this video, by link.
-  const checkedIn = useRef(new Map<string, Set<string>>());
+  // Files read for their checks in each language, by link, for the stream playing: another
+  // stream of the video reads its own file and the addon's first again.
+  const checkedIn = useRef<{ entry: StreamEntry | null; byLanguage: Map<string, Set<string>> }>({
+    entry: null,
+    byLanguage: new Map(),
+  });
+  // Plans the choice again, now: for a language the viewer turned on.
+  const wake = useRef<(() => void) | null>(null);
   // A version just picked by hand, kept for the release once it reads.
   const handPicked = useRef<{ entry: StreamEntry; key: string; release: string } | null>(null);
   // Links of files that failed for this video, so a retry moves on to another,
@@ -254,6 +281,22 @@ export function useSubtitles(
   const fileKeyOf = (key: string, stream: StreamEntry) =>
     subtitleFileKey(videoId, fileIdentity({ kind: 'file', key }, stream));
 
+  /** The release the version picked by hand is kept for; none for Lab streams and Demo checks. */
+  const pickReleaseOf = (stream: StreamEntry): string | null =>
+    metaId !== undefined && !isSubtitleCheck(stream) ? subtitleRelease(stream, videoId) : null;
+
+  /** The key of the version picked by hand for the release, among those offered. */
+  const rememberedIn = (
+    offered: readonly SubtitleOption[],
+    stream: StreamEntry,
+  ): string | undefined => {
+    const pickRelease = pickReleaseOf(stream);
+    const pickedFile = pickRelease ? subtitlePicks.get(metaId!, pickRelease)?.file : undefined;
+    return pickedFile
+      ? offered.find((option) => fileKeyOf(option.key, stream) === pickedFile)?.key
+      : undefined;
+  };
+
   /**
    * What is known of the files in a language, for picking one: those that could
    * not be read, what reading the others found, and the version picked by hand
@@ -266,17 +309,12 @@ export function useSubtitles(
     length: VideoLength,
   ): PickContext => {
     const fits = fitsIn(offered, language, checks.profile, length);
-    const pickRelease =
-      metaId !== undefined && !isSubtitleCheck(stream) ? subtitleRelease(stream, videoId) : null;
-    const pickedFile = pickRelease ? subtitlePicks.get(metaId!, pickRelease)?.file : undefined;
-    const remembered = pickedFile
-      ? offered.find((option) => fileKeyOf(option.key, stream) === pickedFile)?.key
-      : undefined;
+    const pickRelease = pickReleaseOf(stream);
     return {
       video: playingRelease(stream),
       broken: (url) => broken.current.has(url) || checks.failed(url),
       fit: (url) => fits.get(url),
-      remembered,
+      remembered: rememberedIn(offered, stream),
       hearing: pickRelease ? subtitlePicks.wantsHearing(metaId!, pickRelease) : false,
     };
   };
@@ -286,12 +324,21 @@ export function useSubtitles(
   useEffect(() => {
     if (!entry || !session || !list) return;
     let stopped = false;
-    // The language wanted at the latest look, kept with an automatic choice.
+    // The language wanted at the latest look, kept with an automatic choice, and whether the
+    // viewer turned it on from the sheet.
     let wantedNow: string | null = null;
+    let pressedNow: string | undefined;
     // Ends the hold once its time is up.
     let timer: number | undefined;
     const settle = (next: SubtitleChoice, remembered = false) => {
-      decided.current = { entry, choice: next, auto: true, wanted: wantedNow, remembered };
+      decided.current = {
+        entry,
+        choice: next,
+        auto: true,
+        wanted: wantedNow,
+        remembered,
+        language: pressedNow,
+      };
       setChosen({ entry, choice: next });
     };
     const setHolding = (holding: boolean) => {
@@ -320,8 +367,9 @@ export function useSubtitles(
       const playing = session.get();
       const now = Date.now();
       const language = languageKey(wanted);
-      const checked = checkedIn.current.get(language) ?? new Set<string>();
-      checkedIn.current.set(language, checked);
+      if (checkedIn.current.entry !== entry) checkedIn.current = { entry, byLanguage: new Map() };
+      const checked = checkedIn.current.byLanguage.get(language) ?? new Set<string>();
+      checkedIn.current.byLanguage.set(language, checked);
       if (
         standing.holding &&
         standing.firstReadAt === undefined &&
@@ -362,7 +410,8 @@ export function useSubtitles(
       if (result.switched) standing.switches++;
       setHolding(result.hold);
       if (result.pick && result.pick.key !== current) {
-        settle({ kind: 'file', key: result.pick.key });
+        // Landing on the version picked by hand, it stays: a track listed later does not take over.
+        settle({ kind: 'file', key: result.pick.key }, result.pick.key === context.remembered);
       }
       return result;
     };
@@ -375,36 +424,73 @@ export function useSubtitles(
       // TV's player never lists any.
       const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
       const made = decided.current;
-      const wanted = isSubtitleCheck(entry)
-        ? null
-        : wantedSubtitle(metaId, heardLanguages(audio, entry));
+      const ours = made?.entry === entry ? made : null;
+      // A language the viewer turned on from the sheet: its version is chosen in it.
+      const pressed = ours?.auto ? ours.language : undefined;
+      const wanted =
+        pressed ??
+        (isSubtitleCheck(entry) ? null : wantedSubtitle(metaId, heardLanguages(audio, entry)));
       wantedNow = wanted;
+      pressedNow = pressed;
       const { options: offered, pending: waiting } = list.get();
       const length = videoLength(playing.duration, playing.live, runtimeSeconds);
       const context = wanted === null ? null : contextIn(offered, wanted, entry, length);
-      if (made?.entry === entry) {
+      const key = wanted === null ? null : languageKey(wanted);
+      // The version picked by hand for this release comes first, even before the stream's track,
+      // and whether or not the stream has listed its tracks yet.
+      const picked =
+        context && key !== null
+          ? offered.find(
+              (o) =>
+                o.key === context.remembered &&
+                languageKey(o.lang) === key &&
+                !context.broken(o.url),
+            )
+          : undefined;
+      // The stream's own track in the language; one of forced lines only (signs, the
+      // foreign-language scenes) only when the language has nothing else.
+      const inLanguage = (t: EngineTrack) => key !== null && languageKey(t.lang) === key;
+      const track = text.find((t) => inLanguage(t) && !t.forced);
+      const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced);
+      if (ours) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
-        const chosenTrack = made.choice;
+        const chosenTrack = ours.choice;
         const lost =
           chosenTrack?.kind === 'track' &&
           tracksKnown &&
           !text.some((t) => t.id === chosenTrack.id);
         // A file or Off picked while the TV's player listed no tracks gives way
         // to the stream's own track once another engine (hls.js) lists one,
-        // unless it is the version picked by hand for this release.
+        // unless it is the version picked by hand for this release. A track of
+        // forced lines only takes over from Off, chosen as nothing was left, and
+        // gives way to a full track, or to a file that can be used.
+        const onForced =
+          chosenTrack?.kind === 'track' && text.some((t) => t.id === chosenTrack.id && !!t.forced);
         const better =
-          made.auto &&
-          !made.remembered &&
-          chosenTrack?.kind !== 'track' &&
-          wanted !== null &&
-          text.some((t) => languageKey(t.lang) === languageKey(wanted));
-        // "Only when the audio isn't in that language", once the audio's language is known.
-        const heardOther = made.auto && made.wanted !== undefined && made.wanted !== wanted;
-        if (!lost && !better && !heardOther) {
+          ours.auto &&
+          !ours.remembered &&
+          (chosenTrack?.kind !== 'track'
+            ? track !== undefined || (chosenTrack === null && forcedTrack !== undefined)
+            : onForced &&
+              (track !== undefined ||
+                (context !== null &&
+                  wanted !== null &&
+                  pickSubtitleFile(offered, wanted, context) !== undefined)));
+        // "Only when the audio isn't in that language", once the audio's language is known; not
+        // for a language the viewer turned on.
+        const heardOther =
+          ours.auto && pressed === undefined && ours.wanted !== undefined && ours.wanted !== wanted;
+        // The version picked by hand for this release, offered after an automatic choice.
+        const rememberedNow =
+          ours.auto &&
+          !ours.remembered &&
+          picked !== undefined &&
+          !(chosenTrack?.kind === 'file' && chosenTrack.key === picked.key);
+        if (!lost && !better && !heardOther && !rememberedNow) {
           // The automatic file choice, planned again as files are read or more addons answer:
           // the one made for this release, or one that fits clearly better, takes over.
-          if (made.auto && chosenTrack?.kind === 'file' && context && wanted !== null) {
+          if (ours.auto && chosenTrack?.kind === 'file' && context && wanted !== null) {
             if (auto.current.entry !== entry) {
               auto.current = { entry, holding: false, switches: 0, shownAt: Date.now() };
             }
@@ -418,18 +504,11 @@ export function useSubtitles(
         settle(null);
         return;
       }
-      const key = languageKey(wanted);
-      // The version picked by hand for this release comes first, even before the stream's track.
-      const picked = offered.find(
-        (o) =>
-          o.key === context.remembered && languageKey(o.lang) === key && !context.broken(o.url),
-      );
-      if (picked && tracksKnown) {
+      if (picked) {
         startAuto(false);
         settle({ kind: 'file', key: picked.key }, true);
         return;
       }
-      const track = text.find((t) => languageKey(t.lang) === key);
       if (track) {
         startAuto(false);
         settle({ kind: 'track', id: track.id });
@@ -441,9 +520,10 @@ export function useSubtitles(
       const result = plan(offered, wanted, context, undefined);
       if (!result.pick && waiting === 0) {
         setHolding(false);
-        settle(null);
+        settle(forcedTrack ? { kind: 'track', id: forcedTrack.id } : null);
       }
     };
+    wake.current = decide;
     // The session tells of every step of the clock; only what the choice weighs counts.
     let seen: SessionState | undefined;
     const onSession = () => {
@@ -469,6 +549,7 @@ export function useSubtitles(
     void Promise.resolve().then(decide);
     return () => {
       stopped = true;
+      if (wake.current === decide) wake.current = null;
       if (timer !== undefined) clearTimeout(timer);
       stopList();
       stopSession();
@@ -477,6 +558,9 @@ export function useSubtitles(
     // contextIn and fileKeyOf read only what these name, and refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, session, list, metaId, runtimeSeconds, videoId, checks]);
+
+  // The files read stay in memory only while the player is open.
+  useEffect(() => () => clearSubtitleCache(), []);
 
   // Load the chosen file, moving to the next in its language if it fails.
   useEffect(() => {
@@ -500,9 +584,16 @@ export function useSubtitles(
         // A file that failed once and reads now is no longer marked.
         if (broken.current.has(option.url)) markBroken(option.url, false);
         // A version picked by hand is kept for the release once it reads, with whether it
-        // was for the hard of hearing: picking one asks for them.
+        // was for the hard of hearing: picking one asks for them. Not one given up on while
+        // it loaded.
         const picked = handPicked.current;
-        if (picked && picked.entry === entry && picked.key === option.key && metaId !== undefined) {
+        if (
+          !cancelled &&
+          picked &&
+          picked.entry === entry &&
+          picked.key === option.key &&
+          metaId !== undefined
+        ) {
           handPicked.current = null;
           const profile = checks.profile(option.url);
           void subtitlePicks.remember({
@@ -603,6 +694,18 @@ export function useSubtitles(
   const inUse = driftInUse({ canFix: canFixDrift, evidence, kept: keptDrift, offset });
   const { drift, auto: autoDrift } = inUse;
 
+  /**
+   * The viewer moved the timing or chose a drift fix of the automatic choice showing: it is
+   * theirs now. Nothing takes over from it, and its lines show at once.
+   */
+  const keepShowing = () => {
+    const made = decided.current;
+    if (made?.entry !== entry || !made.auto) return;
+    decided.current = { ...made, auto: false };
+    auto.current = { entry, holding: false, switches: 0 };
+    setHoldingFor(null);
+  };
+
   const rawCues = trackId === null ? (fileFailed || holding ? null : fileCues) : trackCues;
   // Stretched once per file and fix, so the subtitle layer's index is built once too.
   const cues = useMemo(
@@ -657,42 +760,73 @@ export function useSubtitles(
               : undefined;
       const check: SubtitleCheck = { hearing: fit.hearing };
       if (problem) check.problem = problem;
+      if (fit.drift) check.drift = fit.drift;
       if (showing && autoDrift) check.autoDrift = true;
       return check;
     },
+    isRemembered(version) {
+      return !!entry && version.kind === 'file' && rememberedIn(options, entry) === version.key;
+    },
+    wantsHearing() {
+      const pickRelease = entry ? pickReleaseOf(entry) : null;
+      return pickRelease ? subtitlePicks.wantsHearing(metaId!, pickRelease) : false;
+    },
     choose(next, way = 'version') {
-      decided.current = { entry, choice: next, auto: false };
-      auto.current = { entry, holding: false, switches: 0 };
-      setHoldingFor(null);
-      setChosen({ entry, choice: next });
+      // The version already showing, pressed again, changes nothing: it stays as it was chosen,
+      // and is not kept for the release. One that could not be read is tried again.
+      if (sameChoice(next, choice) && !fileFailed) return;
+      // A version picked before and still loading is given up on: it is not kept.
+      handPicked.current = null;
       if (next?.kind === 'file') {
         const option = options.find((o) => o.key === next.key);
         if (option && broken.current.has(option.url)) markBroken(option.url, false);
       }
+      const language = languageOf(next, options, tracks);
+      // A language turned on from the sheet is the viewer's, but its version is chosen here,
+      // with the same reads, hold and switches as at the start of a stream. Not for Lab streams,
+      // which remember no language, nor BannerTV Demo's checks: theirs stays as picked.
+      const pressed =
+        way === 'language' &&
+        next !== null &&
+        language !== null &&
+        metaId !== undefined &&
+        !isSubtitleCheck(entry);
+      if (pressed) {
+        decided.current = { entry, choice: next, auto: true, wanted: language, language };
+        auto.current = { entry, holding: next.kind === 'file', switches: 0 };
+        setHoldingFor(next.kind === 'file' ? entry : null);
+      } else {
+        decided.current = { entry, choice: next, auto: false };
+        auto.current = { entry, holding: false, switches: 0 };
+        setHoldingFor(null);
+      }
+      setChosen({ entry, choice: next });
       if (isSubtitleCheck(entry)) return;
-      chooseSubtitleLanguage(metaId, languageOf(next, options, tracks));
+      chooseSubtitleLanguage(metaId, language);
+      if (pressed) wake.current?.();
       // A version picked from the list is the one for this release; the stream's own track
-      // picked over it takes its place. Not for Lab streams, which remember nothing.
+      // picked over it takes its place. Not for Lab streams, which remember nothing. Picking a
+      // language keeps no version.
       if (way !== 'version' || metaId === undefined || !entry) return;
       const pickRelease = subtitleRelease(entry, videoId);
       if (next?.kind === 'file')
         handPicked.current = { entry, key: next.key, release: pickRelease };
-      else if (next?.kind === 'track') {
-        handPicked.current = null;
-        void subtitlePicks.forget(metaId, pickRelease);
-      }
+      else if (next?.kind === 'track') void subtitlePicks.forget(metaId, pickRelease);
     },
     setOffset(next) {
       if (offsetKey === null) return;
-      // Moving the timing of a file whose drift the player fixed keeps that fix as the viewer's,
-      // so the lines stay stretched as they see them. Kept first: both are saved in the order
-      // asked, so the lines never show for a moment without it.
+      keepShowing();
+      // Moving the timing of a file whose drift the player fixed keeps that fix on, worked out
+      // from each stream's own evidence ('auto'), so the lines stay stretched as they see them.
+      // Kept first: both are saved in the order asked, so the lines never show for a moment
+      // without it.
       const keep = driftKeptWithTiming(inUse, next);
       if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
       void subtitleOffsets.remember(offsetKey, next);
     },
     setDrift(next) {
       if (offsetKey === null) return;
+      keepShowing();
       // No fix, where the file's length shows a drift, is kept: the player does not fix it again.
       void subtitleDrifts.remember(offsetKey, next === null && evidence !== null ? 'none' : next);
     },

@@ -11,6 +11,7 @@ import {
   subtitleVersions,
   type SubtitleVersion,
   VERSION_NOTES,
+  versionDetail,
   versionGroups,
   versionId,
   versionNotes,
@@ -150,7 +151,7 @@ function SubtitleChoices({
         ? item.source
         : t('player.sourceNumber', { source: item.source, number });
     // The notes first: a long release name is cut at the end, and the notes must stay in sight.
-    const detail = [...notes, item.release].filter(Boolean).join(' · ');
+    const detail = versionDetail(notes, item.release);
     return (
       <PanelOption
         key={versionId(item.choice)}
@@ -165,15 +166,13 @@ function SubtitleChoices({
     );
   };
 
-  // A language not showing starts on its first version that loads, and the panel stays open
-  // on its versions; the language showing only opens.
+  // A language not showing starts on its best placed version, which the player may move
+  // from once it has read the language's files, and the panel stays open on its versions;
+  // the language showing only opens.
   const pickLanguage = (group: LanguageGroup<SubtitleVersion>) => {
     onOpen(group.key);
     if (group.key === chosenLanguage) return;
-    subtitles.choose(
-      languageFirstPick(group, subtitles.statusOf, subtitles.checkOf).choice,
-      'language',
-    );
+    subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
   };
 
   return (

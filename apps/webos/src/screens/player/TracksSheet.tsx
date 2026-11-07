@@ -21,6 +21,7 @@ import {
   subtitleVersions,
   type SubtitleVersion,
   VERSION_NOTES,
+  versionDetail,
   versionGroups,
   versionNotes,
 } from '../../player/subtitle-versions';
@@ -113,7 +114,7 @@ export function TracksSheet(props: TracksSheetProps) {
         number === undefined
           ? item.source
           : t('player.sourceNumber', { source: item.source, number }),
-      detail: [item.release, ...said].filter(Boolean).join(' · ') || undefined,
+      detail: versionDetail(said, item.release),
       selected,
       // Passed over, for good reason: still there to pick by hand.
       dim: status === 'failed' || isUnfit(check),
@@ -141,15 +142,13 @@ export function TracksSheet(props: TracksSheetProps) {
       },
       onPress: () => {
         setView(group.key);
-        // The language showing: on to its versions. Another: its first that loads.
+        // The language showing: on to its versions. Another starts on its best placed version,
+        // and the player reads its files and may move to one that fits better.
         if (group.key === chosenLanguage && chosen) {
           if (inputMode.get() !== 'pointer') void setFocus(versionKey(chosen.choice));
           return;
         }
-        subtitles.choose(
-          languageFirstPick(group, subtitles.statusOf, subtitles.checkOf).choice,
-          'language',
-        );
+        subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
       },
     })),
   ];

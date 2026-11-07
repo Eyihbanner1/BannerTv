@@ -3,8 +3,10 @@ import {
   keepOrder,
   type LanguageGroup,
   languageName,
+  rankSubtitles,
   releaseMatch,
   type StreamEntry,
+  type SubtitleFit,
 } from '@bannertv/core';
 import type {
   SubtitleCheck,
@@ -28,6 +30,8 @@ export interface SubtitleVersion {
   source: string;
   /** The release name an addon sent, or a track's own name where it says more than its language. */
   release?: string;
+  /** A stream track of forced lines only (signs, the foreign-language scenes). */
+  forced?: boolean;
 }
 
 /** Who a version is among the others: `file:<key>` or `track:<id>`. */
@@ -96,6 +100,7 @@ export function subtitleVersions(
         track.label && track.label.toLowerCase() !== languageName(track.lang).toLowerCase()
           ? track.label
           : undefined,
+      ...(track.forced ? { forced: true } : {}),
     })),
     ...subtitles.options.map((option) => ({
       choice: { kind: 'file', key: option.key } as const,
@@ -206,21 +211,66 @@ export function versionNotes(
   return notes.slice(0, MAX_NOTES);
 }
 
+/**
+ * A version's row detail: its notes, said in words, then its release name.
+ * The notes first, on the TV and the phone alike: a long release name is
+ * cut at the end, and why a row is dimmed must stay in sight.
+ */
+export function versionDetail(said: readonly string[], release?: string): string | undefined {
+  return said.concat(release ? [release] : []).join(' · ') || undefined;
+}
+
 /** Whether a version was passed over for what reading it found: another script, or signs only. */
 export function isUnfit(check: SubtitleCheck | undefined): boolean {
   return check?.problem === 'script' || check?.problem === 'signs';
 }
 
+/** What a row says reading a file found, as the checks' findings, for ranking it. */
+function fitOfCheck(check: SubtitleCheck | undefined): SubtitleFit | undefined {
+  if (!check) return undefined;
+  const { problem } = check;
+  const fit: SubtitleFit = {
+    script: problem === 'script' ? 'wrong' : 'right',
+    signs: problem === 'signs',
+    hearing: check.hearing,
+    length: problem === 'short' || problem === 'long' ? problem : 'fits',
+    unfit: isUnfit(check),
+  };
+  if (check.drift) fit.drift = check.drift;
+  return fit;
+}
+
 /**
- * The version a language starts with when it is picked: its first that has
- * not failed and was not passed over for its checks, else its first that has
- * not failed, else its first.
+ * The version a language starts with when it is picked, as the automatic
+ * choice would rank them, of those that have not failed: the version picked
+ * by hand for the release; the stream's own track (always in step), unless it
+ * holds forced lines only; then the files, one made for the release first,
+ * then the best fit, in the list's order where nothing tells them apart (so
+ * a file known to cover only part falls below one not read yet). One passed
+ * over for its checks, or a forced track, only when nothing else is left;
+ * else its first that has not failed, else its first. The player then reads
+ * the language's files and may move to a better one.
  */
 export function languageFirstPick(
   group: LanguageGroup<SubtitleVersion>,
-  statusOf: Subtitles['statusOf'],
-  checkOf?: Subtitles['checkOf'],
+  subtitles: Pick<Subtitles, 'statusOf' | 'checkOf' | 'isRemembered' | 'wantsHearing'>,
+  video: PlayingRelease,
 ): SubtitleVersion {
-  const working = group.items.filter((item) => statusOf(item.choice) !== 'failed');
-  return working.find((item) => !isUnfit(checkOf?.(item.choice))) ?? working[0] ?? group.items[0]!;
+  const working = group.items.filter((item) => subtitles.statusOf(item.choice) !== 'failed');
+  const remembered = working.find((item) => subtitles.isRemembered(item.choice));
+  if (remembered) return remembered;
+  const track = working.find((item) => item.choice.kind === 'track' && !item.forced);
+  if (track) return track;
+  const files = working.filter(
+    (item) => item.choice.kind === 'file' && !isUnfit(subtitles.checkOf(item.choice)),
+  );
+  const [best] = rankSubtitles(
+    files.map((item) => ({ item, label: item.release })),
+    {
+      video,
+      fit: ({ item }) => fitOfCheck(subtitles.checkOf(item.choice)),
+      hearing: subtitles.wantsHearing(),
+    },
+  );
+  return best?.item ?? working[0] ?? group.items[0]!;
 }
