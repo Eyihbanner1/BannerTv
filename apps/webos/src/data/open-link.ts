@@ -10,8 +10,8 @@ export interface OpenLink {
   type: string;
   meta: string;
   /**
-   * The video the card was for. Details is what opens, and it works out what
-   * to resume from progress itself, so nothing uses this yet.
+   * The video the card was for. Details is what opens: it works out what to
+   * resume from progress itself, and a series opens its episodes on this one.
    */
   video?: string;
 }
@@ -58,12 +58,14 @@ export function asksFirst(
 /**
  * Opens a title's Details over Home, as a fresh start would have it: Back
  * goes to Home, and Details puts focus on Resume when there is a place to
- * resume, so the person sees what plays before it does.
+ * resume, so the person sees what plays before it does. A card for a next
+ * episode has the series open its episodes on that episode.
  */
 export function openTitle(link: OpenLink): void {
   openSection('home');
+  const route = { name: 'details' as const, type: link.type, id: link.meta };
   // Nothing on Home was pressed to get here, so Back lands where Home starts.
-  push({ name: 'details', type: link.type, id: link.meta }, () => undefined);
+  push(link.video === undefined ? route : { ...route, video: link.video }, () => undefined);
 }
 
 /** Runs `run` once someone has said who is watching: at once when they have. */
