@@ -209,24 +209,98 @@ export async function deleteSyncKeys(
   }
 }
 
+/** One item of the set-aside copy: the store's value, its own time if it has one, and whether it was Trakt's. */
+export interface AsideItem {
+  v: unknown;
+  t?: number;
+  trakt?: true;
+}
+
 /** What a join with Use kept of this screen: every part's items, by document. */
 export interface SyncAside {
   v: 1;
   /** This screen's clock when it was kept, and when it may be thrown away. */
   at: number;
   until: number;
-  documents: { [document: string]: Array<[string, { v: unknown; t?: number; trakt?: true }]> };
+  documents: { [document: string]: Array<[string, AsideItem]> };
+  /**
+   * The person asked for it back (ADR 0006, decision 12): a launch that
+   * finds this carries the bringing back on, and the copy does not run out
+   * until it is done.
+   */
+  back?: true;
 }
 
 export function asideUntil(at: number): number {
   return at + ASIDE_DAYS * DAY_MS;
 }
 
-/** Throws the set-aside copy away once its 30 days are over. */
+function readAsideItem(value: unknown): AsideItem | undefined {
+  if (!isObject(value) || !Object.prototype.hasOwnProperty.call(value, 'v')) return undefined;
+  if (value.v === undefined) return undefined;
+  const item: AsideItem = { v: value.v };
+  if (typeof value.t === 'number' && Number.isFinite(value.t) && value.t >= 0) item.t = value.t;
+  if (value.trakt === true) item.trakt = true;
+  return item;
+}
+
+/**
+ * The set-aside copy as saved, or undefined when what was saved is not one.
+ * Documents are kept by name with no prototype, and items as `[key, item]`
+ * pairs, so a key such as `__proto__` stays an ordinary key.
+ */
+export function readAside(value: unknown): SyncAside | undefined {
+  if (!isObject(value) || value.v !== 1 || !isObject(value.documents)) return undefined;
+  if (typeof value.at !== 'number' || typeof value.until !== 'number') return undefined;
+  const documents = Object.create(null) as SyncAside['documents'];
+  for (const document of Object.keys(value.documents)) {
+    const pairs = value.documents[document];
+    if (!Array.isArray(pairs)) continue;
+    const list: Array<[string, AsideItem]> = [];
+    for (const pair of pairs) {
+      if (!Array.isArray(pair) || typeof pair[0] !== 'string') continue;
+      const item = readAsideItem(pair[1]);
+      if (item) list.push([pair[0], item]);
+    }
+    documents[document] = list;
+  }
+  const aside: SyncAside = { v: 1, at: value.at, until: value.until, documents };
+  if (value.back === true) aside.back = true;
+  return aside;
+}
+
+/**
+ * The set-aside copy, or undefined when there is none or what was saved is
+ * not one. A read that fails is tried again as the engine's own are, and
+ * then rejects: taken as none, a copy being brought back would be left half done.
+ */
+export async function loadAside(
+  storage: KeyValueStore,
+  timers?: Timers,
+): Promise<SyncAside | undefined> {
+  return readAside(await readKey(storage, ASIDE_KEY, timers));
+}
+
+/** Saves the copy, as when it is marked for bringing back. A failure rejects. */
+export function saveAside(storage: KeyValueStore, aside: SyncAside): Promise<void> {
+  return storage.set(ASIDE_KEY, aside);
+}
+
+/** Throws the copy away: it has been brought back, or its 30 days are over. A failure rejects. */
+export async function dropAside(storage: KeyValueStore): Promise<void> {
+  if (storage.delete) await storage.delete(ASIDE_KEY);
+  else await storage.set(ASIDE_KEY, undefined);
+}
+
+/**
+ * Throws the set-aside copy away once its 30 days are over, unless it is
+ * being brought back: the launch that carries that on drops it when done.
+ */
 export async function expireAside(storage: KeyValueStore, now: number): Promise<void> {
   try {
     const saved = await storage.get(ASIDE_KEY);
     if (saved === undefined || saved === null) return;
+    if (isObject(saved) && saved.back === true) return;
     const until = isObject(saved) && typeof saved.until === 'number' ? saved.until : 0;
     // A copy dated in the future came from a clock that was wrong: it gets its 30 days from now.
     const at = isObject(saved) && typeof saved.at === 'number' ? saved.at : 0;
@@ -235,8 +309,7 @@ export async function expireAside(storage: KeyValueStore, now: number): Promise<
       return;
     }
     if (now < until) return;
-    if (storage.delete) await storage.delete(ASIDE_KEY);
-    else await storage.set(ASIDE_KEY, undefined);
+    await dropAside(storage);
   } catch {
     // Tried again at the next launch.
   }

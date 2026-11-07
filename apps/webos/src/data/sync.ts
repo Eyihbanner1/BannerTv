@@ -1,5 +1,6 @@
 import {
   addonSwitchesPart,
+  type AsideCopy,
   checkSyncService,
   collectionPart,
   createFollows,
@@ -12,6 +13,7 @@ import {
   itemAt,
   type Items,
   type JoinMode,
+  loadAside,
   loadBase,
   loadSyncState,
   MAIN_PROFILE_ID,
@@ -335,6 +337,8 @@ async function open(): Promise<SyncEngine | undefined> {
     // A join that carried on by itself finished: start again as the account's screen, once
     // that interrupts nothing.
     onJoined: () => reloadWhenSafe(() => void reloadJoined()),
+    // As for a bringing back that an interrupted launch left to this one.
+    onBroughtBack: () => reloadWhenSafe(() => void reloadBroughtBack()),
   });
   engine = made;
   if (typeof document !== 'undefined' && document.hidden) made.hide();
@@ -465,6 +469,7 @@ function startAccount(): void {
   void loadSyncState(storage.kv, browserTimers).then(
     (saved) => {
       if (saved) void openEngine();
+      else void carryOnBringingBack();
     },
     () => void openEngine(),
   );
@@ -548,6 +553,59 @@ export async function leaveAccount(): Promise<void> {
 /** Deletes the account from the service, then leaves it here. Rejects when the service is out of reach. */
 export async function deleteAccount(): Promise<void> {
   await (await running()).deleteAccount();
+}
+
+/**
+ * What the copy a join with Use kept of this screen holds, while it lasts:
+ * Settings > BannerTV account offers to bring it back (ADR 0006, decision
+ * 12). Undefined until checkAsideCopy() has read it, and when there is none.
+ */
+export const asideCopy = createStore<AsideCopy | undefined>(undefined);
+
+/** Reads what the set-aside copy holds, as the account screen opens. Asks the service nothing. */
+export function checkAsideCopy(): void {
+  void openEngine().then(async (made) => {
+    const copy = made ? await made.asideCopy() : undefined;
+    if (copy !== undefined || asideCopy.get() !== undefined) asideCopy.set(copy);
+  });
+}
+
+/** Starts the app again after bringing back profiles, with the join's guard against a lost write. */
+async function reloadBroughtBack(): Promise<void> {
+  try {
+    await markJoined(storage.kv, savedProfiles, syncOn());
+  } catch {
+    // Without the copy the reload most often reads everything anyway.
+  }
+  window.location.reload();
+}
+
+/**
+ * Brings back what this screen had before it joined with Use: into the
+ * account while signed in, onto the screen alone while signed out. When
+ * profiles came back, the app starts again at once, as after a join: the
+ * person is watching it. Rejects with the engine's reason (`profiles`,
+ * `none`, `offline`), the copy then left as it was.
+ */
+export async function bringBackAside(): Promise<void> {
+  const made = await running();
+  // Whether it came back or not, the account screen shows the copy as it is now.
+  const done = await made.bringBack().finally(checkAsideCopy);
+  if (done.profiles) await reloadBroughtBack();
+}
+
+/**
+ * At a launch without an account: bringing back what Use set aside, left
+ * half done by the last launch, carries on. Only then is the engine opened,
+ * and it asks the service nothing.
+ */
+async function carryOnBringingBack(): Promise<void> {
+  try {
+    const aside = await loadAside(storage.kv, browserTimers);
+    if (aside && aside.back) void openEngine();
+  } catch {
+    // Read again at the next launch.
+  }
 }
 
 export interface AccountProfile {

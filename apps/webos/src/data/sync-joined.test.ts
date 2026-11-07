@@ -203,6 +203,28 @@ describe('a join’s reload', () => {
     ]);
   });
 
+  it('puts back what a reload lost after bringing back on a screen without an account, and does not sign it in', async () => {
+    const kv = memoryKeyValueStore();
+    local.setItem(
+      'bannertv.profiles',
+      JSON.stringify({ profiles: [MAIN], lastId: 'main', askAtLaunch: false }),
+    );
+    const old = new Map(local.map);
+    const app = await launch();
+    // Bringing back what Use set aside put Guest back on the list.
+    app.profiles.set((s) => ({ ...s, profiles: [MAIN, GUEST] }));
+    await markJoined(kv, app.savedProfiles, false);
+    loseWrites(old);
+
+    const stale = await settle(kv);
+    expect(stale.reloads).toBe(1);
+    expect(stale.signedIn).toBe(false);
+    const next = await settle(kv);
+    expect(next.signedIn).toBe(false);
+    expect(next.ids()).toEqual(['main', 'guest4']);
+    expect(await kv.get(JOINED_KEY)).toBeUndefined();
+  });
+
   it('leaves a launch with no join alone', async () => {
     const kv = memoryKeyValueStore();
     before();

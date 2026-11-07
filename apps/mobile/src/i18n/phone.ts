@@ -71,8 +71,10 @@ const PHONE = {
     'Your profiles, addons, My List and Continue Watching, the same on your phone and your TV.',
   accountJoinLead:
     'Type the account code from the TV, or from where you made the account. Capitals, spaces and dashes don’t matter.',
-  accountCreateOnTv:
-    'This first phone build can join an account but not make one. Make it on the TV, then join here with its code.',
+  copyCode: 'Copy the code',
+  codeCopied:
+    'Copied. Keep it somewhere private as well as written down: anyone with the code can see everything in the account.',
+  codeNotCopied: 'The code wasn’t copied. Write it down instead.',
   playback: 'Playback',
   stillWatchingSetting: 'Ask “Still watching?”',
   about: 'BannerTV for phones {{version}} (test build)',
