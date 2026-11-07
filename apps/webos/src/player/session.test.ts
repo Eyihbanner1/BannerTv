@@ -826,6 +826,8 @@ describe('a stream far shorter than the title', () => {
     playFor(video, 5);
     expect(session.get().clip).toBe(true);
     expect(session.carryOn()).toBe(600);
+    // Nor is a move in it one the next stream starts at.
+    expect(session.moves()).toBe(0);
     session.destroy();
   });
 
@@ -1104,6 +1106,10 @@ describe('a live stream', () => {
     await live(session, video);
     playFor(video, 60);
     expect(session.carryOn()).toBe(0);
+    // Nor at a place the viewer moves it to.
+    session.seek(7100);
+    expect(session.carryOn()).toBe(0);
+    expect(session.moves()).toBe(0);
 
     lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
     expect(session.get()).toMatchObject({ entry: second, failedOver: true, live: false });
@@ -1260,6 +1266,39 @@ describe('a stream with an end', () => {
     session.seek(1830);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+
+  it('counts the moves the next stream would start at, afresh for each stream', async () => {
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 1800);
+    await settle();
+    // Before the first picture, with no length known, a move is no place yet.
+    session.seek(1830);
+    expect(session.moves()).toBe(0);
+    expect(session.carryOn()).toBe(1800);
+    // Once it plays, carryOn() follows the clock, and so each move.
+    void video.play();
+    video.fire('playing');
+    session.seek(1900);
+    expect(session.moves()).toBe(1);
+    expect(session.carryOn()).toBe(1900);
+    video.duration = Infinity;
+    await start(session, video, second, 600);
+    playFor(video, 5);
+    session.seek(1200);
+    expect(session.moves()).toBe(1);
+    expect(session.carryOn()).toBe(1200);
+    session.play(first, session.carryOn());
+    expect(session.moves()).toBe(0);
+    // Before its first picture, once its length is known, a move is a place.
+    await settle();
+    video.duration = 5000;
+    video.fire('durationchange');
+    session.seek(2000);
+    expect(session.moves()).toBe(1);
+    expect(session.carryOn()).toBe(2000);
+    session.destroy();
   });
 
   it('is a film, not a broadcast, when its file leaves the length out', async () => {

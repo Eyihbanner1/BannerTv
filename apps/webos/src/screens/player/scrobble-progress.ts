@@ -58,9 +58,10 @@ export interface Runtimes {
 export interface ScrobblePlace {
   /**
    * Notes, at every change, how far a real file of the video has got;
-   * carryOn is where the player would open the next file now.
+   * carryOn is where the player would open the next file now, and moves how
+   * many of the viewer's moves in this stream the player has taken.
    */
-  see(state: Played, runtimes: Runtimes, carryOn?: number): void;
+  see(state: Played, runtimes: Runtimes, carryOn?: number, moves?: number): void;
   /**
    * Whether the file playing now is a clip: by its length, or, while it shows
    * none, by what its link was when it was opened before.
@@ -120,6 +121,8 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let openedCarry: number | undefined;
   /** Where this opening's clock started from: openedCarry, or a move it took. */
   let origin: number | undefined;
+  /** The player's count of moves taken, as this opening last saw it. */
+  let movesSeen: number | undefined;
   /**
    * A place with no length an earlier opening reached: kept once another file
    * opens there. The same link opened again only holds it on.
@@ -215,10 +218,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     openedAt = undefined;
     openedCarry = undefined;
     origin = undefined;
+    movesSeen = undefined;
     wasClip = false;
   };
   const place: ScrobblePlace = {
-    see(state, runtimes, carryOn) {
+    see(state, runtimes, carryOn, moves) {
       const opening = state.status === 'loading' || state.status === 'idle';
       let again = false;
       if (state.entry !== file) {
@@ -246,6 +250,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
           movedTo = undefined;
         }
       }
+      // A move the player took since this opening last saw it.
+      const took = moves !== undefined && movesSeen !== undefined && moves !== movesSeen;
+      movesSeen = moves;
       if (!opening) begun = true;
       if (state.status === 'playing') played = true;
       if (state.live) {
@@ -291,11 +298,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         carryOn !== undefined &&
         Math.abs(carryOn - state.position) <= SAME_PLACE_S &&
         Math.abs(carryOn - (openedCarry ?? carryOn)) > SAME_PLACE_S;
-      if (moved) {
-        // The player took it: this is the title now, whatever the link was.
+      if (moved || took) {
+        // The player took it, before the file played or as it plays: this is
+        // the title now, whatever the link was.
         linkWasClip = false;
         linkLength = 0;
-        origin = carryOn;
+        origin = carryOn ?? state.position;
       }
       if (remembered(state, runtimes)) {
         // Still a clip by what its link was, maybe only now its running time

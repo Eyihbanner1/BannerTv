@@ -157,6 +157,11 @@ export interface PlaybackSession {
    * whose clock means nothing on another source's.
    */
   carryOn(): number;
+  /**
+   * How many moves the viewer made in this stream that moved where another
+   * stream starts: each a change carryOn() follows.
+   */
+  moves(): number;
   /** Saves progress, stops the stream and frees the decoder. */
   destroy(): void;
 }
@@ -214,6 +219,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   // Whether the viewer moved to a place in this stream before its first picture,
   // once its length was known (a stream opened paused can be).
   let seekedToPlace = false;
+  // Moves in this stream that carryOn() follows.
+  let moves = 0;
   let reportedWorked = false;
   // This attempt is a short clip of the video, not the video: a sample, a
   // trailer, or a debrid service's "not ready yet". Nothing it plays is kept
@@ -714,6 +721,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       lastStartAt = startAt;
       startedPlaying = false;
       seekedToPlace = false;
+      moves = 0;
       pausedByViewer = playOptions?.paused === true;
       reportedWorked = false;
       clip = false;
@@ -882,6 +890,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       } else patch({ position: target, ...judge(target) });
       save();
       if (!live && savedLength() > 0) seekedToPlace = true;
+      if (!live && !clip && (startedPlaying || seekedToPlace)) moves += 1;
     },
 
     setRate(rate) {
@@ -920,6 +929,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     trustedPosition: () => tracker?.position(),
 
     carryOn,
+
+    moves: () => moves,
 
     destroy() {
       if (destroyed) return;

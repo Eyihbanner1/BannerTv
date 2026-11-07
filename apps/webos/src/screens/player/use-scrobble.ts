@@ -59,7 +59,7 @@ export function useScrobble(
   useEffect(() => {
     latest.current = state;
     const runtimes = runtimesOf(runtime, knownRuntime);
-    place.see(state, runtimes, session?.carryOn());
+    place.see(state, runtimes, session?.carryOn(), session?.moves());
     // A file found to be the title as it plays starts now, its status unchanged.
     const seen = onSeen(sent.current, wasClip.current, state, place, runtimes);
     wasClip.current = seen.clip;
