@@ -132,6 +132,13 @@ export interface SubtitleProfile {
   /** Seconds: when the first line starts. */
   start: number;
   /**
+   * Seconds of the video the lines are on screen for, counting a stretch
+   * once however many lines show in it: the karaoke of a song, one syllable
+   * to a line, counts for as long as the song is sung, not for its many
+   * lines. Among the same lines as `end`.
+   */
+  covered: number;
+  /**
    * Seconds: when the last line ends, leaving out up to two stray lines set
    * ten minutes or more after the rest (a credit after the end titles).
    */
@@ -249,6 +256,21 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     last--;
   }
   const end = last >= 0 ? latest[last]! : latestEnd;
+  // The stretches the lines are on screen for, each counted once, in start order.
+  let covered = 0;
+  let from = 0;
+  let to = -1;
+  for (let i = 0; i <= last; i++) {
+    const { start, end: lineEnd } = cues[i]!;
+    if (start > to) {
+      if (to > from) covered += to - from;
+      from = start;
+      to = lineEnd;
+    } else if (lineEnd > to) {
+      to = lineEnd;
+    }
+  }
+  if (to > from) covered += to - from;
   // The latest few ends among the lines counted, latest first.
   const latestEnds: number[] = [];
   for (let i = 0; i <= last; i++) {
@@ -264,6 +286,7 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     lines: cues.length,
     start: cues.length > 0 ? cues[0]!.start : 0,
     end,
+    covered,
     latestEnds,
     letters,
     scripts,
@@ -338,13 +361,8 @@ const MIN_JUDGED_S = 300;
 export const FRAME_RATE_RATIO = 25 / (24000 / 1001);
 /** Lines a minute under which a file holds only signs and the odd line in another language. */
 const SIGNS_PER_MINUTE = 1.2;
-/** Past this many lines a file is never taken for signs only, however long the video. */
+/** Past this many lines a file is never taken for signs only by its few lines, however long the video. */
 const SIGNS_MAX_LINES = 150;
-/**
- * Lines a minute from which a file is never taken for signs only, whatever
- * its name says: a full file has about ten, a forced one far fewer.
- */
-const FULL_PER_MINUTE = 5;
 /** A file that stops before this share of the video, and over PARTIAL_GAP_S before its end, covers only part. */
 const PARTIAL_SHARE = 0.7;
 const PARTIAL_GAP_S = 600;
@@ -381,8 +399,8 @@ export interface SubtitleFit {
   hearing: boolean;
   /**
    * How its length sits against the video's: 'short' stops well before the
-   * end (part of the film, such as CD1) or has under half the lines of the
-   * other files (a forced file), 'long' runs past the end by more than a
+   * end (part of the film, such as CD1) or is on screen for under half as
+   * long as the other files (a forced file), 'long' runs past the end by more than a
    * frame-rate drift explains (another cut). Undefined when the video's
    * length cannot be judged by.
    */
@@ -429,12 +447,13 @@ export function judgeSubtitleFit(
     profile.hearingLabel ||
     (profile.hearingLines >= HEARING_MIN_LINES &&
       profile.hearingLines / Math.max(1, profile.lines) >= HEARING_SHARE);
+  // A name that says so is trusted, however many lines the file has: the karaoke of a signs
+  // and songs file, one syllable to a line, gives it as many lines as a full file.
   const fit: SubtitleFit = { script, signs: profile.forcedLabel, hearing, unfit: false };
   const seconds = judgedLength(video);
   if (seconds !== undefined) {
     const perMinute = profile.lines / (seconds / 60);
-    if (perMinute >= FULL_PER_MINUTE) fit.signs = false;
-    else if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
+    if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
     fit.coverage = profile.end / seconds;
     const margin = pastEndMargin(seconds);
     if (profile.end < seconds * PARTIAL_SHARE && seconds - profile.end > PARTIAL_GAP_S) {
@@ -490,19 +509,23 @@ function agreedEnd(ends: readonly number[]): number | undefined {
 }
 
 /**
- * A file with under this share of the lines of the others that fit (their
- * median) covers only part of the video: a forced file with only the
- * foreign-language scenes. A plain file has 10 to 30% fewer lines than one
- * for the hard of hearing of the same film, far from this.
+ * A file whose lines are on screen for under this share of the time the
+ * others' that fit are (their median, `covered`) covers only part of the
+ * video: a forced file with only the foreign-language scenes. A plain file
+ * has 10 to 30% fewer lines than one for the hard of hearing of the same
+ * film, far from this. Time rather than lines, so the karaoke of the songs
+ * in a full file, one syllable to a line, does not make a plain file beside
+ * it look like part of one.
  */
-const PART_LINES_SHARE = 0.5;
+const PART_SHARE = 0.5;
 
 /**
  * Judges the files offered in one language together: each on its own, then
  * against the others.
  *
- * - A file with under half the lines of the others that fit covers only
- *   part ('short'), whatever its length. With the title's running time too.
+ * - A file whose lines are on screen for under half as long as those of
+ *   the others that fit covers only part ('short'), whatever its length.
+ *   With the title's running time too.
  * - When at least two others that fit the video agree on where the last
  *   line goes, a file whose lines run on past the video's end falls behind
  *   ('behind': timed for film speed on a faster, PAL, video) when its end is
@@ -531,8 +554,8 @@ export function judgeSubtitleFits<K>(
     return !fit.unfit && fit.length === 'fits';
   });
   for (const file of whole) {
-    const others = whole.filter((other) => other !== file).map((other) => other.profile.lines);
-    if (others.length === 0 || file.profile.lines >= median(others) * PART_LINES_SHARE) continue;
+    const others = whole.filter((other) => other !== file).map((other) => other.profile.covered);
+    if (others.length === 0 || file.profile.covered >= median(others) * PART_SHARE) continue;
     // Its end says nothing of a frame rate: the lines are only some of the film's.
     const fit = fits.get(file.id)!;
     fit.length = 'short';

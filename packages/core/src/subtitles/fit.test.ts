@@ -8,7 +8,8 @@ import {
   profileSubtitles,
   type SubtitleProfile,
 } from './fit';
-import { fitTier } from './rank';
+import { parseSubtitleText } from './parse';
+import { fitTier, rankSubtitles } from './rank';
 import type { Cue } from './types';
 
 const cue = (start: number, end: number, text: string): Cue => ({
@@ -47,6 +48,9 @@ describe('profileSubtitles', () => {
     expect(profile.latestEnds[0]).toBe(6600);
     expect(profile.latestEnds[1]).toBeLessThan(6600);
     expect(profileSubtitles([]).latestEnds).toEqual([]);
+    // Six hundred lines of two seconds, apart from one another; the stray is left out.
+    expect(profile.covered).toBeCloseTo(1200);
+    expect(profileSubtitles([]).covered).toBe(0);
     // A quiet stretch of a few minutes before the last words is the film's, not a stray.
     const quiet = dialogue(600, 60, 6000).concat(cue(6400, 6403, 'Goodbye.'));
     expect(profileSubtitles(quiet).end).toBe(6403);
@@ -207,15 +211,16 @@ describe('judgeSubtitleFit', () => {
     expect(judgeSubtitleFit(forced, film, 'en')).toMatchObject({ signs: true, unfit: true });
   });
 
-  it('never takes a file with five lines a minute or more for signs only, whatever its name', () => {
+  it('trusts a name that says forced or signs and songs, however many lines the file has', () => {
     const named = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Film.2021.Forced');
-    expect(judgeSubtitleFit(named, film, 'en')).toMatchObject({ signs: false, unfit: false });
-    expect(judgeSubtitleFit(named, { seconds: FILM_S, exact: false }, 'en').signs).toBe(false);
-    // Six hundred lines over two hours is five a minute.
-    const five = profileSubtitles(dialogue(600, 30, FILM_S - 360), 'Film.2021.Signs.&.Songs');
-    expect(judgeSubtitleFit(five, film, 'en').signs).toBe(false);
-    // Without a length to go by, the name is all there is.
+    expect(judgeSubtitleFit(named, film, 'en')).toMatchObject({ signs: true, unfit: true });
+    expect(judgeSubtitleFit(named, { seconds: FILM_S, exact: false }, 'en').signs).toBe(true);
     expect(judgeSubtitleFit(named, { exact: false }, 'en').signs).toBe(true);
+    const songs = profileSubtitles(dialogue(600, 30, FILM_S - 360), 'Film.2021.Signs.&.Songs');
+    expect(judgeSubtitleFit(songs, film, 'en').signs).toBe(true);
+    // A film whose title starts with the word is still judged by its lines.
+    const title = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Forced.Vengeance.1982.1080p');
+    expect(judgeSubtitleFit(title, film, 'en')).toMatchObject({ signs: false, unfit: false });
   });
 
   it('knows a file in another script, and passes it over', () => {
@@ -575,5 +580,103 @@ describe('judgeSubtitleFits', () => {
     );
     expect(fits.get('plain')).toMatchObject({ length: 'fits', hearing: false });
     expect(fits.get('sdh')).toMatchObject({ length: 'fits', hearing: true });
+  });
+
+  describe('an anime episode whose songs are sung one syllable to a line', () => {
+    const episode = { seconds: 1420, exact: true };
+    const SYLLABLES = ['ka', 'ze', 'ni', 'mu', 'ke', 'te', 'ha', 'shi', 'ru', 'yo', 'so', 'ra'];
+    const clock = (seconds: number) => {
+      const cs = Math.round(seconds * 100);
+      const two = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+      return `0:${two(Math.floor(cs / 6000))}:${two(Math.floor(cs / 100) % 60)}.${two(cs % 100)}`;
+    };
+    const event = (from: number, to: number, style: string, text: string) =>
+      `Dialogue: 0,${clock(from)},${clock(to)},${style},,0,0,0,,${text}`;
+    /** The opening and the ending: each line its syllables one after another, and its translation. */
+    const songs = (linesEach: number, syllables: number) => {
+      const events: string[] = [];
+      for (const at of [60, 1330]) {
+        for (let line = 0; line < linesEach; line++) {
+          const from = at + line * 4;
+          events.push(event(from, from + 4, 'Translation', 'Into the wind we run together'));
+          for (let s = 0; s < syllables; s++) {
+            const step = 4 / syllables;
+            events.push(event(from + s * step, from + (s + 1) * step, 'Romaji', SYLLABLES[s]!));
+          }
+        }
+      }
+      return events;
+    };
+    const signs = Array.from({ length: 60 }, (_, i) =>
+      event(170 + i * 19, 173 + i * 19, 'Sign', `{\\an8}SIGN ${i + 1}`),
+    );
+    const speech = Array.from({ length: 370 }, (_, i) => {
+      const from = 160 + (i * (1320 - 163)) / 369;
+      return { from, to: from + 2.5, text: ENGLISH[i % ENGLISH.length]! };
+    });
+    const ass = (events: string[]) =>
+      parseSubtitleText(
+        ['[Script Info]', 'Title: Show', '', '[Events]']
+          .concat('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
+          .concat(events)
+          .join('\n'),
+      );
+    const srt = parseSubtitleText(
+      speech
+        .map(
+          (line, i) =>
+            `${i + 1}\n${clock(line.from).replace('.', ',')}0 --> ${clock(line.to).replace('.', ',')}0\n${line.text}`,
+        )
+        .join('\n\n'),
+    );
+    const judge = (linesEach: number, syllables: number) => {
+      const sung = songs(linesEach, syllables);
+      const files: Array<{ id: string; label?: string; profile: SubtitleProfile }> = [
+        {
+          id: 'songs',
+          profile: profileSubtitles(
+            ass(sung.concat(signs)),
+            '[Group] Show - 01 (1080p) [Signs & Songs]',
+          ),
+        },
+        {
+          id: 'full',
+          profile: profileSubtitles(
+            ass(
+              sung.concat(
+                signs,
+                speech.map((l) => event(l.from, l.to, 'Default', l.text)),
+              ),
+            ),
+            '[Group] Show - 01 (1080p)',
+          ),
+        },
+        { id: 'srt', profile: profileSubtitles(srt) },
+      ];
+      const fits = judgeSubtitleFits(files, episode, 'en');
+      const ranked = rankSubtitles(files, {
+        video: {},
+        fit: (file) => fits.get(file.id),
+        hearing: false,
+      }).map((file) => file.id);
+      return { files, fits, ranked };
+    };
+
+    it('takes the signs and songs file by its name for signs only, many lines as it has', () => {
+      const { files, fits, ranked } = judge(20, 9);
+      // More lines a minute than a full file has.
+      expect(files[0]!.profile.lines / 24).toBeGreaterThan(15);
+      expect(fits.get('songs')).toMatchObject({ signs: true, unfit: true });
+      expect(ranked[ranked.length - 1]).toBe('songs');
+    });
+
+    it('never takes the plain file for part of one beside the full file with the karaoke', () => {
+      const { files, fits, ranked } = judge(22, 12);
+      // The full file has far more than twice the plain file's lines.
+      expect(files[1]!.profile.lines).toBeGreaterThan(files[2]!.profile.lines * 2);
+      expect(fits.get('srt')).toMatchObject({ length: 'fits', unfit: false });
+      expect(fits.get('full')).toMatchObject({ length: 'fits', unfit: false });
+      expect(ranked).toEqual(['full', 'srt', 'songs']);
+    });
   });
 });
