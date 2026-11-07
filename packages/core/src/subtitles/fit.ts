@@ -136,6 +136,12 @@ export interface SubtitleProfile {
    * ten minutes or more after the rest (a credit after the end titles).
    */
   end: number;
+  /**
+   * Seconds: the latest few line ends (TAIL_LINES at most) among the same
+   * lines, latest first, for telling lines that run on past the video's end
+   * from a lone late line.
+   */
+  latestEnds: number[];
   /** Letters read for their script, at most MAX_LETTERS. */
   letters: number;
   /** Of those, the letters in each script. */
@@ -158,6 +164,8 @@ const MAX_LETTERS = 30000;
  */
 const STRAY_GAP_S = 600;
 const MAX_STRAYS = 2;
+/** Line ends kept from the end of a file (`latestEnds`). */
+const TAIL_LINES = 3;
 
 /** A sound or a description in brackets at the start of a line: "[door creaks]", "(sighs) I know". */
 const BRACKETED = /^[-–—]?\s*[[(][^\])]{2,}[\])]/;
@@ -214,21 +222,29 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     latestEnd = Math.max(latestEnd, cue.end);
     latest.push(latestEnd);
   }
-  let end = latestEnd;
-  for (let i = cues.length - 1, strays = 0; i > 0; i--) {
-    if (strays < MAX_STRAYS && cues[i]!.start - latest[i - 1]! > STRAY_GAP_S) {
-      strays++;
-      end = latest[i - 1]!;
-      continue;
-    }
-    end = latest[i]!;
-    break;
+  // The last line counted: up to MAX_STRAYS stray lines at the end are left out.
+  let last = cues.length - 1;
+  for (let strays = 0; last > 0 && strays < MAX_STRAYS; strays++) {
+    if (cues[last]!.start - latest[last - 1]! <= STRAY_GAP_S) break;
+    last--;
+  }
+  const end = last >= 0 ? latest[last]! : latestEnd;
+  // The latest few ends among the lines counted, latest first.
+  const latestEnds: number[] = [];
+  for (let i = 0; i <= last; i++) {
+    const lineEnd = cues[i]!.end;
+    if (latestEnds.length === TAIL_LINES && lineEnd <= latestEnds[TAIL_LINES - 1]!) continue;
+    let at = latestEnds.length;
+    while (at > 0 && latestEnds[at - 1]! < lineEnd) at--;
+    latestEnds.splice(at, 0, lineEnd);
+    if (latestEnds.length > TAIL_LINES) latestEnds.pop();
   }
 
   return {
     lines: cues.length,
     start: cues.length > 0 ? cues[0]!.start : 0,
     end,
+    latestEnds,
     letters,
     scripts,
     hearingLines,
@@ -291,6 +307,15 @@ const PARTIAL_GAP_S = 600;
 /** A file is past the video's end only beyond this: releases differ by a few seconds. */
 const PAST_END_MIN_S = 10;
 const PAST_END_SHARE = 0.003;
+/**
+ * A file falls behind (timed for film speed on a faster, PAL, video) only on
+ * strong evidence: its last line ends past the video's end by at least half
+ * of what the frame rates' ratio gives (2.1%), and so do its last
+ * BEHIND_MIN_LINES lines. Less than that, or one or two late lines, is
+ * another release's ending, a teaser or a translator's credit: no drift.
+ */
+const BEHIND_MIN_SHARE = (FRAME_RATE_RATIO - 1) / 2;
+const BEHIND_MIN_LINES = 3;
 /** With only the title's running time to go by, a file is too long only well past it. */
 const RUNTIME_LONG_SHARE = 1.25;
 /** Lines marked for the hard of hearing, at least this many and this share, make an SDH file. */
@@ -358,13 +383,21 @@ export function judgeSubtitleFit(
       fit.length = profile.end > seconds * RUNTIME_LONG_SHARE ? 'long' : 'fits';
     } else if (profile.end <= seconds + margin) {
       fit.length = 'fits';
-    } else if (!fit.signs && profile.end <= seconds * FRAME_RATE_RATIO + margin) {
-      // Past the end, but by no more than a file timed for film speed runs
-      // on a faster (PAL) video: stretched onto the video's clock, it ends in time.
-      fit.length = 'fits';
-      fit.drift = 'behind';
-    } else {
+    } else if (profile.end > seconds * FRAME_RATE_RATIO + margin) {
       fit.length = 'long';
+    } else {
+      // Past the end, but by no more than a file timed for film speed runs
+      // on a faster (PAL) video: stretched onto the video's clock, it ends in
+      // time. Only when it runs on well past the end, line after line.
+      fit.length = 'fits';
+      const pastEnd = profile.latestEnds.filter((lineEnd) => lineEnd > seconds + margin).length;
+      if (
+        !fit.signs &&
+        profile.end >= seconds * (1 + BEHIND_MIN_SHARE) &&
+        pastEnd >= BEHIND_MIN_LINES
+      ) {
+        fit.drift = 'behind';
+      }
     }
   }
   fit.unfit = fit.script === 'wrong' || fit.signs;
@@ -386,11 +419,25 @@ function median(values: readonly number[]): number {
 }
 
 /**
+ * Where most of these files' last lines agree to end (within AGREE_SHARE of
+ * their middle), when at least two do; undefined when they do not agree.
+ */
+function agreedEnd(ends: readonly number[]): number | undefined {
+  if (ends.length < 2) return undefined;
+  const consensus = median(ends);
+  const agreeing = ends.filter((end) => Math.abs(end - consensus) <= consensus * AGREE_SHARE);
+  return agreeing.length >= 2 && agreeing.length * 2 > ends.length ? consensus : undefined;
+}
+
+/**
  * Judges the files offered in one language together: each on its own, and
  * one ending about 4% before the others ('ahead': timed for 25 fps on a
  * film-speed video) when at least two others that fit the video agree on
  * where the last line goes, none agrees with it, and stretched it still ends
- * within the video. Only with the video's own length.
+ * within the video. A file judged on its own as falling behind ('behind') is
+ * not, when such others agree on an end and its own is not about 4% after
+ * theirs: it is another cut, or has a longer ending, and is too long. Only
+ * with the video's own length.
  */
 export function judgeSubtitleFits<K>(
   files: ReadonlyArray<{ id: K; profile: SubtitleProfile }>,
@@ -409,23 +456,27 @@ export function judgeSubtitleFits<K>(
       !fit.unfit &&
       fit.length === 'fits' &&
       fit.drift === undefined &&
-      file.profile.end >= seconds - CREDITS_MAX_S
+      file.profile.end >= seconds - CREDITS_MAX_S &&
+      file.profile.end <= seconds + margin
     );
   });
   for (const file of files) {
     const fit = fits.get(file.id)!;
-    if (fit.unfit || fit.length !== 'fits' || fit.drift !== undefined) continue;
+    if (fit.unfit || fit.length !== 'fits') continue;
     const end = file.profile.end;
     const others = steady.filter((other) => other !== file).map((other) => other.profile.end);
-    if (others.length < 2) continue;
+    const consensus = agreedEnd(others);
+    if (consensus === undefined) continue;
+    if (fit.drift === 'behind') {
+      if (Math.abs(end / consensus - FRAME_RATE_RATIO) > DRIFT_TOLERANCE) {
+        delete fit.drift;
+        fit.length = 'long';
+      }
+      continue;
+    }
+    if (fit.drift !== undefined) continue;
     if (others.some((other) => Math.abs(other - end) <= end * AGREE_SHARE)) continue;
-    const consensus = median(others);
-    const agreeing = others.filter(
-      (other) => Math.abs(other - consensus) <= consensus * AGREE_SHARE,
-    );
-    if (agreeing.length < 2 || agreeing.length * 2 <= others.length) continue;
-    const ratio = end / consensus;
-    if (Math.abs(ratio - 1 / FRAME_RATE_RATIO) > DRIFT_TOLERANCE) continue;
+    if (Math.abs(end / consensus - 1 / FRAME_RATE_RATIO) > DRIFT_TOLERANCE) continue;
     if (end * FRAME_RATE_RATIO > seconds + margin) continue;
     fit.drift = 'ahead';
   }

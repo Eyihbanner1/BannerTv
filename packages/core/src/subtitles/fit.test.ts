@@ -40,6 +40,11 @@ describe('profileSubtitles', () => {
     expect(profile.lines).toBe(601);
     expect(profile.start).toBe(60);
     expect(profile.end).toBe(6600);
+    // The latest ends, latest first, leave the stray out too.
+    expect(profile.latestEnds).toHaveLength(3);
+    expect(profile.latestEnds[0]).toBe(6600);
+    expect(profile.latestEnds[1]).toBeLessThan(6600);
+    expect(profileSubtitles([]).latestEnds).toEqual([]);
     // A quiet stretch of a few minutes before the last words is the film's, not a stray.
     const quiet = dialogue(600, 60, 6000).concat(cue(6400, 6403, 'Goodbye.'));
     expect(profileSubtitles(quiet).end).toBe(6403);
@@ -191,6 +196,32 @@ describe('judgeSubtitleFit', () => {
     expect(fromPage.length).toBe('fits');
   });
 
+  it('takes no drift from a lone late line, or from lines just past the end', () => {
+    // A translator's credit just after the video's end: the ad filter knows only English ones.
+    const spanish = ['¿Dónde estuviste toda la noche?', 'Te esperé hasta que salió el sol.'];
+    const credit = profileSubtitles(
+      dialogue(1300, 30, 6785, spanish).concat(cue(7226, 7230, 'Traducido por Juan')),
+    );
+    expect(credit.end).toBe(7230);
+    expect(judgeSubtitleFit(credit, film, 'es')).toMatchObject({ length: 'fits', unfit: false });
+    expect(judgeSubtitleFit(credit, film, 'es').drift).toBeUndefined();
+    // The same credit much later, past half of what a drift gives, is still one line.
+    const lateCredit = profileSubtitles(
+      dialogue(1300, 30, 7000).concat(cue(7360, 7364, 'Subtitulado por Juan')),
+    );
+    expect(lateCredit.latestEnds[0]).toBe(7364);
+    expect(lateCredit.latestEnds[1]).toBeCloseTo(7000);
+    expect(judgeSubtitleFit(lateCredit, film, 'en').drift).toBeUndefined();
+    // A 45-minute episode whose lines end half a minute after it: another release's ending.
+    const episode = { seconds: 2700, exact: true };
+    const teaser = profileSubtitles(dialogue(500, 20, 2730));
+    expect(judgeSubtitleFit(teaser, episode, 'en')).toMatchObject({ length: 'fits' });
+    expect(judgeSubtitleFit(teaser, episode, 'en').drift).toBeUndefined();
+    // Lines running on well past its end, line after line, are a drift.
+    const behind = profileSubtitles(dialogue(500, 20, 2780));
+    expect(judgeSubtitleFit(behind, episode, 'en').drift).toBe('behind');
+  });
+
   it('takes a few seconds past the end as a release’s difference, and far past it as another cut', () => {
     const justPast = profileSubtitles(dialogue(1300, 30, FILM_S + 6));
     expect(judgeSubtitleFit(justPast, film, 'en')).toMatchObject({ length: 'fits' });
@@ -267,6 +298,40 @@ describe('judgeSubtitleFits', () => {
         { id: 'b', profile: at(FILM_S - 1480) },
       ]),
     ).toBeUndefined();
+  });
+
+  it('takes a file running past the end for another cut, not a drift, when others agree elsewhere', () => {
+    const episode = { seconds: 2700, exact: true };
+    const ending = (end: number) => profileSubtitles(dialogue(500, 20, end));
+    // A longer ending (a teaser for the next episode) runs on a minute past the others'.
+    const longer = judgeSubtitleFits(
+      [
+        { id: 'teaser', profile: ending(2765) },
+        { id: 'a', profile: ending(2690) },
+        { id: 'b', profile: ending(2700) },
+      ],
+      episode,
+      'en',
+    );
+    expect(longer.get('teaser')).toMatchObject({ length: 'long', unfit: false });
+    expect(longer.get('teaser')!.drift).toBeUndefined();
+    // Alone, the same file is taken for one timed for film speed.
+    expect(
+      judgeSubtitleFits([{ id: 'teaser', profile: ending(2765) }], episode, 'en').get('teaser')!
+        .drift,
+    ).toBe('behind');
+    // About 4% after the others' end: a drift indeed.
+    const drifting = judgeSubtitleFits(
+      [
+        { id: 'film', profile: ending(2650 * FRAME_RATE_RATIO) },
+        { id: 'a', profile: ending(2650) },
+        { id: 'b', profile: ending(2655) },
+      ],
+      episode,
+      'en',
+    );
+    expect(drifting.get('film')).toMatchObject({ length: 'fits', drift: 'behind' });
+    expect(drifting.get('a')!.drift).toBeUndefined();
   });
 
   it('counts neither a drifting file nor one of signs among the files that agree', () => {
