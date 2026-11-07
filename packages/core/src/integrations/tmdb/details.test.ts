@@ -138,6 +138,8 @@ describe('readDetails', () => {
       certificate: '12',
       network: 'DC Comics',
       tagline: 'Welcome to a world without rules.',
+      // No digital release listed, so the UK disc release.
+      homeRelease: Date.parse('2008-12-08T00:00:00.000Z'),
     });
   });
 
@@ -290,6 +292,38 @@ describe('readDetails', () => {
       expect(series([us, { descriptors: [], iso_3166_1: 'GB', rating: '15' }])).toBe('15');
       expect(series([us, { descriptors: [], iso_3166_1: 'GB', rating: '' }])).toBe('PG');
       expect(series([{ descriptors: [], iso_3166_1: 'AU', rating: 'G' }])).toBeUndefined();
+    });
+  });
+
+  describe('home release', () => {
+    const home = (results: unknown[]) => filmWith({ release_dates: { results } }).homeRelease;
+    const on = (type: number, release_date: string) => ({ ...release('', type), release_date });
+
+    it('takes the first digital release in the UK, before a disc or a cinema one', () => {
+      const gb = {
+        iso_3166_1: 'GB',
+        release_dates: [
+          on(3, '2026-03-01T00:00:00.000Z'),
+          on(5, '2026-04-01T00:00:00.000Z'),
+          on(4, '2026-05-02T00:00:00.000Z'),
+          on(4, '2026-05-01T00:00:00.000Z'),
+        ],
+      };
+      expect(home([gb])).toBe(Date.parse('2026-05-01T00:00:00.000Z'));
+    });
+
+    it('asks the US when the UK lists none, and takes a disc release when nothing is digital', () => {
+      const us = { iso_3166_1: 'US', release_dates: [on(4, '2026-06-01T00:00:00.000Z')] };
+      const gbDisc = { iso_3166_1: 'GB', release_dates: [on(5, '2026-07-01T00:00:00.000Z')] };
+      expect(home([gbDisc, us])).toBe(Date.parse('2026-06-01T00:00:00.000Z'));
+      expect(home([gbDisc])).toBe(Date.parse('2026-07-01T00:00:00.000Z'));
+    });
+
+    it('has none for cinema releases only, an unreadable date, or a series', () => {
+      const gb = { iso_3166_1: 'GB', release_dates: [on(3, '2026-03-01T00:00:00.000Z')] };
+      expect(home([gb])).toBeUndefined();
+      expect(home([{ iso_3166_1: 'GB', release_dates: [on(4, 'soon')] }])).toBeUndefined();
+      expect(seriesWith({ release_dates: { results: [gb] } }).homeRelease).toBeUndefined();
     });
   });
 

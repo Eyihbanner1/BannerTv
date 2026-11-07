@@ -45,6 +45,14 @@ export const SEARCH_FIELD = 'search-field';
 // Kept for this session, so Back from a title returns to the same results.
 const memory = { text: '', term: '', slideRow: undefined as string | undefined };
 
+/** Search opens next on `term`, as if typed: a name from a title's cast, say. */
+export function searchFor(term: string): void {
+  forgetFocus(RESULT_PREFIX);
+  memory.text = term;
+  memory.term = termOf(term);
+  memory.slideRow = undefined;
+}
+
 function termOf(text: string): string {
   const term = text.trim().replace(/\s+/g, ' ');
   return term.length >= MIN_TERM_LENGTH ? term : '';

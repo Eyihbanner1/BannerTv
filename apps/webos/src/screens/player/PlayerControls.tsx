@@ -1,5 +1,5 @@
 import { liveFraction, type LiveWindow } from '@bannertv/core';
-import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import {
   type MouseEvent,
   type ReactNode,
@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '../../components/Button';
 import { Pressable } from '../../components/Pressable';
 import { markActivity } from '../../navigation/activity';
 import { answeredOk, clickCameWithOk } from '../../navigation/ok-click';
@@ -66,7 +67,16 @@ interface PlayerControlsProps {
   onSeekTo: (seconds: number) => void;
   /** The back arrow at the top left, for the pointer: the same as Back with the controls hidden. */
   onLeave: () => void;
+  /**
+   * Skip intro or Skip recap, while one plays: a button just above the right
+   * end of the bar, reached with Up from it, so nothing in the rows moves.
+   */
+  skip?: { label: string; onPress: () => void };
 }
+
+/** Skip intro's place above the bar, and the bar's: Up and Down go between them. */
+const SKIP_KEY = 'player-skip-chrome';
+const SEEK_KEY = 'player-seek';
 
 /**
  * Where the video is, and where a skip will land: the time played, the bar
@@ -87,6 +97,7 @@ function SeekBar({
   live,
   liveWindow,
   behind,
+  skipAbove,
 }: Pick<
   PlayerControlsProps,
   | 'position'
@@ -98,18 +109,20 @@ function SeekBar({
   | 'live'
   | 'liveWindow'
   | 'behind'
->) {
+> & { skipAbove: boolean }) {
   const { t } = useTranslation();
   // Whether the pointer is over the row, where its OK is a click.
   const pointerOver = useRef(false);
   const { ref, focused, focusSelf } = useFocusable<object, HTMLDivElement>({
-    focusKey: 'player-seek',
+    focusKey: SEEK_KEY,
     accessibilityLabel: t('player.seek'),
     onArrowPress: (direction, _props, details) => {
       if (direction === 'left' || direction === 'right') {
         onScrub(direction === 'left' ? -1 : 1, (details.pressedKeys[direction] ?? 1) - 1);
         return false;
       }
+      // Up stops here, the back arrow above being the pointer's, unless Skip intro waits above.
+      if (direction === 'up' && skipAbove) void setFocus(SKIP_KEY);
       return direction === 'down';
     },
     // The Magic Remote OK over the bar also arrives as a click, which jumps:
@@ -135,6 +148,11 @@ function SeekBar({
   );
   // What the bar spans: the video, or on a broadcast what it keeps, up to live.
   const kept = live ? liveWindow : null;
+  // While a skip moves along a broadcast, how far behind live it will land:
+  // within the engine's slack of live, it lands live.
+  const scrubBehind = kept && scrubTo !== null ? Math.max(0, kept.live - scrubTo) : null;
+  const shownBehind =
+    scrubBehind === null ? behind : scrubBehind <= Math.max(0, kept?.slack ?? 0) ? 0 : scrubBehind;
   const from = kept ? kept.start : 0;
   const span = kept ? kept.live - kept.start : live ? 0 : duration;
   const fractionAt = (event: MouseEvent): number | null => {
@@ -150,7 +168,7 @@ function SeekBar({
     kept ? liveFraction(kept, at) : span > 0 ? Math.max(0, Math.min(1, at / span)) : 0;
   const fraction = share(shown);
   const played = share(position);
-  const behindLive = live && behind > 0;
+  const behindLive = live && shownBehind > 0;
   return (
     <div
       ref={ref}
@@ -163,7 +181,7 @@ function SeekBar({
         !live
           ? formatTime(shown)
           : behindLive
-            ? t('player.behindLive', { time: formatTime(behind) })
+            ? t('player.behindLive', { time: formatTime(shownBehind) })
             : t('player.atLive')
       }
       className={focused ? `${styles.seek} ${styles.seekFocused}` : styles.seek}
@@ -217,7 +235,7 @@ function SeekBar({
       </div>
       <span className={`${styles.time} ${styles.timeLeft}`}>
         {behindLive
-          ? `−${formatTime(behind)}`
+          ? `−${formatTime(shownBehind)}`
           : !live && duration > 0
             ? `−${formatTime(Math.max(0, duration - shown))}`
             : ''}
@@ -339,8 +357,9 @@ function ControlRow({
  * with a name under each icon, and the tools saying what is on now. At the
  * top: a back arrow for the pointer, the title, three facts, the clock and
  * when it ends. Down from Pause reaches Audio and subtitles; Up from the
- * tools comes back to Pause. They stay mounted while hidden, so focus can
- * land on them the moment they show.
+ * tools comes back to Pause. During an intro or recap, Skip intro waits just
+ * above the right end of the bar, Up from it. They stay mounted while
+ * hidden, so focus can land on them the moment they show.
  */
 export function PlayerControls(props: PlayerControlsProps) {
   const { visible, title, subtitle, facts, transport, tools, live, duration, position } = props;
@@ -412,7 +431,23 @@ export function PlayerControls(props: PlayerControlsProps) {
             onScrub={props.onScrub}
             onCommit={props.onCommit}
             onSeekTo={props.onSeekTo}
+            skipAbove={!!props.skip}
           />
+          {props.skip && (
+            <div className={styles.skipInControls}>
+              <Button
+                focusKey={SKIP_KEY}
+                variant="primary"
+                label={props.skip.label}
+                onPress={props.skip.onPress}
+                // Down goes back to the bar; nothing else leaves it, the back arrow being the pointer's.
+                onArrowPress={(direction) => {
+                  if (direction === 'down') void setFocus(SEEK_KEY);
+                  return false;
+                }}
+              />
+            </div>
+          )}
           <ControlRow
             focusKey="player-transport"
             first={pause?.focusKey ?? 'player-play'}

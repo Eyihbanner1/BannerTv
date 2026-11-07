@@ -103,13 +103,13 @@ test('signed in to Trakt, Details ticks what was watched, the player says what p
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
 
-  // Watched elsewhere: the first episode has its tick, the second has none.
+  // Watched elsewhere: the first episode has its tick, and Details opens on the second, with none.
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await expectTitleFocused(page);
-  await press(page, 'Enter', 'details-episodes-0');
-  await expect(page.locator('[data-focused="true"]')).toHaveAttribute('aria-label', /, watched$/);
-  await press(page, 'ArrowDown', 'details-episodes-1');
+  await press(page, 'Enter', 'details-episodes-1');
   await expect(page.locator('[data-focused="true"]')).not.toHaveAttribute('aria-label', /watched/);
+  await press(page, 'ArrowUp', 'details-episodes-0');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute('aria-label', /, watched$/);
   await pressBack(page);
   await expectFocus(page, `${SERIES_ROW}-tile-0`);
 

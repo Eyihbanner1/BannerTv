@@ -11,6 +11,7 @@ import { Button } from '../../ui/Button';
 import { FixtureRow } from '../../ui/FixtureRow';
 import { Message } from '../../ui/Message';
 import { colors, radius, space, type } from '../../ui/theme';
+import { usePullRefresh } from '../../ui/use-pull-refresh';
 import {
   useMinuteClock,
   useOnShow,
@@ -23,6 +24,19 @@ const TODAY_INDEX = 1;
 
 // Kept for the run, so coming back to Sports finds the day it was on.
 const memory = { day: undefined as SportsDay | undefined };
+
+/** Resolves once the feed has nothing loading; a refresh starts loading at once if it will. */
+function feedSettled(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (sportsFeed.get().loading) return;
+      stop();
+      resolve();
+    };
+    const stop = sportsFeed.subscribe(check);
+    check();
+  });
+}
 
 const GroupRow = memo(function GroupRow({
   group,
@@ -70,6 +84,12 @@ export function SportsScreen() {
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
 
   useWantSports(day, false, onShow);
+  // Pull to refresh asks again for whatever failed or has gone out of date.
+  const refreshControl = usePullRefresh(() => {
+    sportsFeed.retry();
+    sportsFeed.refresh();
+    return feedSettled();
+  });
   // The last sports addon was removed: Sports gives way to Home.
   useEffect(() => {
     if (sports.ready && !sports.shown) router.navigate('/');
@@ -137,6 +157,7 @@ export function SportsScreen() {
       // A new day's rows are new rows, even for a competition on both days.
       keyExtractor={(group) => `${day}|${group.key}`}
       ListHeaderComponent={header}
+      refreshControl={refreshControl}
       renderItem={({ item: group }) => <GroupRow group={group} view={view} />}
       ListFooterComponent={
         groups.length > 0 && feed.loading ? (

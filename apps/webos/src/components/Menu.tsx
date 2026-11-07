@@ -30,7 +30,8 @@ interface MenuProps {
   title: string;
   options: readonly MenuOption[];
   selected: string | undefined;
-  returnFocusKey: string;
+  /** Focused again when the menu closes. A function is read at closing time. */
+  returnFocusKey: string | (() => string);
   onSelect: (value: string) => void;
   onClose: () => void;
 }

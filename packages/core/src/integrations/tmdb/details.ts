@@ -34,6 +34,11 @@ export interface TmdbDetails {
   tagline?: string;
   /** A series' season numbers, lowest first; 0 holds the specials. */
   seasons?: number[];
+  /**
+   * When a film comes out to watch at home, in milliseconds: its first digital release in the
+   * UK, else the US, else its first disc release there.
+   */
+  homeRelease?: number;
 }
 
 export interface TmdbEpisode {
@@ -213,6 +218,30 @@ function filmCertificate(releaseDates: unknown): Ratings | undefined {
   });
 }
 
+/** TMDB's release types for watching at home: digital, then physical (disc). */
+const HOME_RELEASE_TYPES = [4, 5] as const;
+
+function homeRelease(releaseDates: unknown): number | undefined {
+  const results = list(asObject(releaseDates)?.results);
+  for (const type of HOME_RELEASE_TYPES) {
+    for (const country of COUNTRIES) {
+      let first: number | undefined;
+      for (const item of results) {
+        const entry = asObject(item);
+        if (entry?.iso_3166_1 !== country) continue;
+        for (const release of list(entry.release_dates)) {
+          const raw = asObject(release);
+          const date = raw?.type === type ? text(raw.release_date) : undefined;
+          const time = date === undefined ? NaN : Date.parse(date);
+          if (Number.isFinite(time) && (first === undefined || time < first)) first = time;
+        }
+      }
+      if (first !== undefined) return first;
+    }
+  }
+  return undefined;
+}
+
 function seriesCertificate(contentRatings: unknown): Ratings | undefined {
   const results = list(asObject(contentRatings)?.results);
   return firstRating((country) => {
@@ -275,6 +304,9 @@ export function readDetails(kind: TmdbKind, tmdbId: number, value: unknown): Tmd
   if (tv) {
     const seasons = readSeasons(raw.seasons);
     if (seasons.length > 0) details.seasons = seasons;
+  } else {
+    const home = homeRelease(raw.release_dates);
+    if (home !== undefined) details.homeRelease = home;
   }
   return details;
 }

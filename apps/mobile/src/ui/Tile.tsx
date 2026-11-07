@@ -23,6 +23,7 @@ export const Tile = memo(function Tile({
   note,
   progress,
   onPress,
+  onLongPress,
   width,
 }: {
   item: MetaPreview;
@@ -30,6 +31,8 @@ export const Tile = memo(function Tile({
   note?: string;
   progress?: number;
   onPress: (item: MetaPreview) => void;
+  /** A long press: what else can be done with the title. */
+  onLongPress?: (item: MetaPreview) => void;
   /** Overrides the shape's width (grids); the height keeps the shape's proportions. */
   width?: number;
 }) {
@@ -43,6 +46,7 @@ export const Tile = memo(function Tile({
   return (
     <Pressable
       onPress={() => onPress(item)}
+      {...(onLongPress ? { onLongPress: () => onLongPress(item) } : {})}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => [{ width: tileWidth }, pressed && styles.pressed]}
