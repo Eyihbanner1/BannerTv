@@ -158,12 +158,41 @@ export interface SubtitlePlan<T> {
 }
 
 /**
+ * Once lines show: the file showing stays, unless a file read since ranks
+ * above it and fits clearly better, and switches are left. Files to read are
+ * read only while switches are left, as only a switch could follow.
+ */
+function keepOrSwitch<T extends PickableSubtitle>(
+  ranked: readonly T[],
+  current: T,
+  toRead: T[],
+  input: PlanInput<T>,
+): SubtitlePlan<T> {
+  const switches = input.switchesLeft > 0;
+  const best = ranked.find((option) => input.fit(option.url) !== undefined);
+  if (
+    switches &&
+    best !== undefined &&
+    best !== current &&
+    ranked.indexOf(best) < ranked.indexOf(current) &&
+    clearlyBetter(input.fit(best.url), input.fit(current.url), input.hearing)
+  ) {
+    return { pick: best, read: toRead, hold: false, switched: true };
+  }
+  return { pick: current, read: switches ? toRead : [], hold: false, switched: false };
+}
+
+/**
  * The automatic choice of a file in a language, planned again each time
  * something is learnt: which file to choose, which to read for their checks,
  * and whether to hold the lines back meanwhile.
  *
  * - A version picked by hand for this release, or one whose release name
- *   matches the video, is chosen at once, and no other is read.
+ *   matches the video, is chosen at once, and no other is read. Another
+ *   made for the release as well (two addons' copies, or CD1 and CD2) takes
+ *   over from it only as below: read, clearly better, and while switches
+ *   are left. So two such files are not swapped back and forth as each is
+ *   read.
  * - Otherwise the best placed few are read, and the lines held back until
  *   they have been and the video's length is known (or `timeUp`); then the
  *   best of those read is chosen.
@@ -181,17 +210,29 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
       switched: false,
     };
   }
-  const top = ranked[0]!;
-  if (rankReason(top, { video: input.video, remembered: (o) => o.key === input.remembered }) < 2) {
-    return { pick: top, read: [], hold: false, switched: false };
-  }
   const isRead = (option: T) => input.fit(option.url) !== undefined;
+  const reasonOf = (option: T) =>
+    rankReason(option, { video: input.video, remembered: (o) => o.key === input.remembered });
+  const top = ranked[0]!;
+  const current = ranked.find((option) => option.key === input.current);
+  const reason = reasonOf(top);
+  if (reason < 2) {
+    if (!current || reasonOf(current) !== reason) {
+      return { pick: top, read: [], hold: false, switched: false };
+    }
+    // Others of the same standing, best first; those placed above the one showing may be read.
+    const peers = ranked.filter((option) => reasonOf(option) === reason);
+    const above = peers.slice(0, peers.indexOf(current));
+    const toRead = above
+      .filter((option) => !isRead(option) && !input.reading(option.url))
+      .slice(0, Math.max(0, input.readsLeft));
+    return keepOrSwitch(peers, current, toRead, input);
+  }
   const candidates = ranked.slice(0, CANDIDATES);
   const toRead = candidates
     .filter((option) => !isRead(option) && !input.reading(option.url))
     .slice(0, Math.max(0, input.readsLeft));
   const known = ranked.filter(isRead);
-  const current = ranked.find((option) => option.key === input.current);
 
   if (input.holding) {
     const busy =
@@ -205,16 +246,5 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
   }
 
   if (!current) return { pick: known[0] ?? top, read: toRead, hold: false, switched: false };
-  const best = known[0];
-  const switches = input.switchesLeft > 0;
-  if (
-    switches &&
-    best !== undefined &&
-    best !== current &&
-    ranked.indexOf(best) < ranked.indexOf(current) &&
-    clearlyBetter(input.fit(best.url), input.fit(current.url), input.hearing)
-  ) {
-    return { pick: best, read: toRead, hold: false, switched: true };
-  }
-  return { pick: current, read: switches ? toRead : [], hold: false, switched: false };
+  return keepOrSwitch(ranked, current, toRead, input);
 }

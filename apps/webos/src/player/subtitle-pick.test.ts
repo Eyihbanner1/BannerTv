@@ -205,6 +205,43 @@ describe('planSubtitlePick', () => {
     });
   });
 
+  it('does not swap two files made for the release back and forth as each is read', () => {
+    const label = 'Some.Film.2021.1080p.BluRay-GROUP';
+    const two = [file('cd1', 'eng', label), file('cd2', 'eng', label)];
+    const SHORT: SubtitleFit = { ...FITS, length: 'short' };
+    const showing = { holding: false, current: 'cd1' };
+    const settled = { hold: false, switched: false };
+    // The first shows at once.
+    expect(plan(two, {})).toEqual({ pick: 'cd1', read: [], ...settled });
+    // Read, it covers only part of the film: the other is read, and the first stays meanwhile.
+    expect(plan(two, { cd1: SHORT }, showing)).toEqual({ pick: 'cd1', read: ['cd2'], ...settled });
+    expect(plan(two, { cd1: BEHIND }, showing)).toEqual({ pick: 'cd1', read: ['cd2'], ...settled });
+    // Read and no better: the first stays.
+    expect(plan(two, { cd1: SHORT, cd2: SHORT }, showing)).toEqual({
+      pick: 'cd1',
+      read: [],
+      ...settled,
+    });
+    // Read and clearly better: it takes over, counted as a switch, but not when none is left.
+    expect(plan(two, { cd1: SHORT, cd2: FITS }, showing)).toEqual({
+      pick: 'cd2',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    expect(plan(two, { cd1: SHORT }, { ...showing, switchesLeft: 0 })).toEqual({
+      pick: 'cd1',
+      read: [],
+      ...settled,
+    });
+    // Once on the second, the first stays passed over.
+    expect(plan(two, { cd1: SHORT, cd2: FITS }, { ...showing, current: 'cd2' })).toEqual({
+      pick: 'cd2',
+      read: [],
+      ...settled,
+    });
+  });
+
   it('once lines show, switches to a file read later only when it fits clearly better', () => {
     const showing = { holding: false, current: 'past', readsLeft: 0 };
     expect(plan(offered, { signs: SIGNS, past: BEHIND, full: FITS }, showing)).toEqual({
