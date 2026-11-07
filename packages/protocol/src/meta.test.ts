@@ -149,6 +149,23 @@ describe('parseMetaResponse', () => {
     expect(cache).toEqual({ cacheMaxAge: 3600 });
   });
 
+  it('keeps the first copy of each episode, in order, for a long-running series', () => {
+    const videos: unknown[] = [];
+    for (let n = 1; n <= 5000; n++) videos.push({ id: `tt1:1:${n}`, name: `Episode ${n}` });
+    // Repeats of every tenth episode, after the originals, and a junk item between them.
+    for (let n = 10; n <= 5000; n += 10) videos.push({ id: `tt1:1:${n}`, name: 'repeat' });
+    videos.splice(2500, 0, { name: 'no id' });
+
+    const { meta } = parseMetaResponse({
+      meta: { id: 'tt1', type: 'series', name: 'A daily', videos },
+    });
+    expect(meta?.videos).toHaveLength(5000);
+    expect(meta?.videos.map((v) => v.id)).toEqual(
+      Array.from({ length: 5000 }, (_, i) => `tt1:1:${i + 1}`),
+    );
+    expect(meta?.videos.every((v) => v.title !== 'repeat')).toBe(true);
+  });
+
   it('treats a null meta as not found', () => {
     expect(parseMetaResponse({ meta: null }).meta).toBeNull();
     expect(() => parseMetaResponse('oops')).toThrow('not a JSON object');

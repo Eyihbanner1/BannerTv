@@ -12,6 +12,7 @@ export function SeekBar({
   duration,
   onSeek,
   onScrubbing,
+  onScrubAt,
   right,
 }: {
   position: number;
@@ -19,6 +20,8 @@ export function SeekBar({
   onSeek: (seconds: number) => void;
   /** True while a finger is on the bar, so the controls stay up. */
   onScrubbing: (scrubbing: boolean) => void;
+  /** Where the finger is, in seconds, while it is on the bar (for the scene preview); then null. */
+  onScrubAt?: (seconds: number | null) => void;
   right?: ReactNode;
 }) {
   const width = useRef(1);
@@ -28,6 +31,10 @@ export function SeekBar({
   const fraction = known ? Math.max(0, Math.min(1, shown / duration)) : 0;
 
   const at = (x: number) => Math.max(0, Math.min(1, x / width.current)) * duration;
+  const scrubTo = (seconds: number | null) => {
+    setScrub(seconds);
+    onScrubAt?.(seconds);
+  };
 
   return (
     <View style={styles.wrap}>
@@ -47,17 +54,17 @@ export function SeekBar({
         onResponderTerminationRequest={() => false}
         onResponderGrant={(event) => {
           onScrubbing(true);
-          setScrub(at(event.nativeEvent.locationX));
+          scrubTo(at(event.nativeEvent.locationX));
         }}
-        onResponderMove={(event) => setScrub(at(event.nativeEvent.locationX))}
+        onResponderMove={(event) => scrubTo(at(event.nativeEvent.locationX))}
         onResponderRelease={(event) => {
           const target = at(event.nativeEvent.locationX);
-          setScrub(null);
+          scrubTo(null);
           onScrubbing(false);
           onSeek(target);
         }}
         onResponderTerminate={() => {
-          setScrub(null);
+          scrubTo(null);
           onScrubbing(false);
         }}
         accessibilityRole="adjustable"

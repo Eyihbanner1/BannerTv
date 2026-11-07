@@ -4,6 +4,7 @@ import { memo, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { FixtureRow, FixtureRowPlaceholder } from '../../components/FixtureRow';
+import { wantSportsMatcher } from '../../data/sports';
 import { focusedKey } from '../../navigation/spatial';
 import { fixtureText } from '../sports/fixture';
 import { useMinuteClock, useSportsFeed, useViewOptions, useWantSports } from '../sports/use-sports';
@@ -61,8 +62,11 @@ export const LiveSportRow = memo(function LiveSportRow({
     onShown(!empty, empty && focusedKey().indexOf(`${LIVE_SPORT_FOCUS_KEY}-tile-`) === 0);
   }, [empty, onShown]);
   const onFocus = useCallback(
-    (_: number | undefined, element: HTMLElement) =>
-      onItemFocus(LIVE_SPORT_ROW_KEY, undefined, element),
+    (_: number | undefined, element: HTMLElement) => {
+      // Focus in the row: its matches group by team and league from here.
+      wantSportsMatcher();
+      onItemFocus(LIVE_SPORT_ROW_KEY, undefined, element);
+    },
     [onItemFocus],
   );
   const onPress = useCallback(

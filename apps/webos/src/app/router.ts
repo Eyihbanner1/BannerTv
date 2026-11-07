@@ -2,6 +2,7 @@ import { type BingeHint, createStore, type SportEvent, type StreamEntry } from '
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
+import { markPlayPress } from '../player/play-marks';
 
 /** Top-level destinations in the rail. Some show only some of the time: see sections.ts. */
 export const SECTIONS = [
@@ -161,6 +162,7 @@ export function push(
   route: Route,
   returnFocus: ReturnFocus = currentlyPressed() ?? getCurrentFocusKey(),
 ): void {
+  if (route.name === 'player') markPlayPress();
   router.set(({ stack }) => ({
     stack: [...stack.slice(0, -1), { ...stack[stack.length - 1]!, returnFocus }, { route }],
   }));
@@ -178,6 +180,7 @@ export function replace(route: Route): void {
     return;
   }
   pendingFocus = undefined;
+  if (route.name === 'player') markPlayPress();
   router.set({ stack: [...stack.slice(0, -1), { route }] });
 }
 

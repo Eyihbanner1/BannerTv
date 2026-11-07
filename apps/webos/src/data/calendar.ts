@@ -2,6 +2,7 @@ import {
   type CalendarDay,
   type CalendarEntry,
   calendarView,
+  type FollowedTitle,
   followedTitles,
   kidsTitleAllowed,
   type LibraryKind,
@@ -34,14 +35,36 @@ const subscribeLists = (listener: () => void) => {
 };
 const listVersions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
 
+/** What the calendar follows, for useSyncExternalStore. */
+export interface CalendarWatch {
+  subscribe(listener: () => void): () => void;
+  version(): string;
+}
+
+const followLists: CalendarWatch = { subscribe: subscribeLists, version: listVersions };
+const followNothing: CalendarWatch = { subscribe: () => () => undefined, version: () => 'off' };
+
+/**
+ * My List and the history while the calendar is on show, and nothing while it is not, so a
+ * screen that keeps it off (the Library on My List) is not drawn again each time a video
+ * saves its place, every 10 seconds.
+ */
+export function calendarWatch(enabled: boolean): CalendarWatch {
+  return enabled ? followLists : followNothing;
+}
+
+/** Followed while the calendar is off, or before the lists have loaded: one shared list. */
+const NOT_FOLLOWING: readonly FollowedTitle[] = [];
+
 /**
  * The calendar of the series this profile watches and the series and films
  * on its My List, from their addons' meta (cached, so a second visit opens
  * at once). Shared by the TV and the phone. While `enabled` is false nothing
- * is asked for.
+ * is asked for, and no store is followed.
  */
 export function useCalendar(kind: LibraryKind, enabled = true): CalendarState {
-  const lists = useSyncExternalStore(subscribeLists, listVersions);
+  const watch = calendarWatch(enabled);
+  const lists = useSyncExternalStore(watch.subscribe, watch.version);
   const [loaded, setLoaded] = useState(false);
   const [changes, setChanges] = useState(0);
   // Read once per visit; a screen left open past midnight shows yesterday's "Today".
@@ -61,7 +84,7 @@ export function useCalendar(kind: LibraryKind, enabled = true): CalendarState {
   }, [enabled]);
 
   const followed = useMemo(() => {
-    if (!enabled || !loaded) return [];
+    if (!enabled || !loaded) return NOT_FOLLOWING;
     const kids = isKidsProfile();
     const items = kids
       ? library.items().filter((item) => kidsTitleAllowed(libraryPreview(item), true))

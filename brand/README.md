@@ -66,3 +66,5 @@ pip install fonttools brotli uharfbuzz
 python3 brand/source/brandgen.py path/to/Urbanist-Bold.ttf brand > /tmp/jobs.json
 node brand/source/render.js /tmp/jobs.json brand   # needs Playwright and Chromium
 ```
+
+`render.js` deflates each screenshot again at the highest level, which leaves every row and pixel as Chromium drew it and makes the 1920x1080 files about a quarter smaller. `node brand/source/render.js --recompress <file.png>...` does the same to files rendered before.

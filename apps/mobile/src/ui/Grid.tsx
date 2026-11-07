@@ -7,10 +7,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { FIRST_RENDER_TILES, GRID_WINDOW_SCREENS, rowsForTiles } from './grid-window';
 import { Tile } from './Tile';
 import { gutter, space } from './theme';
 
 const COLUMNS = 3;
+/** FlatList counts rows here, not tiles: see grid-window.ts. */
+const FIRST_RENDER_ROWS = rowsForTiles(FIRST_RENDER_TILES, COLUMNS);
 
 /** A grid of posters that fills the phone's width. */
 export function Grid({
@@ -47,7 +50,8 @@ export function Grid({
       columnWrapperStyle={styles.columns}
       contentContainerStyle={styles.content}
       {...(onEndReached ? { onEndReached, onEndReachedThreshold: 1.5 } : {})}
-      initialNumToRender={12}
+      initialNumToRender={FIRST_RENDER_ROWS}
+      windowSize={GRID_WINDOW_SCREENS}
     />
   );
 }

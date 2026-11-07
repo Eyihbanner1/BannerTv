@@ -44,6 +44,7 @@ const MAX_ROW_ITEMS = 40;
 const LOAD_AHEAD = 3;
 /** Rows found empty this run; they stay off Home until the app starts again. */
 const emptyRows = new Set<string>();
+const NO_CONTINUE: readonly ContinueItem[] = [];
 
 function playContinue(item: ContinueItem): void {
   const preview = item.preview;
@@ -85,7 +86,8 @@ const HomeRow = memo(function HomeRow({
 }) {
   const { t } = useTranslation();
   const query = useMemo(
-    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra),
+    // A refreshed row equal to the one shown keeps its items, so no tile draws again.
+    () => addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra, { keepEqual: true }),
     [row.addon, row.type, row.catalog.id, row.extra],
   );
   const state = useQuery(query, enabled);
@@ -154,8 +156,12 @@ type HomeListLine =
   | { key: string; kind: 'live' }
   | { key: string; kind: 'my-list' };
 
-/** Home's My List row: the profile's list, newest first. It asks no addon for anything. */
-function MyListRow() {
+/**
+ * Home's My List row: the profile's list, newest first. It asks no addon for anything. Memoised,
+ * as Live sport is: FlatList draws every cell again each time Home renders, and this row takes no
+ * props, so it draws again only when the list changes.
+ */
+const MyListRow = memo(function MyListRow() {
   const { t } = useTranslation();
   const list = useSyncExternalStore(library.subscribe, library.items);
   const items = useMemo(
@@ -174,7 +180,7 @@ function MyListRow() {
       onSeeAll={() => router.navigate('/library')}
     />
   );
-}
+});
 
 export function HomeScreen() {
   const { t } = useTranslation();
@@ -239,7 +245,8 @@ export function HomeScreen() {
     pushOwn(rows.length);
     return list;
   }, [places, board, empty, rows]);
-  const continueRow = (continueShown ? continueItems : null) ?? [];
+  // Hidden by Home rows or empty, it is one shared empty list, so the header's memo still holds.
+  const continueRow = (continueShown ? continueItems : null) ?? NO_CONTINUE;
   const heroContinue = continueRow[0];
   const heroRow = rows.find((row) => !failed.has(row.key) && firsts[row.key]);
   const heroItem =
@@ -259,7 +266,9 @@ export function HomeScreen() {
     setEmpty(new Set());
     for (const row of board ?? []) {
       if (again.has(row.key))
-        addonClient.catalog(row.addon, row.type, row.catalog.id, row.extra).retry();
+        addonClient
+          .catalog(row.addon, row.type, row.catalog.id, row.extra, { keepEqual: true })
+          .retry();
     }
     if (sportShown) {
       sportsFeed.retry();
@@ -287,82 +296,100 @@ export function HomeScreen() {
   // The addons only list sport, which has its own tab.
   const sportsOnly = !kids && !allHidden && sports.shown;
 
-  const header = (
-    <View>
-      <View style={[styles.topBar, { paddingTop: insets.top + space.m }]}>
-        <PrismMark size={28} />
-        <Text style={styles.wordmark} accessibilityRole="header">
-          {t('phone.appName')}
-        </Text>
-        <View style={styles.spacer} />
-        <Pressable
-          onPress={openBrowse}
-          accessibilityRole="button"
-          accessibilityLabel={t('rail.discover')}
-          style={styles.profile}
-        >
-          <OutlineIcon name="browse" size={26} color={colors.text} />
-        </Pressable>
-        {profile ? (
+  // Made again only when what it shows changes. Each row's first page and each newly reached row
+  // re-render this screen, which would otherwise draw the hero and every Continue Watching tile
+  // again too. Live sport and My List are lines of the list, where Home rows puts them, and are
+  // memoised there for the same reason.
+  const header = useMemo(
+    () => (
+      <View>
+        <View style={[styles.topBar, { paddingTop: insets.top + space.m }]}>
+          <PrismMark size={28} />
+          <Text style={styles.wordmark} accessibilityRole="header">
+            {t('phone.appName')}
+          </Text>
+          <View style={styles.spacer} />
           <Pressable
-            onPress={() => router.push('/profiles')}
+            onPress={openBrowse}
             accessibilityRole="button"
-            accessibilityLabel={t('phone.switchProfile')}
+            accessibilityLabel={t('rail.discover')}
             style={styles.profile}
           >
-            <Avatar profile={profile} size={40} round />
+            <OutlineIcon name="browse" size={26} color={colors.text} />
           </Pressable>
+          {profile ? (
+            <Pressable
+              onPress={() => router.push('/profiles')}
+              accessibilityRole="button"
+              accessibilityLabel={t('phone.switchProfile')}
+              style={styles.profile}
+            >
+              <Avatar profile={profile} size={40} round />
+            </Pressable>
+          ) : null}
+        </View>
+        <Hero
+          item={noRows ? null : heroItem}
+          {...(heroContinue && heroItem === heroContinue.preview
+            ? {
+                playLabel: t('phone.play'),
+                onPlay: () => playContinue(heroContinue),
+              }
+            : {})}
+          onDetails={openTitle}
+        />
+        {continueRow.length > 0 ? (
+          <Row
+            title={t('home.continueWatching')}
+            shape="landscape"
+            items={continueRow.map((item) => {
+              const note = continueNote(t, item);
+              return {
+                item: item.preview,
+                key: item.videoId,
+                ...(note ? { note } : {}),
+                ...(item.progress !== undefined ? { progress: item.progress } : {}),
+              };
+            })}
+            onPress={(entry) => {
+              const item = continueRow.find((candidate) => candidate.videoId === entry.key);
+              if (item) playContinue(item);
+            }}
+            onLongPress={(entry) => setHeld(entry.item)}
+          />
+        ) : null}
+        {noRows ? (
+          <Message
+            title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
+            lead={t(
+              kids
+                ? 'home.noKidsRowsLead'
+                : allHidden
+                  ? 'home.allHiddenLead'
+                  : sportsOnly
+                    ? 'home.sportsOnlyLead'
+                    : 'home.noAddonsLead',
+            )}
+            // Addons are for the grown-ups: a kids profile gets the words only, as on the TV.
+            {...(kids
+              ? {}
+              : { action: { label: t('phone.addons'), onPress: () => router.push('/addons') } })}
+          />
         ) : null}
       </View>
-      <Hero
-        item={noRows ? null : heroItem}
-        {...(heroContinue && heroItem === heroContinue.preview
-          ? {
-              playLabel: t('phone.play'),
-              onPlay: () => playContinue(heroContinue),
-            }
-          : {})}
-        onDetails={openTitle}
-      />
-      {continueRow.length > 0 ? (
-        <Row
-          title={t('home.continueWatching')}
-          shape="landscape"
-          items={continueRow.map((item) => {
-            const note = continueNote(t, item);
-            return {
-              item: item.preview,
-              key: item.videoId,
-              ...(note ? { note } : {}),
-              ...(item.progress !== undefined ? { progress: item.progress } : {}),
-            };
-          })}
-          onPress={(entry) => {
-            const item = continueRow.find((candidate) => candidate.videoId === entry.key);
-            if (item) playContinue(item);
-          }}
-          onLongPress={(entry) => setHeld(entry.item)}
-        />
-      ) : null}
-      {noRows ? (
-        <Message
-          title={t(sportsOnly ? 'home.sportsOnly' : 'home.noAddons')}
-          lead={t(
-            kids
-              ? 'home.noKidsRowsLead'
-              : allHidden
-                ? 'home.allHiddenLead'
-                : sportsOnly
-                  ? 'home.sportsOnlyLead'
-                  : 'home.noAddonsLead',
-          )}
-          // Addons are for the grown-ups: a kids profile gets the words only, as on the TV.
-          {...(kids
-            ? {}
-            : { action: { label: t('phone.addons'), onPress: () => router.push('/addons') } })}
-        />
-      ) : null}
-    </View>
+    ),
+    [
+      insets.top,
+      profile,
+      t,
+      noRows,
+      heroItem,
+      heroContinue,
+      continueRow,
+      kids,
+      allHidden,
+      sportsOnly,
+    ],
   );
 
   const onHeld = (choice: 'remove' | 'details' | 'list') => {

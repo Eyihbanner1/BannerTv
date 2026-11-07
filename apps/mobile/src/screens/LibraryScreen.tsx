@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { useTranslation } from 'react-i18next';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { libraryWatch, type Watch } from '../data/library-watch';
 import { syncForRefresh } from '../data/refresh';
 import { openTitle } from '../nav/routes';
 import { CalendarList } from '../ui/CalendarList';
@@ -25,25 +26,25 @@ import { usePullRefresh } from '../ui/use-pull-refresh';
 
 type Show = 'list' | 'history' | 'calendar';
 
-const subscribeAll = (listener: () => void) => {
-  const undo = [
-    library.subscribe(listener),
-    progress.subscribe(listener),
-    playedVideos.subscribe(listener),
-    subscribeHistoryCards(listener),
-  ];
-  return () => undo.forEach((stop) => stop());
+// My List follows the list alone, so the tab (which stays mounted under the player) is left as
+// it is while a video saves its place every 10 seconds; History follows its stores too, and the
+// cards made for titles that came from Trakt. The calendar follows its own (useCalendar), and
+// only while it is on show: the screen itself needs no more for it than My List does.
+const listWatch = libraryWatch('list', library, []);
+const historyCards = { subscribe: subscribeHistoryCards, version: historyCardsVersion };
+const watches: Readonly<Record<Show, Watch>> = {
+  list: listWatch,
+  history: libraryWatch('history', library, [progress, playedVideos, historyCards]),
+  calendar: listWatch,
 };
-const versions = () =>
-  `${library.version()}:${progress.version()}:${playedVideos.version()}:${historyCardsVersion()}`;
 
 export function LibraryScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const version = useSyncExternalStore(subscribeAll, versions);
   const [loaded, setLoaded] = useState(false);
   const [show, setShow] = useState<Show>('list');
   const [kind, setKind] = useState<LibraryKind>('all');
+  const version = useSyncExternalStore(watches[show].subscribe, watches[show].version);
   const calendar = useCalendar(kind, show === 'calendar');
 
   useEffect(() => {

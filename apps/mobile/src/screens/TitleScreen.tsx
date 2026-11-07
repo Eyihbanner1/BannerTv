@@ -9,7 +9,7 @@ import { progress } from '@tv/data/playback';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
 import { tmdbClient, useTmdbDetails } from '@tv/data/tmdb';
 import { useQuery } from '@tv/data/use-query';
-import { usePrefetch } from '@tv/player/prefetch';
+import { OPEN_PAGE_REST_MS, usePrefetch } from '@tv/player/prefetch';
 import { formatTime } from '@tv/player/media';
 import { playTrailer } from '@tv/platform/youtube';
 import {
@@ -233,7 +233,14 @@ export function TitleScreen({
   const start = reader && meta ? startPoint(meta, seasons, reader, now) : undefined;
 
   const primaryVideoId = watchVideoId ?? start?.video.id ?? null;
-  usePrefetch(titleType, kidsAllowed ? primaryVideoId : null, item?.runtime);
+  // Nothing here moves focus: what Play plays is looked up once the page has been open a moment.
+  usePrefetch(
+    titleType,
+    kidsAllowed ? primaryVideoId : null,
+    item?.runtime,
+    undefined,
+    OPEN_PAGE_REST_MS,
+  );
 
   const [seasonIndex, setSeasonIndex] = useState<number | null>(null);
   const shownIndex =
