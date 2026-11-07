@@ -740,6 +740,25 @@ test('Forgot PIN? for Main on a TV with no account resets BannerTV and starts it
     localStorage.setItem('bannertv.profiles', saved);
     localStorage.setItem('bannertv.tuning', '{"kept":true}');
   }, JSON.stringify(state));
+  // What is taken out of localStorage is noted as it goes, before and after the restart. Read
+  // afterwards, it can't tell: over file://, this test browser sometimes starts the reloaded
+  // page with none of what was stored, even keys nothing touched (a bare page does the same).
+  const removed: string[] = [];
+  await page.exposeFunction('noteRemoved', (key: string) => removed.push(key));
+  await page.addInitScript(() => {
+    const note = (key: string) =>
+      void (window as unknown as { noteRemoved: (key: string) => Promise<void> }).noteRemoved(key);
+    const removeItem = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function (this: Storage, key: string) {
+      if (this === window.localStorage) note(key);
+      removeItem.call(this, key);
+    };
+    const clear = Storage.prototype.clear;
+    Storage.prototype.clear = function (this: Storage) {
+      if (this === window.localStorage) note('(everything)');
+      clear.call(this);
+    };
+  });
   await page.goto(APP_URL);
   await expectFocus(page, 'profile-main');
   await page.waitForTimeout(150);
@@ -753,11 +772,13 @@ test('Forgot PIN? for Main on a TV with no account resets BannerTV and starts it
   await expect(page.getByRole('heading', { name: 'Welcome to BannerTV' })).toBeVisible({
     timeout: 15000,
   });
+  // The profiles and the welcome went; the TV's own measurements were never taken out.
+  expect(removed).toEqual(expect.arrayContaining(['bannertv.profiles', 'bannertv.welcomed']));
+  expect(removed).not.toContain('bannertv.tuning');
+  expect(removed).not.toContain('(everything)');
   const left = await page.evaluate(() => ({
     profiles: localStorage.getItem('bannertv.profiles'),
-    tuning: localStorage.getItem('bannertv.tuning'),
   }));
-  expect(left.tuning).toBe('{"kept":true}');
   // Only a fresh Main, with no PIN, if anything.
   if (left.profiles !== null) {
     const fresh = JSON.parse(left.profiles) as { profiles: { id: string; pin?: unknown }[] };
