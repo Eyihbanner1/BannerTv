@@ -409,6 +409,35 @@ describe('useSubtitles', () => {
     expect(player.subtitles.choice).toEqual(fileChoice(c));
   });
 
+  it('shows a file read soon after the hold, not the slow one the hold ended on', async () => {
+    const entry = streamEntry('film');
+    // Both still on their way 2 s after they were asked for: the hold ends with none read.
+    const a = file('a', FULL, { ms: 14000 });
+    const b = file('b', FULL, { ms: 2500 });
+    offer(entry, [a, b]);
+    const player = play(entry);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(b));
+    expect(player.subtitles.cues).toHaveLength(1200);
+    // The first, read in the end, is no better: the second stays.
+    await player.wait(12000);
+    expect(player.subtitles.choice).toEqual(fileChoice(b));
+  });
+
+  it('shows a file read after the hold, all three of the first files being slow', async () => {
+    const entry = streamEntry('film');
+    const a = file('a', FULL, { ms: 14000 });
+    const b = file('b', FULL, { ms: 6000 });
+    const c = file('c', FULL, { ms: 14000 });
+    offer(entry, [a, b, c]);
+    const player = play(entry);
+    await player.wait(5000);
+    expect(player.subtitles.cues).toBeNull();
+    await player.wait(1500);
+    expect(player.subtitles.choice).toEqual(fileChoice(b));
+    expect(player.subtitles.cues).toHaveLength(1200);
+  });
+
   it('forgets the files read once the player closes', async () => {
     const entry = streamEntry('film');
     offer(entry, [file('full', FULL)]);
@@ -661,6 +690,21 @@ describe('the automatic choice, once the viewer acts on it', () => {
       { key: subtitleFileKey(VIDEO, behind.key), drift: 'auto' },
     ]);
     expect(player.subtitles.drift).toBe('behind');
+  });
+
+  it('keeps only the timing for the stream’s own track, whatever plays it', async () => {
+    for (const engine of ['hls.js', 'shaka', 'android'] as const) {
+      const entry = streamEntry(`film-${engine}`);
+      offer(entry, []);
+      const player = play(entry, { engine, text: [track('en|English', 'en')] });
+      await player.wait(100);
+      expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'en|English' });
+      player.subtitles.setOffset(0.4);
+      await player.flush();
+      expect(player.subtitles.offset).toBe(0.4);
+      expect(stores.subtitleDrifts.drifts()).toEqual([]);
+      player.unmount();
+    }
   });
 });
 

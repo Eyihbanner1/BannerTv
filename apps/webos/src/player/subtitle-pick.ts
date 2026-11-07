@@ -176,8 +176,10 @@ export interface SubtitlePlan<T> {
 }
 
 /**
- * Once lines show: the file showing stays, unless a file read since ranks
- * above it and fits clearly better, and switches are left. Files to read are
+ * Once the hold is over: the file showing stays, unless a file read since
+ * ranks above it and fits clearly better, and switches are left. A file not
+ * read yet (a slow download) shows no line, so it gives way at once to the
+ * best file read, and that is not counted as a switch. Files to read are
  * read only while switches are left, as only a switch could follow.
  */
 function keepOrSwitch<T extends PickableSubtitle>(
@@ -188,6 +190,9 @@ function keepOrSwitch<T extends PickableSubtitle>(
 ): SubtitlePlan<T> {
   const switches = input.switchesLeft > 0;
   const best = ranked.find((option) => input.fit(option.url) !== undefined);
+  if (best !== undefined && input.fit(current.url) === undefined) {
+    return { pick: best, read: switches ? toRead : [], hold: false, switched: false };
+  }
   if (
     switches &&
     best !== undefined &&
@@ -209,22 +214,26 @@ function keepOrSwitch<T extends PickableSubtitle>(
  *   matches the video, is chosen at once, and no other is read while it
  *   reads whole and plain (or for the hard of hearing, as wanted). The
  *   first two in the list are read beside the version picked by hand, for
- *   their checks only, when its lines run on past the video's end: a drift
- *   only files agreeing on an end can show (judgeSubtitleFits). Another
- *   made for the release as well (two addons' copies, CD1 and CD2, or a
- *   plain copy beside one for the hard of hearing) takes over from it only
- *   as below: read, clearly better, and while switches are left. So two
- *   such files are not swapped back and forth as each is read. A file whose
- *   name matches but which reads as drifting, part of the video or another
- *   cut is judged like any other.
+ *   their checks only, when its lines run on past the video's end, line
+ *   after line (`runsOn`): a drift only files agreeing on an end can show
+ *   (judgeSubtitleFits). Another made for the release as well (two addons'
+ *   copies, CD1 and CD2, or a plain copy beside one for the hard of
+ *   hearing) takes over from it only as below: once read, and clearly
+ *   better while switches are left, or at once while the one chosen has not
+ *   been read. So two such files are not swapped back and forth as each is
+ *   read. A file whose name matches but which reads as drifting, part of
+ *   the video or another cut is judged like any other.
  * - Otherwise files are read in the list's order, two at a time: the first
  *   two always, more only while none read fits as it is (nothing would beat
  *   it), and the lines held back until they have been read and the video's
  *   length is known (or `timeUp`); then the best of those read is chosen.
  *   A slow download is not waited for, and the next file is read meanwhile.
- * - Once lines show, a file read later takes over only when it fits clearly
- *   better and switches are left; a choice that failed, or failed its
- *   checks badly, gives way to the next best.
+ * - Once the hold is over, a choice not read yet (a slow download, chosen
+ *   as nothing else had been read) gives way at once to the best file read:
+ *   none of its lines show, so it is not counted as a switch. Once lines
+ *   show, a file read later takes over only when it fits clearly better and
+ *   switches are left; a choice that failed, or failed its checks badly,
+ *   gives way to the next best.
  */
 export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>): SubtitlePlan<T> {
   const ranked = rankedFiles(input.offered, input.language, input);
@@ -255,15 +264,15 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
   const inOrder = filesIn(input.offered, input.language).filter((option) => placed.has(option));
   if (reason === 0 && current === top) {
     // The version picked by hand stays whatever is read. Its lines running on past the video's
-    // end may be a drift that only other files agreeing on an end can show: the first two in
-    // the list are read for that, as they were when it was picked.
+    // end, line after line, may be a drift that only other files agreeing on an end can show:
+    // the first two in the list are read for that, as they were when it was picked.
     const fit = input.fit(current.url);
     const runsOn =
       !input.lengthPending &&
       fit?.unfit === false &&
       fit.length === 'fits' &&
       fit.drift === undefined &&
-      (fit.coverage ?? 0) > 1;
+      fit.runsOn === true;
     const toRead = runsOn
       ? inOrder
           .filter((option) => option !== current)

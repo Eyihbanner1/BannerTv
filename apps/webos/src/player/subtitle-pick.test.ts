@@ -382,7 +382,7 @@ describe('planSubtitlePick', () => {
 
   it('reads the first two beside the version picked by hand whose lines run on past the end', () => {
     const showing = { remembered: 'more', current: 'more', holding: false, switchesLeft: 0 };
-    const runsOn: SubtitleFit = { ...FITS, coverage: 1.02 };
+    const runsOn: SubtitleFit = { ...FITS, coverage: 1.02, runsOn: true };
     // For their checks only: a drift files agreeing on an end can show. It stays.
     expect(plan(offered, { more: runsOn }, showing)).toEqual({
       pick: 'more',
@@ -399,7 +399,13 @@ describe('planSubtitlePick', () => {
     // Not while it ends in time, while its own length shows a drift, or while the player is
     // still learning how long the video is.
     expect(plan(offered, { more: { ...FITS, coverage: 0.99 } }, showing).read).toEqual([]);
-    expect(plan(offered, { more: { ...BEHIND, coverage: 1.04 } }, showing).read).toEqual([]);
+    expect(
+      plan(offered, { more: { ...BEHIND, coverage: 1.04, runsOn: true } }, showing).read,
+    ).toEqual([]);
+    // Nor while it ends past the video by only what releases differ by, or with one or two late
+    // lines: other files could not show a drift.
+    expect(plan(offered, { more: { ...FITS, coverage: 1.0002 } }, showing).read).toEqual([]);
+    expect(plan(offered, { more: { ...FITS, coverage: 1.03 } }, showing).read).toEqual([]);
     expect(plan(offered, { more: runsOn }, { ...showing, lengthPending: true }).read).toEqual([]);
     // Nor before it has been read.
     expect(plan(offered, {}, showing).read).toEqual([]);
@@ -424,6 +430,33 @@ describe('planSubtitlePick', () => {
     expect(
       plan(offered, { full: FITS }, { reading, current: 'signs', readsLeft: 0 }),
     ).toMatchObject({ hold: true });
+  });
+
+  it('gives way at once from a slow file whose lines never showed, without counting a switch', () => {
+    // The hold ended with nothing read, on the first file; both are still on their way.
+    const two = [file('a'), file('b')];
+    const reading = (url: string) => url.endsWith('/a.srt');
+    const waiting = { holding: false, current: 'a', reading, slow: reading };
+    const settled = { read: [], hold: false, switched: false };
+    // The second is read and fits: it shows now, not once the first has come.
+    expect(plan(two, { b: FITS }, waiting)).toEqual({ pick: 'b', ...settled });
+    // Whatever it fits like, and with no switch left: nothing showed to switch from.
+    expect(plan(two, { b: SDH }, { ...waiting, switchesLeft: 0 })).toEqual({
+      pick: 'b',
+      ...settled,
+    });
+    // The same among files made for the release.
+    const label = 'Some.Film.2021.1080p.BluRay-GROUP';
+    const copies = [file('a', 'eng', label), file('b', 'eng', label)];
+    expect(plan(copies, { b: SDH }, waiting)).toEqual({ pick: 'b', ...settled });
+    // Once its lines show, only a file that fits clearly better takes over, as a switch.
+    expect(plan(two, { a: SDH, b: SDH }, waiting).pick).toBe('a');
+    expect(plan(two, { a: SDH, b: FITS }, waiting)).toEqual({
+      pick: 'b',
+      read: [],
+      hold: false,
+      switched: true,
+    });
   });
 });
 
@@ -484,6 +517,33 @@ describe('fitsIn', () => {
       drift: 'behind',
       auto: true,
     });
+  });
+
+  it('reads no other file beside the version picked by hand that ends a second past the video', () => {
+    const offered = [file('a'), file('b'), file('x')];
+    const profiles: Record<string, ReturnType<typeof profileSubtitles>> = {
+      x: profileSubtitles(lines(1300, 7201)),
+    };
+    const fits = fitsIn(offered, 'en', (url) => profiles[/\/([^/]+)\.srt$/.exec(url)![1]!], {
+      seconds: 7200,
+      exact: true,
+    });
+    expect(fits.get(file('x').url)).toMatchObject({ length: 'fits', unfit: false });
+    const result = planSubtitlePick<File>({
+      ...context(),
+      fit: (url) => fits.get(url),
+      remembered: 'x',
+      offered,
+      language: 'en',
+      reading: () => false,
+      current: 'x',
+      holding: false,
+      timeUp: false,
+      readsLeft: 4,
+      switchesLeft: 0,
+    });
+    expect(result.pick?.key).toBe('x');
+    expect(result.read).toEqual([]);
   });
 
   it('fixes the drift of the version picked by hand again when only other files show it', () => {

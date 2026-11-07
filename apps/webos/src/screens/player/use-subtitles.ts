@@ -876,11 +876,11 @@ export function useSubtitles(
       // the player's fix is worked out from each stream's own evidence, so the lines stay
       // stretched as they see them, and another release whose length shows a drift is still
       // fixed. Kept first: both are saved in the order asked, so the lines never show for a
-      // moment without it.
-      const keep = driftKeptWithTiming(
-        { canFix: canFixDrift, evidence, kept: keptDrift, offset },
-        next,
-      );
+      // moment without it. Not for the stream's own track: no length of it shows a drift.
+      const keep =
+        trackId === null
+          ? driftKeptWithTiming({ canFix: canFixDrift, evidence, kept: keptDrift, offset }, next)
+          : null;
       if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
       void subtitleOffsets.remember(offsetKey, next);
     },
