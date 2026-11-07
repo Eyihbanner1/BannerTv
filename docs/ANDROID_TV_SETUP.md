@@ -4,12 +4,12 @@ How to put a test build of the Android app (`apps/androidtv`, ADR 0005) on an An
 
 ## Get the APK
 
-Every CI run builds it; nothing needs installing on a computer.
+A full CI build makes it (the README says when one runs); nothing needs installing on a computer.
 
-1. On GitHub, open the repository's **Actions** tab, then the latest **CI** run for the branch (or for `main`).
+1. On GitHub, open the repository's **Actions** tab, then the latest **CI** run for the branch that ran the **Android TV APK** job.
 2. Under **Artifacts**, download **bannertv-apk**. It is a zip; inside is `bannertv-<version>-debug.apk`, and `bannertv-<version>-release.apk` once the release key is set up.
 
-The debug build installs as **BannerTV test** (`com.bannertv.app.debug`), beside any release build, with its own data. A newer debug build installs over it and keeps its addons and profiles. CI keeps the debug key in its cache, which GitHub empties after a week without a run. A branch's builds share one key, and every branch can read `main`'s, but `main` cannot read a branch's, so the first build from `main` after a merge has a key of its own. If Android refuses an update ("App not installed" or "package conflicts"), uninstall the old build first, which clears its data.
+The debug build installs as **BannerTV test** (`com.bannertv.app.debug`), beside any release build, with its own data. A newer debug build installs over it and keeps its addons and profiles. CI keeps the debug key in its cache, which GitHub empties after a week without a full build. A branch's builds share one key, and every branch can read `main`'s, but `main` cannot read a branch's, so the first build from `main` after a merge has a key of its own. Pushes to `main` no longer build the APK, so once the cache has been emptied, start a full build on `main` by hand (Actions, CI, Run workflow, branch `main`) before the next branch build, and every branch shares the new key again. If Android refuses an update ("App not installed" or "package conflicts"), uninstall the old build first, which clears its data.
 
 ## On an Android phone
 
