@@ -1369,6 +1369,66 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(0)', 'pause(21)', 'stop(22)']);
   });
 
+  it('keeps a film’s place through a Try again that fails as soon as it plays, for a clip after it', () => {
+    // The film gives no length and plays to 600 s, then fails. Try again
+    // opens it there; it plays a second, or stops to buffer, and fails. Try
+    // again once more: the link now serves a 60 s clip.
+    const clip: Parameters<typeof trakt>[0] = [
+      [played(601, 0, 'loading'), known],
+      [played(601, 60, 'loading', true, REAL), known],
+      [played(0, 60, 'playing', true, REAL), known, 601],
+      [played(1, 60, 'paused', true, REAL), known, 601],
+    ];
+    const film: Parameters<typeof trakt>[0] = [
+      [played(0, 0, 'playing'), known],
+      [played(600, 0, 'playing'), known],
+      [played(600, 0, 'failed'), known],
+      [played(600, 0, 'loading'), known, 600, 0],
+      [played(600, 0, 'playing'), known, 600, 0],
+    ];
+    expect(
+      trakt([
+        ...film,
+        [played(601, 0, 'playing'), known],
+        [played(601, 0, 'failed'), known],
+        ...clip,
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+    expect(
+      trakt([
+        ...film,
+        [played(600, 0, 'buffering'), known],
+        [played(600, 0, 'failed'), known],
+        ...clip,
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+    // Or one moved before its first picture, which the player takes.
+    expect(
+      trakt([
+        ...film.slice(0, 4),
+        [played(600, 0, 'paused'), known],
+        [played(1200, 0, 'paused'), known],
+        [played(1200, 0, 'failed'), known],
+        [played(1200, 0, 'loading'), known],
+        [played(1200, 60, 'loading', true, REAL), known],
+        [played(1, 60, 'paused', true, REAL), known, 1200],
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+    // Or one that plays from where the viewer skipped back to, within what
+    // the clip could be.
+    expect(
+      trakt([
+        ...film,
+        [played(30, 0, 'playing'), known, 30, 1],
+        [played(50, 0, 'playing'), known, 50, 1],
+        [played(50, 0, 'failed'), known, 50, 1],
+        [played(50, 0, 'loading'), known, 50, 0],
+        [played(50, 60, 'loading', true, REAL), known, 50, 0],
+        [played(1, 60, 'paused', true, REAL), known, 50, 0],
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+  });
+
   it('counts the moves the player takes afresh at each opening', () => {
     // A 60 s file passes for the episode until the page's running time
     // comes; the viewer skips in it, which the player takes. It fails, and

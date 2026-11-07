@@ -208,12 +208,19 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   // leads, but where a clip's clock is never. Until then a place held from
   // before stands, unless this opening reached a newer one: a clip's opening
   // reaches none, and what it could have made of its clock is forgotten.
+  // A held place whose clock ran is kept behind a newer one with no length,
+  // which may yet prove a place in a clip, and one there still ran.
   const startOver = () => {
     const held = movedTo;
     movedTo = undefined;
     if (reached && !wasClip) {
-      if (reached.duration === 0) movedTo = reached;
-      else keep(reached);
+      if (reached.duration > 0) keep(reached);
+      else {
+        const same =
+          held?.ran === true && Math.abs(held.position - reached.position) <= SAME_PLACE_S;
+        if (held?.ran) keep(held);
+        movedTo = same ? { ...reached, ran: true } : reached;
+      }
     } else movedTo = held;
     reached = undefined;
     played = false;
