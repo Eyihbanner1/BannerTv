@@ -85,10 +85,11 @@ interface Reached {
   /** Only moved to, before the file played or gave a length. */
   moved: boolean;
   /**
-   * Where the file's clock started from: where the player opened it, or a
-   * move it took in it. A clip's clock may show no more than that.
+   * Whether the file's clock had run on by itself from where it started
+   * (where the player opened it, or a move it took in it). A clip's clock the
+   * player does not trust never does: it shows only where it started.
    */
-  from: number;
+  ran: boolean;
 }
 
 /** Earlier files' places kept, newest last. */
@@ -121,6 +122,8 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let openedCarry: number | undefined;
   /** Where this opening's clock started from: openedCarry, or a move it took. */
   let origin: number | undefined;
+  /** Whether this opening's clock has run on from its origin by itself. */
+  let ran = false;
   /** The player's count of moves taken, as this opening last saw it. */
   let movesSeen: number | undefined;
   /**
@@ -185,14 +188,14 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   };
   // Places this link reached before it showed a length, now that it shows it
   // is a clip `upTo` long: they may be its own clock, which never passes it,
-  // or shows only where it started from (where the player opened it, or a
-  // move the viewer took in it). A broadcast's clock may be anywhere.
+  // or, while it never ran on by itself, shows only where it started from
+  // (where the player opened it, or a move the viewer took in it). A
+  // broadcast's clock may be anywhere.
   const forgetUnmeasured = (entry: SessionState['entry'], upTo = Infinity) => {
     const clock = (place: Reached) =>
       place.duration === 0 &&
       place.entry === entry &&
-      (place.position <= upTo + SAME_PLACE_S ||
-        Math.abs(place.position - place.from) <= SAME_PLACE_S);
+      (place.position <= upTo + SAME_PLACE_S || !place.ran);
     for (let index = earlier.length - 1; index >= 0; index--) {
       if (clock(earlier[index]!)) earlier.splice(index, 1);
     }
@@ -218,6 +221,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     openedAt = undefined;
     openedCarry = undefined;
     origin = undefined;
+    ran = false;
     movesSeen = undefined;
     wasClip = false;
   };
@@ -313,6 +317,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         return;
       }
       if ((!underWay && !moved) || wasClip) return;
+      if (played && Math.abs(state.position - (origin ?? state.position)) > SAME_PLACE_S) {
+        ran = true;
+      }
       const inside = state.duration === 0 || played || state.position <= state.duration;
       // A place it reached by its own length stands when the length goes
       // (another player taking over the link) and the player opens on there.
@@ -333,7 +340,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
           duration: state.duration,
           entry: state.entry,
           moved: !played && state.duration === 0,
-          from: origin ?? state.position,
+          ran,
         };
       } else if (
         reached?.moved &&
