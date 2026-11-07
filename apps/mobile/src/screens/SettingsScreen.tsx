@@ -107,7 +107,10 @@ export function SettingsScreen() {
     account.engine !== 'running'
       ? undefined
       : account.status.state === 'off'
-        ? t('account.join')
+        ? // Signed out: what the account page offers, Join alone while new accounts are closed.
+          section.canCreate
+          ? t('phone.accountMakeOrJoin')
+          : t('account.join')
         : account.status.state === 'setup' || account.status.state === 'gone'
           ? undefined
           : statusLine(t, account.status, now);

@@ -147,6 +147,13 @@ test('Create answered with new accounts closed leaves only Join', async ({ page 
   // Settings asked while there was room; the service has closed since.
   await openAccount(page);
   await expect(page.getByText(OFF_LEAD)).toBeVisible();
+  // Once the account page has looked, Settings' row says what it offers: Create or Join.
+  await page.getByRole('button', { name: 'Back' }).first().click();
+  await expect(
+    page.getByText('Make one, or join with a code', { exact: true }).last(),
+  ).toBeVisible();
+  await page.getByText('BannerTV account', { exact: true }).click();
+  await expect(page.getByText(OFF_LEAD)).toBeVisible();
   await expect(page.getByText(NOT_OPEN)).toHaveCount(0);
   sync.maxAccounts = 0;
   await page.getByRole('button', { name: 'Create an account' }).click();
@@ -157,6 +164,10 @@ test('Create answered with new accounts closed leaves only Join', async ({ page 
   // Kept, so the account screen does not offer Create again until the service is asked again.
   const saved = await page.evaluate(() => localStorage.getItem('bannertv.syncStatus'));
   expect(JSON.parse(saved ?? '{}')).toMatchObject({ create: false });
+  // Settings' row says what the account page offers now: Join alone.
+  await page.getByRole('button', { name: 'Back' }).first().click();
+  await expect(page.getByText('Join with an account code', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Make one, or join with a code', { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

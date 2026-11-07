@@ -69,6 +69,7 @@ const PHONE = {
   account: 'BannerTV account',
   accountLead:
     'Your profiles, addons, My List and Continue Watching, the same on your phone and your TV.',
+  accountMakeOrJoin: 'Make one, or join with a code',
   accountJoinLead:
     'Type the account code from the TV, or from where you made the account. Capitals, spaces and dashes don’t matter.',
   copyCode: 'Copy the code',
