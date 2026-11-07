@@ -1158,7 +1158,8 @@ describe('onStatus and onClose', () => {
   it('keeps no place from a skip the player did not take before the file played', () => {
     // Paused at 5 s, Quality opens another release paused; the viewer skips
     // to 305 s before it gives a length, so the player cannot take it, and
-    // it then shows 330 s. Quality opens a third release, skipped the same way.
+    // it then shows 330 s. Quality opens a third release, skipped the same way:
+    // the player would still open the next file at 5 s, so that is the place.
     const steps: Parameters<typeof trakt>[0] = [
       [played(0, 2820, 'playing'), known],
       [played(5, 2820, 'playing'), known],
@@ -1175,7 +1176,7 @@ describe('onStatus and onClose', () => {
         [played(5, 0, 'paused', false, THIRD), known],
         [played(305, 0, 'paused', false, THIRD), known, 5],
       ]),
-    ).toEqual(['start(0)', 'pause(0)', 'stop(11)']);
+    ).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
     // Nor once Sources opens a clip there.
     expect(
       trakt([
@@ -1509,6 +1510,42 @@ describe('onStatus and onClose', () => {
         [played(0, 60, 'playing', true), known, 1060, 0],
       ]),
     ).toEqual(['start(78)', 'pause(78)', 'stop(38)']);
+  });
+
+  it('keeps the last real place for a skip the player never takes in a stream that failed opening', () => {
+    // A 70 minute cut plays to 2106 s, the player fails over to another
+    // release, and it fails before its first clock report. A minute's skip,
+    // pressed before the problem box, lands in it after that: the player
+    // never takes it, and would open the next file at 2106 s. That is the
+    // place, by the cut's length, not 2166 s by the episode's running time.
+    const opened: Parameters<typeof trakt>[0] = [
+      [played(2100, 4200, 'playing'), known, 2100, 0],
+      [played(2106, 4200, 'playing'), known, 2106, 0],
+      [played(2106, 0, 'loading', false, OTHER), known, 2106, 0],
+    ];
+    expect(
+      trakt([
+        ...opened,
+        [played(2106, 0, 'failed', false, OTHER), known, 2106, 0],
+        [played(2166, 0, 'failed', false, OTHER), known, 2106, 0],
+      ]),
+    ).toEqual(['start(50)', 'stop(50)']);
+    // Or it is closed while it still opens.
+    expect(trakt([...opened, [played(2166, 0, 'loading', false, OTHER), known, 2106, 0]])).toEqual([
+      'start(50)',
+      'stop(50)',
+    ]);
+    // A skip it takes there is the place it opens the next file at, and one
+    // after it that it never takes leaves it there.
+    const took: Parameters<typeof trakt>[0] = [
+      ...opened,
+      [played(2166, 0, 'loading', false, OTHER), known, 2166, 1],
+    ];
+    expect(trakt(took)).toEqual(['start(50)', 'stop(77)']);
+    expect(trakt([...took, [played(2226, 0, 'loading', false, OTHER), known, 2166, 1]])).toEqual([
+      'start(50)',
+      'stop(77)',
+    ]);
   });
 
   it('keeps a place inside a clip’s length whose clock ran past it, when Try again finds a clip', () => {

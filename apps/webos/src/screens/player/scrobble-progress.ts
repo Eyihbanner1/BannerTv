@@ -167,6 +167,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
    * The player may then hold a move in it that the file never makes.
    */
   let linkCannotSeek = false;
+  /**
+   * Where the player would open the next file, as this file's latest state
+   * showed it: a skip it never takes (one that lands once the file failed)
+   * moves the clock it shows, but not this.
+   */
+  let carried: number | undefined;
   /** A clip by what the player shows of it now. */
   const judged = (state: Played, runtimes: Runtimes) =>
     isClip(state, runtimes.knownRuntimeSeconds, videoId);
@@ -282,6 +288,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         startOver();
         again = true;
       }
+      carried = carryOn;
       if (openedAt === undefined) {
         openedAt = state.position;
         openedCarry = carryOn ?? state.position;
@@ -444,8 +451,14 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       // real file's place, or nothing.
       if (state.entry === file && linkWasLive) return kept;
       // Opening where the last real file got to, it is there by that file's
-      // measure, not by the title's running time.
-      if (last && Math.abs(last.position - state.position) <= SAME_PLACE_S) return kept;
+      // measure, not by the title's running time: so is one the player would
+      // open the next file there from, whatever a skip it never took shows.
+      const from = state.entry === file ? carried : undefined;
+      const there = (position: number | undefined) =>
+        last !== undefined &&
+        position !== undefined &&
+        Math.abs(last.position - position) <= SAME_PLACE_S;
+      if (there(state.position) || there(from)) return kept;
       return percent(state, runtimes.runtimeSeconds);
     },
     end(state, runtimes) {
