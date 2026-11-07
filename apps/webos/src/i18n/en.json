@@ -560,6 +560,9 @@
     "embedded": "Test embedded subtitles (Luna)",
     "inPlayer": "Open in BannerTV's player"
   },
+  "watchNext": {
+    "episodeTitle": "{{name}} S{{season}}:E{{episode}}"
+  },
   "welcome": {
     "title": "Welcome to BannerTV",
     "lead": "Films and series from the addons you choose, in one place and made for your remote.",

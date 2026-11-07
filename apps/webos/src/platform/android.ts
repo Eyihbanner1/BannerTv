@@ -15,6 +15,13 @@ interface AndroidHost {
   exit(): void;
   openExternal(url: string): void;
   player(command: string): void;
+  /**
+   * Added to version 1 later, so missing from an older app and from the
+   * phone's stand-in: replaces BannerTV's cards on the system's Watch Next row.
+   */
+  watchNext?(cards: string): void;
+  /** Added later too: the link the app was opened with, as JSON, once; "" when none. */
+  takeLink?(): string;
 }
 
 /** The Android app, as it describes itself. */
@@ -81,6 +88,8 @@ export type AndroidEvent =
   | { type: 'key'; key: string; repeat?: boolean }
   | { type: 'keyboard'; visible: boolean }
   | { type: 'relaunch' }
+  /** Opened from a link while running, such as a Watch Next card: takeLink() hands it over. */
+  | { type: 'open' }
   | AndroidPlayerEvent;
 
 export type AndroidPlayerCommand =
@@ -156,6 +165,32 @@ export function openExternal(url: string): void {
   host()?.openExternal(url);
 }
 
+/**
+ * Publishes to the system's own "Continue watching" row (Watch Next), or
+ * null when this Android app cannot: an older build, or the phone's player.
+ * Android itself does nothing on a phone, a Fire TV or before Android 8.
+ * Each list replaces the last; an empty one empties the row.
+ */
+export function androidWatchNext(): ((cards: readonly object[]) => void) | null {
+  const bridge = host();
+  const watchNext = bridge?.watchNext;
+  if (!bridge || typeof watchNext !== 'function') return null;
+  return (cards) => watchNext.call(bridge, JSON.stringify({ cards }));
+}
+
+/**
+ * The link Android was opened with and holds for the page, read once (the
+ * next read gives nothing), or null when there is none. What it says is
+ * checked by whoever opens it: another app can send one.
+ */
+export function takeAndroidLink(): unknown {
+  const bridge = host();
+  const takeLink = bridge?.takeLink;
+  if (!bridge || typeof takeLink !== 'function') return null;
+  // "" when nothing waits, which is no JSON.
+  return readJson<unknown>(() => takeLink.call(bridge));
+}
+
 const playerListeners = new Set<(event: AndroidPlayerEvent) => void>();
 
 /** Android's player events, until the returned function is called. */
@@ -210,6 +245,8 @@ function playerPaused(): boolean {
 export interface AndroidHooks {
   /** The app came back to the front, as webOSRelaunch does on the TV. */
   onRelaunch?: () => void;
+  /** The app was opened from a link while running; takeAndroidLink() has it. */
+  onOpen?: () => void;
 }
 
 /**
@@ -238,6 +275,9 @@ export function initAndroid(hooks: AndroidHooks = {}): void {
           return;
         case 'relaunch':
           hooks.onRelaunch?.();
+          return;
+        case 'open':
+          hooks.onOpen?.();
           return;
         case 'player':
           playerListeners.forEach((listener) => listener(event));

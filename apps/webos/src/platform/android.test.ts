@@ -125,6 +125,46 @@ describe('the Android host', () => {
   });
 });
 
+describe('Watch Next and links', () => {
+  it("are missing from an app that predates them, and from the phone's player", async () => {
+    onAndroid();
+    const android = await load();
+    expect(android.androidWatchNext()).toBeNull();
+    expect(android.takeAndroidLink()).toBeNull();
+  });
+
+  it('sends each list of cards whole, and takes the link Android holds', async () => {
+    const sent: string[] = [];
+    let link = '{"type":"movie","meta":"tt1","video":"tt1"}';
+    onAndroid({
+      watchNext: (cards: string) => sent.push(cards),
+      takeLink: () => {
+        const taken = link;
+        link = '';
+        return taken;
+      },
+    });
+    const android = await load();
+    const publish = android.androidWatchNext();
+    publish?.([{ meta: 'tt1' }]);
+    publish?.([]);
+    expect(sent.map((cards) => JSON.parse(cards) as unknown)).toEqual([
+      { cards: [{ meta: 'tt1' }] },
+      { cards: [] },
+    ]);
+    expect(android.takeAndroidLink()).toEqual({ type: 'movie', meta: 'tt1', video: 'tt1' });
+    // Taken once: nothing waits now.
+    expect(android.takeAndroidLink()).toBeNull();
+  });
+
+  it('does nothing off Android', async () => {
+    vi.stubGlobal('window', new EventTarget());
+    const android = await load();
+    expect(android.androidWatchNext()).toBeNull();
+    expect(android.takeAndroidLink()).toBeNull();
+  });
+});
+
 describe('keyCodeFor', () => {
   it("gives Android's keys the LG codes the app answers", async () => {
     const { keyCodeFor } = await load();
@@ -223,6 +263,17 @@ describe('initAndroid', () => {
     android.initAndroid({ onRelaunch });
     send({ type: 'relaunch' });
     expect(onRelaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes on being opened from a link while running', async () => {
+    onAndroid();
+    const android = await load();
+    const onOpen = vi.fn();
+    const onRelaunch = vi.fn();
+    android.initAndroid({ onRelaunch, onOpen });
+    send({ type: 'open' });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onRelaunch).not.toHaveBeenCalled();
   });
 
   it('hands player news to the player until it stops listening', async () => {
