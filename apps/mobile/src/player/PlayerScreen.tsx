@@ -286,6 +286,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     state,
     { type: titleType, metaId, videoId },
     finder.runtimeSeconds,
+    finder.knownRuntimeSeconds,
     cue?.start,
   );
   // The progress saved counts the episode watched from the credits.

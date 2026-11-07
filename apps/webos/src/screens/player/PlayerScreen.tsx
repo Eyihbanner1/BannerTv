@@ -514,6 +514,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     state,
     { type, metaId, videoId, lab: props.lab },
     finder.runtimeSeconds,
+    finder.knownRuntimeSeconds,
     cue?.start,
   );
 

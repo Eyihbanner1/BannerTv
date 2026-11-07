@@ -194,7 +194,13 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
     // The title's own running time judges a file's length until the video's is known.
     parseRuntime(item?.runtime),
   );
-  useScrobble(session, state, { type: titleType, metaId, videoId }, finder.runtimeSeconds);
+  useScrobble(
+    session,
+    state,
+    { type: titleType, metaId, videoId },
+    finder.runtimeSeconds,
+    finder.knownRuntimeSeconds,
+  );
 
   // The language the viewer chose before, once per stream and engine.
   const audioDecided = useRef('');

@@ -66,7 +66,11 @@ test('Settings, Profiles adds a kids profile, offers to lock the grown-ups, and 
   await page.getByLabel('Name', { exact: true }).fill('Ada');
   await page.getByRole('button', { name: /^Kids profile/ }).click();
   await page.getByRole('button', { name: 'Kids, up to U' }).click();
-  await expect(page.getByText(/^Only family films and series/)).toBeVisible();
+  await expect(
+    page.getByText(
+      /^No Addons, and limited Settings\. Home, Discover and Search show family films/,
+    ),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Add a profile' }).click();
   await expect(page.getByText('Lock the grown-up profiles?')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Not now' })).toBeVisible();
