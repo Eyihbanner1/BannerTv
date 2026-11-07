@@ -51,6 +51,17 @@ describe('profileSubtitles', () => {
     // Six hundred lines of two seconds, apart from one another; the stray is left out.
     expect(profile.covered).toBeCloseTo(1200);
     expect(profileSubtitles([]).covered).toBe(0);
+    // Each of the six hundred starts once the one before it has ended.
+    expect(profile.apart).toBe(600);
+    expect(profileSubtitles([]).apart).toBe(0);
+    // A line drawn over another is not counted; one that starts as the last ends is.
+    const drawnOver = [
+      cue(10, 20, 'Into the wind we run together'),
+      cue(10, 12, 'ka'),
+      cue(12, 14, 'ze'),
+      cue(20, 22, 'Where have you been?'),
+    ];
+    expect(profileSubtitles(drawnOver).apart).toBe(2);
     // A quiet stretch of a few minutes before the last words is the film's, not a stray.
     const quiet = dialogue(600, 60, 6000).concat(cue(6400, 6403, 'Goodbye.'));
     expect(profileSubtitles(quiet).end).toBe(6403);
@@ -753,6 +764,74 @@ describe('judgeSubtitleFits', () => {
       expect(files[0]!.profile.lines / 24).toBeGreaterThan(15);
       expect(fits.get('songs')).toMatchObject({ signs: true, unfit: true });
       expect(ranked[ranked.length - 1]).toBe('songs');
+    });
+
+    it('knows the signs and songs file for part of the episode, with no name or one that says only forced', () => {
+      const sung = songs(20, 9);
+      const plain = { id: 'srt', profile: profileSubtitles(srt) };
+      const full = {
+        id: 'full',
+        profile: profileSubtitles(
+          ass(
+            sung.concat(
+              signs,
+              speech.map((l) => event(l.from, l.to, 'Default', l.text)),
+            ),
+          ),
+        ),
+      };
+      const rankedIn = (files: Array<{ id: string; label?: string; profile: SubtitleProfile }>) => {
+        const fits = judgeSubtitleFits(files, episode, 'en');
+        const ranked = rankSubtitles(files, {
+          video: {},
+          fit: (each) => fits.get(each.id),
+          hearing: false,
+        }).map((each) => each.id);
+        return { fits, ranked };
+      };
+      // OpenSubtitles sends no release name at all.
+      const unnamed = { id: 'songs', profile: profileSubtitles(ass(sung.concat(signs))) };
+      // The karaoke gives it more than half the plain file's lines, and a full file's a minute.
+      expect(unnamed.profile.lines).toBeGreaterThan(plain.profile.lines / 2);
+      expect(unnamed.profile.lines / (episode.seconds / 60)).toBeGreaterThan(15);
+      // Each line of a song counts once, however many syllables are drawn over it.
+      expect(unnamed.profile.apart).toBeLessThan(plain.profile.apart / 2);
+      for (const files of [
+        [unnamed, plain],
+        [unnamed, full, plain],
+      ]) {
+        const { fits, ranked } = rankedIn(files);
+        expect(fits.get('songs')).toMatchObject({ length: 'short', signs: false });
+        expect(ranked[ranked.length - 1]).toBe('songs');
+      }
+      // A name that says only forced is trusted: the karaoke is not a full file's lines.
+      const named = {
+        id: 'songs',
+        profile: profileSubtitles(ass(sung.concat(signs)), '[Group] Show - 01 (1080p) [Forced]'),
+      };
+      for (const files of [[named], [named, plain], [named, full, plain]]) {
+        const { fits, ranked } = rankedIn(files);
+        expect(fits.get('songs')).toMatchObject({ signs: true, unfit: true });
+        expect(ranked[ranked.length - 1]).toBe('songs');
+      }
+      // A full file that says forced as well is still a full file, its karaoke left out.
+      const fullForced = {
+        id: 'full',
+        profile: profileSubtitles(
+          ass(
+            sung.concat(
+              signs,
+              speech.map((l) => event(l.from, l.to, 'Default', l.text)),
+            ),
+          ),
+          '[Group] Show - 01 (1080p) [Full+Forced]',
+        ),
+      };
+      expect(rankedIn([fullForced, plain]).fits.get('full')).toMatchObject({
+        signs: false,
+        length: 'fits',
+        unfit: false,
+      });
     });
 
     it('never takes the plain file for part of one beside the full file with the karaoke', () => {
