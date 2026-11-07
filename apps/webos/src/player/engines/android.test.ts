@@ -334,7 +334,11 @@ describe("Android's engine", () => {
           mime: 'audio/true-hd',
         },
       ],
-      text: [{ id: '2:0', lang: 'und', label: 'Forced', active: false, supported: true }],
+      text: [
+        { id: '2:0', lang: 'und', label: 'Forced', active: false, supported: true },
+        { id: '2:1', lang: 'en', label: 'English', active: false, supported: true, forced: true },
+        { id: '2:2', lang: 'en', label: 'English', active: false, supported: true },
+      ],
     });
     expect(tracks).toHaveBeenCalledTimes(1);
     expect(engine.audioTracks()).toEqual([
@@ -349,7 +353,12 @@ describe("Android's engine", () => {
         commentary: true,
       },
     ]);
-    expect(engine.textTracks()).toEqual([{ id: '2:0', lang: '', label: 'Forced', active: false }]);
+    // Forced lines only, by the track's flag or its name.
+    expect(engine.textTracks()).toEqual([
+      { id: '2:0', lang: '', label: 'Forced', active: false, forced: true },
+      { id: '2:1', lang: 'en', label: 'English', active: false, forced: true },
+      { id: '2:2', lang: 'en', label: 'English', active: false },
+    ]);
 
     engine.selectAudio('1:1');
     engine.selectText('2:0');

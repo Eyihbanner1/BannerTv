@@ -13,6 +13,11 @@ export interface EngineTrack {
   format?: string;
   /** Audio only: the stream marks it as commentary (its kind or DASH role). */
   commentary?: boolean;
+  /**
+   * Subtitles only: it holds forced lines only (signs, foreign-language
+   * scenes), as the stream marks it or its name says.
+   */
+  forced?: boolean;
 }
 
 /**
