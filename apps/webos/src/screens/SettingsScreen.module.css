@@ -9,6 +9,15 @@
   margin-right: 96px;
 }
 
+/*
+ * Nine buttons on the left: a tighter stack keeps the last one, focused,
+ * above the bottom safe area of a 1080 line screen.
+ */
+.left > [role='button'],
+.right > [role='button'] {
+  margin-bottom: 12px;
+}
+
 .heading {
   margin-bottom: 24px;
   color: var(--bt-text-subtle);
@@ -16,5 +25,10 @@
 }
 
 .later {
+  margin-top: 24px;
+}
+
+/* The version line and the TMDB credit, under the shorter right column so they stay on screen. */
+.about {
   margin-top: 24px;
 }

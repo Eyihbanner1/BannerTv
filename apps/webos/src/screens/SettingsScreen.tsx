@@ -174,11 +174,11 @@ function FullSettings() {
             onPress={() => setPreference('tmdb', !prefs.tmdb)}
           />
         )}
+        <p className={`${styles.muted} ${settings.about}`}>
+          {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
+        </p>
+        {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}
       </div>
-      <p className={styles.muted}>
-        {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
-      </p>
-      {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}
       {open === 'streamChoice' && (
         <Menu
           focusKey="settings-stream-choice-menu"

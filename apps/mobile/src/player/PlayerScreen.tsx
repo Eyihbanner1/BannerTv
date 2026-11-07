@@ -366,7 +366,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [askAtEnd, setAskAtEnd] = useState<boolean | null>(null);
   const [afterEnd, setAfterEnd] = useState<number | null>(null);
   const [countSeen, setCountSeen] = useState(false);
-  const held = panel !== null || waiting || problem || scrubbing;
+  // A skip still adding up (the 10 s buttons, double taps, below) holds Up Next as a sheet
+  // does, as on the TV: a count does not run out under it and start the next episode.
+  const [pending, setPending] = useState<PendingSkip | null>(null);
+  const held = panel !== null || waiting || problem || scrubbing || pending !== null;
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
   const counting = inStretch && !dismissed && !held;
   // As the credits start, the pill offers the next episode or Watch credits; with "Start next
@@ -476,8 +479,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         setPanel(null);
         return true;
       }
-      // Over the credits pill, as on the TV: Watch credits.
-      if (creditsUp) {
+      // Over the credits pill (the controls hide it), or a Next episode count it stops: Watch
+      // credits. With the controls up over a pill that only offers, Back leaves, as before.
+      if (creditsUp && (!controls || creditsCounts)) {
         setCreditsCard((card) => card && { ...card, gone: true });
         return true;
       }
@@ -488,7 +492,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       return false;
     });
     return () => subscription.remove();
-  }, [panel, counting, ended, decision, creditsUp]);
+  }, [panel, counting, ended, decision, creditsUp, controls, creditsCounts]);
 
   // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
   // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
@@ -544,7 +548,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // go: what it counted from is no longer playing, or the viewer has chosen another way.
   const lastTap = useRef<{ at: number; side: TapSide } | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [pending, setPending] = useState<PendingSkip | null>(null);
   const skipsAddUp =
     !!session && !waiting && !problem && !state.live && panel === null && !scrubbing;
   if (pending && !skipsAddUp) setPending(null);
