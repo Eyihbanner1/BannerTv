@@ -1,10 +1,11 @@
 import { createCueIndex, type Cue, type CueIndex } from '@bannertv/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { SubtitleStyle } from '../../data/preferences';
+import { nextReadDelay } from '../../player/timing';
 import styles from './SubtitleLayer.module.css';
 
-/** How often the layer reads the clock. Cues rarely last under half a second. */
-const TICK_MS = 100;
+/** What the video says when its clock moves, stops or jumps. */
+const CLOCK_EVENTS = ['play', 'playing', 'pause', 'seeking', 'seeked', 'ratechange', 'timeupdate'];
 const NONE: Cue[] = [];
 
 /**
@@ -29,6 +30,10 @@ interface SubtitleLayerProps {
  * Draws subtitles over the picture. BannerTV draws them itself because
  * webOS shows neither embedded nor HLS subtitles to web apps (ADR 0001), and
  * so that every source looks the same and follows the viewer's style.
+ *
+ * Lines change on time: the layer reads the clock when the next line is due,
+ * rather than every tenth of a second, which showed and cleared lines up to
+ * 0.1 s late and made them feel loose against the speech.
  */
 export function SubtitleLayer({ video, cues, offset, look, lift, sample }: SubtitleLayerProps) {
   const index = useMemo(() => (cues ? createCueIndex(cues) : null), [cues]);
@@ -39,13 +44,24 @@ export function SubtitleLayer({ video, cues, offset, look, lift, sample }: Subti
 
   useEffect(() => {
     if (!video || !index) return;
+    let timer: number | undefined;
     // The index hands back the same array while nothing changes, so React skips the redraw.
     const tick = () => {
-      const cues = index.at(video.currentTime - offset);
-      setRead((last) => (last.index === index && last.cues === cues ? last : { index, cues }));
+      window.clearTimeout(timer);
+      const now = video.currentTime - offset;
+      const showing = index.at(now);
+      setRead((last) =>
+        last.index === index && last.cues === showing ? last : { index, cues: showing },
+      );
+      const wait = nextReadDelay(now, index.nextChange(now), video.playbackRate, video.paused);
+      timer = window.setTimeout(tick, wait);
     };
-    const timer = window.setInterval(tick, TICK_MS);
-    return () => window.clearInterval(timer);
+    for (const type of CLOCK_EVENTS) video.addEventListener(type, tick);
+    tick();
+    return () => {
+      window.clearTimeout(timer);
+      for (const type of CLOCK_EVENTS) video.removeEventListener(type, tick);
+    };
   }, [video, index, offset]);
 
   // Cues read from an older file never show over a new one.

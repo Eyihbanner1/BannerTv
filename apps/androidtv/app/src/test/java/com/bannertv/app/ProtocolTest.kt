@@ -75,6 +75,31 @@ class ProtocolTest {
         assertNull(Protocol.streamType(null))
     }
 
+    // The rules themselves are tested in HeaderRulesTest: the player keeps the stream helper's.
+    @Test
+    fun keepsOnlyRequestHeadersThatCanBeSent() {
+        val sent =
+            Protocol.requestHeaders(
+                mapOf(
+                    "Referer" to "https://site.example/",
+                    "User-Agent" to "Mozilla/5.0 (X11)",
+                    "Bad Name" to "x",
+                    "X-Split" to "a\r\nInjected: yes",
+                    "Range" to "bytes=0-",
+                    "host" to "other.example",
+                    "X-Empty" to null,
+                ),
+            )
+        assertEquals(mapOf("Referer" to "https://site.example/", "User-Agent" to "Mozilla/5.0 (X11)"), sent)
+        assertTrue(Protocol.requestHeaders(emptyMap()).isEmpty())
+    }
+
+    @Test
+    fun findsTheUserAgentWhateverItsCase() {
+        assertEquals("Agent/1", Protocol.userAgent(mapOf("user-agent" to "Agent/1")))
+        assertNull(Protocol.userAgent(mapOf("Referer" to "https://site.example/")))
+    }
+
     @Test
     fun undeterminedLanguageIsEmpty() {
         assertEquals("", Protocol.language(null))

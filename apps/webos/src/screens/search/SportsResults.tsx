@@ -11,7 +11,12 @@ import { eventsFromItems } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { focusedKey } from '../../navigation/spatial';
 import { fixtureText } from '../sports/fixture';
-import { useMinuteClock, useSportsFeed, useViewOptions } from '../sports/use-sports';
+import {
+  useMinuteClock,
+  useSportsFeed,
+  useSportsMatcher,
+  useViewOptions,
+} from '../sports/use-sports';
 import styles from './SearchScreen.module.css';
 
 const MAX_RESULTS = 40;
@@ -125,7 +130,7 @@ interface SportsResultsProps {
   /** Sports addons' own searches, asked only when the viewer asks. */
   sources: readonly CatalogSource[];
   onFocusRow: (rowKey: string) => void;
-  /** Whether this group shows anything, so Search can say when nothing at all was found. */
+  /** Whether this group found any match, so Search can say when nothing at all was found. */
   onContent: (has: boolean) => void;
   /** A row of the group came or went, so the rows under it have moved. */
   onLayout: () => void;
@@ -153,6 +158,8 @@ export function SportsResults({
   const feed = useSportsFeed();
   const now = useMinuteClock();
   const view = useViewOptions(feed.events, now);
+  // A sports search finds teams by every name the team and league data knows.
+  useSportsMatcher();
   const found = useMemo(
     () => searchEvents(feed.events, term, view).slice(0, MAX_RESULTS),
     [feed.events, term, view],
@@ -193,8 +200,14 @@ export function SportsResults({
     if (asked) handOff(-1);
   }, [asked, handOff]);
 
-  const fromAddons = Object.keys(addonCounts).some((key) => addonCounts[key] !== 0);
-  const has = found.length > 0 || sources.length > 0 || fromAddons;
+  // Only the addons asked now: a count left from one that went says nothing.
+  const fromAddons =
+    asked &&
+    sources.some(
+      (source) => addonCounts[source.key] !== undefined && addonCounts[source.key] !== 0,
+    );
+  // Matches only: the button alone is not something found, so Nothing found still helps.
+  const has = found.length > 0 || fromAddons;
   useEffect(() => onContent(has), [onContent, has]);
   const none = found.length === 0;
   const addonRows = asked ? sources.filter((source) => addonCounts[source.key] !== 0).length : 0;

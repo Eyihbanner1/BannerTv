@@ -1,0 +1,142 @@
+{
+  "$description": "The redesign's tokens (approved 1 Nov 2026). The one source for both the web apps (design.css) and the React Native apps (design.ts). Edit this file, then run: node tools/scripts/build-tokens.mjs. CSS names start --bt-<group>-; the older --bt-focus-ring and --bt-focus-scale belong to tokens.css users in apps/webos and are left alone.",
+  "color": {
+    "bg": "#0B0815",
+    "rail": "#110C1F",
+    "surface": "#1B1430",
+    "raised": "#2A2050",
+    "sheet": "#140F26",
+    "track": "#3A3160",
+    "text": "#F1EDFF",
+    "text-soft": "#D9D2F2",
+    "text-muted": "#B8AEDB",
+    "text-faint": "#8E82B8",
+    "accent": "#A98BFF",
+    "focus": "#C9B5FF",
+    "focus-glow": "rgba(201, 181, 255, 0.55)",
+    "focus-fill": "#F1EDFF",
+    "on-focus": "#0B0815",
+    "brand": "#6A3BF0",
+    "brand-deep": "#4B23C8",
+    "brand-bright": "#7B4DFF",
+    "player-bg": "#05030A",
+    "player-scrim": "rgba(5, 3, 10, 0.62)",
+    "control-idle": "rgba(241, 237, 255, 0.10)",
+    "bar-track": "rgba(241, 237, 255, 0.22)",
+    "bar-buffer": "rgba(241, 237, 255, 0.32)",
+    "kids-bg": "#1F3A2E",
+    "kids-text": "#BFEBD6",
+    "player-dim": "rgba(5, 3, 10, 0.45)",
+    "control-press": "rgba(241, 237, 255, 0.14)"
+  },
+  "font": {
+    "family": "Urbanist",
+    "weight-medium": 500,
+    "weight-semibold": 600,
+    "weight-bold": 700,
+    "weight-heavy": 800
+  },
+  "tv-type": {
+    "hero-title": 84,
+    "details-title": 80,
+    "heading": 40,
+    "row-title": 32,
+    "body": 28,
+    "label": 26,
+    "meta": 24,
+    "small": 22
+  },
+  "space": {
+    "xs": 8,
+    "sm": 12,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "xxl": 48,
+    "tv-safe": 96
+  },
+  "radius": {
+    "sm": 8,
+    "md": 14,
+    "lg": 16,
+    "sheet": 32,
+    "pill": 999
+  },
+  "focused": {
+    "ring-width": 5,
+    "glow-width": 4,
+    "tile-scale": 1.08
+  },
+  "motion": {
+    "fast": 120,
+    "base": 200,
+    "slide": 240,
+    "hero-fade": 320,
+    "hero-delay": 250,
+    "controls-hide": 4000
+  },
+  "ease": {
+    "standard": [0.2, 0, 0, 1],
+    "decelerate": [0, 0, 0.2, 1],
+    "accelerate": [0.4, 0, 1, 1]
+  },
+  "tv": {
+    "nav-height": 120,
+    "hero-left": 96,
+    "hero-top": 210,
+    "hero-width": 820,
+    "tile-wide-w": 360,
+    "tile-wide-h": 202,
+    "tile-wide-focused-w": 400,
+    "tile-wide-focused-h": 225,
+    "tile-poster-w": 200,
+    "tile-poster-h": 300,
+    "row-gap": 24,
+    "settings-rail": 600,
+    "settings-row-h": 96,
+    "toggle-w": 84,
+    "toggle-h": 46,
+    "details-resume-w": 520,
+    "avatar": 220,
+    "sheet-h": 560
+  },
+  "player": {
+    "button": 76,
+    "bar": 6,
+    "scrim": 300,
+    "seek-step": 10
+  },
+  "phone-type": {
+    "display": 30,
+    "hero-title": 26,
+    "wordmark": 22,
+    "heading": 18,
+    "body": 15,
+    "label": 14,
+    "meta": 13,
+    "small": 12
+  },
+  "touch": {
+    "min": 48,
+    "chip": 40,
+    "row": 52,
+    "play": 52,
+    "skip": 52,
+    "play-big": 72
+  },
+  "phone": {
+    "gutter": 20,
+    "hero-h": 300,
+    "hero-radius": 20,
+    "backdrop-h": 260,
+    "tile-poster-w": 104,
+    "tile-poster-h": 156,
+    "tile-wide-w": 200,
+    "tile-wide-h": 112,
+    "result-poster-w": 72,
+    "result-poster-h": 108,
+    "progress": 4,
+    "side-sheet-w": 424,
+    "side-sheet-radius": 24
+  }
+}

@@ -254,6 +254,8 @@ describe('createLibrary', () => {
       name: 'Show',
       poster: 'https://p',
       addedAt: 50,
+      // Still Trakt's: new artwork is not a choice made here.
+      from: 'trakt',
     });
     expect(library.version()).toBeGreaterThan(before);
     const after = library.version();
@@ -453,5 +455,86 @@ describe('mergeRemote', () => {
         .map((i) => i.id)
         .sort(),
     ).toEqual(['a', 'r']);
+  });
+});
+
+describe('the Trakt mark and the BannerTV account', () => {
+  it('marks titles from Trakt, keeps the mark when read back, and drops it when added here', async () => {
+    const storage = memoryKeyValueStore();
+    const library = createLibrary({ storage, now: () => 7777 });
+    await library.mergeRemote([{ id: 'tt1', type: 'movie', name: 'One', addedAt: 1000 }]);
+    expect(library.get('tt1')?.from).toBe('trakt');
+
+    const again = createLibrary({ storage });
+    await again.load();
+    expect(again.get('tt1')?.from).toBe('trakt');
+
+    await again.add(preview('tt1'));
+    expect(again.get('tt1')).toMatchObject({ addedAt: expect.any(Number) });
+    expect(again.get('tt1')?.from).toBeUndefined();
+  });
+
+  it('adopts titles with their own times, newest first, and takes others out', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 50 });
+    await library.add(preview('kept'));
+    await library.add(preview('gone'));
+    let notified = 0;
+    library.subscribe(() => (notified += 1));
+    await library.adopt({
+      set: [
+        { id: 'new', type: 'series', name: 'New', addedAt: 90 },
+        { id: 'old', type: 'movie', name: 'Old', addedAt: 10, poster: 'https://p' },
+        { id: '', type: 'movie', name: 'Unreadable', addedAt: 1 },
+      ],
+      remove: ['gone', 'never-here'],
+    });
+    expect(library.items().map((i) => [i.id, i.addedAt])).toEqual([
+      ['new', 90],
+      ['kept', 50],
+      ['old', 10],
+    ]);
+    expect(library.get('old')?.poster).toBe('https://p');
+    expect(notified).toBe(1);
+    // Nothing to change: nothing saved, nobody told.
+    await library.adopt({ remove: ['gone'] });
+    expect(notified).toBe(1);
+  });
+
+  it('takes a title off Trakt too only when its list has it', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 50 });
+    await library.mergeRemote([{ id: 'onTrakt', type: 'movie', name: 'T', addedAt: 1000 }]);
+    await library.add(preview('local'));
+    await library.adopt({ remove: ['onTrakt', 'local'] });
+    expect(library.items()).toEqual([]);
+    expect(library.outbox()).toEqual([{ op: 'remove', id: 'onTrakt', type: 'movie' }]);
+    // Put back from the account: the removal waiting for Trakt goes.
+    await library.adopt({ set: [{ id: 'onTrakt', type: 'movie', name: 'T', addedAt: 2000 }] });
+    expect(library.outbox()).toEqual([]);
+  });
+
+  it("leaves Trakt's list alone when titles go from this screen only", async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 50 });
+    await library.mergeRemote([{ id: 'onTrakt', type: 'movie', name: 'T', addedAt: 1000 }]);
+    await library.add(preview('local'));
+    await library.adopt({ remove: ['onTrakt', 'local'], onlyHere: true });
+    expect(library.items()).toEqual([]);
+    expect(library.outbox()).toEqual([]);
+    // Trakt's next sync brings its title back, as Trakt's.
+    await library.mergeRemote([{ id: 'onTrakt', type: 'movie', name: 'T', addedAt: 1000 }]);
+    expect(library.get('onTrakt')?.from).toBe('trakt');
+  });
+
+  it('keeps no more than MAX_LIBRARY_ITEMS after adopting', async () => {
+    const library = createLibrary({ storage: memoryKeyValueStore(), now: () => 1 });
+    await library.adopt({
+      set: Array.from({ length: MAX_LIBRARY_ITEMS + 5 }, (_, i) => ({
+        id: `tt${i}`,
+        type: 'movie',
+        name: `T${i}`,
+        addedAt: 100 + i,
+      })),
+    });
+    expect(library.items()).toHaveLength(MAX_LIBRARY_ITEMS);
+    expect(library.items()[0]!.id).toBe(`tt${MAX_LIBRARY_ITEMS + 4}`);
   });
 });

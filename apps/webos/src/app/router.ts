@@ -2,6 +2,7 @@ import { type BingeHint, createStore, type SportEvent, type StreamEntry } from '
 import type { MetaPreview } from '@bannertv/protocol';
 import { getCurrentFocusKey } from '@noriginmedia/norigin-spatial-navigation';
 import { currentlyPressed } from '../navigation/focus-memory';
+import { markPlayPress } from '../player/play-marks';
 
 /** Top-level destinations in the rail. Some show only some of the time: see sections.ts. */
 export const SECTIONS = [
@@ -48,8 +49,11 @@ export function remembersPlace(route: { lab?: boolean; event?: EventPlay }): boo
 
 export type Route =
   | { name: Section }
-  /** `preview` is what the tile already knew, drawn while the full meta loads. */
-  | { name: 'details'; type: string; id: string; preview?: MetaPreview }
+  /**
+   * `preview` is what the tile already knew, drawn while the full meta loads.
+   * `video` is an episode to open the episodes on, as a Watch Next card names it.
+   */
+  | { name: 'details'; type: string; id: string; preview?: MetaPreview; video?: string }
   /** One sports event, as the Sports screen had it when it was opened. */
   | { name: 'event'; event: SportEvent }
   /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */
@@ -96,13 +100,27 @@ export type Route =
     }
   | { name: 'diagnostics' }
   | { name: 'lab' }
-  /** Settings > Profiles, and one profile's page; without an id it adds a profile. */
+  /**
+   * Settings > Profiles, and one profile's page; without an id it adds a
+   * profile. `unlocked`: its PIN was entered to open the page, so changing
+   * the PIN does not ask for it again.
+   */
   | { name: 'profiles' }
-  | { name: 'profile-edit'; id?: string }
+  | { name: 'profile-edit'; id?: string; unlocked?: boolean }
   /** Settings > Home rows: their order, and which are hidden. */
   | { name: 'home-rows' }
   /** Settings > Trakt: sign in, sync, sign out. */
-  | { name: 'trakt' };
+  | { name: 'trakt' }
+  /**
+   * Settings > BannerTV account: create, join, sync now, leave, delete (ADR 0006).
+   * `join` opens it on typing a code, from the welcome's Join with a code.
+   */
+  | { name: 'account'; join?: boolean }
+
+  /** Settings > Stream helper: run it (Android) or pair with one (the LG). */
+  | { name: 'stream-helper' }
+  /** Settings > Languages and picture: the profile's audio, subtitles and picture limits. */
+  | { name: 'languages' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 
@@ -149,6 +167,7 @@ export function push(
   route: Route,
   returnFocus: ReturnFocus = currentlyPressed() ?? getCurrentFocusKey(),
 ): void {
+  if (route.name === 'player') markPlayPress();
   router.set(({ stack }) => ({
     stack: [...stack.slice(0, -1), { ...stack[stack.length - 1]!, returnFocus }, { route }],
   }));
@@ -166,6 +185,7 @@ export function replace(route: Route): void {
     return;
   }
   pendingFocus = undefined;
+  if (route.name === 'player') markPlayPress();
   router.set({ stack: [...stack.slice(0, -1), { route }] });
 }
 

@@ -192,6 +192,99 @@ test('opening BannerTV again from the launcher asks who is watching when the pro
   expect(errors).toEqual([]);
 });
 
+test('changing or removing a PIN asks for the one it has, unless it was entered to open the profile', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [
+      main(lockedWith('2468')),
+      { id: GUEST_ID, name: 'Guest', colour: 2, ...lockedWith('1357') },
+    ],
+    lastId: GUEST_ID,
+    askAtLaunch: false,
+  });
+  const pinOf = (id: string) =>
+    page.evaluate((profileId) => {
+      const saved = JSON.parse(localStorage.getItem('bannertv.profiles')!) as {
+        profiles: { id: string; pin?: { hash: string } }[];
+      };
+      return saved.profiles.find((profile) => profile.id === profileId)?.pin?.hash ?? null;
+    }, id);
+  const pad = (name: string) => page.getByRole('dialog', { name: `Enter the PIN for ${name}` });
+  await page.goto(APP_URL);
+  await expectFocusLabel(page, 'Guest, PIN');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await typeDigits(page, '1357');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  const guestPin = await pinOf(GUEST_ID);
+
+  // Guest's own page opens without the PIN, but its PIN cannot be changed or removed without it.
+  await openSettings(page);
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'Enter', 'profiles-main');
+  await press(page, 'ArrowDown', `profiles-${GUEST_ID}`);
+  await press(page, 'Enter', 'profile-name');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    /^profile-colour-/,
+  );
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowDown', 'profile-save');
+  await press(page, 'ArrowDown', 'profile-pin');
+  await press(page, 'ArrowDown', 'profile-pin-remove');
+  await press(page, 'Enter', 'profile-pin-pad-1');
+  await expect(pad('Guest')).toBeVisible();
+  await typeDigits(page, '2468');
+  await expect(pad('Guest').getByText('That PIN is not right.')).toBeVisible();
+  // Back returns to Remove PIN, and the PIN stays.
+  await pressBack(page);
+  await expectFocus(page, 'profile-pin-remove');
+  expect(await pinOf(GUEST_ID)).toBe(guestPin);
+
+  // Change PIN takes the one it has first, then the new one twice.
+  await press(page, 'ArrowUp', 'profile-pin');
+  await press(page, 'Enter', 'profile-pin-pad-1');
+  await expect(pad('Guest')).toBeVisible();
+  await typeDigits(page, '1357');
+  const choose = page.getByRole('dialog', { name: 'Choose a four-digit PIN' });
+  await expect(choose).toBeVisible();
+  await typeDigits(page, '1111');
+  await expect(page.getByRole('dialog', { name: 'Enter the PIN again' })).toBeVisible();
+  await typeDigits(page, '1111');
+  await expectFocus(page, 'profile-pin');
+  const changed = await pinOf(GUEST_ID);
+  expect(changed).not.toBeNull();
+  expect(changed).not.toBe(guestPin);
+  // Known on this page now, so Remove PIN asks nothing more.
+  await press(page, 'ArrowDown', 'profile-pin-remove');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'profile-pin');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await pinOf(GUEST_ID)).toBeNull();
+
+  // Main's page asks for its PIN to open, so Remove PIN does not ask again.
+  await pressBack(page);
+  await expectFocus(page, `profiles-${GUEST_ID}`);
+  await press(page, 'ArrowUp', 'profiles-main');
+  await press(page, 'Enter', 'profiles-pin-1');
+  await typeDigits(page, '2468');
+  await expectFocus(page, 'profile-name');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowDown', 'profile-save');
+  await press(page, 'ArrowDown', 'profile-pin');
+  await press(page, 'ArrowDown', 'profile-pin-remove');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'profile-pin');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await pinOf('main')).toBeNull();
+  expect(errors).toEqual([]);
+});
+
 test("Back pressed while Home still reads the profile's rows stays in the app", async ({
   page,
 }) => {
@@ -273,12 +366,14 @@ test('a kids profile sees Family rows only, no Addons, a short Settings, and no 
 
   const kidsRow = 'home-0-movie-top-genre-family';
   await expectFocus(page, `${kidsRow}-tile-0`);
-  expect(requests.catalogs).toContain('movie/top/genre=Family');
-  expect(requests.catalogs).not.toContain('movie/top');
   // Elephants Dream says Horror, so it is left out; Sintel says nothing, and its row asked for Family.
   const row = page.locator(`[data-row-key="${kidsRow}"]`);
   await expect(row.getByRole('button', { name: /Big Buck Bunny/ })).toBeVisible();
   await expect(row.getByRole('button', { name: /Elephants Dream/ })).toHaveCount(0);
+  // Focus can land on the row's loading tiles a moment before its catalog is asked for,
+  // so what was asked is read once the row shows its titles.
+  expect(requests.catalogs).toContain('movie/top/genre=Family');
+  expect(requests.catalogs).not.toContain('movie/top');
 
   await press(page, 'Enter', 'details-watch');
   await pressBack(page);
@@ -489,7 +584,8 @@ test('a title taken off My List from its page leaves focus on the Library', asyn
     },
   });
   await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  // With nothing to continue, Home opens on its My List row.
+  await expectFocus(page, 'home-my-list-tile-0');
   await openSection(page, 'library');
   await expectFocus(page, 'discover-tile-0');
   await press(page, 'ArrowRight', 'discover-tile-1');
@@ -518,11 +614,12 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
   await openSettings(page);
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
+  // Continue Watching and My List come first; the catalogs follow.
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  await press(page, 'ArrowDown', 'home-rows-bannertv-my-list-show');
   const top = 'home-rows-0-movie-top';
-  await press(page, 'Enter', `${top}-up`);
-  // Hide the first row, then move the series row to the top.
-  await press(page, 'ArrowRight', `${top}-down`);
-  await press(page, 'ArrowRight', `${top}-show`);
+  // Hide the first catalog row, then move the series row up above it.
+  await press(page, 'ArrowDown', `${top}-show`);
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
     'aria-label',
@@ -544,4 +641,220 @@ test('Home rows hides and moves rows for this profile only', async ({ page }) =>
 
   await page.reload();
   await expectFocus(page, 'home-0-series-top-tile-0');
+});
+
+/** The profiles saved in localStorage, by id. */
+async function savedProfiles(
+  page: Page,
+): Promise<Record<string, { name: string; kids?: string; pin?: unknown }>> {
+  return page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('bannertv.profiles')!) as {
+      profiles: { id: string; name: string; kids?: string; pin?: unknown }[];
+    };
+    return Object.fromEntries(state.profiles.map((p) => [p.id, p]));
+  });
+}
+
+/** From the first key of an open PIN pad down to its "Forgot PIN?". */
+async function toForgot(page: Page, pad: string): Promise<void> {
+  for (const key of ['4', '7', 'delete']) await press(page, 'ArrowDown', `${pad}-${key}`);
+  await press(page, 'ArrowDown', `${pad}-forgot`);
+}
+
+test("Forgot PIN? on another profile asks for Main's PIN, then opens it with the PIN off", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [
+      main(lockedWith('2468')),
+      { id: GUEST_ID, name: 'Guest', colour: 2, ...lockedWith('1111') },
+    ],
+    lastId: 'main',
+    askAtLaunch: true,
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, 'profile-main');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowRight', `profile-${GUEST_ID}`);
+  await press(page, 'Enter', 'picker-pin-1');
+  await toForgot(page, 'picker-pin');
+  await expectFocusLabel(page, 'Forgot PIN?');
+  await press(page, 'Enter', 'forgot-pin-main-1');
+  const pad = page.getByRole('dialog', { name: "Enter Main's PIN to take the PIN off Guest" });
+  await expect(pad).toBeVisible();
+  // Guest's own PIN is no use here.
+  await typeDigits(page, '1111');
+  await expect(pad.getByText('That PIN is not right.')).toBeVisible();
+  await typeDigits(page, '2468');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  const saved = await savedProfiles(page);
+  expect(saved[GUEST_ID]!.pin).toBeUndefined();
+  expect(saved.main!.pin).toBeDefined();
+  expect(errors).toEqual([]);
+});
+
+test('Forgot PIN? when Main has no PIN says anyone could do it, and Cancel keeps the PIN', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [main(), { id: GUEST_ID, name: 'Guest', colour: 2, ...lockedWith('1111') }],
+    lastId: 'main',
+    askAtLaunch: true,
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, 'profile-main');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowRight', `profile-${GUEST_ID}`);
+  await press(page, 'Enter', 'picker-pin-1');
+  await toForgot(page, 'picker-pin');
+  await press(page, 'Enter', 'forgot-pin-warn-cancel');
+  const warn = page.getByRole('dialog', { name: 'Take the PIN off Guest?' });
+  await expect(warn.getByText(/Main has no PIN, so anyone using BannerTV here/)).toBeVisible();
+  await press(page, 'Enter', `profile-${GUEST_ID}`);
+  expect((await savedProfiles(page))[GUEST_ID]!.pin).toBeDefined();
+
+  await press(page, 'Enter', 'picker-pin-1');
+  await toForgot(page, 'picker-pin');
+  await press(page, 'Enter', 'forgot-pin-warn-cancel');
+  await press(page, 'ArrowLeft', 'forgot-pin-warn-confirm');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  expect((await savedProfiles(page))[GUEST_ID]!.pin).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test('Forgot PIN? for Main on a TV with no account resets BannerTV and starts it as new', async ({
+  page,
+}) => {
+  await mockAddons(page, { firstRun: true });
+  // Seeded once per tab: the reset reloads the page, and must not find them again.
+  const state = {
+    profiles: [main(lockedWith('2468')), { id: GUEST_ID, name: 'Guest', colour: 2 }],
+    lastId: 'main',
+    askAtLaunch: true,
+  };
+  await page.addInitScript((saved) => {
+    if (window.name === 'seeded') return;
+    window.name = 'seeded';
+    localStorage.setItem('bannertv.welcomed', '1');
+    localStorage.setItem('bannertv.profiles', saved);
+    localStorage.setItem('bannertv.tuning', '{"kept":true}');
+  }, JSON.stringify(state));
+  // What is taken out of localStorage is noted as it goes, before and after the restart. Read
+  // afterwards, it can't tell: over file://, this test browser sometimes starts the reloaded
+  // page with none of what was stored, even keys nothing touched (a bare page does the same).
+  const removed: string[] = [];
+  await page.exposeFunction('noteRemoved', (key: string) => removed.push(key));
+  await page.addInitScript(() => {
+    const note = (key: string) =>
+      void (window as unknown as { noteRemoved: (key: string) => Promise<void> }).noteRemoved(key);
+    const removeItem = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function (this: Storage, key: string) {
+      if (this === window.localStorage) note(key);
+      removeItem.call(this, key);
+    };
+    const clear = Storage.prototype.clear;
+    Storage.prototype.clear = function (this: Storage) {
+      if (this === window.localStorage) note('(everything)');
+      clear.call(this);
+    };
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, 'profile-main');
+  await page.waitForTimeout(150);
+  await press(page, 'Enter', 'picker-pin-1');
+  await toForgot(page, 'picker-pin');
+  await press(page, 'Enter', 'forgot-pin-reset-cancel');
+  const reset = page.getByRole('dialog', { name: 'Reset BannerTV on this TV?' });
+  await expect(reset.getByText(/Every profile, addon, My List/)).toBeVisible();
+  await press(page, 'ArrowLeft', 'forgot-pin-reset-confirm');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Welcome to BannerTV' })).toBeVisible({
+    timeout: 15000,
+  });
+  // The profiles and the welcome went; the TV's own measurements were never taken out.
+  expect(removed).toEqual(expect.arrayContaining(['bannertv.profiles', 'bannertv.welcomed']));
+  expect(removed).not.toContain('bannertv.tuning');
+  expect(removed).not.toContain('(everything)');
+  const left = await page.evaluate(() => ({
+    profiles: localStorage.getItem('bannertv.profiles'),
+  }));
+  // Only a fresh Main, with no PIN, if anything.
+  if (left.profiles !== null) {
+    const fresh = JSON.parse(left.profiles) as { profiles: { id: string; pin?: unknown }[] };
+    expect(fresh.profiles.map((p) => p.id)).toEqual(['main']);
+    expect(fresh.profiles[0]!.pin).toBeUndefined();
+  }
+});
+
+test('making a kids profile offers to lock the grown-up profiles that have no PIN', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [main(), { id: GUEST_ID, name: 'Guest', colour: 2 }],
+    lastId: 'main',
+    askAtLaunch: false,
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSettings(page);
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'Enter', 'profiles-main');
+  await press(page, 'ArrowDown', `profiles-${GUEST_ID}`);
+  await press(page, 'ArrowDown', 'profiles-add');
+  await press(page, 'Enter', 'profile-name');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Ada');
+  await press(page, 'Enter', 'profile-name');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150);
+  await press(page, 'ArrowDown', 'profile-kids');
+  await press(page, 'Enter', 'profile-kids-menu-0');
+  await press(page, 'ArrowDown', 'profile-kids-menu-1');
+  await press(page, 'Enter', 'profile-kids');
+  await expectFocusLabel(page, 'Kids profile: Kids, up to U');
+  await press(page, 'ArrowDown', 'profile-save');
+  await press(page, 'Enter', 'lock-grown-ups-main');
+  const offer = page.getByRole('dialog', { name: 'Lock the grown-up profiles?' });
+  await expect(offer).toBeVisible();
+  await expectFocusLabel(page, 'Set a PIN for Main');
+  await expect(offer.getByRole('button', { name: 'Not now' })).toBeVisible();
+
+  // Main gets a PIN, typed twice; the second time wrong first.
+  await press(page, 'Enter', 'lock-grown-ups-pin-1');
+  await expect(
+    page.getByRole('dialog', { name: 'Choose a four-digit PIN for Main' }),
+  ).toBeVisible();
+  await typeDigits(page, '1357');
+  await typeDigits(page, '1358');
+  await expect(page.getByText("Those PINs didn't match. Choose one again.")).toBeVisible();
+  await typeDigits(page, '1357');
+  await typeDigits(page, '1357');
+  await expectFocus(page, 'lock-grown-ups-done');
+  await expect(offer.getByRole('button', { name: 'Main has a PIN' })).toBeVisible();
+
+  // Guest too, and the button says Done.
+  await press(page, 'ArrowUp', `lock-grown-ups-${GUEST_ID}`);
+  await page.keyboard.press('Enter');
+  await typeDigits(page, '2468');
+  await typeDigits(page, '2468');
+  await expectFocus(page, 'lock-grown-ups-done');
+  await expectFocusLabel(page, 'Done');
+  await page.keyboard.press('Enter');
+  await expect(offer).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible();
+
+  const saved = await savedProfiles(page);
+  expect(saved.main!.pin).toBeDefined();
+  expect(saved[GUEST_ID]!.pin).toBeDefined();
+  const ada = Object.values(saved).filter((p) => p.name === 'Ada')[0]!;
+  expect(ada.kids).toBe('U');
+  expect(ada.pin).toBeUndefined();
+  expect(errors).toEqual([]);
 });

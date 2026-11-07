@@ -175,6 +175,81 @@ describe('days', () => {
   });
 });
 
+describe('the Following row', () => {
+  const follows = {
+    teams: new Set(['football:arsenal:women']),
+    competitions: new Set(['ger.cup']),
+  };
+  const arsenalWomen = (fields: Parameters<typeof event>[0]) =>
+    event({
+      title: 'Arsenal Women vs Chelsea Women',
+      followKeys: ['football:arsenal:women', 'football:chelsea:women'],
+      ...fields,
+    });
+
+  it("comes first on a day, holding followed matches instead of their competitions' rows", () => {
+    const followed = arsenalWomen({ at: NOW + 2 * HOUR });
+    const cup = event({ at: NOW + HOUR, competition: CUP, title: 'Cup tie' });
+    const other = event({ at: NOW + HOUR, title: 'Other match' });
+    const untimed = arsenalWomen({ title: 'Untimed' });
+    const options = { now: NOW, firstSeen: () => NOW, follows };
+    const groups = buildDay([followed, cup, other, untimed], '2026-10-28', options);
+    expect(groups.map((g) => [g.key, g.title, g.kind])).toEqual([
+      ['following', 'Following', 'following'],
+      ['c-eng-1', 'Premier League', 'competition'],
+    ]);
+    // By kick-off, untimed last, as in any row.
+    expect(groups[0]!.events.map((e) => e.title)).toEqual([
+      'Cup tie',
+      'Arsenal Women vs Chelsea Women',
+      'Untimed',
+    ]);
+    // Each match once, so a day counts the same with follows or without.
+    expect(dayCounts([followed, cup, other, untimed], options)).toEqual(
+      dayCounts([followed, cup, other, untimed], { now: NOW, firstSeen: () => NOW }),
+    );
+  });
+
+  it('comes first on Live now, so Home lists followed matches first', () => {
+    const groups = buildDay(
+      [
+        event({ at: NOW - HOUR, title: 'Live league match' }),
+        arsenalWomen({ at: NOW + 5 * 60 * 1000 }),
+        arsenalWomen({ liveLabel: true, title: 'Live with no time' }),
+        event({ at: NOW - HOUR, competition: CUP, title: 'Live cup tie' }),
+        arsenalWomen({ at: NOW + 3 * HOUR, title: 'Later' }),
+      ],
+      'live',
+      { now: NOW, firstSeen: () => NOW, follows },
+    );
+    expect(groups.map((g) => g.title)).toEqual(['Following', 'Premier League']);
+    expect(groups[0]!.events.map((e) => e.title)).toEqual([
+      'Live cup tie',
+      'Arsenal Women vs Chelsea Women',
+      'Live with no time',
+    ]);
+    expect(groups[0]!.live).toBe(2);
+  });
+
+  it('leaves a followed match that is over in Earlier today, and a replay in Replays', () => {
+    const groups = buildDay(
+      [
+        arsenalWomen({ at: NOW - 5 * HOUR }),
+        arsenalWomen({ kind: 'replay', date: '2026-10-27' }),
+        arsenalWomen({ at: NOW + 30 * HOUR }),
+      ],
+      '2026-10-28',
+      { now: NOW, follows },
+    );
+    expect(groups.map((g) => g.title)).toEqual(['Earlier today', 'Replays']);
+  });
+
+  it('is not there when nothing followed is on', () => {
+    const groups = buildDay([event({ at: NOW + HOUR })], '2026-10-28', { now: NOW, follows });
+    expect(groups.map((g) => g.title)).toEqual(['Premier League']);
+  });
+});
+
 describe('team search', () => {
   const spurs = event({
     title: 'Arsenal vs Tottenham Hotspur',

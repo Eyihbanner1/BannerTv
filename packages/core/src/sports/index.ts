@@ -10,7 +10,24 @@ export {
   type SportsSetting,
 } from './detect';
 export { createMatcher, type Matcher } from './dictionary';
-export { buildEvents, replayedKeys, sportWord } from './events';
+export { buildEvents, isSport, replayedKeys, sportWord } from './events';
+export {
+  createFollows,
+  type Follow,
+  followableCompetition,
+  followableTeams,
+  followDocumentKey,
+  type FollowKind,
+  type Follows,
+  type FollowSet,
+  followsHas,
+  followsPart,
+  type FollowTarget,
+  followTargets,
+  isFollowed,
+  MAX_FOLLOWS,
+  NO_FOLLOWS,
+} from './follows';
 export {
   createSportsFeed,
   type SportsFeed,
@@ -21,6 +38,21 @@ export {
 } from './feed';
 export { createKickoffMemory, dayEvidence, type KickoffMemory } from './kickoffs';
 export { type CatalogContext, type Listing, readListing, rollClockWraps } from './listing';
+export {
+  canRemind,
+  createReminders,
+  dueReminders,
+  findReminded,
+  isDue,
+  MAX_REMINDERS,
+  nextReminderChange,
+  type Reminder,
+  REMIND_BEFORE_MS,
+  REMIND_LATE_MS,
+  reminderFor,
+  type Reminders,
+  remindAt,
+} from './reminders';
 export { sportOf } from './sport';
 export { addDays, localClock, localDate, localDayStart } from './time';
 export type {

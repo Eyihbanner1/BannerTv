@@ -39,13 +39,41 @@ const OLD_CONTAINERS: readonly Container[] = ['avi'];
 /** Recorded in a cinema: a camcorder, a line-in or a screener copy. */
 const CINEMA = ['CAM', 'TS', 'TC', 'SCR'];
 
-function actionFor(stream: Stream): StreamAction {
+/** A header name as HTTP allows it (RFC 9110 token). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+/** Headers the player sets itself: an addon's would break seeking or the connection. */
+const PLAYER_HEADERS = ['host', 'range', 'content-length', 'connection', 'transfer-encoding'];
+
+/**
+ * The request headers an addon asks to be sent with a stream's link (often a
+ * Referer, Origin or User-Agent for sports streams), cleaned so a player can
+ * send them as they are: names HTTP allows, values without line breaks, and
+ * none of the headers the player sets itself. Undefined when there are none.
+ */
+export function streamRequestHeaders(stream: Stream): Record<string, string> | undefined {
+  const asked = stream.behaviorHints.proxyHeaders?.request;
+  if (!asked) return undefined;
+  const headers: Record<string, string> = {};
+  let count = 0;
+  for (const name of Object.keys(asked)) {
+    const value = asked[name];
+    if (typeof value !== 'string' || !HEADER_NAME.test(name) || /[\r\n\0]/.test(value)) continue;
+    if (PLAYER_HEADERS.indexOf(name.toLowerCase()) >= 0) continue;
+    headers[name] = value;
+    count++;
+  }
+  return count > 0 ? headers : undefined;
+}
+
+function actionFor(stream: Stream, tv: TvCapabilities): StreamAction {
   switch (stream.source.kind) {
     case 'url': {
       // webOS's <video> cannot send request headers, and Chromium overwrites
-      // any passed through mediaOption. Response headers need no help to play.
+      // any passed through mediaOption; Android's player sends them. Response
+      // headers need no help to play.
       const request = stream.behaviorHints.proxyHeaders?.request;
-      return request && Object.keys(request).length > 0
+      return request && Object.keys(request).length > 0 && tv.requestHeaders !== true
         ? { kind: 'unavailable', reason: 'proxy-headers' }
         : { kind: 'play' };
     }
@@ -106,5 +134,5 @@ export function assessStream(
   // What stops a picture or sound comes before what only changes the picture.
   const severe = warnings.filter((warning) => SEVERE_WARNINGS.has(warning));
   const mild = warnings.filter((warning) => !SEVERE_WARNINGS.has(warning));
-  return { action: actionFor(stream), warnings: severe.concat(mild) };
+  return { action: actionFor(stream, tv), warnings: severe.concat(mild) };
 }

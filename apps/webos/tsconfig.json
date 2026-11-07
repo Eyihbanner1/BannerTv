@@ -3,7 +3,16 @@
   "compilerOptions": {
     "lib": ["ES2018", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // The phone app (apps/mobile) brings React 19's types into the workspace. Some libraries'
+    // typings import React without declaring its types and would find whichever copy pnpm
+    // hoisted, so the LG app pins its own React 18 types here.
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
   },
   "include": ["src"]
 }

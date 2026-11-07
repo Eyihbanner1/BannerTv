@@ -1,6 +1,6 @@
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
-import { assessStream, SEVERE_WARNINGS } from './assess';
+import { assessStream, SEVERE_WARNINGS, streamRequestHeaders } from './assess';
 import { describeStream } from './facts';
 import fixture from './fixtures/streams.json';
 import type { StreamFacts, StreamWarning, TvCapabilities } from './types';
@@ -85,6 +85,20 @@ describe('assessStream actions', () => {
     });
   });
 
+  it("plays links that need request headers on a TV whose player sends them (Android's)", () => {
+    const stream = parseStream({
+      url: 'https://cdn.example.net/hls/master.m3u8',
+      behaviorHints: { proxyHeaders: { request: { Referer: 'https://x/' } } },
+    })!;
+    expect(assessStream(stream, facts(), { ...UNKNOWN, requestHeaders: true }).action).toEqual({
+      kind: 'play',
+    });
+    expect(assessStream(stream, facts(), { ...CAPABLE, requestHeaders: false }).action).toEqual({
+      kind: 'unavailable',
+      reason: 'proxy-headers',
+    });
+  });
+
   it('still plays links whose proxy headers are only for the response', () => {
     const stream = parseStream({
       url: 'https://cdn.example.net/film.mp4',
@@ -106,6 +120,46 @@ describe('assessStream actions', () => {
       kind: 'unavailable',
       reason: 'torrent',
     });
+  });
+});
+
+describe('streamRequestHeaders', () => {
+  const withHeaders = (request: Record<string, unknown>) =>
+    parseStream({
+      url: 'https://cdn.example.net/live.m3u8',
+      behaviorHints: { proxyHeaders: { request } },
+    })!;
+
+  it('gives the headers an addon asks to be sent with the link', () => {
+    expect(
+      streamRequestHeaders(
+        withHeaders({ Referer: 'https://site.example/', 'User-Agent': 'Mozilla/5.0 (X11)' }),
+      ),
+    ).toEqual({ Referer: 'https://site.example/', 'User-Agent': 'Mozilla/5.0 (X11)' });
+  });
+
+  it('leaves out names HTTP does not allow, line breaks, and headers the player sets', () => {
+    expect(
+      streamRequestHeaders(
+        withHeaders({
+          Origin: 'https://site.example',
+          'Bad Name': 'x',
+          'X-Split': 'a\r\nInjected: yes',
+          Range: 'bytes=0-',
+          host: 'other.example',
+        }),
+      ),
+    ).toEqual({ Origin: 'https://site.example' });
+  });
+
+  it('gives none when the addon asks for none, or only for response headers', () => {
+    expect(streamRequestHeaders(PLAIN)).toBeUndefined();
+    expect(streamRequestHeaders(withHeaders({ Range: 'bytes=0-' }))).toBeUndefined();
+    const responseOnly = parseStream({
+      url: 'https://cdn.example.net/film.mp4',
+      behaviorHints: { proxyHeaders: { response: { 'Content-Type': 'video/mp4' } } },
+    })!;
+    expect(streamRequestHeaders(responseOnly)).toBeUndefined();
   });
 });
 

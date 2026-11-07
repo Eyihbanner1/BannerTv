@@ -137,7 +137,90 @@ export function createHomeLayout(options: { storage: KeyValueStore }): HomeLayou
   });
 }
 
-/** The layout with row `id` (from rowIdentities) moved one place up (-1) or down (1) among all the rows. */
+/**
+ * What each name in `saved` stands for on the board: the identities (from
+ * rowIdentities) of the rows it gives their place, as orderedRows reads it.
+ * A name shared by two copies of one addon places both; the name of a row
+ * placed by another of its names places none. Names of no row on the board
+ * are left out.
+ */
+export function savedRowNames(
+  rows: readonly BoardRow[],
+  saved: readonly string[],
+): Map<string, string[]> {
+  const inSaved = new Set(saved);
+  const names = new Map<string, string[]>();
+  rowNames(rows).forEach((row) => {
+    for (const known of row.known) if (!names.has(known)) names.set(known, []);
+    const by = row.known.find((known) => inSaved.has(known));
+    if (by !== undefined) names.get(by)!.push(row.id);
+  });
+  return names;
+}
+
+/**
+ * The order to save when line `id` moves one place up (-1) or down (1)
+ * among `shown`, the lines on screen in their order now. What the layout
+ * holds for lines not on screen (the rows of an addon switched off or not
+ * installed here, a line of Home's own not shown) keeps its place: each
+ * stays after the line it followed, and only the moved line and the one it
+ * passes change places. `lines` gives the lines on screen a saved name
+ * places (savedRowNames), or undefined for a name of nothing on screen; a
+ * name that places no line in `shown` is let go. Null when the line cannot
+ * move that way.
+ */
+export function moveAmong(
+  saved: readonly string[],
+  shown: readonly string[],
+  lines: (name: string) => readonly string[] | undefined,
+  id: string,
+  by: -1 | 1,
+): string[] | null {
+  const from = shown.indexOf(id);
+  const to = from + by;
+  if (from < 0 || to < 0 || to >= shown.length) return null;
+  const position = new Map(shown.map((line, index) => [line, index]));
+  const kept = new Set<string>();
+  // The names not on screen after each line that is; null for those before the first.
+  const after = new Map<string | null, string[]>();
+  let anchor: string | null = null;
+  for (const name of saved) {
+    const placed = lines(name);
+    if (placed === undefined) {
+      kept.add(name);
+      const group = after.get(anchor);
+      if (group) group.push(name);
+      else after.set(anchor, [name]);
+      continue;
+    }
+    // A name that places two copies places them side by side: what follows it follows both.
+    let last = -1;
+    for (const line of placed) last = Math.max(last, position.get(line) ?? -1);
+    if (last >= 0) anchor = shown[last]!;
+  }
+  const order = (after.get(null) ?? []).slice();
+  for (const line of shown) {
+    order.push(line);
+    const group = after.get(line);
+    if (group) for (const name of group) order.push(name);
+  }
+  const passed = shown[to]!;
+  const at = order.indexOf(id);
+  const other = order.indexOf(passed);
+  order[at] = passed;
+  order[other] = id;
+  // A layout is read back up to MAX_ROWS: past that, what is not on screen goes first, from the end.
+  for (let index = order.length - 1; order.length > MAX_ROWS && index >= 0; index--) {
+    if (kept.has(order[index]!)) order.splice(index, 1);
+  }
+  return order;
+}
+
+/**
+ * The layout with row `id` (from rowIdentities) moved one place up (-1) or
+ * down (1) among all the rows. What it holds for rows not on the board, and
+ * for Home's own lines, keeps its place (moveAmong).
+ */
 export function moveRow(
   rows: readonly BoardRow[],
   layout: HomeLayout,
@@ -145,12 +228,15 @@ export function moveRow(
   by: -1 | 1,
 ): HomeLayout {
   const ids = rowIdentities(rows);
-  const order = orderedRows(rows, layout).map((row) => ids.get(row)!);
-  const from = order.indexOf(id);
-  const to = from + by;
-  if (from < 0 || to < 0 || to >= order.length) return layout;
-  order.splice(to, 0, order.splice(from, 1)[0]!);
-  return { order, hidden: layout.hidden };
+  const names = savedRowNames(rows, layout.order);
+  const order = moveAmong(
+    layout.order,
+    orderedRows(rows, layout).map((row) => ids.get(row)!),
+    (name) => names.get(name),
+    id,
+    by,
+  );
+  return order ? { order, hidden: layout.hidden } : layout;
 }
 
 /**

@@ -5,9 +5,12 @@ import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore }
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenSlot } from '../../app/screen-slot';
+import { Menu, type MenuOption } from '../../components/Menu';
 import { Row } from '../../components/Row';
 import type { TileExtra } from '../../components/Tile';
 import { cardsMissing, fillPlayedCards, onCardAnswer } from '../../data/continue';
+import { library } from '../../data/library';
+import { leaveContinueWatching } from '../../data/marks';
 import { playedVideos, progress } from '../../data/playback';
 import { isKidsProfile } from '../../data/profiles';
 import { onActivity } from '../../navigation/activity';
@@ -173,24 +176,50 @@ export function useContinueItems(): ContinueItem[] | null {
 function noteFor(t: TFunction, item: ContinueItem): string | undefined {
   if (item.season !== undefined && item.episode !== undefined) {
     const numbers = { season: item.season, episode: item.episode };
+    if (item.newEpisode) return t('browsing.newEpisodeNote', numbers);
     return item.upNext ? t('home.nextEpisodeNote', numbers) : t('home.episodeNote', numbers);
   }
+  if (item.newEpisode) return t('browsing.newNote');
   return item.upNext ? t('home.nextNote') : undefined;
 }
 
 interface ContinueRowProps {
   items: readonly ContinueItem[];
   onItemFocus: (rowKey: string, item: MetaPreview | undefined) => void;
+  /** Where focus goes when the last title is taken off the row and the row goes. */
+  focusAfterRow: () => string;
+}
+
+type HeldChoice = 'remove' | 'details' | 'list';
+
+/** What OK held on a tile offers, in order. */
+function heldOptions(t: TFunction, preview: MetaPreview): MenuOption[] {
+  return [
+    { value: 'remove', label: t('browsing.removeFromContinue') },
+    { value: 'details', label: t('home.details') },
+    {
+      value: 'list',
+      label: library.has(preview.id) ? t('browsing.removeFromList') : t('browsing.addToList'),
+    },
+  ];
 }
 
 /**
  * Continue Watching: what was left part-way, most recent first, as wide
  * tiles with a progress bar. OK goes straight back into the player where
  * playback stopped, or into the next episode; in a kids profile, to the
- * title's Details first.
+ * title's Details first. OK held offers to take the title off the row, its
+ * Details, and My List.
  */
-export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: ContinueRowProps) {
+export const ContinueRow = memo(function ContinueRow({
+  items,
+  onItemFocus,
+  focusAfterRow,
+}: ContinueRowProps) {
   const { t } = useTranslation();
+  const [held, setHeld] = useState<{ preview: MetaPreview; index: number; key: string } | null>(
+    null,
+  );
   const previews = useMemo(() => items.map((item) => item.preview), [items]);
   const extras = useMemo(
     () =>
@@ -234,16 +263,63 @@ export const ContinueRow = memo(function ContinueRow({ items, onItemFocus }: Con
     },
     [items, previews],
   );
+  const onLongPress = useCallback(
+    (preview: MetaPreview, key: string) =>
+      setHeld({ preview, index: previews.indexOf(preview), key }),
+    [previews],
+  );
+  // Back on the tile the menu came from, or, once the title has left the row,
+  // on the one now in its place; the next row's when none is left.
+  const menuReturn = useCallback(() => {
+    if (!held) return CONTINUE_FOCUS_KEY;
+    const now = snapshot();
+    if (now.some((item) => item.preview.id === held.preview.id)) return held.key;
+    if (now.length === 0) return focusAfterRow();
+    const index = Math.min(held.index, now.length - 1);
+    rememberScroll(CONTINUE_FOCUS_KEY, index);
+    return `${CONTINUE_FOCUS_KEY}-tile-${index}`;
+  }, [held, focusAfterRow]);
+  const onHeldChoice = (choice: HeldChoice) => {
+    if (!held) return;
+    const { preview, index } = held;
+    setHeld(null);
+    if (choice === 'remove') {
+      leaveContinueWatching({ metaId: preview.id, type: preview.type });
+    } else if (choice === 'details') {
+      push({ name: 'details', type: preview.type, id: preview.id, preview }, () =>
+        returnTile(preview.id, index),
+      );
+    } else if (library.has(preview.id)) {
+      void library.remove(preview.id);
+    } else {
+      void library.add(preview);
+    }
+  };
+
   return (
-    <Row
-      focusKey={CONTINUE_FOCUS_KEY}
-      scrollKey={items}
-      title={t('home.continueWatching')}
-      shape="landscape"
-      items={previews}
-      extras={extras}
-      onItemFocus={onFocus}
-      onItemPress={onPress}
-    />
+    <>
+      <Row
+        focusKey={CONTINUE_FOCUS_KEY}
+        scrollKey={items}
+        title={t('home.continueWatching')}
+        shape="landscape"
+        items={previews}
+        extras={extras}
+        onItemFocus={onFocus}
+        onItemPress={onPress}
+        onItemLongPress={onLongPress}
+      />
+      {held && (
+        <Menu
+          focusKey="continue-menu"
+          title={held.preview.name}
+          options={heldOptions(t, held.preview)}
+          selected={undefined}
+          returnFocusKey={menuReturn}
+          onSelect={(value) => onHeldChoice(value as HeldChoice)}
+          onClose={() => setHeld(null)}
+        />
+      )}
+    </>
   );
 });

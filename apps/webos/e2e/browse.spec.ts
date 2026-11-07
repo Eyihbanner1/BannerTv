@@ -119,6 +119,9 @@ test('a series opens on season 1, and seasons switch as focus moves', async ({ p
   // No stream addon is installed, so the player says so.
   await press(page, 'Enter', 'player-problem-streams');
   await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText('You have no addon that finds streams yet. Add one in Addons.'),
+  ).toBeVisible();
 
   await pressBack(page);
   await expectFocus(page, 'details-episodes-0');

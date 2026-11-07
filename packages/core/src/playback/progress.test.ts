@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { memoryKeyValueStore, type KeyValueStore } from '../storage';
 import {
+  AWAY_MS,
   createProgressStore,
   MIN_RESUME_SECONDS,
   type ProgressEntry,
   type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+  resumeLeadIn,
   WATCHED_FRACTION,
 } from './progress';
 
@@ -157,6 +161,45 @@ describe('createProgressStore', () => {
     expect(progress.record(movie(NaN, Infinity))).toMatchObject({ position: 0, duration: 0 });
     expect(progress.record(movie(-5, -1))).toMatchObject({ position: 0, duration: 0 });
     expect(progress.record(movie(Infinity, NaN))).toMatchObject({ position: 0, duration: 0 });
+  });
+
+  it('starts a resume a few seconds early, further after a day away, and says the exact place', async () => {
+    let time = 1_000_000;
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => time });
+    await progress.load();
+    expect(progress.resumeFrom('tt1')).toBeUndefined();
+    progress.record(movie(2530));
+    // Details still says where it stopped.
+    expect(progress.resumeAt('tt1')).toBe(2530);
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_S);
+    time += AWAY_MS - 1;
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_S);
+    time += 1;
+    expect(progress.resumeFrom('tt1')).toBe(2530 - RESUME_LEAD_IN_AWAY_S);
+    // A time given wins over the store's clock.
+    expect(progress.resumeFrom('tt1', 1_000_000)).toBe(2530 - RESUME_LEAD_IN_S);
+    // Nothing to resume, nothing to start early.
+    progress.record(movie(MIN_RESUME_SECONDS - 1));
+    expect(progress.resumeFrom('tt1')).toBeUndefined();
+  });
+
+  it('never leads a resume in below where resumes begin, so leaving at once keeps it resumable', async () => {
+    let time = 1_000_000;
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => time });
+    await progress.load();
+    progress.record(movie(MIN_RESUME_SECONDS + 2));
+    time += AWAY_MS;
+    expect(progress.resumeFrom('tt1')).toBe(MIN_RESUME_SECONDS);
+    // The player saves its first reading there, and it still resumes.
+    progress.record(movie(MIN_RESUME_SECONDS));
+    expect(progress.resumeAt('tt1')).toBe(MIN_RESUME_SECONDS);
+    expect(progress.resumeFrom('tt1')).toBe(MIN_RESUME_SECONDS);
+  });
+
+  it('never starts a resume before 0, and a clock set back is no time away', () => {
+    expect(resumeLeadIn(3, 0, 0)).toBe(0);
+    expect(resumeLeadIn(600, 5000, 1000)).toBe(600 - RESUME_LEAD_IN_S);
+    expect(resumeLeadIn(600, 0, AWAY_MS)).toBe(600 - RESUME_LEAD_IN_AWAY_S);
   });
 
   it('resumes only from the middle of a video', async () => {
@@ -598,5 +641,68 @@ describe('createProgressStore', () => {
       expect(() => progress.clear('tt1')).not.toThrow();
       await flush();
     });
+  });
+});
+
+describe('the Trakt mark and the BannerTV account', () => {
+  const traktEntry: ProgressEntry = {
+    metaId: 'tt1',
+    type: 'movie',
+    videoId: 'tt1',
+    position: 600,
+    duration: 3000,
+    updatedAt: 2000,
+    watched: false,
+    from: 'trakt',
+  };
+
+  it('keeps the mark of progress from Trakt through a save, and drops it when played here', async () => {
+    const storage = memoryKeyValueStore();
+    let time = 5000;
+    const progress = createProgressStore({ storage, now: () => time });
+    await progress.load();
+    expect(await progress.merge([traktEntry])).toBe(1);
+    expect(progress.get('tt1')?.from).toBe('trakt');
+    await vi.waitFor(async () => expect(await storage.get('progress')).toHaveLength(1));
+
+    const again = createProgressStore({ storage, now: () => time });
+    await again.load();
+    expect(again.get('tt1')?.from).toBe('trakt');
+    time = 6000;
+    again.record({ metaId: 'tt1', type: 'movie', videoId: 'tt1', position: 700, duration: 3000 });
+    expect(again.get('tt1')?.from).toBeUndefined();
+  });
+
+  it('adopts entries as given, without rescaling, and forgets others', async () => {
+    const storage = memoryKeyValueStore();
+    const progress = createProgressStore({ storage, now: () => 5000 });
+    await progress.load();
+    progress.record({ metaId: 'tt2', type: 'movie', videoId: 'tt2', position: 60, duration: 100 });
+    progress.record({ metaId: 'tt3', type: 'movie', videoId: 'tt3', position: 60, duration: 100 });
+    const listener = vi.fn();
+    progress.subscribe(listener);
+    await progress.adopt({
+      set: [
+        { ...traktEntry, from: undefined, position: 1500, updatedAt: 9000 },
+        { ...traktEntry, videoId: 'tt2', metaId: 'tt2', position: 10, updatedAt: 1000 },
+      ],
+      remove: ['tt3'],
+    });
+    expect(progress.get('tt1')).toEqual({
+      metaId: 'tt1',
+      type: 'movie',
+      videoId: 'tt1',
+      position: 1500,
+      duration: 3000,
+      updatedAt: 9000,
+      watched: false,
+    });
+    // Older than the TV's own, but the account's merge already chose it.
+    expect(progress.get('tt2')).toMatchObject({ position: 10, updatedAt: 1000, from: 'trakt' });
+    expect(progress.get('tt3')).toBeUndefined();
+    expect(progress.recent().map((e) => e.videoId)).toEqual(['tt1', 'tt2']);
+    expect(listener).toHaveBeenCalledTimes(1);
+    await progress.adopt({ remove: ['tt3'] });
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
