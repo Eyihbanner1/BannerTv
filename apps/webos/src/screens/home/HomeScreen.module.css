@@ -26,6 +26,11 @@
   transition: none;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: the screens' jump leaves these alone. */
+:global(.tune-screens-jump) .track {
+  --bt-motion: 180ms;
+}
+
 /* Only Home's rows box, not each row's track, so a Down moves a layer that
    is already drawn instead of drawing the whole box again. */
 :global(.tune-home-layer) .track {

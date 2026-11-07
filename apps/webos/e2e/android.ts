@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * The app as the Android app (apps/androidtv) shows it: the same build, served
@@ -225,6 +225,55 @@ export function playerState(
     duration: state.duration === undefined ? 900 : state.duration,
     live: state.live ?? false,
   });
+}
+
+/**
+ * OK on the title Home has focused, until Details opens. An OK in Home's first quarter second
+ * is sometimes left unanswered (other journeys that press it at once show it too), so it is
+ * pressed again only once Details has plainly not opened.
+ */
+export async function openFocusedTitle(page: Page): Promise<void> {
+  await expect(async () => {
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+      'data-focus-key',
+      'details-watch',
+      { timeout: 2000 },
+    );
+  }).toPass({ timeout: 10_000 });
+}
+
+/** Android's player names its subtitle tracks inside the file, as onTracksChanged does. */
+export function androidTextTracks(
+  page: Page,
+  text: Array<{ id: string; lang: string; label?: string; mime?: string }>,
+): Promise<void> {
+  return androidSays(page, {
+    type: 'player',
+    event: 'tracks',
+    audio: [],
+    text: text.map((track) => ({
+      label: '',
+      mime: 'application/x-subrip',
+      ...track,
+      active: false,
+      supported: true,
+      forced: false,
+    })),
+  });
+}
+
+/**
+ * Android's player hands over the lines of subtitle track `track` that show from `at`, as
+ * onCues does once the page asked for them: none ends the line before.
+ */
+export function androidCues(
+  page: Page,
+  at: number,
+  cues: Array<{ text: string; top?: boolean }>,
+  track = '2:0',
+): Promise<void> {
+  return androidSays(page, { type: 'player', event: 'cues', track, at, cues });
 }
 
 /**

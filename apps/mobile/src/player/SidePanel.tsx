@@ -129,13 +129,17 @@ export function PanelColumn({ title, children }: { title?: string; children: Rea
   );
 }
 
-/** One choice in a panel: the chosen one sits on a raised fill with a tick. */
+/**
+ * One choice in a panel: the chosen one sits on a raised fill with a tick. A dimmed one (a
+ * subtitle file that couldn't be read) can still be tapped, to try it again.
+ */
 export function PanelOption({
   label,
   detail,
   selected = false,
   onPress,
   disabled = false,
+  dim = false,
   accessibilityLabel,
 }: {
   label: string;
@@ -143,6 +147,7 @@ export function PanelOption({
   selected?: boolean;
   onPress: () => void;
   disabled?: boolean;
+  dim?: boolean;
   accessibilityLabel?: string;
 }) {
   return (
@@ -156,7 +161,7 @@ export function PanelOption({
         styles.option,
         selected && styles.optionSelected,
         pressed && !selected && styles.optionPressed,
-        disabled && styles.optionDisabled,
+        (disabled || dim) && styles.optionDisabled,
       ]}
     >
       <View style={styles.optionText}>

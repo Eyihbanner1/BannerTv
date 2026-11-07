@@ -115,7 +115,12 @@ export type Route =
    * Settings > BannerTV account: create, join, sync now, leave, delete (ADR 0006).
    * `join` opens it on typing a code, from the welcome's Join with a code.
    */
-  | { name: 'account'; join?: boolean };
+  | { name: 'account'; join?: boolean }
+
+  /** Settings > Stream helper: run it (Android) or pair with one (the LG). */
+  | { name: 'stream-helper' }
+  /** Settings > Languages and picture: the profile's audio, subtitles and picture limits. */
+  | { name: 'languages' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 

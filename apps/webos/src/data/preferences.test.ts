@@ -26,13 +26,52 @@ describe('readPreferences', () => {
       streamChoice: 'fast',
       probing: 'auto',
       allStreamsOrder: 'addon',
+      streamFilter: {},
       audioLanguage: 'fre',
       subtitleLanguage: null,
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
       tmdb: true,
       stillWatching: true,
       nextAtCredits: false,
+      subtitleWhen: 'always',
+      maxResolution: null,
+      avoidHdr: false,
+      learnLanguages: false,
     });
+  });
+
+  it('keeps the languages and picture chosen in Settings, and drops bad ones', () => {
+    expect(
+      readPreferences(
+        JSON.stringify({
+          subtitleWhen: 'foreign',
+          maxResolution: '1080p',
+          avoidHdr: true,
+          learnLanguages: true,
+        }),
+      ),
+    ).toMatchObject({
+      subtitleWhen: 'foreign',
+      maxResolution: '1080p',
+      avoidHdr: true,
+      learnLanguages: true,
+    });
+    expect(
+      readPreferences(
+        JSON.stringify({
+          subtitleWhen: 'never',
+          maxResolution: '8K',
+          avoidHdr: 1,
+          learnLanguages: 'y',
+        }),
+      ),
+    ).toMatchObject({
+      subtitleWhen: 'always',
+      maxResolution: null,
+      avoidHdr: false,
+      learnLanguages: false,
+    });
+    expect(readPreferences(JSON.stringify({ maxResolution: null })).maxResolution).toBeNull();
   });
 
   it('keeps TMDB turned off', () => {
@@ -45,6 +84,17 @@ describe('readPreferences', () => {
 
   it('keeps "Start next at credits" turned on', () => {
     expect(readPreferences(JSON.stringify({ nextAtCredits: true })).nextAtCredits).toBe(true);
+  });
+
+  it('keeps the stream filter part by part, and none when it is not one', () => {
+    const read = (streamFilter: unknown) =>
+      readPreferences(JSON.stringify({ streamFilter, tmdb: false }));
+    expect(read({ resolution: '1080p', cached: true, language: 'Spanish' })).toMatchObject({
+      streamFilter: { resolution: '1080p', cached: true },
+      tmdb: false,
+    });
+    expect(read('1080p').streamFilter).toEqual({});
+    expect(read({ addonId: 'org.example' }).streamFilter).toEqual({ addonId: 'org.example' });
   });
 
   it('treats an empty language as not chosen', () => {

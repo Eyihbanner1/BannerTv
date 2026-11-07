@@ -173,6 +173,14 @@ export {
 } from './playback/continue';
 export { bingeEntry, type BingeHint, bingeHint, findBingeStream, nextVideo } from './playback/next';
 export {
+  createReleaseMemory,
+  MAX_RELEASE_TITLES,
+  type ReleaseChoice,
+  releaseChoice,
+  releaseHint,
+  type ReleaseMemory,
+} from './playback/releases';
+export {
   clampToWindow,
   judgeLive,
   type LiveJudgement,
@@ -296,6 +304,16 @@ export {
   WATCHED_FRACTION,
 } from './playback/progress';
 export {
+  createSubtitleDrifts,
+  type DriftAdoption,
+  type DriftChoice,
+  MAX_SUBTITLE_DRIFTS,
+  type SavedDrift,
+  SUBTITLE_DRIFTS,
+  type SubtitleDrift,
+  type SubtitleDrifts,
+} from './playback/drifts';
+export {
   createSubtitleOffsets,
   MAX_SUBTITLE_OFFSETS,
   type OffsetAdoption,
@@ -303,6 +321,13 @@ export {
   type SubtitleOffsets,
   subtitleFileKey,
 } from './playback/offsets';
+export {
+  createSubtitlePickMemory,
+  MAX_SUBTITLE_PICKS,
+  type SubtitlePick,
+  type SubtitlePickMemory,
+  subtitleRelease,
+} from './playback/subtitle-picks';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
 export {
@@ -364,7 +389,14 @@ export * from './search';
 export * from './sports';
 export { createStore } from './store';
 export * from './sync';
-export { assessStream, SEVERE_WARNINGS } from './streams/assess';
+export { assessStream, SEVERE_WARNINGS, streamRequestHeaders } from './streams/assess';
+export {
+  explainProblem,
+  type PlayAttempt,
+  type PlayProblem,
+  type ProblemExplained,
+  type ProblemInput,
+} from './streams/explain';
 export {
   DEFAULT_MAX_BITRATE,
   estimateBitrate,
@@ -376,10 +408,12 @@ export {
 export { describeStream } from './streams/facts';
 export {
   closestCandidate,
+  namesOnlyOthers,
   orderStreams,
   otherLanguages,
   playableCandidates,
   qualityChoices,
+  streamInLanguage,
   streamTier,
 } from './streams/order';
 export type {
@@ -401,6 +435,7 @@ export type {
   TvCapabilities,
   VideoCodec,
 } from './streams/types';
+export { isAdCue, stripAdCues } from './subtitles/ads';
 export { createCueIndex, type CueIndex } from './subtitles/cues';
 export { detectEncoding } from './subtitles/encoding';
 export {
@@ -409,7 +444,28 @@ export {
   languageKey,
   languageName,
 } from './subtitles/languages';
+export {
+  FRAME_RATE_RATIO,
+  isForcedName,
+  judgeScript,
+  judgeSubtitleFit,
+  judgeSubtitleFits,
+  profileSubtitles,
+  type Script,
+  type SubtitleFit,
+  type SubtitleProfile,
+  type VideoLength,
+} from './subtitles/fit';
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
+export {
+  clearlyBetter,
+  fitTier,
+  rankReason,
+  type RankOptions,
+  rankSubtitles,
+  type ReasonOptions,
+  UNREAD_TIER,
+} from './subtitles/rank';
 export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';

@@ -1,10 +1,19 @@
+import {
+  assessStream,
+  describeStream,
+  type StreamEntry,
+  type TvCapabilities,
+} from '@bannertv/core';
+import { parseStream } from '@bannertv/protocol';
 import type { MediaPlaylist } from 'hls.js';
 import { describe, expect, it } from 'vitest';
 import {
   audioDetail,
   audioSummary,
+  audioSwitch,
   channelName,
   formatName,
+  hasLanguage,
   isCommentary,
   pickAudio,
 } from './audio';
@@ -217,5 +226,57 @@ describe('engine audio tracks', () => {
     expect(shakaAudioId({ ...surround, codecs: 'dtsc' })).not.toBe(
       shakaAudioId({ ...surround, codecs: 'dtse' }),
     );
+  });
+});
+
+describe('the Audio tab offering a stream in another language', () => {
+  const TV: TvCapabilities = {
+    webOS: 22,
+    uhd: true,
+    hdr10: true,
+    dolbyVision: false,
+    hevc: true,
+    av1: true,
+    dts: false,
+    truehd: false,
+  };
+  const stream = (file: string, title: string, rank: number): StreamEntry => {
+    const parsed = parseStream({
+      url: `https://cdn.example.org/${file}.mkv`,
+      name: 'Addon\n1080p',
+      title,
+    })!;
+    const facts = describeStream(parsed);
+    return {
+      stream: parsed,
+      addonId: 'addon',
+      addonRank: 0,
+      rank,
+      facts,
+      assessment: assessStream(parsed, facts, TV),
+    };
+  };
+  const dub = stream('dub', 'Film.1080p.WEB-DL 🇪🇸', 0);
+  const original = stream('original', 'Film.1080p.WEB-DL', 1);
+
+  it('tells whether the tracks have the language, by any of its codes', () => {
+    expect(hasLanguage([track('1', 'spa', ''), track('2', 'en-GB', '')], 'eng')).toBe(true);
+    expect(hasLanguage([track('1', 'es', '')], 'en')).toBe(false);
+    expect(hasLanguage([track('1', '', 'Track 1'), track('2', 'und', '')], 'en')).toBeUndefined();
+  });
+
+  it('offers a stream in the language when what plays has none', () => {
+    const candidates = [dub, original];
+    expect(audioSwitch([track('1', 'spa', '')], { entry: dub }, candidates, 'en')).toBe(original);
+    // Tracks that don't say: the stream's own name tells.
+    expect(audioSwitch([], { entry: dub }, candidates, 'en')).toBe(original);
+    expect(audioSwitch([], { entry: original }, candidates, 'en')).toBeUndefined();
+  });
+
+  it('offers nothing when the language plays, or no other stream has it', () => {
+    expect(
+      audioSwitch([track('1', 'eng', '')], { entry: dub }, [dub, original], 'en'),
+    ).toBeUndefined();
+    expect(audioSwitch([track('1', 'spa', '')], { entry: dub }, [dub], 'en')).toBeUndefined();
   });
 });

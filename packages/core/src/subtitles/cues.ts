@@ -3,6 +3,12 @@ import type { Cue } from './types';
 export interface CueIndex {
   /** The cues showing at `time` seconds, in start order. */
   at(time: number): Cue[];
+  /**
+   * When what shows next changes after `time` seconds: the next cue start or
+   * end, or Infinity when nothing more changes. The subtitle layer sleeps
+   * until then instead of polling, so a line appears on its frame.
+   */
+  nextChange(time: number): number;
 }
 
 /**
@@ -18,8 +24,9 @@ export function sortByStart<T extends { start: number }>(cues: readonly T[]): T[
 }
 
 /**
- * Finds the cues for a moment quickly: the subtitle layer asks ten times a
- * second, and files have thousands of cues, some overlapping.
+ * Finds the cues for a moment quickly: the subtitle layer asks at every cue
+ * change and on every clock event, and files have thousands of cues, some
+ * overlapping.
  *
  * Cues are sorted by start, and each position also records the latest end of
  * any cue up to it. A binary search finds the last cue that has started; the
@@ -56,24 +63,32 @@ export function createCueIndex(cues: readonly Cue[]): CueIndex {
     return low - 1;
   }
 
-  return {
-    at(time) {
-      if (time >= validFrom && time < validUntil) return showing;
-      const last = lastStarted(time);
-      let nextChange = last + 1 < sorted.length ? starts[last + 1]! : Infinity;
-      const found: Cue[] = [];
-      for (let i = last; i >= 0 && latestEnds[i]! > time; i--) {
-        const cue = sorted[i]!;
-        if (cue.end > time) {
-          found.push(cue);
-          nextChange = Math.min(nextChange, cue.end);
-        }
+  function at(time: number): Cue[] {
+    if (time >= validFrom && time < validUntil) return showing;
+    const last = lastStarted(time);
+    let nextChange = last + 1 < sorted.length ? starts[last + 1]! : Infinity;
+    const found: Cue[] = [];
+    for (let i = last; i >= 0 && latestEnds[i]! > time; i--) {
+      const cue = sorted[i]!;
+      if (cue.end > time) {
+        found.push(cue);
+        nextChange = Math.min(nextChange, cue.end);
       }
-      found.reverse();
-      validFrom = time;
-      validUntil = nextChange;
-      showing = found;
-      return found;
+    }
+    found.reverse();
+    validFrom = time;
+    validUntil = nextChange;
+    showing = found;
+    return found;
+  }
+
+  return {
+    at,
+    nextChange(time) {
+      // NaN (no clock yet) has no next change: the caller polls instead.
+      if (Number.isNaN(time)) return Infinity;
+      at(time);
+      return validUntil;
     },
   };
 }

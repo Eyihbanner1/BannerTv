@@ -73,3 +73,12 @@ html.android-video body {
 .screen-settling * {
   transition: none !important;
 }
+
+/* Tuning switch, see src/platform/tuning.ts: every screen's lists, grids,
+   buttons, dialogs and the rail move at once. On the TV each frame of a
+   slide redraws everything it moves, as Home's rows showed before they
+   jumped. Home's and Sports' rows, tiles and the player put the motion time
+   back, so their own switches still choose. */
+.tune-screens-jump {
+  --bt-motion: 0ms;
+}

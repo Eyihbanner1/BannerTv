@@ -1,4 +1,4 @@
-import { type Cue, parseCueMarkup } from '@bannertv/core';
+import { type Cue, isForcedName, parseCueMarkup } from '@bannertv/core';
 import type Hls from 'hls.js';
 import type { CuesParsedData, ErrorData, MediaPlaylist } from 'hls.js';
 import { isWebOS } from '../../platform/webos';
@@ -58,6 +58,18 @@ function toCue(cue: VTTCue): Cue | undefined {
 /** Tracks are told apart by language and name: hls.js renumbers ids within each group. */
 function trackId(track: MediaPlaylist): string {
   return `${track.lang ?? ''}|${track.name}`;
+}
+
+/** A subtitle rendition as the player lists it: forced lines only by FORCED=YES or its name. */
+export function hlsTextTrack(track: MediaPlaylist, active: boolean): EngineTrack {
+  const listed: EngineTrack = {
+    id: trackId(track),
+    lang: track.lang ?? '',
+    label: track.name,
+    active,
+  };
+  if (track.forced || isForcedName(track.name)) listed.forced = true;
+  return listed;
 }
 
 /** An audio rendition as the player lists it, with its channels and format where the playlist gives them. */
@@ -222,12 +234,7 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     textTracks() {
       if (!hls) return [];
       const active = hls.subtitleTrack;
-      return hls.subtitleTracks.map((track) => ({
-        id: trackId(track),
-        lang: track.lang ?? '',
-        label: track.name,
-        active: track.id === active,
-      }));
+      return hls.subtitleTracks.map((track) => hlsTextTrack(track, track.id === active));
     },
 
     selectText(id) {

@@ -1,5 +1,7 @@
 package com.bannertv.app
 
+import com.bannertv.helper.HeaderRules
+
 /**
  * Constants and pure helpers for the host <-> web app protocol, version 1.
  * No Android imports, so JVM unit tests run them as they are.
@@ -18,10 +20,14 @@ object Protocol {
     /** The oldest Chromium the web build supports (the LG floor too). */
     const val MIN_WEBVIEW_MAJOR: Int = 68
 
+    /** What the page may ask of the stream helper through helper(). */
+    val HELPER_COMMANDS: Set<String> = setOf("start", "stop", "forget")
+
     const val STREAM_HLS: String = "hls"
     const val STREAM_DASH: String = "dash"
 
     private val TRACK_ID = Regex("""(\d{1,6}):(\d{1,6})""")
+
     private val HTTPS_URL = Regex("""https://[^/?#\s]+([/?#]\S*)?""", RegexOption.IGNORE_CASE)
 
     /** The script that hands one event object to the page, if the page is listening yet. */
@@ -54,6 +60,15 @@ object Protocol {
         "application/dash+xml" -> STREAM_DASH
         else -> null
     }
+
+    /**
+     * The load command's request headers as they can be sent: names HTTP allows, values without
+     * line breaks, none the player sets itself. The rules are the stream helper's too (HeaderRules).
+     */
+    fun requestHeaders(asked: Map<String, String?>): Map<String, String> = HeaderRules.requestHeaders(asked)
+
+    /** The User-Agent among request headers, whatever its case, or null. */
+    fun userAgent(headers: Map<String, String>): String? = HeaderRules.userAgent(headers)
 
     /** Format.language as the web app expects it: "" when missing or undetermined. */
     fun language(language: String?): String =

@@ -1,0 +1,29 @@
+.actions {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Margins, not flex gap: webOS 5 (Chromium 68) has no flex gap. */
+.actions > * + * {
+  margin-top: 16px;
+}
+
+.note {
+  margin-top: 8px;
+  color: var(--bt-text-muted);
+}
+
+.pairing {
+  margin-top: 48px;
+}
+
+.label {
+  color: var(--bt-text-subtle);
+  font: var(--bt-text-label);
+}
+
+.value {
+  margin-bottom: 24px;
+  font: var(--bt-text-title);
+  letter-spacing: 0.04em;
+}

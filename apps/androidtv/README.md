@@ -4,7 +4,7 @@ The Android app for Android TV, Google TV, Fire TV (Fire OS 6 and later) and pho
 
 - The web build is packed into the APK and served from `https://appassets.androidplatform.net/assets/web/index.html` by androidx.webkit's `WebViewAssetLoader`.
 - Video plays in a native Media3 ExoPlayer `PlayerView` that sits under the transparent, full-screen WebView.
-- The page talks to the app through `window.BannerAndroid` (protocol version 1), set out in [ADR 0005](../../docs/adr/0005-android-tv-app.md). The Kotlin side is `Protocol.kt` and the classes beside it; the page's side is `apps/webos/src/platform/android.ts` and the Android player engine. Installing on devices: [docs/ANDROID_TV_SETUP.md](../../docs/ANDROID_TV_SETUP.md).
+- The page talks to the app through `window.BannerAndroid` (protocol version 1), set out in [ADR 0005](../../docs/adr/0005-android-tv-app.md). The Kotlin side is `Protocol.kt` and the classes beside it; the page's side is `apps/webos/src/platform/android.ts` and the Android player engine. The stream helper's server and rules are in `helper-core/`, which the phone app builds too. Installing on devices: [docs/ANDROID_TV_SETUP.md](../../docs/ANDROID_TV_SETUP.md).
 
 This is a plain Gradle build with no `package.json`, so `pnpm -r` skips it and the web build never needs the Android SDK.
 

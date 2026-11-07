@@ -93,6 +93,7 @@ export {
   mergeRowOrder,
   type ProfileStores,
   profileParts,
+  subtitleDriftsPart,
   subtitleOffsetsPart,
   trackMemoryPart,
   watchPart,

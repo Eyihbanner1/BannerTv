@@ -48,6 +48,7 @@ const kept = vi.hoisted(() => ({
   progress: vi.fn(),
   cleared: vi.fn(),
   sourceMemory: vi.fn(),
+  releases: vi.fn(() => Promise.resolve()),
   bandwidth: {
     maxBitrate: () => 40e6,
     struggled: vi.fn<(bitrate: number, ceiling?: number) => void>(),
@@ -72,6 +73,7 @@ vi.mock('./play-marks', () => ({ playMark: marks.playMark }));
 vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
   sourceMemory: { record: kept.sourceMemory },
+  releaseMemory: { remember: kept.releases },
   bandwidth: kept.bandwidth,
 }));
 
@@ -272,6 +274,7 @@ beforeEach(() => {
   kept.progress.mockClear();
   kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
+  kept.releases.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
   marks.playMark.mockClear();
@@ -474,6 +477,56 @@ describe('tracks the viewer chose', () => {
     lastEngine().text = [track('eng|English')];
     lastEngine().listener.tracks();
     expect(session.get().text).toEqual([track('eng|English')]);
+  });
+});
+
+describe("cues of the stream's own subtitles", () => {
+  const cue = (start: number, end: number, text: string) => ({
+    start,
+    end,
+    lines: [[{ text }]],
+  });
+
+  it('are added to as hls.js and Shaka hand them over, each once', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const { listener } = lastEngine();
+    listener.cues('eng', [cue(1, 2, 'One'), cue(3, 4, 'Two')]);
+    // Sent again after an audio switch, with one more.
+    listener.cues('eng', [cue(3, 4, 'Two'), cue(5, 6, 'Three')]);
+    expect(session.get().streamCues.eng).toEqual([
+      cue(1, 2, 'One'),
+      cue(3, 4, 'Two'),
+      cue(5, 6, 'Three'),
+    ]);
+  });
+
+  it("are replaced whole when the engine says so, as Android's are when a line closes", async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const { listener } = lastEngine();
+    listener.cues('2:0', [cue(1, Infinity, 'Hello')], true);
+    expect(session.get().streamCues['2:0']).toEqual([cue(1, Infinity, 'Hello')]);
+    listener.cues('2:0', [cue(1, 3, 'Hello')], true);
+    expect(session.get().streamCues['2:0']).toEqual([cue(1, 3, 'Hello')]);
+    // Another track's are left as they are, and an empty list clears the track.
+    listener.cues('2:1', [cue(2, Infinity, 'Bonjour')], true);
+    listener.cues('2:0', [], true);
+    expect(session.get().streamCues).toEqual({ '2:0': [], '2:1': [cue(2, Infinity, 'Bonjour')] });
+  });
+
+  it('from a stream played before are dropped', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const before = lastEngine();
+    before.listener.cues('2:0', [cue(1, Infinity, 'Old')], true);
+    session.play(second, 0);
+    await settle();
+    before.listener.cues('2:0', [cue(1, Infinity, 'Old, late')], true);
+    expect(session.get().streamCues).toEqual({});
   });
 });
 
@@ -953,6 +1006,37 @@ describe('a stream that is not remembered', () => {
     expect(kept.bandwidth.smooth).not.toHaveBeenCalled();
     expect(kept.progress).not.toHaveBeenCalled();
     expect(kept.sourceMemory).not.toHaveBeenCalled();
+    expect(kept.releases).not.toHaveBeenCalled();
+  });
+});
+
+describe('the release kept for the title', () => {
+  it('is the stream that played half a minute, kept once', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 20);
+    expect(kept.releases).not.toHaveBeenCalled();
+    playFor(video, 40);
+    expect(kept.releases).toHaveBeenCalledTimes(1);
+    expect(kept.releases).toHaveBeenCalledWith('tt1', first);
+  });
+
+  it("is not a sports event's", async () => {
+    const { video, session } = setup({ continueRow: false });
+    await start(session, video, first, 600);
+    playFor(video, 40);
+    expect(kept.releases).not.toHaveBeenCalled();
+  });
+
+  it('is the step-down once it plays, not the stream that kept buffering', async () => {
+    const { video, session } = setup({ lighter: [bluray] });
+    await start(session, video, remux, 60);
+    struggle(video);
+    expect(session.get().entry).toBe(bluray);
+    await settle();
+    video.fire('playing');
+    playFor(video, 40);
+    expect(kept.releases).toHaveBeenLastCalledWith('tt1', bluray);
   });
 });
 
@@ -1156,6 +1240,8 @@ describe('a live stream', () => {
     expect(kept.sourceMemory).not.toHaveBeenCalled();
     playFor(video, 15);
     expect(kept.sourceMemory).toHaveBeenCalledWith(first.addonId, true);
+    // A broadcast's release is not one to start the title with again.
+    expect(kept.releases).not.toHaveBeenCalled();
   });
   it('is opened once, at the live edge, when it was opened where an older build saved it', async () => {
     const { video, session } = setup();
@@ -1322,6 +1408,41 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('the streams tried', () => {
+  it('lists each stream that stopped, with why, until one plays', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().listener.fatal(
+      new PlaybackError('network', 'The helper is off', 'stream-helper-unreachable'),
+    );
+    await settle();
+    expect(session.get().entry).toBe(second);
+    lastEngine().listener.fatal(new PlaybackError('format', 'No decoder'));
+    await settle();
+    expect(session.get().status).toBe('failed');
+    expect(session.get().attempts.map(({ key, kind, detail }) => ({ key, kind, detail }))).toEqual([
+      { key: entryKey(first), kind: 'network', detail: 'stream-helper-unreachable' },
+      { key: entryKey(second), kind: 'format', detail: undefined },
+    ]);
+
+    // Try again on the last one, which plays: the list starts afresh.
+    session.play(second, 0);
+    await settle();
+    void video.play();
+    video.fire('playing');
+    expect(session.get().attempts).toEqual([]);
+  });
+
+  it('lists the one stream picked from the list that would not play', async () => {
+    const { video, session } = setup();
+    await start(session, video, second, 600, { chosen: true, handPicked: true });
+    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
+    await settle();
+    expect(session.get().attempts.map((attempt) => attempt.entry)).toEqual([second]);
   });
 });
 

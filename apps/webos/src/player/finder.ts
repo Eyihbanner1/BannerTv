@@ -17,18 +17,22 @@ import {
   type QueryState,
   type StreamEntry,
   type StreamOrder,
+  streamRequestHeaders,
   type TvCapabilities,
 } from '@bannertv/core';
 import type { Stream } from '@bannertv/protocol';
 import type { EventPlay } from '../app/router';
 import { addonClient, putVideosFirst } from '../data/addons';
+import { trackMemory } from '../data/library';
 import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
+import { wantedAudio } from '../data/tracks';
 import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
 import { tuning } from '../platform/tuning';
 import { playMark } from './play-marks';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
+import { noteRequestHeaders } from './request-headers';
 
 /**
  * Once one stream could play, slower addons get this much longer to offer a
@@ -51,6 +55,8 @@ const ASSUMED_EPISODE_RUNTIME_S = 3600;
 export type ProbeState = 'testing' | ProbeResult;
 
 export interface FinderState {
+  /** The addons asked, in priority order: an entry's addonRank is its place here. */
+  asked: InstalledAddon[];
   /** Addons that have not answered yet. */
   pending: number;
   /** Addons that could not answer, in priority order. */
@@ -148,11 +154,29 @@ function buildEntries(
           },
         };
         described.set(stream, known);
+        // Android's player sends them when it opens the link.
+        noteRequestHeaders(stream);
       }
       entries.push({ ...known.entry, addonRank });
     });
   });
   return entries;
+}
+
+/**
+ * The title a video belongs to, for the audio language chosen for it: a
+ * film's own id, or a series episode's id without ":season:episode". None
+ * for a sports event, which follows the profile's choice.
+ */
+function titleOf(
+  type: string,
+  videoId: string,
+  sources?: readonly ItemSource[],
+): string | undefined {
+  if (sources) return undefined;
+  if (type === 'movie') return videoId;
+  const episode = /^(.+):\d+:\d+$/.exec(videoId);
+  return episode ? episode[1] : undefined;
 }
 
 function create(type: string, videoId: string, sources?: readonly ItemSource[]): StreamFinder {
@@ -169,6 +193,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
   const probes: Record<string, ProbeState> = {};
 
   const state = createStore<FinderState>({
+    asked: [],
     pending: 0,
     failed: [],
     entries: [],
@@ -178,17 +203,32 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
   });
 
   const runtimeSeconds = () => runtime ?? ASSUMED_RUNTIME_S[type] ?? ASSUMED_EPISODE_RUNTIME_S;
+  const title = titleOf(type, videoId, sources);
+  // What the ranking last weighed from the profile: a new audio choice in the
+  // player, or new limits in Settings, rank the streams again.
+  let rankedWith = '';
+  const weighed = () => {
+    const { maxResolution, avoidHdr, streamChoice } = preferences.get();
+    return [wantedAudio(title), maxResolution, avoidHdr, streamChoice].join('|');
+  };
 
   function orderOptions(): OrderOptions {
     const memory = sourceMemory;
-    return {
+    const options: OrderOptions = {
       addonScore: (id) => memory.score(id),
       maxBitrate: bandwidth.maxBitrate(),
       runtimeSeconds: runtimeSeconds(),
     };
+    const audio = wantedAudio(title);
+    if (audio !== null) options.audioLanguage = audio;
+    const { maxResolution, avoidHdr } = preferences.get();
+    if (maxResolution !== null) options.maxResolution = maxResolution;
+    if (avoidHdr) options.avoidHdr = true;
+    return options;
   }
 
   function rank(entries: readonly StreamEntry[]): StreamEntry[] {
+    rankedWith = weighed();
     return playableCandidates(
       entries,
       preferences.get().streamChoice,
@@ -219,7 +259,8 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       settleTimer = undefined;
     }
     if (settled && !state.get().settled) playMark(finder, 'settled');
-    state.set({ pending, failed, entries, candidates, probes: { ...probes }, settled });
+    const asked = answers.map((answer) => answer.addon);
+    state.set({ asked, pending, failed, entries, candidates, probes: { ...probes }, settled });
   }
 
   async function runProbes() {
@@ -227,9 +268,12 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
     probing = true;
     try {
       for (let tested = 0; tested < PROBE_LIMIT;) {
+        // The test's hidden <video> cannot send an addon's request headers: those links go untested.
         const candidate = state
           .get()
-          .candidates.find((entry) => probes[entryKey(entry)] === undefined);
+          .candidates.find(
+            (entry) => probes[entryKey(entry)] === undefined && !streamRequestHeaders(entry.stream),
+          );
         if (!candidate || candidate.stream.source.kind !== 'url') return;
         if (state.get().candidates.some((entry) => probes[entryKey(entry)] === 'works')) return;
         const key = entryKey(candidate);
@@ -267,6 +311,11 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
       unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
       // A lower limit after a stream kept buffering moves heavy streams down.
       unsubscribe.push(bandwidth.subscribe(refresh));
+      // Another audio language or picture limit moves streams in or out of the way.
+      const reweigh = () => {
+        if (weighed() !== rankedWith) refresh();
+      };
+      unsubscribe.push(preferences.subscribe(reweigh), trackMemory.subscribe(reweigh));
       answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);
@@ -452,15 +501,15 @@ export function isHeavy(entry: StreamEntry, runtimeSeconds: number): boolean {
   return bitrate !== undefined && bitrate > bandwidth.maxBitrate();
 }
 
-/** All streams, in the order the viewer picked for that list. */
+/**
+ * All streams, in the order the viewer picked for that list, weighed as the
+ * finder weighs them now (`finder.orderOptions()`): the connection, the
+ * addons' record and the audio language wanted.
+ */
 export function listOrder(
   entries: readonly StreamEntry[],
   order: StreamOrder,
-  runtimeSeconds: number,
+  options: OrderOptions,
 ): StreamEntry[] {
-  return orderStreams(entries, order, knownCapabilities(), {
-    addonScore: (id) => sourceMemory.score(id),
-    maxBitrate: bandwidth.maxBitrate(),
-    runtimeSeconds,
-  });
+  return orderStreams(entries, order, knownCapabilities(), options);
 }

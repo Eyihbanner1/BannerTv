@@ -21,7 +21,8 @@
     "ares": "pnpm --filter @bannertv/webos exec",
     "tv:install": "node tools/scripts/tv.mjs install",
     "tv:launch": "node tools/scripts/tv.mjs launch",
-    "tv:inspect": "node tools/scripts/tv.mjs inspect"
+    "tv:inspect": "node tools/scripts/tv.mjs inspect",
+    "tokens": "node tools/scripts/build-tokens.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

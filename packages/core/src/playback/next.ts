@@ -104,6 +104,11 @@ export interface BingeHint {
   addonId: string;
   /** The addon's name for the release, such as "torrentio|1080p|WEB-DL". */
   bingeGroup?: string;
+  /**
+   * The release group, such as "FLUX", for a release remembered for the
+   * title (ReleaseMemory): found by it when the binge group is not there.
+   */
+  releaseGroup?: string;
 }
 
 /**
@@ -119,20 +124,29 @@ export function bingeHint(entry: StreamEntry | null | undefined): BingeHint | un
  * The same addon's stream of the same release, as Stremio's binge watching
  * picks it: the first, in the order given, that the player can play. Streams
  * that can't play are passed over, so one first in the group does not hide
- * another that can. Undefined when the hint has no group or the release is
- * not there; the caller then picks as it would for any video, never another
- * of the addon's releases.
+ * another that can. A hint with a release group (a release remembered for
+ * the title) falls back to the addon's first playable stream from that
+ * group. Undefined when the hint names neither or the release is not there;
+ * the caller then picks as it would for any video, never another of the
+ * addon's releases.
  */
 export function bingeEntry(
   entries: readonly StreamEntry[],
   hint: BingeHint,
 ): StreamEntry | undefined {
-  const { addonId, bingeGroup } = hint;
-  if (!bingeGroup) return undefined;
+  const { addonId, bingeGroup, releaseGroup } = hint;
+  const playable = (entry: StreamEntry) =>
+    entry.addonId === addonId && entry.assessment.action.kind === 'play';
+  const byGroup = bingeGroup
+    ? entries.find((entry) => playable(entry) && inBingeGroup(entry.stream, bingeGroup))
+    : undefined;
+  if (byGroup || !releaseGroup) return byGroup;
+  const group = releaseGroup.toLowerCase();
   return entries.find(
     (entry) =>
-      entry.addonId === addonId &&
-      entry.assessment.action.kind === 'play' &&
-      inBingeGroup(entry.stream, bingeGroup),
+      playable(entry) &&
+      entry.stream.source.kind === 'url' &&
+      entry.stream.behaviorHints.proxyHeaders === undefined &&
+      entry.facts.releaseGroup?.toLowerCase() === group,
   );
 }

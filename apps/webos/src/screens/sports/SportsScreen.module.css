@@ -84,6 +84,11 @@
   transition: none;
 }
 
+/* Tuning switch, see src/platform/tuning.ts: the screens' jump leaves these alone. */
+:global(.tune-screens-jump) .track {
+  --bt-motion: 180ms;
+}
+
 .message {
   max-width: 1100px;
   padding: 16px 0 0 var(--bt-content-inset);
