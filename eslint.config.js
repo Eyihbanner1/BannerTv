@@ -18,6 +18,11 @@ export default defineConfig(
       'services/demo/.work/**',
       // Kotlin, and its Gradle build folder holds a copy of the web build.
       'apps/androidtv/**',
+      // The phone app's generated native projects and Expo's own folders.
+      'apps/mobile/android/**',
+      'apps/mobile/ios/**',
+      'apps/mobile/.expo/**',
+      'apps/mobile/expo-env.d.ts',
     ],
   },
   js.configs.recommended,
@@ -26,6 +31,11 @@ export default defineConfig(
     files: ['apps/webos/src/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat['recommended-latest']],
     languageOptions: { globals: globals.browser },
+  },
+  {
+    // The phone app: React Native, where fetch, timers and console are the only browser-like globals.
+    files: ['apps/mobile/src/**/*.{ts,tsx}'],
+    extends: [reactHooks.configs.flat['recommended-latest']],
   },
   {
     // The core and protocol packages run anywhere: no DOM, no browser globals, no React.
@@ -44,5 +54,11 @@ export default defineConfig(
       '**/*.config.{js,ts}',
     ],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // Metro, Babel and their plugins load CommonJS.
+    files: ['apps/mobile/*.config.js', 'apps/mobile/build/**/*.js'],
+    languageOptions: { globals: globals.node, sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
 );

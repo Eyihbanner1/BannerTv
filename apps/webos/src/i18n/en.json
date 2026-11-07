@@ -340,6 +340,8 @@
     "upNext": "Up next",
     "playNextIn": "Play now ({{seconds}})",
     "keepWatching": "Keep watching",
+    "skipIntro": "Skip intro",
+    "skipRecap": "Skip recap",
     "audio": "Audio",
     "subtitles": "Subtitles",
     "subtitlesOff": "Off",
