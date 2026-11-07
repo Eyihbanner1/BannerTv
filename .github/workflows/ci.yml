@@ -55,6 +55,7 @@ jobs:
       full: ${{ steps.plan.outputs.full }}
       androidtv: ${{ steps.plan.outputs.androidtv }}
       phone: ${{ steps.plan.outputs.phone }}
+      tvnative: ${{ steps.plan.outputs.tvnative }}
     steps:
       - uses: actions/checkout@v5
 
@@ -97,12 +98,29 @@ jobs:
               fi
             fi
           fi
+          # The native TV app (apps/tv) builds from the LG app's source and version, the phone
+          # app's source, assets and Babel plugin, the Android TV banner, brand and the packages.
+          tvnative=false
+          if [ "$full" = true ] && [ -f apps/tv/package.json ]; then
+            tvnative=true
+            if [ "$LABEL" = full-ci ]; then
+              if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename'); then
+                tvshared='^(apps/tv/|apps/webos/(src/|webos-meta/|package\.json$)|apps/mobile/(src|assets|build)/|apps/androidtv/app/src/main/res/|brand/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.npmrc$)'
+                if ! grep -Eq "$tvshared" <<< "$files"; then
+                  tvnative=false
+                fi
+              else
+                echo "::warning::Could not list the pull request's files, so the native TV APK is built anyway."
+              fi
+            fi
+          fi
           {
             echo "full=$full"
             echo "androidtv=$androidtv"
             echo "phone=$phone"
+            echo "tvnative=$tvnative"
           } >> "$GITHUB_OUTPUT"
-          echo "Full build: $full. Android TV APK: $androidtv. Phone job: $phone." >> "$GITHUB_STEP_SUMMARY"
+          echo "Full build: $full. Android TV APK: $androidtv. Phone job: $phone. Native TV APK: $tvnative." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
 
@@ -507,6 +525,90 @@ jobs:
           name: phone-android-reports
           path: apps/mobile/android/app/build/reports/
           retention-days: 3
+          if-no-files-found: ignore
+
+  # The native TV app (apps/tv, ADR 0008): React Native for TV through Expo. It installs with npm
+  # outside the workspace, so the TV fork of React Native never meets the phone's.
+  tv-native:
+    name: TV APK (React Native)
+    # A full build only, and on a labelled pull request only when it changes what this app reads.
+    needs: quick
+    if: needs.quick.outputs.tvnative == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # The workspace first: Metro reads @bannertv/core and @bannertv/protocol through apps/webos.
+      - name: Install
+        run: |
+          pnpm install --frozen-lockfile
+          cd apps/tv && npm install --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: apps/tv
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: apps/tv
+        run: npm test
+
+      - name: Bundle the JavaScript
+        working-directory: apps/tv
+        env:
+          CI: '1'
+          EXPO_TV: '1'
+        run: npx expo export --platform android --output-dir dist/android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate the Android project
+        working-directory: apps/tv
+        env:
+          CI: '1'
+          EXPO_TV: '1'
+        run: npx expo prebuild --platform android --no-install
+
+      # A release build signed with the Expo template's fixed debug key, as for the phone, so each
+      # test APK installs over the last. Not for the store.
+      - name: Build
+        working-directory: apps/tv/android
+        env:
+          EXPO_TV: '1'
+        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Collect the APK
+        run: |
+          version=$(node -p "require('./apps/webos/webos-meta/appinfo.json').version")
+          mkdir -p apps/tv/out
+          cp apps/tv/android/app/build/outputs/apk/release/app-release.apk \
+            "apps/tv/out/bannertv-tv-native-$version-test.apk"
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-tv-native-apk
+          path: apps/tv/out/*.apk
+          if-no-files-found: error
+
+      - name: Upload Gradle reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tv-native-android-reports
+          path: apps/tv/android/app/build/reports/
           if-no-files-found: ignore
 
   # A throwaway app for the LG, outside the pnpm workspace:
