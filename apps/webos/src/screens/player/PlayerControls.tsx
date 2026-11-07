@@ -368,6 +368,12 @@ export function PlayerControls(props: PlayerControlsProps) {
     focusKey: 'player-controls',
     saveLastFocusedChild: false,
     preferredChildFocusKey: 'player-transport',
+    // Skip intro is the one control here that comes and goes, and the screen
+    // moves focus itself as it goes: to the bar with the controls up, to the
+    // picture as they hide. Norigin's own restore, 300 ms after a focused
+    // control goes, would land later still, on Pause while the controls are
+    // hidden, wherever focus went meanwhile (a busy TV runs it after the move).
+    autoRestoreFocus: false,
   });
   const now = useNow(visible);
   const shown = props.scrubTo ?? position;
