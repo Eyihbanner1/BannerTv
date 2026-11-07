@@ -175,6 +175,17 @@ const SPEAKER = /^[-–—]?\s*[A-Z][A-Z0-9'’.# -]{1,28}:(?:\s|$)/;
 const MUSIC_ALONE = /^[\s♪♫#*~]*[♪♫][\s♪♫#*~]*$/;
 const HEARING_LABEL = /(?:^|[^a-z])(?:sdh|hearing[ ._-]?impaired)(?:[^a-z]|$)/i;
 const FORCED_LABEL = /(?:^|[^a-z])(?:forced|signs?[ ._-]*(?:&|and|\+|\/)[ ._-]*songs)(?:[^a-z]|$)/i;
+/**
+ * "Forced" as the first word of a name, with more words after it, is the
+ * film's title (Forced.Vengeance.1982.1080p), not a tag, so only the rest of
+ * the name is read for one. The word alone, or with a file extension, is a
+ * tag. A forced file whose name starts that way is still known by its few lines.
+ */
+const FORCED_TITLE = /^[\s._-]*forced(?=[ ._-]+(?!(?:srt|ass|ssa|vtt|sub|txt)$)[a-z0-9])/i;
+
+function isForcedLabel(label: string): boolean {
+  return FORCED_LABEL.test(label.replace(FORCED_TITLE, ''));
+}
 
 function lineText(line: Cue['lines'][number]): string {
   return line
@@ -249,13 +260,24 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     scripts,
     hearingLines,
     hearingLabel: !!label && HEARING_LABEL.test(label),
-    forcedLabel: !!label && FORCED_LABEL.test(label),
+    forcedLabel: !!label && isForcedLabel(label),
   };
 }
 
 /** Under this share of its letters in the language's script, a file is in another language. */
 const RIGHT_SCRIPT_SHARE = 0.2;
-/** Japanese is written with kana among the kanji; Chinese has none. */
+/**
+ * A Chinese, Japanese or Korean character says about as much as three
+ * letters of an alphabet: a Chinese line is about a third as long as the
+ * English line it stands for. Counted so for those languages, a file with a
+ * Chinese line over each English one is a Chinese file.
+ */
+const DENSE_SCRIPTS: readonly Script[] = ['han', 'kana', 'hangul'];
+const DENSE_WEIGHT = 3;
+/**
+ * Japanese is written with kana among the kanji; Chinese has none. Shares of
+ * the kana and kanji (han) together, so English lines next to them change nothing.
+ */
 const JAPANESE_KANA_SHARE = 0.05;
 const CHINESE_KANA_SHARE = 0.2;
 
@@ -272,12 +294,20 @@ export function judgeScript(
   const key = languageKey(language);
   const expected = LANGUAGE_SCRIPTS[key];
   if (!expected || profile.letters < MIN_LETTERS) return 'unknown';
-  const share = (script: Script) => (profile.scripts[script] ?? 0) / profile.letters;
+  const count = (script: Script) => profile.scripts[script] ?? 0;
+  const chinese = key.indexOf('zh') === 0;
+  const dense = chinese || key === 'ja' || key === 'ko';
+  const weight = (script: Script) =>
+    dense && DENSE_SCRIPTS.indexOf(script) !== -1 ? DENSE_WEIGHT : 1;
+  let weighed = profile.letters;
+  for (const script of DENSE_SCRIPTS) weighed += count(script) * (weight(script) - 1);
   let inScript = 0;
-  for (const script of expected) inScript += share(script);
-  if (inScript < RIGHT_SCRIPT_SHARE) return 'wrong';
-  if (key === 'ja' && share('kana') < JAPANESE_KANA_SHARE) return 'wrong';
-  if (key.indexOf('zh') === 0 && share('kana') > CHINESE_KANA_SHARE) return 'wrong';
+  for (const script of expected) inScript += count(script) * weight(script);
+  if (inScript < weighed * RIGHT_SCRIPT_SHARE) return 'wrong';
+  const kana = count('kana');
+  const ideographs = kana + count('han');
+  if (key === 'ja' && kana < ideographs * JAPANESE_KANA_SHARE) return 'wrong';
+  if (chinese && kana > ideographs * CHINESE_KANA_SHARE) return 'wrong';
   return 'right';
 }
 
@@ -301,6 +331,11 @@ export const FRAME_RATE_RATIO = 25 / (24000 / 1001);
 const SIGNS_PER_MINUTE = 1.2;
 /** Past this many lines a file is never taken for signs only, however long the video. */
 const SIGNS_MAX_LINES = 150;
+/**
+ * Lines a minute from which a file is never taken for signs only, whatever
+ * its name says: a full file has about ten, a forced one far fewer.
+ */
+const FULL_PER_MINUTE = 5;
 /** A file that stops before this share of the video, and over PARTIAL_GAP_S before its end, covers only part. */
 const PARTIAL_SHARE = 0.7;
 const PARTIAL_GAP_S = 600;
@@ -308,13 +343,18 @@ const PARTIAL_GAP_S = 600;
 const PAST_END_MIN_S = 10;
 const PAST_END_SHARE = 0.003;
 /**
- * A file falls behind (timed for film speed on a faster, PAL, video) only on
- * strong evidence: its last line ends past the video's end by at least half
- * of what the frame rates' ratio gives (2.1%), and so do its last
+ * A file falls behind (timed for film speed on a faster, PAL, video), going
+ * by its own lines alone, only on strong evidence: its last line ends past
+ * the video's end by at least half of what the frame rates' ratio gives
+ * (2.1%) and by at least BEHIND_MIN_PAST_S, and so do its last
  * BEHIND_MIN_LINES lines. Less than that, or one or two late lines, is
- * another release's ending, a teaser or a translator's credit: no drift.
+ * another release's ending, a next-episode preview, a recap the video does
+ * not have or a translator's credit: no drift. Other files agreeing on an
+ * end can still show a drift that is shorter (judgeSubtitleFits).
  */
 const BEHIND_MIN_SHARE = (FRAME_RATE_RATIO - 1) / 2;
+/** Longer than a next-episode preview or a promo after the end titles. */
+const BEHIND_MIN_PAST_S = 60;
 const BEHIND_MIN_LINES = 3;
 /** With only the title's running time to go by, a file is too long only well past it. */
 const RUNTIME_LONG_SHARE = 1.25;
@@ -332,9 +372,10 @@ export interface SubtitleFit {
   hearing: boolean;
   /**
    * How its length sits against the video's: 'short' stops well before the
-   * end (part of the film, such as CD1), 'long' runs past the end by more
-   * than a frame-rate drift explains (another cut). Undefined when the
-   * video's length cannot be judged by.
+   * end (part of the film, such as CD1) or has under half the lines of the
+   * other files (a forced file), 'long' runs past the end by more than a
+   * frame-rate drift explains (another cut). Undefined when the video's
+   * length cannot be judged by.
    */
   length?: 'fits' | 'short' | 'long';
   /** The last line's end over the video's length, when known. */
@@ -356,9 +397,18 @@ function pastEndMargin(seconds: number): number {
   return Math.max(PAST_END_MIN_S, seconds * PAST_END_SHARE);
 }
 
+/** The latest few line ends that run past the video's end, line after line. */
+function runsPastEnd(profile: SubtitleProfile, seconds: number): boolean {
+  const margin = pastEndMargin(seconds);
+  return (
+    profile.latestEnds.filter((lineEnd) => lineEnd > seconds + margin).length >= BEHIND_MIN_LINES
+  );
+}
+
 /**
- * Judges one file against the video. The drift that only other files can
- * show ('ahead') is left to judgeSubtitleFits.
+ * Judges one file against the video. What only the other files in the
+ * language can show (covering only part by its line count, a shorter drift,
+ * another cut) is left to judgeSubtitleFits.
  */
 export function judgeSubtitleFit(
   profile: SubtitleProfile,
@@ -374,7 +424,8 @@ export function judgeSubtitleFit(
   const seconds = judgedLength(video);
   if (seconds !== undefined) {
     const perMinute = profile.lines / (seconds / 60);
-    if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
+    if (perMinute >= FULL_PER_MINUTE) fit.signs = false;
+    else if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
     fit.coverage = profile.end / seconds;
     const margin = pastEndMargin(seconds);
     if (profile.end < seconds * PARTIAL_SHARE && seconds - profile.end > PARTIAL_GAP_S) {
@@ -390,11 +441,11 @@ export function judgeSubtitleFit(
       // on a faster (PAL) video: stretched onto the video's clock, it ends in
       // time. Only when it runs on well past the end, line after line.
       fit.length = 'fits';
-      const pastEnd = profile.latestEnds.filter((lineEnd) => lineEnd > seconds + margin).length;
       if (
         !fit.signs &&
         profile.end >= seconds * (1 + BEHIND_MIN_SHARE) &&
-        pastEnd >= BEHIND_MIN_LINES
+        profile.end - seconds >= BEHIND_MIN_PAST_S &&
+        runsPastEnd(profile, seconds)
       ) {
         fit.drift = 'behind';
       }
@@ -406,7 +457,7 @@ export function judgeSubtitleFit(
 
 /** Two files' last lines this close (a share of the time) end together. */
 const AGREE_SHARE = 0.01;
-/** How close a file's end must come to a frame-rate drift's before the others' to count as one. */
+/** How close a file's end over the others' must come to the frame rates' ratio to count as a drift. */
 const DRIFT_TOLERANCE = 0.005;
 /** Files ending well before the video, beyond any end titles, tell nothing of where the last line goes. */
 const CREDITS_MAX_S = 900;
@@ -430,14 +481,30 @@ function agreedEnd(ends: readonly number[]): number | undefined {
 }
 
 /**
- * Judges the files offered in one language together: each on its own, and
- * one ending about 4% before the others ('ahead': timed for 25 fps on a
- * film-speed video) when at least two others that fit the video agree on
- * where the last line goes, none agrees with it, and stretched it still ends
- * within the video. A file judged on its own as falling behind ('behind') is
- * not, when such others agree on an end and its own is not about 4% after
- * theirs: it is another cut, or has a longer ending, and is too long. Only
- * with the video's own length.
+ * A file with under this share of the lines of the others that fit (their
+ * median) covers only part of the video: a forced file with only the
+ * foreign-language scenes. A plain file has 10 to 30% fewer lines than one
+ * for the hard of hearing of the same film, far from this.
+ */
+const PART_LINES_SHARE = 0.5;
+
+/**
+ * Judges the files offered in one language together: each on its own, then
+ * against the others.
+ *
+ * - A file with under half the lines of the others that fit covers only
+ *   part ('short'), whatever its length. With the title's running time too.
+ * - When at least two others that fit the video agree on where the last
+ *   line goes, a file whose lines run on past the video's end falls behind
+ *   ('behind': timed for film speed on a faster, PAL, video) when its end is
+ *   about 4% after theirs, and is too long (another cut, or a longer ending)
+ *   when it is not. Only with the video's own length.
+ *
+ * A file ending about 4% before the others is never taken for one getting
+ * ahead: a file timed for the faster video it is playing on ends so too,
+ * when the others hide their drift in the end titles, and so does a plain
+ * file next to ones that caption the song over the end titles. Nothing
+ * tells the video's frame rate, so getting ahead is the viewer's to choose.
  */
 export function judgeSubtitleFits<K>(
   files: ReadonlyArray<{ id: K; profile: SubtitleProfile }>,
@@ -447,7 +514,23 @@ export function judgeSubtitleFits<K>(
   const fits = new Map<K, SubtitleFit>();
   for (const file of files) fits.set(file.id, judgeSubtitleFit(file.profile, video, language));
   const seconds = judgedLength(video);
-  if (!video.exact || seconds === undefined) return fits;
+  if (seconds === undefined) return fits;
+
+  // The files that fit by their own reading, before any is changed below.
+  const whole = files.filter((file) => {
+    const fit = fits.get(file.id)!;
+    return !fit.unfit && fit.length === 'fits';
+  });
+  for (const file of whole) {
+    const others = whole.filter((other) => other !== file).map((other) => other.profile.lines);
+    if (others.length === 0 || file.profile.lines >= median(others) * PART_LINES_SHARE) continue;
+    // Its end says nothing of a frame rate: the lines are only some of the film's.
+    const fit = fits.get(file.id)!;
+    fit.length = 'short';
+    delete fit.drift;
+  }
+
+  if (!video.exact) return fits;
   const margin = pastEndMargin(seconds);
   // Files that fit the video as they are, with a last line where a film's goes.
   const steady = files.filter((file) => {
@@ -462,23 +545,19 @@ export function judgeSubtitleFits<K>(
   });
   for (const file of files) {
     const fit = fits.get(file.id)!;
-    if (fit.unfit || fit.length !== 'fits') continue;
     const end = file.profile.end;
+    if (fit.unfit || fit.length !== 'fits' || end <= seconds + margin) continue;
+    // A lone late line (a translator's credit) is not lines running on.
+    if (!runsPastEnd(file.profile, seconds)) continue;
     const others = steady.filter((other) => other !== file).map((other) => other.profile.end);
     const consensus = agreedEnd(others);
     if (consensus === undefined) continue;
-    if (fit.drift === 'behind') {
-      if (Math.abs(end / consensus - FRAME_RATE_RATIO) > DRIFT_TOLERANCE) {
-        delete fit.drift;
-        fit.length = 'long';
-      }
-      continue;
+    if (Math.abs(end / consensus - FRAME_RATE_RATIO) <= DRIFT_TOLERANCE) {
+      fit.drift = 'behind';
+    } else {
+      delete fit.drift;
+      fit.length = 'long';
     }
-    if (fit.drift !== undefined) continue;
-    if (others.some((other) => Math.abs(other - end) <= end * AGREE_SHARE)) continue;
-    if (Math.abs(end / consensus - 1 / FRAME_RATE_RATIO) > DRIFT_TOLERANCE) continue;
-    if (end * FRAME_RATE_RATIO > seconds + margin) continue;
-    fit.drift = 'ahead';
   }
   return fits;
 }

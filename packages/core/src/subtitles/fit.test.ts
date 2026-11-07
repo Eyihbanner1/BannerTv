@@ -7,6 +7,7 @@ import {
   profileSubtitles,
   type SubtitleProfile,
 } from './fit';
+import { fitTier } from './rank';
 import type { Cue } from './types';
 
 const cue = (start: number, end: number, text: string): Cue => ({
@@ -72,6 +73,18 @@ describe('profileSubtitles', () => {
     expect(profileSubtitles([], 'Signs.2002.1080p.BluRay').forcedLabel).toBe(false);
     expect(profileSubtitles([], 'Hi.Score.Girl.S01E01').hearingLabel).toBe(false);
   });
+
+  it('takes "Forced" at the start of a name for the film’s title, not a tag', () => {
+    const forced = (label: string) => profileSubtitles([], label).forcedLabel;
+    expect(forced('Forced.Vengeance.1982.1080p.BluRay.x264-GRP')).toBe(false);
+    expect(forced('Forced Entry (1973) DVDRip')).toBe(false);
+    expect(forced('forced.to.kill.1993.720p')).toBe(false);
+    // A tag after the title still counts, and so does the word on its own.
+    expect(forced('Forced.Vengeance.1982.1080p.FORCED')).toBe(true);
+    expect(forced('Forced')).toBe(true);
+    expect(forced('forced.srt')).toBe(true);
+    expect(forced('[Forced] Film.2021.1080p')).toBe(true);
+  });
 });
 
 describe('judgeScript', () => {
@@ -119,6 +132,33 @@ describe('judgeScript', () => {
     expect(judgeScript(both, 'eng')).toBe('right');
     expect(judgeScript(both, 'zhe')).toBe('right');
   });
+
+  it('counts a Chinese, Japanese or Korean character as three letters, so short lines next to English ones count', () => {
+    // Each Chinese line is about a ninth of the letters, as a short line goes.
+    const chinese = profileSubtitles(
+      dialogue(40, 0, 400, ['相信我', 'You have to trust me on this one.']),
+    );
+    expect(judgeScript(chinese, 'zhe')).toBe('right');
+    expect(judgeScript(chinese, 'chi')).toBe('right');
+    expect(judgeScript(chinese, 'eng')).toBe('right');
+    // Still no kana: not Japanese.
+    expect(judgeScript(chinese, 'jpn')).toBe('wrong');
+    const japanese = profileSubtitles(
+      dialogue(40, 0, 400, ['待ってた', 'I waited for you until the sun came up.']),
+    );
+    expect(judgeScript(japanese, 'jpn')).toBe('right');
+    // Kana among the kanji, however much English is next to them: not Chinese.
+    expect(judgeScript(japanese, 'chi')).toBe('wrong');
+    const korean = profileSubtitles(
+      dialogue(40, 0, 400, ['날 믿어', 'You have to trust me on this one.']),
+    );
+    expect(judgeScript(korean, 'kor')).toBe('right');
+    // A few Chinese characters in an English file do not make it Chinese.
+    const names = profileSubtitles(
+      dialogue(40, 0, 400, ['Where have you been all night, 李?', ...ENGLISH]),
+    );
+    expect(judgeScript(names, 'chi')).toBe('wrong');
+  });
 });
 
 describe('judgeSubtitleFit', () => {
@@ -154,6 +194,18 @@ describe('judgeSubtitleFit', () => {
     // A forced file says so in its release name.
     const forced = profileSubtitles(dialogue(400, 30, 7000), 'Film.2021.FORCED');
     expect(judgeSubtitleFit(forced, { exact: false }, 'en').unfit).toBe(true);
+    expect(judgeSubtitleFit(forced, film, 'en')).toMatchObject({ signs: true, unfit: true });
+  });
+
+  it('never takes a file with five lines a minute or more for signs only, whatever its name', () => {
+    const named = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Film.2021.Forced');
+    expect(judgeSubtitleFit(named, film, 'en')).toMatchObject({ signs: false, unfit: false });
+    expect(judgeSubtitleFit(named, { seconds: FILM_S, exact: false }, 'en').signs).toBe(false);
+    // Six hundred lines over two hours is five a minute.
+    const five = profileSubtitles(dialogue(600, 30, FILM_S - 360), 'Film.2021.Signs.&.Songs');
+    expect(judgeSubtitleFit(five, film, 'en').signs).toBe(false);
+    // Without a length to go by, the name is all there is.
+    expect(judgeSubtitleFit(named, { exact: false }, 'en').signs).toBe(true);
   });
 
   it('knows a file in another script, and passes it over', () => {
@@ -222,6 +274,18 @@ describe('judgeSubtitleFit', () => {
     expect(judgeSubtitleFit(behind, episode, 'en').drift).toBe('behind');
   });
 
+  it('takes no drift from a next-episode preview under a minute long after a short episode', () => {
+    // A 24-minute episode; the file is timed for the airing, with a preview after the end.
+    const episode = { seconds: 1420, exact: true };
+    const preview = Array.from({ length: 6 }, (_, i) =>
+      cue(1428 + i * 5, 1433 + i * 5, `Next time: part ${i + 1}`),
+    );
+    const aired = profileSubtitles(dialogue(320, 20, 1400).concat(preview));
+    expect(aired.end).toBe(1458);
+    expect(judgeSubtitleFit(aired, episode, 'en')).toMatchObject({ length: 'fits', unfit: false });
+    expect(judgeSubtitleFit(aired, episode, 'en').drift).toBeUndefined();
+  });
+
   it('takes a few seconds past the end as a release’s difference, and far past it as another cut', () => {
     const justPast = profileSubtitles(dialogue(1300, 30, FILM_S + 6));
     expect(judgeSubtitleFit(justPast, film, 'en')).toMatchObject({ length: 'fits' });
@@ -245,7 +309,7 @@ describe('judgeSubtitleFits', () => {
   const at = (end: number): SubtitleProfile => profileSubtitles(dialogue(1300, 30, end));
   const consensus = FILM_S - 480;
 
-  it('knows a file ending about 4% before two others that agree: timed for 25 fps on a film-speed video', () => {
+  it('never takes a file ending about 4% before two others that agree for one getting ahead', () => {
     const fits = judgeSubtitleFits(
       [
         { id: 'pal', profile: at(consensus / FRAME_RATE_RATIO) },
@@ -255,9 +319,48 @@ describe('judgeSubtitleFits', () => {
       film,
       'en',
     );
-    expect(fits.get('pal')!.drift).toBe('ahead');
-    expect(fits.get('a')!.drift).toBeUndefined();
-    expect(fits.get('b')!.drift).toBeUndefined();
+    for (const id of ['pal', 'a', 'b']) {
+      expect(fits.get(id)).toMatchObject({ length: 'fits', unfit: false });
+      expect(fits.get(id)!.drift).toBeUndefined();
+    }
+  });
+
+  it('leaves the one file timed for a PAL video as it is, next to two timed for film speed', () => {
+    // A two-hour film as a PAL rip: two files are timed for the film-speed
+    // releases and hide their drift in the end titles; the third is right.
+    const video = { seconds: 6905, exact: true };
+    const fits = judgeSubtitleFits(
+      [
+        { id: 'a', profile: at(6778) },
+        { id: 'b', profile: at(6782) },
+        { id: 'right', profile: at(6502) },
+      ],
+      video,
+      'en',
+    );
+    expect(fits.get('right')).toMatchObject({ length: 'fits', unfit: false });
+    expect(fits.get('right')!.drift).toBeUndefined();
+  });
+
+  it('leaves a plain file that stops at the last spoken line, next to two that caption the song over the end titles', () => {
+    const lyrics = (end: number) =>
+      dialogue(1300, 30, 6880).concat(
+        Array.from({ length: 30 }, (_, i) => {
+          const start = 6890 + ((end - 6892) * i) / 29;
+          return cue(start, start + 2, '♪ And the night goes on ♪');
+        }),
+      );
+    const fits = judgeSubtitleFits(
+      [
+        { id: 'plain', profile: at(6885) },
+        { id: 'songs1', profile: profileSubtitles(lyrics(7178)) },
+        { id: 'songs2', profile: profileSubtitles(lyrics(7182)) },
+      ],
+      film,
+      'en',
+    );
+    expect(fits.get('plain')).toMatchObject({ length: 'fits', unfit: false });
+    expect(fits.get('plain')!.drift).toBeUndefined();
   });
 
   it('says nothing on thin evidence', () => {
@@ -334,17 +437,133 @@ describe('judgeSubtitleFits', () => {
     expect(drifting.get('a')!.drift).toBeUndefined();
   });
 
-  it('counts neither a drifting file nor one of signs among the files that agree', () => {
+  it('fixes a short episode’s file that runs on past the end, when two others agree on an end about 4% before', () => {
+    // On its own the file runs under a minute past the 24-minute episode: no drift.
+    const episode = { seconds: 1420, exact: true };
+    const ending = (end: number) => profileSubtitles(dialogue(320, 20, end));
+    const drifting = ending(1390 * FRAME_RATE_RATIO);
+    expect(judgeSubtitleFit(drifting, episode, 'en').drift).toBeUndefined();
     const fits = judgeSubtitleFits(
       [
-        { id: 'pal', profile: at(consensus / FRAME_RATE_RATIO) },
-        { id: 'a', profile: at(consensus) },
-        { id: 'signs', profile: profileSubtitles(dialogue(30, 300, consensus)) },
+        { id: 'film', profile: drifting },
+        { id: 'a', profile: ending(1390) },
+        { id: 'b', profile: ending(1392) },
+      ],
+      episode,
+      'en',
+    );
+    expect(fits.get('film')).toMatchObject({ length: 'fits', drift: 'behind', unfit: false });
+    expect(fits.get('a')!.drift).toBeUndefined();
+    // Running on past the end by other than a drift, when the others agree: another cut.
+    const longer = judgeSubtitleFits(
+      [
+        { id: 'longer', profile: ending(1445) },
+        { id: 'a', profile: ending(1400) },
+        { id: 'b', profile: ending(1402) },
+      ],
+      episode,
+      'en',
+    );
+    expect(longer.get('longer')).toMatchObject({ length: 'long', unfit: false });
+    expect(longer.get('longer')!.drift).toBeUndefined();
+    // A lone late line, a translator's credit, is not lines running on.
+    const credit = profileSubtitles(
+      dialogue(320, 20, 1395).concat(cue(1440, 1444, 'Translated by Juan')),
+    );
+    const withCredit = judgeSubtitleFits(
+      [
+        { id: 'credit', profile: credit },
+        { id: 'a', profile: ending(1400) },
+        { id: 'b', profile: ending(1402) },
+      ],
+      episode,
+      'en',
+    );
+    expect(withCredit.get('credit')).toMatchObject({ length: 'fits', unfit: false });
+    expect(withCredit.get('credit')!.drift).toBeUndefined();
+  });
+
+  it('counts neither a drifting file nor one of signs among the files that agree', () => {
+    const episode = { seconds: 2700, exact: true };
+    const ending = (end: number) => profileSubtitles(dialogue(500, 20, end));
+    const fits = judgeSubtitleFits(
+      [
+        { id: 'teaser', profile: ending(2765) },
+        { id: 'other', profile: ending(2770) },
+        { id: 'a', profile: ending(2690) },
+        { id: 'signs', profile: profileSubtitles(dialogue(30, 300, 2690)) },
+      ],
+      episode,
+      'en',
+    );
+    // Only one file that fits ends before the video does: no agreement, each judged on its own.
+    expect(fits.get('teaser')!.drift).toBe('behind');
+    expect(fits.get('other')!.drift).toBe('behind');
+    expect(fits.get('signs')!.unfit).toBe(true);
+  });
+
+  it('knows a file with under half the lines of the others for one covering only part: a forced file', () => {
+    // A 153-minute film with long German and French scenes.
+    const video = { seconds: 153 * 60, exact: true };
+    const sdhLines = [...ENGLISH, '[speaking German]', 'HANS: Wo ist er?', ...ENGLISH, '(sighs)'];
+    const sdh = () => profileSubtitles(dialogue(1800, 30, video.seconds - 300, sdhLines));
+    const files = [
+      { id: 'forced', profile: profileSubtitles(dialogue(400, 600, video.seconds - 900)) },
+      { id: 'sdh1', profile: sdh() },
+      { id: 'sdh2', profile: sdh() },
+    ];
+    const fits = judgeSubtitleFits(files, video, 'en');
+    expect(fits.get('forced')).toMatchObject({ length: 'short', unfit: false });
+    expect(fits.get('forced')!.drift).toBeUndefined();
+    expect(fits.get('sdh1')).toMatchObject({ length: 'fits', hearing: true });
+    // It ranks below both full files, whose lines are for the hard of hearing.
+    expect(fitTier(fits.get('forced'), false)).toBeGreaterThan(fitTier(fits.get('sdh1'), false));
+    // The title's running time is enough to tell.
+    const fromPage = judgeSubtitleFits(files, { seconds: video.seconds, exact: false }, 'en');
+    expect(fromPage.get('forced')!.length).toBe('short');
+    // On its own, nothing tells.
+    expect(judgeSubtitleFits(files.slice(0, 1), video, 'en').get('forced')!.length).toBe('fits');
+    // Nor on a live broadcast or a clip.
+    expect(judgeSubtitleFits(files, { exact: true }, 'en').get('forced')!.length).toBeUndefined();
+  });
+
+  it('knows a forced file on an episode, even one that runs past the end, and drops its drift', () => {
+    const episode = { seconds: 42 * 60, exact: true };
+    // Its last three lines run on well past the end, as a drift's would.
+    const forced = profileSubtitles(
+      dialogue(57, 120, 2400).concat(
+        [2560, 2578, 2596].map((at) => cue(at, at + 4, 'We have to go.')),
+      ),
+    );
+    expect(judgeSubtitleFit(forced, episode, 'en')).toMatchObject({
+      drift: 'behind',
+      signs: false,
+    });
+    const fits = judgeSubtitleFits(
+      [
+        { id: 'forced', profile: forced },
+        { id: 'full', profile: profileSubtitles(dialogue(600, 20, 2480)) },
+      ],
+      episode,
+      'en',
+    );
+    expect(fits.get('forced')).toMatchObject({ length: 'short', signs: false });
+    expect(fits.get('forced')!.drift).toBeUndefined();
+    expect(fits.get('full')!.length).toBe('fits');
+  });
+
+  it('never takes a plain file for one covering only part, next to one for the hard of hearing', () => {
+    const lines = [...ENGLISH, '[door creaks]', 'MARY: Who is it?', ...ENGLISH, '(sighs)'];
+    const fits = judgeSubtitleFits(
+      [
+        // 30% fewer lines than the file for the hard of hearing.
+        { id: 'plain', profile: profileSubtitles(dialogue(1260, 30, FILM_S - 360)) },
+        { id: 'sdh', profile: profileSubtitles(dialogue(1800, 30, FILM_S - 360, lines)) },
       ],
       film,
       'en',
     );
-    expect(fits.get('pal')!.drift).toBeUndefined();
-    expect(fits.get('signs')!.unfit).toBe(true);
+    expect(fits.get('plain')).toMatchObject({ length: 'fits', hearing: false });
+    expect(fits.get('sdh')).toMatchObject({ length: 'fits', hearing: true });
   });
 });
