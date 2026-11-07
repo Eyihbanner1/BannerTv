@@ -2377,6 +2377,9 @@ test('the pointer brings the controls up, shows the time over the bar, and a cli
   page,
 }) => {
   await playMovie(page);
+  // Well after the OK that started the film, whose click the one on the bar would
+  // otherwise be (a click within 400 ms of an OK is that OK's): half a second played.
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(0.5);
   const play = page.locator('[data-focus-key="player-play"]');
   await page.mouse.move(900, 500);
   await page.mouse.move(960, 540, { steps: 3 });
@@ -2389,8 +2392,6 @@ test('the pointer brings the controls up, shows the time over the bar, and a cli
   await expect(bar.getByText('0:20', { exact: true })).toBeVisible();
 
   // The Magic Remote's OK there comes as a key press and a click: it jumps, and the film plays on.
-  // Well after the OK that pressed Watch: a click within 400 ms of an answered OK is that OK's.
-  await page.waitForTimeout(500);
   await page.mouse.move(box.x + box.width / 4, box.y + box.height / 2, { steps: 3 });
   await page.keyboard.press('Enter');
   await page.mouse.click(box.x + box.width / 4, box.y + box.height / 2);
