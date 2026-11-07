@@ -68,18 +68,34 @@ describe('driftInUse and driftKeptWithTiming', () => {
   });
 
   it('keeps the player’s own fix with the timing once the viewer moves it, so it stays on', () => {
-    const auto = driftInUse(file);
-    expect(driftKeptWithTiming(auto, 0.5)).toBe('auto');
-    expect(driftKeptWithTiming(auto, -0.1)).toBe('auto');
+    expect(driftKeptWithTiming(file, 0.5)).toBe('auto');
+    expect(driftKeptWithTiming(file, -0.1)).toBe('auto');
     // With 'auto' kept and the timing moved, the fix is still on, still the player's.
     expect(driftInUse({ ...file, kept: 'auto', offset: 0.5 })).toEqual({
       drift: 'behind',
       auto: true,
     });
     // Reset on a file at 0 keeps nothing; neither does a fix the viewer chose, already kept.
-    expect(driftKeptWithTiming(auto, 0)).toBeNull();
-    expect(driftKeptWithTiming(driftInUse({ ...file, kept: 'ahead' }), 0.5)).toBeNull();
-    expect(driftKeptWithTiming(driftInUse({ ...file, evidence: null }), 0.5)).toBeNull();
+    expect(driftKeptWithTiming(file, 0)).toBeNull();
+    expect(driftKeptWithTiming({ ...file, kept: 'ahead' }, 0.5)).toBeNull();
+    expect(driftKeptWithTiming({ ...file, kept: 'none' }, 0.5)).toBeNull();
+    // Nor where no drift fix applies.
+    expect(driftKeptWithTiming({ ...file, canFix: false }, 0.5)).toBeNull();
+  });
+
+  it('keeps the fix to be worked out on each stream with a timing set where there was none to make', () => {
+    // The file fits the stream playing as it is: the timing goes with 'auto'.
+    const fits = { ...file, evidence: null };
+    expect(driftKeptWithTiming(fits, 0.3)).toBe('auto');
+    // On another release of the video, whose length shows the file falling behind, the
+    // player still fixes it, with the viewer's timing.
+    expect(driftInUse({ ...file, kept: 'auto', offset: 0.3 })).toEqual({
+      drift: 'behind',
+      auto: true,
+    });
+    // A timing an older build kept with no drift choice, against lines it left as they were,
+    // stays so: moving it keeps nothing, and the lines are not stretched under the viewer.
+    expect(driftKeptWithTiming({ ...file, offset: 1.5 }, 1.6)).toBeNull();
   });
 
   it('works the kept fix out again on another release, where the file fits as it is', () => {

@@ -379,6 +379,52 @@ describe('planSubtitlePick', () => {
       plan(two, { a: SIGNS, b: OTHER_SCRIPT }, { holding: false, current: 'a' }),
     ).toMatchObject({ pick: 'a', read: [], hold: false });
   });
+
+  it('reads the first two beside the version picked by hand whose lines run on past the end', () => {
+    const showing = { remembered: 'more', current: 'more', holding: false, switchesLeft: 0 };
+    const runsOn: SubtitleFit = { ...FITS, coverage: 1.02 };
+    // For their checks only: a drift files agreeing on an end can show. It stays.
+    expect(plan(offered, { more: runsOn }, showing)).toEqual({
+      pick: 'more',
+      read: ['signs', 'past'],
+      hold: false,
+      switched: false,
+    });
+    expect(plan(offered, { more: runsOn, signs: FITS, past: FITS, full: FITS }, showing)).toEqual({
+      pick: 'more',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Not while it ends in time, while its own length shows a drift, or while the player is
+    // still learning how long the video is.
+    expect(plan(offered, { more: { ...FITS, coverage: 0.99 } }, showing).read).toEqual([]);
+    expect(plan(offered, { more: { ...BEHIND, coverage: 1.04 } }, showing).read).toEqual([]);
+    expect(plan(offered, { more: runsOn }, { ...showing, lengthPending: true }).read).toEqual([]);
+    // Nor before it has been read.
+    expect(plan(offered, {}, showing).read).toEqual([]);
+  });
+
+  it('does not wait for a slow download, and reads the next file meanwhile', () => {
+    // The first two are still on their way after the hold's time.
+    const slow = (url: string) => url.endsWith('/signs.srt') || url.endsWith('/past.srt');
+    const reading = slow;
+    expect(plan(offered, {}, { reading, slow, readsLeft: 2 })).toEqual({
+      pick: 'signs',
+      read: ['full', 'more'],
+      hold: true,
+      switched: false,
+    });
+    // The next file read fits as it is: its lines show, the slow two not waited for.
+    expect(
+      plan(offered, { full: FITS }, { reading, slow, current: 'signs', readsLeft: 0 }),
+    ).toEqual({ pick: 'full', read: [], hold: false, switched: false });
+    // While they are not slow yet, the hold waits for them and nothing more is read.
+    expect(plan(offered, {}, { reading, readsLeft: 2 })).toMatchObject({ read: [], hold: true });
+    expect(
+      plan(offered, { full: FITS }, { reading, current: 'signs', readsLeft: 0 }),
+    ).toMatchObject({ hold: true });
+  });
 });
 
 describe('fitsIn', () => {
@@ -435,6 +481,56 @@ describe('fitsIn', () => {
     expect(result.read).toEqual([]);
     const evidence = fits.get(behind.url)?.drift ?? null;
     expect(driftInUse({ canFix: true, evidence, kept: null, offset: 0 })).toEqual({
+      drift: 'behind',
+      auto: true,
+    });
+  });
+
+  it('fixes the drift of the version picked by hand again when only other files show it', () => {
+    // A 22-minute episode as a PAL release. Two files end with it; the one picked by hand is
+    // timed for film speed, and ends 26 s past it: too little to tell on its own.
+    const video = { seconds: 1320, exact: true };
+    const offered = [file('a'), file('b'), file('x')];
+    const profiles: Record<string, ReturnType<typeof profileSubtitles>> = {
+      x: profileSubtitles(lines(370, 1346)),
+    };
+    const profileOf = (url: string) => profiles[/\/([^/]+)\.srt$/.exec(url)![1]!];
+    const planned = () => {
+      const fits = fitsIn(offered, 'en', profileOf, video);
+      const result = planSubtitlePick<File>({
+        ...context(),
+        fit: (url) => fits.get(url),
+        remembered: 'x',
+        offered,
+        language: 'en',
+        reading: () => false,
+        current: 'x',
+        holding: false,
+        timeUp: false,
+        readsLeft: 4,
+        switchesLeft: 0,
+      });
+      return { fits, result };
+    };
+    // Played again, the version picked by hand alone has been read: the first two are read too.
+    const before = planned();
+    expect(before.fits.get(file('x').url)?.drift).toBeUndefined();
+    expect(before.result.pick?.key).toBe('x');
+    expect(keys(before.result.read)).toEqual(['a', 'b']);
+    profiles.a = profileSubtitles(lines(350, 1291));
+    profiles.b = profileSubtitles(lines(360, 1293));
+    // They agree on an end, 4% before its: it falls behind, and the player fixes it again.
+    const after = planned();
+    expect(after.result).toMatchObject({ read: [], switched: false });
+    expect(after.result.pick?.key).toBe('x');
+    const evidence = after.fits.get(file('x').url)?.drift ?? null;
+    expect(evidence).toBe('behind');
+    expect(driftInUse({ canFix: true, evidence, kept: null, offset: 0 })).toEqual({
+      drift: 'behind',
+      auto: true,
+    });
+    // With the viewer's timing kept beside the player's own fix, too.
+    expect(driftInUse({ canFix: true, evidence, kept: 'auto', offset: 0.3 })).toEqual({
       drift: 'behind',
       auto: true,
     });

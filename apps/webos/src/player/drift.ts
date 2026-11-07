@@ -43,20 +43,28 @@ export interface DriftInUse {
   auto: boolean;
 }
 
+/** What the drift fix of the file showing is worked out from. */
+export interface DriftFile {
+  /** Whether a drift fix applies to it. */
+  canFix: boolean;
+  /** The drift its length gives away on the stream playing, if any. */
+  evidence: SubtitleDrift | null;
+  /** The drift choice kept for the file, if any. */
+  kept: DriftChoice | null;
+  /** The timing kept for the file, in seconds. */
+  offset: number;
+}
+
 /**
  * The drift fix for the file showing: the viewer's own when they chose one
  * for it ('none' is no fix); the one the stream playing gives away when the
  * player's own fix was kept with their timing ('auto'); else the one its
- * length gives away (`evidence`), made by the player, unless the viewer set
- * a timing on the file before (theirs stands). None where a drift fix does
- * not apply (`canFix`).
+ * length gives away (`evidence`), made by the player, unless a timing was set
+ * on the file with no drift choice kept beside it (an older build's, set
+ * against lines it did not stretch: theirs stands). None where a drift fix
+ * does not apply (`canFix`).
  */
-export function driftInUse(file: {
-  canFix: boolean;
-  evidence: SubtitleDrift | null;
-  kept: DriftChoice | null;
-  offset: number;
-}): DriftInUse {
+export function driftInUse(file: DriftFile): DriftInUse {
   if (!file.canFix) return { drift: null, auto: false };
   // Worked out from this stream: a drift belongs to the file and the release together.
   if (file.kept === 'auto') return { drift: file.evidence, auto: file.evidence !== null };
@@ -66,12 +74,17 @@ export function driftInUse(file: {
 }
 
 /**
- * What to keep as the viewer moves the timing to `offset`: 'auto' while the
- * player's own fix is on, so the lines they move stay stretched as they see
- * them, now and next time, as this stream's evidence says. Not a fixed drift:
- * on another release of the video, which the file may fit as it is, it is
- * worked out again. Null when there is none to keep.
+ * What to keep as the viewer moves the timing of the file to `offset`:
+ * 'auto' where they have made no drift choice for it and its lines show as
+ * the stream's own evidence has them (the player's fix on, or no fix to
+ * make). The fix is then worked out again on every stream with their timing:
+ * the lines they move stay stretched as they see them, a release the file
+ * fits as it is gets no stretch, and one whose length shows a drift still
+ * gets the player's fix. Not a fixed drift. Null when there is nothing to
+ * keep: a drift choice of their own stands, and so do lines an older build's
+ * timing left unstretched.
  */
-export function driftKeptWithTiming(inUse: DriftInUse, offset: number): 'auto' | null {
-  return inUse.auto && offset !== 0 ? 'auto' : null;
+export function driftKeptWithTiming(file: DriftFile, offset: number): 'auto' | null {
+  if (!file.canFix || offset === 0 || file.kept !== null) return null;
+  return driftInUse(file).auto || file.evidence === null ? 'auto' : null;
 }

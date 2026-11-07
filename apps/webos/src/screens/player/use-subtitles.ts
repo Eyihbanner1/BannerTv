@@ -183,10 +183,12 @@ interface AutoState {
  * even when its addon answers after the stream lists its own track; then the
  * stream's own track in that language (always in sync), unless it holds
  * forced lines only; then the addon file that fits best; a track of forced
- * lines only when the language has nothing else. The first few files are read
- * before one shows (for at most HOLD_MS after the first is read): one in
- * another script or of signs only is passed over, and a full plain file that
- * lasts as long as the video wins (`planSubtitlePick`). A file that fits
+ * lines only when the language has nothing else that can be shown (a file
+ * that could not be read, or in another script, comes after it). The first
+ * few files are read before one shows (for at most HOLD_MS after the first is
+ * read, and never waiting on a slow download): one in another script or of
+ * signs only is passed over, and a full plain file that lasts as long as the
+ * video wins (`planSubtitlePick`). A file that fits
  * clearly better, read later, takes over soon after, at most twice; one made
  * for the release that arrives later takes over too. A language the viewer
  * turns on from the sheet stays theirs, and its version is chosen the same
@@ -255,10 +257,16 @@ export function useSubtitles(
   } | null>(null);
   const auto = useRef<AutoState>({ entry: null, holding: false, switches: 0 });
   // Files read for their checks in each language, by link, for the stream playing: another
-  // stream of the video reads its own file and the addon's first again.
-  const checkedIn = useRef<{ entry: StreamEntry | null; byLanguage: Map<string, Set<string>> }>({
+  // stream of the video reads its own file and the addon's first again. And when each file
+  // being read was asked for, by link, to tell a slow download.
+  const checkedIn = useRef<{
+    entry: StreamEntry | null;
+    byLanguage: Map<string, Set<string>>;
+    asked: Map<string, number>;
+  }>({
     entry: null,
     byLanguage: new Map(),
+    asked: new Map(),
   });
   // Plans the choice again, now: for a language the viewer turned on.
   const wake = useRef<(() => void) | null>(null);
@@ -328,8 +336,21 @@ export function useSubtitles(
     // viewer turned it on from the sheet.
     let wantedNow: string | null = null;
     let pressedNow: string | undefined;
-    // Ends the hold once its time is up.
+    // Ends the hold once its time is up, or once a file being read turns out slow; and when.
     let timer: number | undefined;
+    let timerAt = 0;
+    const wakeAt = (at: number, now: number) => {
+      if (timer !== undefined && timerAt <= at) return;
+      if (timer !== undefined) clearTimeout(timer);
+      timerAt = at;
+      timer = window.setTimeout(
+        () => {
+          timer = undefined;
+          decide();
+        },
+        Math.max(0, at - now) + 20,
+      );
+    };
     const settle = (next: SubtitleChoice, remembered = false) => {
       decided.current = {
         entry,
@@ -367,30 +388,31 @@ export function useSubtitles(
       const playing = session.get();
       const now = Date.now();
       const language = languageKey(wanted);
-      if (checkedIn.current.entry !== entry) checkedIn.current = { entry, byLanguage: new Map() };
+      if (checkedIn.current.entry !== entry) {
+        checkedIn.current = { entry, byLanguage: new Map(), asked: new Map() };
+      }
       const checked = checkedIn.current.byLanguage.get(language) ?? new Set<string>();
       checkedIn.current.byLanguage.set(language, checked);
+      const { asked } = checkedIn.current;
+      const files = filesIn(offered, wanted);
+      // A file being read that the plan did not ask for (the one chosen, loading) counts from now.
+      for (const option of files) {
+        if (!checks.reading(option.url)) asked.delete(option.url);
+        else if (!asked.has(option.url)) asked.set(option.url, now);
+      }
       if (
         standing.holding &&
         standing.firstReadAt === undefined &&
-        filesIn(offered, wanted).some((option) => checks.profile(option.url))
+        files.some((option) => checks.profile(option.url))
       ) {
         standing.firstReadAt = now;
-      }
-      if (standing.holding && standing.firstReadAt !== undefined && timer === undefined) {
-        timer = window.setTimeout(
-          () => {
-            timer = undefined;
-            decide();
-          },
-          Math.max(0, standing.firstReadAt + HOLD_MS - now) + 20,
-        );
       }
       const result = planSubtitlePick({
         ...context,
         offered,
         language: wanted,
         reading: checks.reading,
+        slow: (url) => checks.reading(url) && now - (asked.get(url) ?? now) >= HOLD_MS,
         current,
         holding: standing.holding,
         timeUp: standing.firstReadAt !== undefined && now - standing.firstReadAt >= HOLD_MS,
@@ -403,12 +425,24 @@ export function useSubtitles(
       });
       for (const file of result.read) {
         checked.add(file.url);
+        asked.set(file.url, now);
         checks.read(file).catch(() => {
           if (!stopped) markBroken(file.url, true);
         });
       }
       if (result.switched) standing.switches++;
       setHolding(result.hold);
+      if (result.hold) {
+        // Planned again when the time is up, or when the next file being read turns slow.
+        let due = standing.firstReadAt !== undefined ? standing.firstReadAt + HOLD_MS : Infinity;
+        for (const option of files) {
+          const at = asked.get(option.url);
+          if (at !== undefined && checks.reading(option.url) && at + HOLD_MS > now) {
+            due = Math.min(due, at + HOLD_MS);
+          }
+        }
+        if (due !== Infinity) wakeAt(due, now);
+      }
       if (result.pick && result.pick.key !== current) {
         // Landing on the version picked by hand, it stays: a track listed later does not take over.
         settle({ kind: 'file', key: result.pick.key }, result.pick.key === context.remembered);
@@ -452,6 +486,13 @@ export function useSubtitles(
       const inLanguage = (t: EngineTrack) => key !== null && languageKey(t.lang) === key;
       const track = text.find((t) => inLanguage(t) && !t.forced);
       const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced);
+      // A file that can be shown: one that could be read, in the language's script. A track of
+      // forced lines only comes before one that cannot.
+      const usable = (option: SubtitleOption | undefined) =>
+        !!option &&
+        !!context &&
+        !context.broken(option.url) &&
+        context.fit(option.url)?.script !== 'wrong';
       if (ours) {
         // A track that left with its engine (hls.js handing the stream to the
         // TV's player) gives way to a file.
@@ -467,16 +508,26 @@ export function useSubtitles(
         // gives way to a full track, or to a file that can be used.
         const onForced =
           chosenTrack?.kind === 'track' && text.some((t) => t.id === chosenTrack.id && !!t.forced);
+        const usableLeft =
+          context !== null &&
+          wanted !== null &&
+          pickSubtitleFile(offered, wanted, context) !== undefined;
+        // A file that cannot be shown, with nothing better left in the language, gives way to a
+        // track of forced lines only; the version picked by hand only once it could not be read.
+        const chosenFile =
+          chosenTrack?.kind === 'file' ? offered.find((o) => o.key === chosenTrack.key) : undefined;
+        const giveUp =
+          chosenFile !== undefined &&
+          forcedTrack !== undefined &&
+          !usableLeft &&
+          (ours.remembered ? !!context?.broken(chosenFile.url) : !usable(chosenFile));
         const better =
           ours.auto &&
-          !ours.remembered &&
-          (chosenTrack?.kind !== 'track'
-            ? track !== undefined || (chosenTrack === null && forcedTrack !== undefined)
-            : onForced &&
-              (track !== undefined ||
-                (context !== null &&
-                  wanted !== null &&
-                  pickSubtitleFile(offered, wanted, context) !== undefined)));
+          (giveUp ||
+            (!ours.remembered &&
+              (chosenTrack?.kind !== 'track'
+                ? track !== undefined || (chosenTrack === null && forcedTrack !== undefined)
+                : onForced && (track !== undefined || usableLeft))));
         // "Only when the audio isn't in that language", once the audio's language is known; not
         // for a language the viewer turned on.
         const heardOther =
@@ -518,7 +569,12 @@ export function useSubtitles(
       if (!tracksKnown) return;
       startAuto(true);
       const result = plan(offered, wanted, context, undefined);
-      if (!result.pick && waiting === 0) {
+      // Nothing in the language can be shown (none at all, or only files that could not be read
+      // or are in another script): a track of forced lines only, where the stream has one.
+      if (result.pick && !usable(result.pick) && forcedTrack) {
+        setHolding(false);
+        settle({ kind: 'track', id: forcedTrack.id });
+      } else if (!result.pick && waiting === 0) {
         setHolding(false);
         settle(forcedTrack ? { kind: 'track', id: forcedTrack.id } : null);
       }
@@ -816,17 +872,24 @@ export function useSubtitles(
     setOffset(next) {
       if (offsetKey === null) return;
       keepShowing();
-      // Moving the timing of a file whose drift the player fixed keeps that fix on, worked out
-      // from each stream's own evidence ('auto'), so the lines stay stretched as they see them.
-      // Kept first: both are saved in the order asked, so the lines never show for a moment
-      // without it.
-      const keep = driftKeptWithTiming(inUse, next);
+      // Moving the timing of a file with no drift choice of the viewer's keeps 'auto' beside it:
+      // the player's fix is worked out from each stream's own evidence, so the lines stay
+      // stretched as they see them, and another release whose length shows a drift is still
+      // fixed. Kept first: both are saved in the order asked, so the lines never show for a
+      // moment without it.
+      const keep = driftKeptWithTiming(
+        { canFix: canFixDrift, evidence, kept: keptDrift, offset },
+        next,
+      );
       if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
       void subtitleOffsets.remember(offsetKey, next);
     },
     setDrift(next) {
       if (offsetKey === null) return;
       keepShowing();
+      // The fix already in use, pressed again, is kept as it was: the player's own stays its own,
+      // worked out on each stream, and is not made a fixed drift for the file on every release.
+      if (next === drift) return;
       // No fix, where the file's length shows a drift, is kept: the player does not fix it again.
       void subtitleDrifts.remember(offsetKey, next === null && evidence !== null ? 'none' : next);
     },

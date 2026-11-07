@@ -20,9 +20,11 @@ export const SUBTITLE_DRIFTS: readonly SubtitleDrift[] = ['ahead', 'behind'];
  * the viewer took the fix off, so it is never put back on that file; or
  * 'auto', the player's own fix, worked out from this stream's evidence, kept
  * with the viewer's timing. 'auto' is kept when the viewer moves the timing
- * of a file the player fixed: the fix stays on as they see it, and is worked
- * out again on every stream, so another release of the video, which the file
- * may fit as it is, is not stretched. A fix the viewer picks replaces it.
+ * of a file with no drift choice of theirs, the player's fix on or none to
+ * make: the fix stays on as they see it, and is worked out again on every
+ * stream, so another release of the video, which the file may fit as it is,
+ * is not stretched, and one whose length shows a drift is still fixed. A fix
+ * the viewer picks replaces it.
  */
 export type DriftChoice = SubtitleDrift | 'none' | 'auto';
 

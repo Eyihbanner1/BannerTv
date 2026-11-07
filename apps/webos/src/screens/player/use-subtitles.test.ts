@@ -186,6 +186,11 @@ function lines(count: number, end: number, hearing = 0): Cue[] {
   });
 }
 
+/** Lines in another language's script: Persian, offered as English. */
+function persian(count: number, end: number): Cue[] {
+  return lines(count, end).map((cue) => ({ ...cue, lines: [[{ text: 'تمام شب کجا بودی؟' }]] }));
+}
+
 const FULL = lines(1200, 7000);
 const SDH = lines(1200, 7000, 2);
 const SIGNS = lines(20, 7000);
@@ -388,6 +393,22 @@ describe('useSubtitles', () => {
     player.unmount();
   });
 
+  it('does not wait for two slow downloads, and reads the next file meanwhile', async () => {
+    const entry = streamEntry('film');
+    const a = file('a', SDH, { ms: 14000 });
+    const b = file('b', SDH, { ms: 14000 });
+    const c = file('c', FULL);
+    offer(entry, [a, b, c]);
+    const player = play(entry);
+    await player.wait(2500);
+    expect(world.loads).toContain(c.url);
+    expect(player.subtitles.choice).toEqual(fileChoice(c));
+    expect(player.subtitles.cues).toHaveLength(1200);
+    // The slow two, read in the end, are not clearly better.
+    await player.wait(13000);
+    expect(player.subtitles.choice).toEqual(fileChoice(c));
+  });
+
   it('forgets the files read once the player closes', async () => {
     const entry = streamEntry('film');
     offer(entry, [file('full', FULL)]);
@@ -435,6 +456,26 @@ describe('the version picked by hand for the release', () => {
     answer([two]);
     await player.flush();
     expect(player.subtitles.choice).toEqual(fileChoice(two));
+  });
+
+  it('gets its drift fix again from the files read beside it, when only they can show it', async () => {
+    // A 22-minute PAL episode: the version picked by hand is timed for film speed and ends 26 s
+    // past the video, too little to tell on its own; the two others end with the video.
+    const entry = streamEntry('episode');
+    const a = file('a', lines(350, 1291));
+    const b = file('b', lines(360, 1293));
+    const x = file('x', lines(370, 1346));
+    offer(entry, [a, b, x]);
+    await remember(entry, x);
+    const player = play(entry, { duration: 1320 });
+    await player.wait(500);
+    expect(player.subtitles.choice).toEqual(fileChoice(x));
+    expect(player.subtitles.drift).toBe('behind');
+    expect(player.subtitles.autoDrift).toBe(true);
+    // With the viewer's timing kept beside the player's own fix, it stays on when moved.
+    player.subtitles.setOffset(0.3);
+    await player.flush();
+    expect(player.subtitles.drift).toBe('behind');
   });
 
   it('stays once it took over from a file, though a track is listed later', async () => {
@@ -564,6 +605,48 @@ describe('the automatic choice, once the viewer acts on it', () => {
     expect(player.subtitles.drift).toBe('ahead');
   });
 
+  it('leaves the player’s own drift fix its own when its chip is pressed again', async () => {
+    const pal = streamEntry('film-pal');
+    const behind = file('behind', lines(1300, 7450));
+    offer(pal, [behind]);
+    const player = play(pal);
+    await player.wait(2500);
+    expect(player.subtitles).toMatchObject({ drift: 'behind', autoDrift: true });
+    player.subtitles.setDrift('behind');
+    await player.flush();
+    expect(stores.subtitleDrifts.drifts()).toEqual([]);
+    expect(player.subtitles).toMatchObject({ drift: 'behind', autoDrift: true });
+    // Another release, which the file fits as it is: its lines are not stretched.
+    const bluRay = streamEntry('film-bluray');
+    offer(bluRay, [behind]);
+    await player.stream(bluRay);
+    await player.session({ duration: 7460 });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(behind));
+    expect(player.subtitles).toMatchObject({ drift: null, autoDrift: false });
+  });
+
+  it('fixes a drift on another release though the timing was moved where none was to fix', async () => {
+    const bluRay = streamEntry('film-bluray');
+    const f = file('f', lines(1300, 7190));
+    offer(bluRay, [f]);
+    const player = play(bluRay);
+    await player.wait(2500);
+    expect(player.subtitles).toMatchObject({ choice: fileChoice(f), drift: null });
+    player.subtitles.setOffset(0.3);
+    // No fix pressed where none is in use changes nothing either.
+    player.subtitles.setDrift(null);
+    await player.flush();
+    // The PAL release of the same video, where the file's length shows it falling behind.
+    const pal = streamEntry('film-pal');
+    offer(pal, [f]);
+    await player.stream(pal);
+    await player.session({ duration: 6905 });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(f));
+    expect(player.subtitles).toMatchObject({ drift: 'behind', autoDrift: true, offset: 0.3 });
+  });
+
   it('keeps the player’s own drift fix with the timing, not as a fixed drift', async () => {
     const entry = streamEntry('film');
     const behind = file('behind', lines(1300, 7450));
@@ -644,6 +727,35 @@ describe('the stream’s own tracks', () => {
     offer(entry, [file('french', FULL, { lang: 'fre' })]);
     const player = play(entry, { engine: 'hls.js', text: [forced] });
     await player.wait(2500);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+  });
+
+  it('take a forced track before a file that could not be read', async () => {
+    const entry = streamEntry('film');
+    offer(entry, [file('gone', null)]);
+    const player = play(entry, { engine: 'hls.js', text: [forced] });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+    expect(player.subtitles.failed).toBe(false);
+  });
+
+  it('take a forced track before a file in another script', async () => {
+    const entry = streamEntry('film');
+    offer(entry, [file('other', persian(1200, 7000))]);
+    const player = play(entry, { engine: 'hls.js', text: [forced] });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+  });
+
+  it('go back to a forced track once a file that came later could not be read', async () => {
+    const entry = streamEntry('film');
+    const answer = offer(entry, []);
+    const player = play(entry, { engine: 'hls.js', text: [forced] });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+    // A slower addon's file is tried, and fails.
+    answer([file('late', null)]);
+    await player.wait(5000);
     expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
   });
 
