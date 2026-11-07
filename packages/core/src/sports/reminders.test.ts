@@ -228,4 +228,36 @@ describe('createReminders', () => {
     await reminders.refresh([], NOW + 2 * MINUTE);
     expect(reminders.list().map((r) => r.key)).toEqual([other!.key, match!.key]);
   });
+
+  it("takes the match's new key when another addon listed above it moved the key", async () => {
+    const [match] = events(listing('a', 'Arsenal vs Chelsea', NOW + HOUR));
+    const reminders = createReminders({ storage: memoryKeyValueStore() });
+    await reminders.load();
+    await reminders.add(reminderFor(match!, 'Arsenal v Chelsea')!);
+
+    const [, moved] = events(
+      listing('x', 'Liverpool vs Everton', NOW + HOUR, 0),
+      listing('a', 'Arsenal FC vs Chelsea FC', NOW + HOUR + 15 * MINUTE, 1),
+    );
+    await reminders.refresh([moved!], NOW);
+    // The match page, which asks by the key it has now, says the reminder is on.
+    expect(reminders.has(moved!.key)).toBe(true);
+    expect(reminders.has(match!.key)).toBe(false);
+    expect(reminders.list()).toEqual([
+      {
+        key: moved!.key,
+        matchKey: match!.matchKey,
+        name: 'Arsenal v Chelsea',
+        at: NOW + HOUR + 15 * MINUTE,
+      },
+    ]);
+
+    // Set again there before the listing moved it: one reminder, not two.
+    const twice = createReminders({ storage: memoryKeyValueStore() });
+    await twice.load();
+    await twice.add(reminderFor(match!, 'Arsenal v Chelsea')!);
+    await twice.add(reminderFor(moved!, 'Arsenal v Chelsea')!);
+    await twice.refresh([moved!], NOW);
+    expect(twice.list().map((r) => r.key)).toEqual([moved!.key]);
+  });
 });
