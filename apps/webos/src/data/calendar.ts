@@ -2,6 +2,7 @@ import {
   type CalendarDay,
   type CalendarEntry,
   calendarView,
+  type FollowedTitle,
   followedTitles,
   kidsTitleAllowed,
   type LibraryKind,
@@ -14,6 +15,7 @@ import { addonClient } from './addons';
 import { library, watchedSet } from './library';
 import { playedVideos, progress } from './playback';
 import { isKidsProfile } from './profiles';
+import { tmdbClient, useTmdbOn } from './tmdb';
 
 export interface CalendarState {
   days: CalendarDay[];
@@ -33,14 +35,36 @@ const subscribeLists = (listener: () => void) => {
 };
 const listVersions = () => `${library.version()}:${progress.version()}:${playedVideos.version()}`;
 
+/** What the calendar follows, for useSyncExternalStore. */
+export interface CalendarWatch {
+  subscribe(listener: () => void): () => void;
+  version(): string;
+}
+
+const followLists: CalendarWatch = { subscribe: subscribeLists, version: listVersions };
+const followNothing: CalendarWatch = { subscribe: () => () => undefined, version: () => 'off' };
+
+/**
+ * My List and the history while the calendar is on show, and nothing while it is not, so a
+ * screen that keeps it off (the Library on My List) is not drawn again each time a video
+ * saves its place, every 10 seconds.
+ */
+export function calendarWatch(enabled: boolean): CalendarWatch {
+  return enabled ? followLists : followNothing;
+}
+
+/** Followed while the calendar is off, or before the lists have loaded: one shared list. */
+const NOT_FOLLOWING: readonly FollowedTitle[] = [];
+
 /**
  * The calendar of the series this profile watches and the series and films
  * on its My List, from their addons' meta (cached, so a second visit opens
  * at once). Shared by the TV and the phone. While `enabled` is false nothing
- * is asked for.
+ * is asked for, and no store is followed.
  */
 export function useCalendar(kind: LibraryKind, enabled = true): CalendarState {
-  const lists = useSyncExternalStore(subscribeLists, listVersions);
+  const watch = calendarWatch(enabled);
+  const lists = useSyncExternalStore(watch.subscribe, watch.version);
   const [loaded, setLoaded] = useState(false);
   const [changes, setChanges] = useState(0);
   // Read once per visit; a screen left open past midnight shows yesterday's "Today".
@@ -59,42 +83,65 @@ export function useCalendar(kind: LibraryKind, enabled = true): CalendarState {
     };
   }, [enabled]);
 
-  const queries = useMemo(() => {
-    if (!enabled || !loaded) return [];
+  const followed = useMemo(() => {
+    if (!enabled || !loaded) return NOT_FOLLOWING;
     const kids = isKidsProfile();
     const items = kids
       ? library.items().filter((item) => kidsTitleAllowed(libraryPreview(item), true))
       : library.items();
-    return followedTitles(items, progress.recent()).map((title) =>
-      addonClient.meta(title.type, title.id),
-    );
+    return followedTitles(items, progress.recent());
     // `lists` stands for the contents of My List and the history.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, loaded, lists]);
+  const queries = useMemo(
+    () => followed.map((title) => addonClient.meta(title.type, title.id)),
+    [followed],
+  );
+  // With TMDB on, a film is dated by when it comes out at home, from the details Details
+  // reads (and caches) anyway. Only IMDb ids can be looked up there.
+  const tmdbOn = useTmdbOn();
+  const homeQueries = useMemo(
+    () =>
+      tmdbOn
+        ? followed.map((title) =>
+            title.type === 'movie' && title.id.startsWith('tt')
+              ? tmdbClient.details('movie', title.id)
+              : null,
+          )
+        : [],
+    [followed, tmdbOn],
+  );
 
   useEffect(() => {
-    const stops = queries.map((query) => query.subscribe(() => setChanges((n) => n + 1)));
-    queries.forEach((query) => query.load());
+    const all = [...queries, ...homeQueries.filter((query) => query !== null)];
+    const stops = all.map((query) => query.subscribe(() => setChanges((n) => n + 1)));
+    all.forEach((query) => query.load());
     return () => stops.forEach((stop) => stop());
-  }, [queries]);
+  }, [queries, homeQueries]);
 
   return useMemo(() => {
     const states = queries.map((query) => query.get());
+    const homeStates = homeQueries.map((query) => query?.get());
     const kids = isKidsProfile();
-    const metas = states
-      .map((state) => state.data)
-      .filter((meta): meta is MetaDetail => meta !== undefined)
-      .filter((meta) => !kids || kidsTitleAllowed(meta, true));
+    const metas: MetaDetail[] = [];
+    const homeReleases = new Map<string, number>();
+    states.forEach((state, index) => {
+      const meta = state.data;
+      if (!meta || (kids && !kidsTitleAllowed(meta, true))) return;
+      metas.push(meta);
+      const home = homeStates[index]?.data?.homeRelease;
+      if (home !== undefined) homeReleases.set(meta.id, home);
+    });
+    const waiting = (state: { status: string } | undefined) =>
+      state !== undefined && (state.status === 'idle' || state.status === 'loading');
     return {
-      days: calendarView(metas, now, kind),
-      loading:
-        enabled &&
-        (!loaded || states.some((state) => state.status === 'idle' || state.status === 'loading')),
+      days: calendarView(metas, now, kind, undefined, homeReleases),
+      loading: enabled && (!loaded || states.some(waiting) || homeStates.some(waiting)),
       following: queries.length,
     };
     // `changes` stands for the queries' answers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queries, changes, kind, now, loaded, enabled]);
+  }, [queries, homeQueries, changes, kind, now, loaded, enabled]);
 }
 
 const weekday = (start: number, form: 'long' | 'short') =>
@@ -112,9 +159,12 @@ export function calendarDayLabel(t: TFunction, day: CalendarDay): { name: string
   return { name: weekday(day.start, 'short'), date };
 }
 
-/** The line under the title: "S2 · E5 · Name", "S3 · E1–8 · 8 episodes", or "Film release". */
+/**
+ * The line under the title: "S2 · E5 · Name", "S3 · E1–8 · 8 episodes", "Film release", or
+ * "Out to watch at home" for a film dated by its home release.
+ */
 export function calendarEntryLine(t: TFunction, entry: CalendarEntry): string {
-  if (entry.kind === 'movie') return t('calendar.film');
+  if (entry.kind === 'movie') return entry.atHome ? t('calendar.atHome') : t('calendar.film');
   const parts: string[] = [];
   if (entry.season !== undefined) parts.push(t('calendar.season', { season: entry.season }));
   if (entry.episode !== undefined) {

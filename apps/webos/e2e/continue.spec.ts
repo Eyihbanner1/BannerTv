@@ -115,7 +115,11 @@ test('Home opens on a film left part way, with its progress, and OK resumes it i
     new MutationObserver(count).observe(row.parentElement!, { childList: true });
   }, CONTINUE_ROW);
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  expect((await video(page)).time).toBeGreaterThanOrEqual(30);
+  // Before where it stopped (35 s), to pick up the line it left: 10 s early, as the seeded
+  // progress is long ago, but never before 30 s, where a resume begins.
+  const resumed = (await video(page)).time;
+  expect(resumed).toBeGreaterThanOrEqual(29);
+  expect(resumed).toBeLessThan(33);
   expect(mock.streams).toEqual([`movie/${MOVIE}`]);
   // The tile's title went with the route, so the player names the film at once.
   await expect(page.locator('section[aria-label="Big Buck Bunny"]:visible')).toBeVisible();
@@ -365,10 +369,10 @@ test('a film played to the end from the only tile leaves focus on Home, where th
 }) => {
   const errors = watchErrors(page);
   await mockAddons(page);
-  // Saved with a longer running time, so the tile resumes it: 35 s is five
-  // seconds from the end of the 40 s test file.
+  // Saved with a longer running time, so the tile resumes it: 10 s early (the
+  // seeded progress is long ago), at 35 s, five seconds from the end of the 40 s test file.
   await seedStreamAddon(page, {
-    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 35, duration: 100 }],
+    progress: [{ metaId: MOVIE, type: 'movie', videoId: MOVIE, position: 45, duration: 120 }],
     played: [card('movie', MOVIE, 'Big Buck Bunny', { releaseInfo: '2008' })],
   });
   await mockPlayback(page);
@@ -858,11 +862,11 @@ test('a next episode that airs while Home sits untouched joins the row on the ho
   await page.waitForTimeout(500);
   await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
 
-  // Past the release and the next hour, with no key pressed.
+  // Past the release and the next hour, with no key pressed. Out within the week, it is New.
   await page.clock.fastForward(50 * minute);
   await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
     'aria-label',
-    'Morevna Project, Next: S1:E2',
+    'Morevna Project, New: S1:E2',
   );
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');

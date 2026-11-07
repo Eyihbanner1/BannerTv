@@ -1,17 +1,13 @@
 import { phone } from '@brand/tokens/design';
-import {
-  kidsTitleAllowed,
-  MIN_RESUME_SECONDS,
-  nextVideo,
-  ratingAllowed,
-  tmdbImageUrl,
-} from '@bannertv/core';
+import { kidsTitleAllowed, moreLikeSource, ratingAllowed, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient, addonCollection } from '@tv/data/addons';
 import { describeAddonError, formatDate, metaFacts } from '@tv/data/describe';
 import { library, watchedSet } from '@tv/data/library';
+import { isWatched, markEpisodes, markFilm } from '@tv/data/marks';
 import { progress } from '@tv/data/playback';
 import { activeProfile, isKidsProfile } from '@tv/data/profiles';
+import { sportsState } from '@tv/data/sports';
 import { tmdbClient, useTmdbDetails } from '@tv/data/tmdb';
 import { useQuery } from '@tv/data/use-query';
 import { resolutionLabel } from '@tv/player/describe';
@@ -23,8 +19,14 @@ import {
   defaultSeason,
   episodeState,
   groupSeasons,
+  type MarkOffer,
+  markOffer,
+  openingEpisode,
   type Season,
-  seasonOf,
+  type StartPoint,
+  startPoint,
+  type StartReader,
+  startReader,
 } from '@tv/screens/details/seasons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -44,6 +46,8 @@ import { goBack, openCatalog, openPlayer, openStreams, openTitle } from '../nav/
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
 import { Icon, type IconName, OutlineIcon } from '../ui/icons';
+import { Sheet, SheetOption } from '../ui/Sheet';
+import { CastList, GenreLinks } from './TitleLinks';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 import { Row, type RowItem } from '../ui/Row';
 import { phoneArt } from '../ui/Tile';
@@ -124,39 +128,20 @@ function StreamReady({ type: titleType, videoId }: { type: string; videoId: stri
 
 const MORE_ITEMS = 20;
 
-/**
- * "More Drama from Cinemeta": the first installed addon with a catalog of this kind that can
- * be filtered by the title's first genre. Addons that list the title's own ids go first.
- */
-function moreSource(item: MetaPreview, titleType: string) {
-  const genre = item.genres[0];
-  if (!genre) return undefined;
-  const addons = [...addonCollection.get().addons].sort((a, b) => {
-    const own = (addon: typeof a) =>
-      addon.manifest.idPrefixes?.some((prefix) => item.id.startsWith(prefix)) ? 0 : 1;
-    return own(a) - own(b);
-  });
-  for (const addon of addons) {
-    for (const catalog of addon.manifest.catalogs) {
-      if (catalog.type !== titleType) continue;
-      const byGenre = catalog.extra.find((extra) => extra.name === 'genre');
-      if (!byGenre) continue;
-      if (byGenre.options.length > 0 && !byGenre.options.includes(genre)) continue;
-      if (catalog.extra.some((extra) => extra.isRequired && extra.name !== 'genre')) continue;
-      return { addon, catalog, genre };
-    }
-  }
-  return undefined;
-}
-
 function MoreFrom({ item, titleType }: { item: MetaPreview; titleType: string }) {
   const { t } = useTranslation();
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
+  // The same pick as the TV's More like this and the genre links above: only a catalog that
+  // lists the genre, so See all opens Browse on it, and never a sport catalog.
   const source = useMemo(
-    () => (collection.ready ? moreSource(item, titleType) : undefined),
+    () =>
+      collection.ready && sports.ready
+        ? moreLikeSource(collection.addons, item, titleType, sports.homeLeaveOut)
+        : undefined,
     // The title's genres and id decide it; the rest of the item may refresh underneath.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [collection, item.id, item.genres[0], titleType],
+    [collection, sports.ready, sports.homeLeaveOut, item.id, item.genres[0], titleType],
   );
   const query = useMemo(
     () =>
@@ -199,6 +184,21 @@ function MoreFrom({ item, titleType }: { item: MetaPreview; titleType: string })
 /** The season each title last showed, for this run. */
 const shownSeason = new Map<string, number>();
 
+/** The Play button's words for where a series' page sends the viewer, as on the TV. */
+function startLabel(t: ReturnType<typeof useTranslation>['t'], point: StartPoint): string {
+  const { season, episode } = point.video;
+  const numbered = season !== undefined && episode !== undefined;
+  if (point.kind === 'resume') {
+    return numbered
+      ? t('details.resumeEpisode', { season, episode })
+      : t('details.resumeFrom', { time: formatTime(point.at) });
+  }
+  if (point.kind === 'next') {
+    return numbered ? t('home.nextEpisodeNote', { season, episode }) : t('home.nextNote');
+  }
+  return numbered ? t('browsing.playEpisode', { season, episode }) : t('phone.play');
+}
+
 function seasonLabel(t: ReturnType<typeof useTranslation>['t'], season: Season): string {
   if (season.number === null) return t('details.episodes');
   if (season.number === 0) return t('details.specials');
@@ -211,12 +211,15 @@ const EpisodeRow = memo(function EpisodeRow({
   extra,
   now,
   onPlay,
+  onHold,
 }: {
   video: Video;
   index: number;
   extra?: { name?: string; overview?: string; stillPath?: string };
   now: number;
   onPlay: (video: Video) => void;
+  /** A long press: mark it, or its season, watched or not. */
+  onHold: (video: Video) => void;
 }) {
   const { t } = useTranslation();
   useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
@@ -238,6 +241,7 @@ const EpisodeRow = memo(function EpisodeRow({
   return (
     <Pressable
       onPress={() => onPlay(video)}
+      onLongPress={() => onHold(video)}
       disabled={upcoming}
       accessibilityRole="button"
       accessibilityLabel={[title, date, state.kind === 'watched' ? t('details.watched') : '']
@@ -319,6 +323,7 @@ export function TitleScreen({
 
   useSyncExternalStore(progress.subscribe, progress.version);
   useSyncExternalStore(library.subscribe, library.version);
+  useSyncExternalStore(watchedSet.subscribe, watchedSet.version);
   useEffect(() => {
     void progress.load();
   }, []);
@@ -327,30 +332,13 @@ export function TitleScreen({
   }, [item]);
 
   const resumeAt = watchVideoId === null ? undefined : progress.resumeAt(watchVideoId);
-  const latest = !canWatch && kidsAllowed ? progress.forMeta(id)[0] : undefined;
-  const latestVideo = latest && meta?.videos.find((video) => video.id === latest.videoId);
-  const latestResume = latest && progress.resumeAt(latest.videoId);
-  // An episode stopped in its first seconds starts again from the beginning, as Continue
-  // Watching has it, rather than being skipped for the next one.
-  const latestAgain =
-    !!latest &&
-    latestResume === undefined &&
-    !latest.watched &&
-    latest.position < MIN_RESUME_SECONDS &&
-    !!latestVideo;
-  // After a finished episode, the next one that has aired.
-  const upNext =
-    latest && latestResume === undefined && !latestAgain && meta
-      ? nextVideo(meta, latest.videoId, now)
-      : undefined;
-  // The first episode that has aired: an announced series has nothing to play yet.
-  const firstListed = hasEpisodes && !latest ? groupSeasons(meta.videos)[0]?.videos[0] : undefined;
-  const firstEpisode =
-    firstListed && episodeState(firstListed, undefined, false, now).kind !== 'upcoming'
-      ? firstListed
-      : undefined;
+  // A series opens where the viewer is up to, with the same rules as the TV's Details.
+  const seasons = useMemo(() => (meta ? groupSeasons(meta.videos) : []), [meta]);
+  const reader: StartReader | undefined =
+    hasEpisodes && kidsAllowed ? startReader(progress, watchedSet, id) : undefined;
+  const start = reader && meta ? startPoint(meta, seasons, reader, now) : undefined;
 
-  const primaryVideoId = watchVideoId ?? latestVideo?.id ?? upNext?.id ?? firstEpisode?.id ?? null;
+  const primaryVideoId = watchVideoId ?? start?.video.id ?? null;
   // Nothing here moves focus: what Play plays is looked up once the page has been open a moment.
   usePrefetch(
     titleType,
@@ -360,16 +348,15 @@ export function TitleScreen({
     OPEN_PAGE_REST_MS,
   );
 
-  const seasons = useMemo(() => (meta ? groupSeasons(meta.videos) : []), [meta]);
   const [seasonIndex, setSeasonIndex] = useState<number | null>(null);
   const shownIndex =
     seasonIndex ??
     shownSeason.get(id) ??
-    (seasons.length > 0
-      ? latest
-        ? seasonOf(seasons, latest.videoId)
-        : defaultSeason(seasons)
-      : 0);
+    (reader
+      ? openingEpisode(seasons, start, reader).season
+      : seasons.length > 0
+        ? defaultSeason(seasons)
+        : 0);
   const season = seasons[Math.min(shownIndex, seasons.length - 1)];
   const seasonQuery = useMemo(
     () =>
@@ -379,6 +366,10 @@ export function TitleScreen({
     [extra, season],
   );
   const seasonExtras = useQuery(seasonQuery).data;
+  // The episode long-pressed, while its sheet shows what marking it offers.
+  const [held, setHeld] = useState<Video | null>(null);
+  const offer: MarkOffer | null = held && season ? markOffer(held, season, isWatched, now) : null;
+  const route = { metaId: id, type: titleType };
 
   const play = (videoId: string, startAt?: number) => {
     if (!item) return;
@@ -413,7 +404,6 @@ export function TitleScreen({
   const certificate = extra?.certificate;
   const saved = library.has(item.id);
   const trailer = item.trailers[0];
-  const cast = meta?.cast.slice(0, 6) ?? [];
   const heroHeight = Math.max(phone.backdropH, Math.round((width * 9) / 16) + insets.top);
 
   const header = (
@@ -449,9 +439,7 @@ export function TitleScreen({
             {certificate ? <Text style={styles.certificate}>{certificate}</Text> : null}
           </View>
         ) : null}
-        {item.genres.length > 0 ? (
-          <Text style={styles.facts}>{item.genres.slice(0, 4).join(' · ')}</Text>
-        ) : null}
+        <GenreLinks item={item} type={titleType} />
 
         {kids && kidsDecided && !kidsAllowed ? (
           <Text style={styles.notice}>{t('kids.notForKids')}</Text>
@@ -471,57 +459,12 @@ export function TitleScreen({
               style={styles.main}
             />
           ) : null}
-          {latestVideo && latestAgain ? (
+          {start ? (
             <Button
               kind="play"
               icon="play"
-              label={
-                latestVideo.season !== undefined && latestVideo.episode !== undefined
-                  ? `${t('phone.play')} ${t('home.episodeNote', {
-                      season: latestVideo.season,
-                      episode: latestVideo.episode,
-                    })}`
-                  : t('phone.play')
-              }
-              onPress={() => play(latestVideo.id, 0)}
-              style={styles.main}
-            />
-          ) : null}
-          {latestVideo && latestResume !== undefined ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={
-                latestVideo.season !== undefined && latestVideo.episode !== undefined
-                  ? t('details.resumeEpisode', {
-                      season: latestVideo.season,
-                      episode: latestVideo.episode,
-                    })
-                  : t('details.resumeFrom', { time: formatTime(latestResume) })
-              }
-              onPress={() => play(latestVideo.id)}
-              style={styles.main}
-            />
-          ) : null}
-          {upNext ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={
-                upNext.season !== undefined && upNext.episode !== undefined
-                  ? t('home.nextEpisodeNote', { season: upNext.season, episode: upNext.episode })
-                  : t('home.nextNote')
-              }
-              onPress={() => play(upNext.id)}
-              style={styles.main}
-            />
-          ) : null}
-          {firstEpisode && kidsAllowed ? (
-            <Button
-              kind="play"
-              icon="play"
-              label={t('phone.play')}
-              onPress={() => play(firstEpisode.id)}
+              label={startLabel(t, start)}
+              onPress={() => play(start.video.id, start.kind === 'again' ? 0 : undefined)}
               style={styles.main}
             />
           ) : null}
@@ -546,6 +489,18 @@ export function TitleScreen({
               }
               onPress={() => void (saved ? library.remove(item.id) : library.add(meta ?? item))}
             />
+            {watchVideoId !== null ? (
+              <ActionTile
+                icon={isWatched(watchVideoId) ? 'check' : 'unchecked'}
+                label={t('browsing.watched')}
+                accessibilityLabel={
+                  isWatched(watchVideoId)
+                    ? t('browsing.markTitleUnwatched', { name: item.name })
+                    : t('browsing.markTitleWatched', { name: item.name })
+                }
+                onPress={() => markFilm(route, item, meta, watchVideoId, !isWatched(watchVideoId))}
+              />
+            ) : null}
             {trailer && kidsAllowed ? (
               <ActionTile
                 icon="movie"
@@ -579,9 +534,7 @@ export function TitleScreen({
             </Text>
           </Pressable>
         ) : null}
-        {cast.length > 0 ? (
-          <Text style={styles.facts}>{t('details.cast', { names: cast.join(', ') })}</Text>
-        ) : null}
+        <CastList people={extra?.cast} names={meta?.cast ?? []} />
         {meta && meta.directors.length > 0 ? (
           <Text style={styles.facts}>
             {t('details.directors', { names: meta.directors.join(', ') })}
@@ -617,28 +570,69 @@ export function TitleScreen({
     </View>
   );
 
+  const onMark = (whole: boolean) => {
+    const target = held;
+    setHeld(null);
+    if (!target || !offer || !meta) return;
+    // The list stays on this season, though the marks move where the viewer is up to.
+    setSeasonIndex(shownIndex);
+    if (whole) markEpisodes(route, meta, offer.out, !offer.allWatched);
+    else markEpisodes(route, meta, [target], !offer.watched);
+  };
+
   return (
-    <FlatList
-      style={styles.screen}
-      data={hasEpisodes && kidsAllowed && season ? season.videos : []}
-      keyExtractor={(video, index) => `${index}:${video.id}`}
-      ListHeaderComponent={header}
-      ListFooterComponent={kidsAllowed ? <MoreFrom item={item} titleType={titleType} /> : undefined}
-      renderItem={({ item: video, index }) => (
-        <EpisodeRow
-          video={video}
-          index={index}
-          {...(video.episode !== undefined && seasonExtras?.[video.episode]
-            ? { extra: seasonExtras[video.episode] }
-            : {})}
-          now={now}
-          onPlay={(target) => play(target.id)}
-        />
-      )}
-      contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
-      initialNumToRender={8}
-      windowSize={9}
-    />
+    <>
+      <FlatList
+        style={styles.screen}
+        data={hasEpisodes && kidsAllowed && season ? season.videos : []}
+        keyExtractor={(video, index) => `${index}:${video.id}`}
+        ListHeaderComponent={header}
+        ListFooterComponent={
+          kidsAllowed ? <MoreFrom item={item} titleType={titleType} /> : undefined
+        }
+        renderItem={({ item: video, index }) => (
+          <EpisodeRow
+            video={video}
+            index={index}
+            {...(video.episode !== undefined && seasonExtras?.[video.episode]
+              ? { extra: seasonExtras[video.episode] }
+              : {})}
+            now={now}
+            onPlay={(target) => play(target.id)}
+            onHold={setHeld}
+          />
+        )}
+        contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
+        initialNumToRender={8}
+        windowSize={9}
+      />
+      <Sheet
+        visible={offer !== null}
+        {...(held
+          ? { title: held.title || t('details.untitledEpisode', { number: held.episode ?? 1 }) }
+          : {})}
+        onClose={() => setHeld(null)}
+      >
+        {offer ? (
+          <>
+            <SheetOption
+              label={offer.watched ? t('browsing.markUnwatched') : t('browsing.markWatched')}
+              onPress={() => onMark(false)}
+            />
+            {offer.season !== undefined ? (
+              <SheetOption
+                label={
+                  offer.allWatched
+                    ? t('browsing.markSeasonUnwatched', { season: offer.season })
+                    : t('browsing.markSeasonWatched', { season: offer.season })
+                }
+                onPress={() => onMark(true)}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </Sheet>
+    </>
   );
 }
 

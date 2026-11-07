@@ -3,7 +3,14 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { calendarDayLabel, calendarEntryLine, calendarEntryTag } from '@tv/data/calendar';
 import type { ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  type RefreshControlProps,
+  SectionList,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Artwork } from './Artwork';
 import { colors, gutter, radius, space, type } from './theme';
 
@@ -20,10 +27,13 @@ export function CalendarList({
   days,
   onPress,
   header,
+  refreshControl,
 }: {
   days: readonly CalendarDay[];
   onPress: (title: MetaPreview) => void;
   header?: ReactElement;
+  /** Pull to refresh, from usePullRefresh. */
+  refreshControl?: ReactElement<RefreshControlProps>;
 }) {
   const { t } = useTranslation();
   const sections: Section[] = days.map((day) => ({ day, data: day.entries }));
@@ -33,6 +43,7 @@ export function CalendarList({
       keyExtractor={(entry) => entry.key}
       stickySectionHeadersEnabled={false}
       {...(header ? { ListHeaderComponent: header } : {})}
+      {...(refreshControl ? { refreshControl } : {})}
       contentContainerStyle={styles.content}
       renderSectionHeader={({ section }) => {
         const label = calendarDayLabel(t, section.day);

@@ -17,6 +17,7 @@ import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openTitle } from '../nav/routes';
 import { reportTyping } from '../runtime/whereabouts';
+import { takeSearchRequests } from '../data/search-request';
 import { phone } from '@brand/tokens/design';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
@@ -231,6 +232,16 @@ export function SearchScreen() {
   useEffect(() => {
     loadRecentSearches();
   }, []);
+  // A name from a title's cast: it goes in the box and is searched at once, of every kind.
+  useEffect(
+    () =>
+      takeSearchRequests((next) => {
+        setText(next);
+        setKind('all');
+        setTerm(termOf(next));
+      }),
+    [],
+  );
   useEffect(() => {
     const timer = setTimeout(() => setTerm(termOf(text)), TYPING_PAUSE_MS);
     return () => clearTimeout(timer);

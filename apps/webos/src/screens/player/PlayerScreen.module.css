@@ -678,6 +678,13 @@
   letter-spacing: 0.08em;
 }
 
+/* The episode's season and number, above its name. */
+.upNextNumber {
+  margin: 12px 0 0;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
 .upNextTitle {
   margin: 8px 0 24px;
   font: var(--bt-text-title);
@@ -689,6 +696,16 @@
 
 .upNextButtons > div {
   margin-right: 20px;
+}
+
+/*
+ * Skip intro with the controls up: just above the right end of the bar, so
+ * the rows below keep their places. Up from the bar reaches it.
+ */
+.skipInControls {
+  position: absolute;
+  top: 56px;
+  right: var(--bt-safe-x);
 }
 
 /* Skip intro or Skip recap: one button in Up Next's corner, with no card behind it. */

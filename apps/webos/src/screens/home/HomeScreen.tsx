@@ -1,4 +1,11 @@
-import { type BoardRow, buildBoard, kidsTitleAllowed } from '@bannertv/core';
+import {
+  type BoardRow,
+  buildBoard,
+  CONTINUE_LINE,
+  kidsTitleAllowed,
+  LIVE_SPORT_LINE,
+  MY_LIST_LINE,
+} from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { doesFocusableExist, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import {
@@ -23,7 +30,8 @@ import { Row, RowPlaceholder } from '../../components/Row';
 import { slideTrack } from '../../components/row-track';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
-import { useHomeBoard } from '../../data/home-board';
+import { homeOwnLines, useHomeBoard, useOwnLinePlaces } from '../../data/home-board';
+import { library } from '../../data/library';
 import { isKidsProfile } from '../../data/profiles';
 import { noteFirstPage, sportsState } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
@@ -36,13 +44,12 @@ import { tuning } from '../../platform/tuning';
 import { CONTINUE_FOCUS_KEY, CONTINUE_ROW_KEY, ContinueRow, useContinueItems } from './ContinueRow';
 import { Hero, openDetails } from './Hero';
 import { cancelHero, heroItem, showInHero } from './hero-item';
-import { LIVE_SPORT_ROW_KEY, LiveSportRow } from './LiveSportRow';
+import { LIVE_SPORT_FOCUS_KEY, LIVE_SPORT_ROW_KEY, LiveSportRow } from './LiveSportRow';
+import { MY_LIST_FOCUS_KEY, MY_LIST_ROW_KEY, MyListRow } from './MyListRow';
 import styles from './HomeScreen.module.css';
 
 /** Rows show the first titles of a catalog; Discover pages through the rest. */
 const MAX_ROW_ITEMS = 40;
-/** The Live sport row is the third row on Home, counting Continue Watching. */
-const LIVE_SPORT_PLACE = 2;
 /** Rows further than this from the focused one are drawn as empty boxes and not fetched yet. */
 const ROWS_AROUND = tuning.rowsAround;
 /** The hero waits for focus to rest, so holding an arrow does not load every backdrop. */
@@ -53,6 +60,7 @@ const BUSY_GAP_MS = 800;
 const HERO_BUSY_MS = Math.max(HERO_DELAY_MS, tuning.heroBusyMs);
 
 export const rowFocusKey = (row: BoardRow) => `home-${row.key}`;
+const hasMyList = () => library.items().length > 0;
 
 function pointedAt(): boolean {
   const key = focusedKey();
@@ -185,25 +193,46 @@ export function HomeScreen() {
   const trackRef = useRef<HTMLDivElement>(null);
   const slideFrame = useRef(0);
 
-  // Continue Watching comes first when there is something to continue.
+  // Continue Watching comes first when there is something to continue, unless
+  // Settings > Home rows hides it. My List and Live sport sit among the rows
+  // where Home rows puts them.
   const continueItems = useContinueItems();
-  const continuing = continueItems !== null && continueItems.length > 0;
+  const continueFilled = continueItems !== null && continueItems.length > 0;
+  const own = useMemo(() => homeOwnLines(sportShown, continueFilled), [sportShown, continueFilled]);
+  const places = useOwnLinePlaces(collection.addons, ready, own, sports.homeLeaveOut);
+  const continuing = continueFilled && places.has(CONTINUE_LINE);
+  // Each own line's place among the rows drawn: rows found empty are not counted.
+  const placeOf = (id: string) => {
+    const place = places.get(id);
+    if (place === undefined) return -1;
+    let at = 0;
+    for (let index = 0; index < place && index < board.length; index++) {
+      if (!hidden.has(board[index]!.key)) at += 1;
+    }
+    return at;
+  };
+  const myListAt = placeOf(MY_LIST_LINE);
+  // My List leads Home when nothing comes before it and it has titles.
+  const myListFilled = useSyncExternalStore(library.subscribe, hasMyList);
+  const myListFirst = !continuing && myListFilled && myListAt === 0;
   const firstRowKey = continuing
     ? CONTINUE_FOCUS_KEY
-    : rows.length > 0
-      ? rowFocusKey(rows[0]!)
-      : undefined;
+    : myListFirst
+      ? MY_LIST_FOCUS_KEY
+      : rows.length > 0
+        ? rowFocusKey(rows[0]!)
+        : undefined;
   // The Live sport row sits before the catalog row at this index, while sport is installed.
-  const liveAt = sportShown
-    ? Math.max(0, Math.min(LIVE_SPORT_PLACE - (continuing ? 1 : 0), rows.length))
-    : -1;
+  const liveAt = sportShown ? placeOf(LIVE_SPORT_LINE) : -1;
   const focusedIndex =
     focusedRow === LIVE_SPORT_ROW_KEY
       ? liveAt
-      : Math.max(
-          0,
-          rows.findIndex((row) => row.key === focusedRow),
-        );
+      : focusedRow === MY_LIST_ROW_KEY
+        ? myListAt
+        : Math.max(
+            0,
+            rows.findIndex((row) => row.key === focusedRow),
+          );
   // Rows coming into the drawn window mount after the focus move has painted,
   // in a render React can interrupt, so a press rarely waits on a new row. The
   // rows next to focus are drawn at once, so the next press has a row to go to.
@@ -233,7 +262,9 @@ export function HomeScreen() {
       return false;
     }
     // From far down, the first row is an empty box with nothing to focus: draw it first.
-    if (first && !doesFocusableExist(firstRowKey)) flushSync(() => setFocusedRow(first.key));
+    if (first && !doesFocusableExist(firstRowKey)) {
+      flushSync(() => setFocusedRow(myListFirst ? MY_LIST_ROW_KEY : first.key));
+    }
     void setFocus(firstRowKey);
     return true;
   });
@@ -248,6 +279,7 @@ export function HomeScreen() {
     drawnRows.current = rows;
     const onHome = (rowKey: string) =>
       rowKey === LIVE_SPORT_ROW_KEY ||
+      rowKey === MY_LIST_ROW_KEY ||
       (rowKey === CONTINUE_ROW_KEY && continuing) ||
       rows.some((row) => row.key === rowKey);
     // The row now in the place of one that has left, as for an empty row.
@@ -291,10 +323,28 @@ export function HomeScreen() {
 
   const latestRows = useRef(rows);
   const latestContinuing = useRef(continuing);
+  // Home's own lines drawn before the first catalog row, in order.
+  const ownFirst: string[] = [];
+  for (const id of places.keys()) {
+    if (placeOf(id) !== 0) continue;
+    if (id === MY_LIST_LINE) ownFirst.push(MY_LIST_FOCUS_KEY);
+    if (id === LIVE_SPORT_LINE && sportShown) ownFirst.push(LIVE_SPORT_FOCUS_KEY);
+  }
+  const latestOwnFirst = useRef(ownFirst);
   useLayoutEffect(() => {
     latestRows.current = rows;
     latestContinuing.current = continuing;
+    latestOwnFirst.current = ownFirst;
   });
+
+  // Where focus goes when the last title is taken off Continue Watching: the
+  // line under it, which may be My List or Live sport when either shows.
+  const focusAfterContinue = useCallback(() => {
+    const own = latestOwnFirst.current.find((key) => doesFocusableExist(key));
+    if (own) return own;
+    const first = latestRows.current[0];
+    return first ? rowFocusKey(first) : RAIL_FOCUS_KEY;
+  }, []);
 
   // A row that turns out empty hands its place to the row below (or above, at
   // the end, which is Continue Watching above the first catalog row): the view
@@ -351,8 +401,10 @@ export function HomeScreen() {
   // as for an empty catalog row. Either way the rows under it have moved, so the
   // view goes back to the row it was on.
   const latestLiveAt = useRef(liveAt);
+  const latestMyListAt = useRef(myListAt);
   useLayoutEffect(() => {
     latestLiveAt.current = liveAt;
+    latestMyListAt.current = myListAt;
   });
   const onLiveShown = useCallback((shown: boolean, focused: boolean) => {
     if (!shown) {
@@ -364,6 +416,21 @@ export function HomeScreen() {
         (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
       if (slideRow.current === LIVE_SPORT_ROW_KEY) slideRow.current = next;
       setFocusedRow((row) => (row === LIVE_SPORT_ROW_KEY ? next : row));
+      if (focused && next) void setFocus(`home-${next}`);
+    }
+    slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
+  }, []);
+  // The same for My List, which goes when its last title is taken off.
+  const onMyListShown = useCallback((shown: boolean, focused: boolean) => {
+    if (!shown) {
+      const list = latestRows.current;
+      const at = latestMyListAt.current;
+      const next =
+        list[at]?.key ??
+        list[at - 1]?.key ??
+        (latestContinuing.current ? CONTINUE_ROW_KEY : undefined);
+      if (slideRow.current === MY_LIST_ROW_KEY) slideRow.current = next;
+      setFocusedRow((row) => (row === MY_LIST_ROW_KEY ? next : row));
       if (focused && next) void setFocus(`home-${next}`);
     }
     slideTrack(trackRef.current, slideRow.current && `home-${slideRow.current}`);
@@ -392,23 +459,50 @@ export function HomeScreen() {
     );
   }
 
-  // One flat, keyed list, so the Live sport row moving never remounts a catalog row.
+  // One flat, keyed list, so Live sport or My List moving never remounts a catalog row.
   const catalogRows: ReactElement[] = [];
-  const liveRow = (
-    <LiveSportRow
-      key={LIVE_SPORT_ROW_KEY}
-      near={Math.abs(liveAt - focusedIndex) <= 1 || Math.abs(liveAt - nearIndex) <= ROWS_AROUND}
-      onItemFocus={onItemFocus}
-      onShown={onLiveShown}
-    />
-  );
+  const isNear = (at: number) =>
+    Math.abs(at - focusedIndex) <= 1 || Math.abs(at - nearIndex) <= ROWS_AROUND;
+  // Home's own lines, each before the catalog row at its index, in Home rows order.
+  const ownRows: Array<{ at: number; row: ReactElement }> = [];
+  for (const id of places.keys()) {
+    if (id === LIVE_SPORT_LINE && liveAt >= 0) {
+      ownRows.push({
+        at: liveAt,
+        row: (
+          <LiveSportRow
+            key={LIVE_SPORT_ROW_KEY}
+            near={isNear(liveAt)}
+            onItemFocus={onItemFocus}
+            onShown={onLiveShown}
+          />
+        ),
+      });
+    } else if (id === MY_LIST_LINE && myListAt >= 0) {
+      ownRows.push({
+        at: myListAt,
+        row: (
+          <MyListRow
+            key={MY_LIST_ROW_KEY}
+            first={continueItems !== null && myListFirst}
+            near={isNear(myListAt)}
+            onItemFocus={onItemFocus}
+            onShown={onMyListShown}
+          />
+        ),
+      });
+    }
+  }
+  const pushOwn = (index: number) => {
+    for (const own of ownRows) if (own.at === index) catalogRows.push(own.row);
+  };
   rows.forEach((row, index) => {
-    if (index === liveAt) catalogRows.push(liveRow);
+    pushOwn(index);
     catalogRows.push(
       <HomeRow
         key={row.key}
         row={row}
-        first={continueItems !== null && !continuing && index === heroIndex}
+        first={continueItems !== null && !continuing && !myListFirst && index === heroIndex}
         near={Math.abs(index - focusedIndex) <= 1 || Math.abs(index - nearIndex) <= ROWS_AROUND}
         onEmpty={onEmpty}
         onFailed={onFailed}
@@ -416,14 +510,20 @@ export function HomeScreen() {
       />,
     );
   });
-  if (liveAt === rows.length) catalogRows.push(liveRow);
+  pushOwn(rows.length);
 
   return (
     <div className={styles.home}>
       <Hero />
       <div className={styles.rows}>
         <div ref={trackRef} className={styles.track}>
-          {continuing && <ContinueRow items={continueItems} onItemFocus={onItemFocus} />}
+          {continuing && (
+            <ContinueRow
+              items={continueItems}
+              onItemFocus={onItemFocus}
+              focusAfterRow={focusAfterContinue}
+            />
+          )}
           {catalogRows}
         </div>
       </div>

@@ -181,6 +181,7 @@ export function SettingsScreen() {
                 onPress={() => router.push('/trakt')}
               />
             ) : null}
+            <ListRow title={t('homeRows.title')} onPress={() => router.push('/home-rows')} />
             {isMain && section.shown ? (
               <ListRow
                 title={t('phone.account')}

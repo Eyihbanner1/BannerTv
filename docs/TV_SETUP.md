@@ -53,7 +53,7 @@ pnpm tv:install
 
 This builds the app, checks it for webOS 5.0, packages `out/com.bannertv.app_0.1.0_all.ipk`, installs it on the TV and opens it. BannerTV also appears in the TV's app list.
 
-Every pull request also builds the `.ipk` in CI. To install that one instead, download the **bannertv-ipk** artifact from the pull request's checks, unzip it, and run:
+A full CI build also makes the `.ipk` (the README says when one runs). To install that one instead, download the **bannertv-ipk** artifact from the run's checks, unzip it, and run:
 
 ```sh
 pnpm ares ares-install -d tv path/to/com.bannertv.app_0.1.0_all.ipk

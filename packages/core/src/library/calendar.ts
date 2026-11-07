@@ -56,6 +56,8 @@ export interface CalendarEntry {
   /** The episode's own name, when the addon gave one and it is a single episode. */
   episodeTitle?: string;
   thumbnail?: string;
+  /** A film dated by when it comes out to watch at home (TMDB), not by the addon's date. */
+  atHome?: true;
 }
 
 /** One day of the calendar, with what comes out on it. */
@@ -149,12 +151,14 @@ function previewOf(meta: MetaDetail): MetaPreview {
 /**
  * What one title brings to the calendar between `pastDays` before today and
  * `aheadDays` after it: a series' dated episodes (specials, season 0, left
- * out), or a film's release.
+ * out), or a film's release. A film's `homeRelease` (milliseconds), when
+ * known, dates it instead of the addon's date, which is usually the cinema's.
  */
 export function calendarEntries(
   meta: MetaDetail,
   now: number,
   window: CalendarWindow = CALENDAR_WINDOW,
+  homeRelease?: number,
 ): CalendarEntry[] {
   const today = startOfDay(now);
   const from = addDays(today, -window.pastDays);
@@ -164,8 +168,11 @@ export function calendarEntries(
   const title = previewOf(meta);
   const entries: CalendarEntry[] = [];
   if (meta.type === MOVIE) {
-    const at = timeOf(meta.released);
-    if (inWindow(at)) entries.push({ key: meta.id, kind: 'movie', title, at, videoId: meta.id });
+    const at = homeRelease ?? timeOf(meta.released);
+    if (!inWindow(at)) return entries;
+    const entry: CalendarEntry = { key: meta.id, kind: 'movie', title, at, videoId: meta.id };
+    if (homeRelease !== undefined) entry.atHome = true;
+    entries.push(entry);
     return entries;
   }
   for (const video of meta.videos) {
@@ -230,17 +237,20 @@ export function calendarDays(entries: readonly CalendarEntry[], now: number): Ca
 
 /**
  * The calendar for a screen: every followed title's entries, of one kind or
- * both (series for episodes, films for releases), by day.
+ * both (series for episodes, films for releases), by day. `homeReleases`
+ * dates films by when they come out at home, by the meta's id.
  */
 export function calendarView(
   metas: readonly MetaDetail[],
   now: number,
   kind: LibraryKind = 'all',
   window: CalendarWindow = CALENDAR_WINDOW,
+  homeReleases?: ReadonlyMap<string, number>,
 ): CalendarDay[] {
   const entries: CalendarEntry[] = [];
   for (const meta of metas) {
-    for (const entry of calendarEntries(meta, now, window)) {
+    const home = meta.type === MOVIE ? homeReleases?.get(meta.id) : undefined;
+    for (const entry of calendarEntries(meta, now, window, home)) {
       if (kind === 'all' || (kind === 'movie') === (entry.kind === 'movie')) entries.push(entry);
     }
   }

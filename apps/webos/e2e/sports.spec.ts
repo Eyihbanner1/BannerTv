@@ -129,6 +129,53 @@ async function startWithSports(page: Page, options: SportsOptions = {}) {
   return { requests, playback };
 }
 
+test('Home rows lists Live sport, which moves to the top and hides like a row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { requests } = await startWithSports(page);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  // Continue Watching, My List, the first catalog row, then Live sport, as on Home.
+  await press(page, 'ArrowDown', 'home-rows-bannertv-my-list-show');
+  await press(page, 'ArrowDown', 'home-rows-0-movie-top-show');
+  await press(page, 'ArrowDown', 'home-rows-bannertv-live-sport-show');
+  await press(page, 'ArrowLeft', 'home-rows-bannertv-live-sport-down');
+  await press(page, 'ArrowLeft', 'home-rows-bannertv-live-sport-up');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(async () => ((await readKv(page, 'homeLayout')) as { order: string[] })?.order[0])
+    .toBe('bannertv:live-sport');
+  await pressBack(page);
+  await pressBack(page);
+  const rows = page.locator('main [data-row-key]');
+  await expect(rows.nth(0)).toHaveAttribute('data-row-key', LIVE_ROW);
+  await expect(rows.nth(1)).toHaveAttribute('data-row-key', FIRST_ROW);
+
+  // Hidden, it is neither drawn nor asked for again.
+  await openSection(page, 'settings');
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  // Now second, under Continue Watching.
+  await press(page, 'ArrowDown', 'home-rows-bannertv-live-sport-show');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Show Live sport on Home');
+  await pressBack(page);
+  await pressBack(page);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await expect(page.locator(`[data-row-key="${LIVE_ROW}"]`)).toHaveCount(0);
+  const asked = requests.all.length;
+  await page.waitForTimeout(500);
+  expect(requests.all.slice(asked).filter((request) => request.includes('/live.json'))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('Sports shows in the rail only while a sports addon is installed', async ({ page }) => {
   const errors = watchErrors(page);
   await page.clock.install({ time: SPORTS_NOW });
