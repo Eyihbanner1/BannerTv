@@ -2258,6 +2258,9 @@ test('the pointer brings the controls up, shows the time over the bar, and a cli
   page,
 }) => {
   await playMovie(page);
+  // Well after the OK that started the film, whose click the one on the bar would
+  // otherwise be (a click within 400 ms of an OK is that OK's): half a second played.
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(0.5);
   const play = page.locator('[data-focus-key="player-play"]');
   await page.mouse.move(900, 500);
   await page.mouse.move(960, 540, { steps: 3 });
