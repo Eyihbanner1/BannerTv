@@ -1477,6 +1477,40 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(50)', 'pause(50)', 'stop(50)']);
   });
 
+  it('keeps the length a stream showed for a skip it takes elsewhere once it failed before it played', () => {
+    // As above, but the viewer skips back to 1000 s, which the player takes,
+    // then on a minute, which lands only once the stream failed. Try again:
+    // the link now serves a 60 s clip. The stream showed the film's length,
+    // so the skip's place is the film's.
+    const film: Parameters<typeof trakt>[0] = [
+      [played(2200, 2820, 'playing'), known, 2200, 0],
+      [played(2200, 2820, 'paused'), known, 2200, 0],
+      [played(2200, 0, 'loading', false, OTHER), known, 2200, 0],
+      [played(2200, 0, 'paused', false, OTHER), known, 2200, 0],
+      [played(2200, 2800, 'paused', false, OTHER), known, 2200, 0],
+      [played(1000, 2800, 'paused', false, OTHER), known, 1000, 1],
+      [played(1000, 2800, 'failed', false, OTHER), known, 1000, 1],
+      [played(1000, 0, 'failed', false, OTHER), known, 1000, 1],
+      [played(1060, 0, 'failed', false, OTHER), known, 1060, 2],
+    ];
+    expect(
+      trakt([
+        ...film,
+        [played(1060, 0, 'loading', false, OTHER), known, 1060, 0],
+        [played(1060, 60, 'loading', false, OTHER), known, 1060, 0],
+        [played(0, 60, 'playing', true, OTHER), known, 1060, 0],
+      ]),
+    ).toEqual(['start(78)', 'pause(78)', 'stop(38)']);
+    // Or Try another opens a clip there.
+    expect(
+      trakt([
+        ...film,
+        [played(1060, 0, 'loading', false, CLIP), known, 1060, 0],
+        [played(0, 60, 'playing', true), known, 1060, 0],
+      ]),
+    ).toEqual(['start(78)', 'pause(78)', 'stop(38)']);
+  });
+
   it('keeps a place inside a clip’s length whose clock ran past it, when Try again finds a clip', () => {
     // A film that gives no length plays 600 s; Start over, which the player
     // takes, and it plays 40 s and fails. Try again: the link now serves a

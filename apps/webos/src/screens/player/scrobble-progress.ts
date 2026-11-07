@@ -361,23 +361,27 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         return;
       }
       if (wasClip) return;
-      if (!underWay && !moved) {
-        // A skip the player takes once the file failed (one pressed before
-        // the problem box lands behind it), when it played or showed its
-        // length: the next file opens there. It is this opening's place, by
-        // the length it showed.
-        if (took && (played || (reached?.duration ?? 0) > 0) && state.status === 'failed') {
-          reached = {
-            position: state.position,
-            duration: reached?.duration ?? 0,
-            entry: state.entry,
-            moved: false,
-            ran,
-            ranTo,
-          };
-        }
+      // A skip the player takes once the file failed (one pressed before the
+      // problem box lands behind it), when it played or showed its length:
+      // the next file opens there. It is this opening's place, by the length
+      // it showed, wherever it went.
+      if (
+        took &&
+        !underWay &&
+        state.status === 'failed' &&
+        (played || (reached?.duration ?? 0) > 0)
+      ) {
+        reached = {
+          position: state.position,
+          duration: reached?.duration ?? 0,
+          entry: state.entry,
+          moved: false,
+          ran,
+          ranTo,
+        };
         return;
       }
+      if (!underWay && !moved) return;
       if (played && Math.abs(state.position - (origin ?? state.position)) > SAME_PLACE_S) {
         ran = true;
       }
