@@ -1,64 +1,95 @@
 name: CI
 
+# The repository is private on GitHub Free, so CI has 2,000 minutes a month. Every push runs one
+# quick check: format, lint, typecheck, unit tests and the TV build. The long jobs (the TV journeys
+# and .ipk, the Android TV APK and the phone APK) run only for a build someone will install, called
+# a full build here:
+# - every push to the combined test build (the test/all-together branch);
+# - once each time the full-ci label is added to a pull request (later pushes are quick again, so
+#   remove and add the label for another full build);
+# - a run started by hand from the Actions tab (Run workflow).
+# Pushes to main run the quick check only: what reaches main has passed a full build already.
+#
+# One file serves every branch: a job whose app a branch does not have skips itself.
+
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore: ['**/*.md', 'docs/**']
   push:
     branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
 
+# A newer push replaces a quick check still running on the same branch. A full build has a group of
+# its own, so a quick push does not cancel it, though a newer full build on the same branch does.
+# Adding any other label starts a run that does nothing, in a group of its own.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: >-
+    ci-${{ github.ref }}-${{
+    (github.event.action == 'labeled' && github.event.label.name != 'full-ci') && 'label'
+    || ((github.event_name == 'workflow_dispatch' || github.head_ref == 'test/all-together'
+    || github.event.label.name == 'full-ci') && 'full' || 'quick') }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  # The plan step lists a labelled pull request's files.
+  pull-requests: read
 
-# The TV app's checks run side by side: the build, the static checks and unit tests, and the
-# remote-key journeys in four shards on the build. "Check, test and package" waits for all of
-# them, fails unless every one passed, and only then packages the .ipk. It is the check to
-# require. The Android TV APK waits for it, so no .ipk or Android TV APK is uploaded before the
-# checks and every journey passed, as when they all ran in one job. The Phone APK does not wait
-# for it: its own phone journeys gate it, as before.
 jobs:
-  web:
-    name: Build the TV app
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
-      - name: Check the build for webOS 5.0
-        run: pnpm check:bundle
-
-      # The journeys run on this exact build, and the .ipk and the Android APK ship it, rather
-      # than building their own. "Re-run failed jobs" does not run this job again once it has
-      # passed, so the build is kept for as long as a re-run is likely.
-      - name: Upload the web build
-        uses: actions/upload-artifact@v4
-        with:
-          name: bannertv-web
-          path: apps/webos/dist
-          retention-days: 14
-          if-no-files-found: error
-
-  checks:
-    name: Format, lint, typecheck and unit tests
+  quick:
+    name: Quick check
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      androidtv: ${{ steps.plan.outputs.androidtv }}
+      phone: ${{ steps.plan.outputs.phone }}
     steps:
       - uses: actions/checkout@v5
+
+      # Whether this run is a full build, and which apps it builds. The phone APK needs a branch
+      # with the phone app, and on a labelled pull request a change to phone or shared code (the
+      # phone app runs the TV app's data layer from apps/webos/src).
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          LABEL: ${{ github.event.label.name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          full=false
+          if [ "$EVENT" = workflow_dispatch ] || [ "$HEAD_REF" = test/all-together ] || [ "$LABEL" = full-ci ]; then
+            full=true
+          fi
+          androidtv=false
+          if [ "$full" = true ] && [ -d apps/androidtv ]; then
+            androidtv=true
+          fi
+          phone=false
+          if [ "$full" = true ] && [ -f apps/mobile/package.json ]; then
+            phone=true
+            if [ "$LABEL" = full-ci ]; then
+              if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename'); then
+                shared='^(apps/mobile/|apps/webos/(src|e2e)/|packages/|\.github/workflows/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
+                if ! grep -Eq "$shared" <<< "$files"; then
+                  phone=false
+                fi
+              else
+                echo "::warning::Could not list the pull request's files, so the phone APK is built anyway."
+              fi
+            fi
+          fi
+          {
+            echo "full=$full"
+            echo "androidtv=$androidtv"
+            echo "phone=$phone"
+          } >> "$GITHUB_OUTPUT"
+          echo "Full build: $full. Android TV APK: $androidtv. Phone APK: $phone." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
 
@@ -85,16 +116,29 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-  journeys:
-    name: TV journeys ${{ matrix.shard }}/${{ strategy.job-total }}
-    needs: web
+      - name: Build
+        run: pnpm build
+
+      - name: Check the build for webOS 5.0
+        run: pnpm check:bundle
+
+      # The journeys run on this exact build, and the .ipk and the Android TV APK ship it.
+      - name: Upload the web build
+        if: steps.plan.outputs.full == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-web
+          path: apps/webos/dist
+          retention-days: 3
+          if-no-files-found: error
+
+  tv:
+    name: TV journeys and .ipk
+    needs: quick
+    if: needs.quick.outputs.full == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      # Every shard runs to the end, so one run shows every journey that fails.
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
+    # The journeys alone take 17 to 22 minutes; a 20-minute limit cut eight runs short.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -117,103 +161,8 @@ jobs:
       - name: Install Playwright's Chromium
         run: pnpm --filter @bannertv/webos exec playwright install --with-deps chromium
 
-      # Playwright splits the journeys by count, a quarter each. One worker, as on the 2-vCPU
-      # runner before the split, so every journey keeps the timing it was written for. The blob
-      # reporter's results come together in "TV journeys report".
       - name: Remote-key journeys
-        run: >-
-          pnpm --filter @bannertv/webos exec playwright test
-          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
-          --workers=1
-          --reporter=github,blob
-
-      # Kept whether the journeys passed or not: a journey that failed and then passed on retry
-      # leaves the job green, and its failed try's trace is only here.
-      - name: Upload the journeys' results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: blob-report-${{ matrix.shard }}
-          path: apps/webos/blob-report/
-          # As long as the web build, so a late re-run of the report still finds every shard.
-          retention-days: 14
-          if-no-files-found: ignore
-          # A shard run again replaces its results.
-          overwrite: true
-
-  journeys-report:
-    name: TV journeys report
-    needs: journeys
-    # Also after a failed shard, which is when the report matters most.
-    if: ${{ !cancelled() && needs.journeys.result != 'skipped' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Download the shards' results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: blob-report-*
-          path: apps/webos/blob-reports
-          merge-multiple: true
-
-      - name: Merge them into one report
-        run: pnpm --filter @bannertv/webos exec playwright merge-reports --reporter html blob-reports
-
-      # On every run, not only on failure, with the trace of each try that failed, including
-      # the first try of a journey that passed on retry (trace: 'retain-on-failure').
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: apps/webos/playwright-report/
-          retention-days: 3
-          if-no-files-found: error
-          overwrite: true
-
-  tv:
-    name: Check, test and package
-    needs: [web, checks, journeys]
-    # Runs even when one of them failed or the run was cancelled, so that this check fails rather
-    # than being skipped: a required check that was skipped counts as passed.
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Every check passed
-        if: ${{ always() && (needs.web.result != 'success' || needs.checks.result != 'success' || needs.journeys.result != 'success') }}
-        run: |
-          echo "::error::Build: ${{ needs.web.result }}. Checks: ${{ needs.checks.result }}. Journeys: ${{ needs.journeys.result }}."
-          exit 1
-
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Download the web build
-        uses: actions/download-artifact@v4
-        with:
-          name: bannertv-web
-          path: apps/webos/dist
+        run: pnpm e2e
 
       - name: Package .ipk
         run: pnpm package
@@ -223,13 +172,25 @@ jobs:
         with:
           name: bannertv-ipk
           path: out/*.ipk
+          retention-days: 7
           if-no-files-found: error
 
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/webos/playwright-report/
+            apps/webos/test-results/
+          retention-days: 3
+          if-no-files-found: ignore
+
   android:
-    name: Android APK
-    # Only once "Check, test and package" passed, so every APK here passed the TV checks and
-    # journeys. It ships the web build those journeys ran on.
-    needs: tv
+    name: Android TV APK
+    # Only once the journeys passed, so every APK here passed them. It ships the web build they ran on.
+    needs: [quick, tv]
+    if: needs.quick.outputs.androidtv == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -314,6 +275,7 @@ jobs:
         with:
           name: bannertv-apk
           path: apps/androidtv/out/*.apk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Upload Gradle reports
@@ -322,14 +284,18 @@ jobs:
         with:
           name: android-reports
           path: apps/androidtv/app/build/reports/
+          retention-days: 3
           if-no-files-found: ignore
 
   # The phone app (apps/mobile, ADR 0007): React Native through Expo. Its native Android project is
   # generated from app.config.ts on every run (`expo prebuild`) rather than kept in the repository.
+  # It waits for the quick check only: its own phone journeys gate the APK.
   mobile:
     name: Phone APK
+    needs: quick
+    if: needs.quick.outputs.phone == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
@@ -359,6 +325,7 @@ jobs:
         with:
           name: phone-journeys
           path: apps/mobile/test-results/
+          retention-days: 3
           if-no-files-found: ignore
 
       - uses: actions/setup-java@v4
@@ -366,10 +333,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # On a pull request setup-gradle only reads the cache unless told otherwise, and this job is
-      # not on main yet, so nothing was ever saved for it. Saved here, the Gradle wrapper,
-      # dependencies and transforms come back on the pull request's next run. The C++ builds
-      # are not cached by Gradle at all.
+      # On a pull request setup-gradle only reads the cache unless told otherwise. Saved here, the
+      # Gradle wrapper, dependencies and transforms come back on the pull request's next run. The
+      # C++ builds are not cached by Gradle at all.
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
@@ -383,9 +349,9 @@ jobs:
       # A release build, so the JavaScript is inside the APK and it runs without a computer
       # attached. Signed with the debug key the Expo template ships, which is the same on every
       # run, so each test APK installs over the last. Not for the store. 64-bit Arm only, the
-      # phones it is tested on (a Galaxy S25 Ultra runs nothing else): each architecture's C++
-      # is built in full, and 32-bit Arm cost about 7 to 10 of the build's 32 minutes. Add
-      # armeabi-v7a back to PHONE_ABIS (comma-separated) for a 32-bit-only phone.
+      # phones it is tested on: each architecture's C++ is built in full, and 32-bit Arm cost about
+      # 7 to 10 minutes of each build. Add armeabi-v7a back to PHONE_ABIS (comma-separated) for a
+      # 32-bit-only phone.
       - name: Build
         working-directory: apps/mobile/android
         env:
@@ -404,6 +370,7 @@ jobs:
         with:
           name: bannertv-phone-apk
           path: apps/mobile/out/*.apk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Upload Gradle reports
@@ -412,4 +379,5 @@ jobs:
         with:
           name: phone-android-reports
           path: apps/mobile/android/app/build/reports/
+          retention-days: 3
           if-no-files-found: ignore
