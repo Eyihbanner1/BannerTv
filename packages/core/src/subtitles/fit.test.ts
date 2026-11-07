@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FRAME_RATE_RATIO,
+  isForcedName,
   judgeScript,
   judgeSubtitleFit,
   judgeSubtitleFits,
@@ -84,6 +85,15 @@ describe('profileSubtitles', () => {
     expect(forced('Forced')).toBe(true);
     expect(forced('forced.srt')).toBe(true);
     expect(forced('[Forced] Film.2021.1080p')).toBe(true);
+  });
+
+  it('reads a stream track’s own name for forced lines, a leading "Forced" too', () => {
+    expect(isForcedName('English (Forced)')).toBe(true);
+    expect(isForcedName('Forced Subs')).toBe(true);
+    expect(isForcedName('Signs & Songs')).toBe(true);
+    expect(isForcedName('English SDH')).toBe(false);
+    expect(isForcedName('Signs')).toBe(false);
+    expect(isForcedName('')).toBe(false);
   });
 });
 

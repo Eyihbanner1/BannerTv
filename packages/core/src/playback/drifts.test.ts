@@ -34,6 +34,18 @@ describe('createSubtitleDrifts', () => {
     expect(again.get('a')).toBeUndefined();
   });
 
+  it('keeps "auto", the player’s own fix kept with the viewer’s timing, until a fix is chosen', async () => {
+    const storage = memoryKeyValueStore();
+    const drifts = createSubtitleDrifts({ storage });
+    await drifts.remember('a', 'auto');
+    expect(drifts.get('a')).toBe('auto');
+    const again = createSubtitleDrifts({ storage });
+    await again.load();
+    expect(again.get('a')).toBe('auto');
+    await again.remember('a', 'ahead');
+    expect(again.get('a')).toBe('ahead');
+  });
+
   it('drops damaged entries and the least recently changed past the limit', async () => {
     const storage = memoryKeyValueStore();
     await storage.set('subtitleDrift', [

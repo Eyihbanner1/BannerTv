@@ -341,6 +341,7 @@ export {
 } from './subtitles/languages';
 export {
   FRAME_RATE_RATIO,
+  isForcedName,
   judgeScript,
   judgeSubtitleFit,
   judgeSubtitleFits,

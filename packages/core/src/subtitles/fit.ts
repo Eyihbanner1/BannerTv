@@ -187,6 +187,15 @@ function isForcedLabel(label: string): boolean {
   return FORCED_LABEL.test(label.replace(FORCED_TITLE, ''));
 }
 
+/**
+ * Whether a stream track's own name says it holds only forced lines, or
+ * signs and songs ("English (Forced)", "Signs & Songs"). A track's name is
+ * not a release name, so "Forced" counts at its start too.
+ */
+export function isForcedName(name: string): boolean {
+  return FORCED_LABEL.test(name);
+}
+
 function lineText(line: Cue['lines'][number]): string {
   return line
     .map((span) => span.text)
