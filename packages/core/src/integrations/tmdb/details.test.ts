@@ -239,6 +239,32 @@ describe('readDetails', () => {
       expect(film([gb(release('', 3), release('', 1), release('15', 4))])).toBe('15');
     });
 
+    it("keeps the strictest of the country's ratings beside the one it shows", () => {
+      const strictest = (results: unknown[]) =>
+        filmWith({ release_dates: { results } }).strictestCertificate;
+      const gb = (...releases: unknown[]) => ({ iso_3166_1: 'GB', release_dates: releases });
+      const us = { iso_3166_1: 'US', release_dates: [release('R', 3)] };
+      // A PG at the cinema and a 15 on disc: Details shows PG, kids go by 15.
+      const both = [gb(release('15', 5), release('PG', 3)), us];
+      expect(filmWith({ release_dates: { results: both } }).certificate).toBe('PG');
+      expect(strictest(both)).toBe('15');
+      // One rating, or the strictest shown first: nothing more to keep.
+      expect(strictest([gb(release('PG', 3))])).toBeUndefined();
+      expect(strictest([gb(release('15', 3), release('PG', 5))])).toBeUndefined();
+      // Another country's stricter rating is not the UK's.
+      expect(strictest([gb(release('PG', 3)), us])).toBeUndefined();
+      const series = seriesWith({
+        content_ratings: {
+          results: [
+            { descriptors: [], iso_3166_1: 'US', rating: 'TV-Y7' },
+            { descriptors: [], iso_3166_1: 'US', rating: 'TV-14' },
+          ],
+        },
+      });
+      expect(series.certificate).toBe('PG');
+      expect(series.strictestCertificate).toBe('15');
+    });
+
     it('reads 12A as 12', () => {
       expect(film([{ iso_3166_1: 'GB', release_dates: [release('12A', 3)] }])).toBe('12');
     });

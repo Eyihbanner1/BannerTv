@@ -32,6 +32,8 @@ export interface ServicesOptions {
   search?: boolean;
   /** The UK rating TMDB gives every film. Default U. */
   certificate?: string;
+  /** A UK rating TMDB also gives every film's home release, if any. */
+  homeCertificate?: string;
   /** When TMDB says every film comes out to watch at home in the UK. None by default. */
   homeRelease?: string;
 }
@@ -158,7 +160,17 @@ function traktAnswer(path: string, approved: boolean): { status: number; data: u
 }
 
 /** TMDB's film answer, the same for every film: a logo, a textless backdrop, cast and a rating. */
-function tmdbMovie(id: number, certificate: string, homeRelease?: string) {
+function tmdbMovie(
+  id: number,
+  certificate: string,
+  homeCertificate?: string,
+  homeRelease?: string,
+) {
+  const releases: { certification: string; type: number; release_date?: string }[] = [
+    { certification: certificate, type: 3 },
+  ];
+  if (homeCertificate) releases.push({ certification: homeCertificate, type: 5 });
+  if (homeRelease) releases.push({ certification: '', type: 4, release_date: homeRelease });
   return {
     id,
     tagline: 'An open movie.',
@@ -176,15 +188,7 @@ function tmdbMovie(id: number, certificate: string, homeRelease?: string) {
       ],
     },
     release_dates: {
-      results: [
-        {
-          iso_3166_1: 'GB',
-          release_dates: [
-            { certification: certificate, type: 3 },
-            ...(homeRelease ? [{ certification: '', type: 4, release_date: homeRelease }] : []),
-          ],
-        },
-      ],
+      results: [{ iso_3166_1: 'GB', release_dates: releases }],
     },
   };
 }
@@ -358,7 +362,12 @@ export async function mockServices(
     if (movie) {
       return json(
         route,
-        tmdbMovie(Number(movie[1]), options.certificate ?? 'U', options.homeRelease),
+        tmdbMovie(
+          Number(movie[1]),
+          options.certificate ?? 'U',
+          options.homeCertificate,
+          options.homeRelease,
+        ),
       );
     }
     return json(route, { status_message: 'not found' }, 404);

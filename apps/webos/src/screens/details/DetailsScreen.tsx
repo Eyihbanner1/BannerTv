@@ -268,7 +268,8 @@ export function DetailsScreen({ type, id, preview, video, visit }: DetailsScreen
   const extra = tmdb.details;
   // A kids profile plays a title only once its full details are in, by the
   // rule the phone uses too (kidsDetailsAllowed): TMDB's strictest UK rating
-  // within the profile's, or without one, a Family listing.
+  // within the profile's and no genre not for children, or without a rating,
+  // a Family listing.
   const kids = isKidsProfile();
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);

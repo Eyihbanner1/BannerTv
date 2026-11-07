@@ -27,7 +27,7 @@ export const TMDB_POLICY: CachePolicy = {
 
 // Answers are cached as read, not as TMDB sent them, so the keys carry a
 // version: a build that reads them differently does not get the old shape.
-const KEY = 'tmdb:1';
+const KEY = 'tmdb:2';
 
 export type TmdbImageSize =
   'w92' | 'w185' | 'w300' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original';
