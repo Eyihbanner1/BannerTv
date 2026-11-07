@@ -105,6 +105,8 @@ npx wrangler@4 secret put TRAKT_CLIENT_SECRET   # only for a Trakt app that has 
 
 Each `secret put` asks for the value and sends it straight to Cloudflare, so it never appears in the repository or in a chat. A secret takes effect as soon as it is put, with no new deploy.
 
+Without the laptop, the **Deploy api Worker** workflow does the same deploy from main: in GitHub, Actions, Deploy api Worker, Run workflow. It runs the Worker's typecheck and unit tests, deploys with `wrangler@4 deploy` and then reads `/status`. It needs the repository secret `CLOUDFLARE_API_TOKEN`, a Cloudflare API token made from the "Edit Cloudflare Workers" template (Settings, Secrets and variables, Actions), and the repository variable `CLOUDFLARE_ACCOUNT_ID` only if that token reaches more than one account. It never touches the Worker's secrets, which stay as they were put.
+
 To check, open <https://api.bannertv.workers.dev/status>. It shows `{"trakt":true,"tmdb":true,"search":true}`; a `false` means that service's key is missing (the Trakt client ID, or the TMDB key), so put it again.
 
 The free Workers plan covers a household many times over: it allows 100,000 requests a day, and a TV makes a sync every 30 minutes, a few scrobbles per title watched, and a couple of TMDB requests per Details page.
