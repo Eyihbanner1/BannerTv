@@ -16,7 +16,12 @@ import { subtitleDrifts, subtitleOffsets } from '../../data/library';
 import { subtitlePicks } from '../../data/playback';
 import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
 import { streamTitle } from '../../player/describe';
-import { stretchCues, type SubtitleDrift } from '../../player/drift';
+import {
+  driftInUse,
+  driftKeptWithTiming,
+  stretchCues,
+  type SubtitleDrift,
+} from '../../player/drift';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import { createSubtitleChecks } from '../../player/subtitle-checks';
@@ -595,9 +600,8 @@ export function useSubtitles(
   // A drift the file's length gives away is fixed by itself, unless the viewer set a drift
   // or a timing on this file: theirs stands.
   const evidence = fileOption ? (fitOf(fileOption)?.drift ?? null) : null;
-  const autoDrift = canFixDrift && evidence !== null && keptDrift === null && offset === 0;
-  const kept = keptDrift === 'none' ? null : keptDrift;
-  const drift = !canFixDrift ? null : autoDrift ? evidence : kept;
+  const inUse = driftInUse({ canFix: canFixDrift, evidence, kept: keptDrift, offset });
+  const { drift, auto: autoDrift } = inUse;
 
   const rawCues = trackId === null ? (fileFailed || holding ? null : fileCues) : trackCues;
   // Stretched once per file and fix, so the subtitle layer's index is built once too.
@@ -679,7 +683,13 @@ export function useSubtitles(
       }
     },
     setOffset(next) {
-      if (offsetKey !== null) void subtitleOffsets.remember(offsetKey, next);
+      if (offsetKey === null) return;
+      // Moving the timing of a file whose drift the player fixed keeps that fix as the viewer's,
+      // so the lines stay stretched as they see them. Kept first: both are saved in the order
+      // asked, so the lines never show for a moment without it.
+      const keep = driftKeptWithTiming(inUse, next);
+      if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
+      void subtitleOffsets.remember(offsetKey, next);
     },
     setDrift(next) {
       if (offsetKey === null) return;
