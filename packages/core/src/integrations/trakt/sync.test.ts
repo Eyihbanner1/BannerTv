@@ -485,6 +485,8 @@ describe('createTraktSync', () => {
       duration: 140 * 60,
       updatedAt: Date.parse('2026-10-27T20:15:04.000Z'),
       watched: false,
+      // Trakt's, so the BannerTV account never sends it.
+      from: 'trakt',
     });
     expect(film.position).toBeCloseTo(0.105 * 140 * 60);
     const episode = progress.get('tt0903747:1:3')!;
@@ -521,6 +523,7 @@ describe('createTraktSync', () => {
       duration: 45 * 60,
       updatedAt: Date.parse('2026-10-26T22:10:00.000Z'),
       watched: true,
+      from: 'trakt',
     });
     expect(progress.get('tt11280740:1:9')).toMatchObject({ watched: true, duration: 55 * 60 });
     expect(progress.get('tt0903747:1:1')).toBeUndefined();
@@ -535,6 +538,7 @@ describe('createTraktSync', () => {
         name: 'TRON: Legacy',
         releaseInfo: '2010',
         addedAt: Date.parse('2026-10-25T10:00:00.000Z'),
+        from: 'trakt',
       },
       {
         id: 'tt14452776',
@@ -542,6 +546,7 @@ describe('createTraktSync', () => {
         name: 'The Bear',
         releaseInfo: '2022',
         addedAt: Date.parse('2026-10-24T09:00:00.000Z'),
+        from: 'trakt',
       },
     ]);
     expect(await storage.get('traktSync')).toEqual({

@@ -5,6 +5,9 @@ import {
   memoryCacheStore,
   memoryKeyValueStore,
 } from '@bannertv/core';
+import { afterLaunch } from './launch';
+import { bootMark } from './marks';
+import { tuning } from './tuning';
 
 const DB_NAME = 'bannertv';
 const DB_VERSION = 1;
@@ -46,9 +49,23 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * A transaction that writes to the cache. The cache holds only addon answers
+ * that can be fetched again, so with `idbRelaxed` its writes commit without
+ * waiting for the disk, as Chromium does by default only from version 121:
+ * webOS 22's Chromium 87 waits on every one. Older engines ignore the option.
+ * The key-value store, where profiles, progress and the account live, always
+ * waits.
+ */
+function writeCache(db: IDBDatabase): IDBTransaction {
+  return tuning.idbRelaxed
+    ? db.transaction(CACHE, 'readwrite', { durability: 'relaxed' })
+    : db.transaction(CACHE, 'readwrite');
+}
+
 /** Deletes the oldest cache entries until at most `max` are left. */
 async function prune(db: IDBDatabase, max: number): Promise<void> {
-  const store = db.transaction(CACHE, 'readwrite').objectStore(CACHE);
+  const store = writeCache(db).objectStore(CACHE);
   let excess = (await done(store.count())) - max;
   if (excess <= 0) return;
   await new Promise<void>((resolve, reject) => {
@@ -70,6 +87,12 @@ async function prune(db: IDBDatabase, max: number): Promise<void> {
 export interface Storage {
   kv: KeyValueStore;
   cache: CacheStore;
+  /**
+   * False once the database failed to open and everything lives in memory
+   * for this session. The BannerTV account stays off then: an empty store
+   * would read as a screen with no account (ADR 0006, decision 13).
+   */
+  persistent: Promise<boolean>;
 }
 
 /**
@@ -86,10 +109,19 @@ export function createStorage(): Storage {
   let writes = 0;
 
   void db.then((database) => {
-    if (database) prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
+    if (!database) return;
+    bootMark('boot:idb-open');
+    const trim = () => {
+      prune(database, MAX_CACHE_ENTRIES).catch(() => undefined);
+    };
+    // Counting the cache reads through it, and holds it for writing, as the
+    // launch reads the collection and Home's rows: `later` waits for Home.
+    if (tuning.idbPrune === 'later') afterLaunch(trim);
+    else trim();
   });
 
   return {
+    persistent: db.then((database) => database !== null),
     kv: {
       async get(key) {
         const database = await db;
@@ -126,7 +158,7 @@ export function createStorage(): Storage {
       async write(key, record) {
         const database = await db;
         if (!database) return fallbackCache.write(key, record);
-        await done(database.transaction(CACHE, 'readwrite').objectStore(CACHE).put(record, key));
+        await done(writeCache(database).objectStore(CACHE).put(record, key));
         if (++writes % PRUNE_EVERY_WRITES === 0) await prune(database, MAX_CACHE_ENTRIES);
       },
     },

@@ -75,6 +75,7 @@ class ProtocolTest {
         assertNull(Protocol.streamType(null))
     }
 
+    // The rules themselves are tested in HeaderRulesTest: the player keeps the stream helper's.
     @Test
     fun keepsOnlyRequestHeadersThatCanBeSent() {
         val sent =

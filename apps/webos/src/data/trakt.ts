@@ -2,7 +2,9 @@ import {
   createDeviceSignIn,
   createStore,
   createTraktAccount,
+  createTraktMarks,
   createTraktSync,
+  type TraktMark,
   type TraktSyncResult,
 } from '@bannertv/core';
 import { serviceStatus, traktSend } from './api';
@@ -32,6 +34,9 @@ export const traktSync = createTraktSync({
   storage: profileKv,
   targets: { progress, library, watched: watchedSet },
 });
+
+/** What the viewer marks watched, and takes off Continue Watching, told to Trakt too. */
+export const traktMarks = createTraktMarks({ account: traktAccount });
 
 /** Whether this profile can use Trakt: the service has its keys, and it is not a kids profile. */
 export function traktAvailable(): boolean {
@@ -78,6 +83,24 @@ function schedule(ms: number) {
 /** A sync shortly, as after the player closes. */
 export function syncTraktSoon(): void {
   schedule(AFTER_PLAYBACK_MS);
+}
+
+/**
+ * Puts what the viewer marked watched into Trakt's history, or takes it out,
+ * when the profile is signed in there; a sync follows, so the ticks come back
+ * as Trakt has them. Saved progress is what counts here either way.
+ */
+export function markOnTrakt(marks: readonly TraktMark[], watched: boolean): void {
+  if (!traktAvailable() || traktAccount.get().status !== 'signedIn') return;
+  void traktMarks.history(marks, watched).then((ok) => {
+    if (ok) syncTraktSoon();
+  });
+}
+
+/** Takes a title off Trakt's paused list too, when the profile is signed in there. */
+export function forgetPausedOnTrakt(metaId: string, type: string): void {
+  if (!traktAvailable() || traktAccount.get().status !== 'signedIn') return;
+  void traktMarks.forgetPaused(metaId, type);
 }
 
 let pushTimer: ReturnType<typeof setTimeout> | undefined;

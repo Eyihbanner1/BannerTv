@@ -1,5 +1,7 @@
 package com.bannertv.app
 
+import com.bannertv.helper.HeaderRules
+
 /**
  * Constants and pure helpers for the host <-> web app protocol, version 1.
  * No Android imports, so JVM unit tests run them as they are.
@@ -25,12 +27,6 @@ object Protocol {
     const val STREAM_DASH: String = "dash"
 
     private val TRACK_ID = Regex("""(\d{1,6}):(\d{1,6})""")
-
-    /** A header name as HTTP allows it (RFC 9110 token). */
-    private val HEADER_NAME = Regex("""[!#$%&'*+.^_`|~0-9A-Za-z-]+""")
-
-    /** Headers the player sets itself: an addon's would break seeking or the connection. */
-    private val PLAYER_HEADERS = setOf("host", "range", "content-length", "connection", "transfer-encoding")
 
     private val HTTPS_URL = Regex("""https://[^/?#\s]+([/?#]\S*)?""", RegexOption.IGNORE_CASE)
 
@@ -67,20 +63,12 @@ object Protocol {
 
     /**
      * The load command's request headers as they can be sent: names HTTP allows, values without
-     * line breaks, none the player sets itself. The web app cleans them too; this is the guard.
+     * line breaks, none the player sets itself. The rules are the stream helper's too (HeaderRules).
      */
-    fun requestHeaders(asked: Map<String, String?>): Map<String, String> =
-        asked.entries
-            .filter { (name, value) ->
-                value != null &&
-                    HEADER_NAME.matches(name) &&
-                    name.lowercase() !in PLAYER_HEADERS &&
-                    value.none { it == '\r' || it == '\n' || it == '\u0000' }
-            }.associate { (name, value) -> name to value!! }
+    fun requestHeaders(asked: Map<String, String?>): Map<String, String> = HeaderRules.requestHeaders(asked)
 
     /** The User-Agent among request headers, whatever its case, or null. */
-    fun userAgent(headers: Map<String, String>): String? =
-        headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+    fun userAgent(headers: Map<String, String>): String? = HeaderRules.userAgent(headers)
 
     /** Format.language as the web app expects it: "" when missing or undetermined. */
     fun language(language: String?): String =

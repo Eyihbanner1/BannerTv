@@ -11,7 +11,12 @@ export interface InstalledAddon {
   transportUrl: string;
   manifest: Manifest;
   official: boolean;
-  /** When the manifest was fetched, in ms since 1970. 0 for a copy bundled with the app. */
+  /**
+   * When the manifest was fetched, in ms since 1970. 0 for a copy bundled with
+   * the app. A refresh that brings back the same manifest keeps this object as
+   * it is, so screens do not draw again: the collection saves the newer time
+   * (see toStored) and goes by it.
+   */
   fetchedAt: number;
   /**
    * Names this install while its settings change, for when the same addon is
@@ -22,7 +27,7 @@ export interface InstalledAddon {
 }
 
 /** A short tag for an address, so what is saved about an install never holds the address, which can hold keys. */
-function addressTag(url: string): string {
+export function addressTag(url: string): string {
   // FNV-1a: the same on every launch.
   let hash = 0x811c9dc5;
   for (let index = 0; index < url.length; index++) {
@@ -94,6 +99,25 @@ export interface AddonCollection extends Pick<Store<CollectionState>, 'get' | 's
   move(transportUrl: string, offset: number): void;
   /** Fetches manifests older than `maxAgeMs` again. Failures keep the old manifest. */
   refreshManifests(maxAgeMs: number): Promise<void>;
+  /** The collection as it is saved, with every install's name (installIdOf) filled in. */
+  toStored(): StoredAddon[];
+  /**
+   * Makes the collection match a change from the BannerTV account, with no
+   * request to any addon. Each addon in `set` names its install: it replaces
+   * that install, or one at the same address, or else joins the end. One
+   * already here at the same address keeps its own manifest. Installs named in
+   * `remove` leave, and `order` (install names) puts the rest in order, any
+   * it does not name after it as they were. The change is made before
+   * adopt() returns.
+   */
+  adopt(change: CollectionAdoption): Promise<void>;
+}
+
+/** What the BannerTV account changes in the collection. */
+export interface CollectionAdoption {
+  set?: readonly StoredAddon[];
+  remove?: readonly string[];
+  order?: readonly string[];
 }
 
 /** The scheme and host of an address normalizeManifestUrl has accepted. */
@@ -133,6 +157,10 @@ export function createAddonCollection(options: {
   const state = createStore<CollectionState>({ ready: false, addons: [] });
   // Raw manifests, kept so storage holds exactly what the addon sent.
   const raw = new Map<string, unknown>();
+  // When a refresh last found an addon's manifest unchanged. The addon keeps its
+  // object, so this time is saved and checked in place of its own fetchedAt.
+  const checkedAt = new WeakMap<InstalledAddon, number>();
+  const fetchedAtOf = (addon: InstalledAddon) => checkedAt.get(addon) ?? addon.fetchedAt;
 
   function readAll(list: readonly StoredAddon[]): InstalledAddon[] {
     const addons: InstalledAddon[] = [];
@@ -148,13 +176,23 @@ export function createAddonCollection(options: {
     return addons;
   }
 
+  function stored(addons: readonly InstalledAddon[]): StoredAddon[] {
+    return addons.map((addon) => ({
+      transportUrl: addon.transportUrl,
+      manifest: raw.get(addon.transportUrl),
+      official: addon.official,
+      fetchedAt: fetchedAtOf(addon),
+      installId: installIdOf(addon),
+    }));
+  }
+
   function save(addons: readonly InstalledAddon[]) {
     const stored: StoredAddon[] = addons.map((addon) => {
       const item: StoredAddon = {
         transportUrl: addon.transportUrl,
         manifest: raw.get(addon.transportUrl),
         official: addon.official,
-        fetchedAt: addon.fetchedAt,
+        fetchedAt: fetchedAtOf(addon),
       };
       // Only an install whose address changed needs its name kept.
       const id = installIdOf(addon);
@@ -272,7 +310,7 @@ export function createAddonCollection(options: {
     },
 
     async refreshManifests(maxAgeMs) {
-      const due = state.get().addons.filter((a) => now() - a.fetchedAt >= maxAgeMs);
+      const due = state.get().addons.filter((a) => now() - fetchedAtOf(a) >= maxAgeMs);
       const fetched = await Promise.all(
         due.map((addon) =>
           fetchManifest(addon.transportUrl).then(
@@ -282,20 +320,91 @@ export function createAddonCollection(options: {
         ),
       );
       const fresh = new Map<string, Manifest>();
+      const same = new Set<string>();
       for (const result of fetched) {
         if (!result) continue;
+        // Most days nothing changed. Keeping the addon and its raw manifest then means
+        // Home, sports and sync see the same objects and have nothing to do again.
+        if (JSON.stringify(result.json) === JSON.stringify(raw.get(result.url))) {
+          same.add(result.url);
+          continue;
+        }
         raw.set(result.url, result.json);
         fresh.set(result.url, result.manifest);
       }
-      if (fresh.size === 0) return;
+      if (fresh.size === 0 && same.size === 0) return;
       // The user may have changed the collection while the manifests were loading.
       const fetchedAt = now();
-      update(
-        state.get().addons.map((addon) => {
-          const manifest = fresh.get(addon.transportUrl);
-          return manifest ? { ...addon, manifest, fetchedAt } : addon;
-        }),
-      );
+      let changed = false;
+      const addons = state.get().addons.map((addon) => {
+        if (same.has(addon.transportUrl)) checkedAt.set(addon, fetchedAt);
+        const manifest = fresh.get(addon.transportUrl);
+        if (!manifest) return addon;
+        changed = true;
+        return { ...addon, manifest, fetchedAt };
+      });
+      // When only the times changed they are saved, but no screen reads them.
+      if (changed) update(addons);
+      else save(addons);
+    },
+
+    toStored: () => stored(state.get().addons),
+
+    async adopt(change) {
+      // Before the saved collection is read, this would save over it.
+      if (!state.get().ready) return;
+      let list = stored(state.get().addons);
+      const before = JSON.stringify(list.map((item) => [item.installId, item.transportUrl]));
+      const removing = new Set(change.remove ?? []);
+      list = list.filter((item) => !removing.has(item.installId!));
+      for (const incoming of change.set ?? []) {
+        if (!incoming || typeof incoming.transportUrl !== 'string' || !incoming.installId) continue;
+        const at = list.findIndex(
+          (item) =>
+            item.installId === incoming.installId || item.transportUrl === incoming.transportUrl,
+        );
+        const old = at === -1 ? undefined : list[at]!;
+        // The same address: what this screen fetched is as good, and maybe fresher.
+        const item: StoredAddon =
+          old && old.transportUrl === incoming.transportUrl
+            ? { ...old, official: incoming.official === true, installId: incoming.installId }
+            : {
+                transportUrl: incoming.transportUrl,
+                manifest: incoming.manifest,
+                official: incoming.official === true,
+                fetchedAt: 0,
+                installId: incoming.installId,
+              };
+        // Another install of this screen's at the same address leaves, as one install per address is kept.
+        list = list.filter(
+          (other, index) => index === at || other.transportUrl !== incoming.transportUrl,
+        );
+        const place = old ? list.indexOf(old) : -1;
+        if (place === -1) list.push(item);
+        else list[place] = item;
+      }
+      if (change.order) {
+        const rank = new Map(change.order.map((id, index) => [id, index]));
+        list = list
+          .map((item, index) => ({ item, index, rank: rank.get(item.installId!) }))
+          .sort((a, b) => {
+            if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank;
+            if (a.rank !== undefined) return -1;
+            if (b.rank !== undefined) return 1;
+            return a.index - b.index;
+          })
+          .map(({ item }) => item);
+      }
+      const after = JSON.stringify(list.map((item) => [item.installId, item.transportUrl]));
+      const official = (items: StoredAddon[]) => items.map((item) => item.official).join();
+      if (after === before && official(list) === official(stored(state.get().addons))) return;
+      const addons = readAll(list);
+      // Addresses that left take their manifests with them.
+      const kept = new Set(addons.map((addon) => addon.transportUrl));
+      Array.from(raw.keys()).forEach((url) => {
+        if (!kept.has(url)) raw.delete(url);
+      });
+      update(addons);
     },
   };
 }

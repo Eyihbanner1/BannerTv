@@ -15,6 +15,8 @@ Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, pac
 - [ADR 0003](docs/adr/0003-playback.md): playback, automatic stream choice and subtitles.
 - [ADR 0004](docs/adr/0004-library-profiles-trakt.md): library, household profiles, Trakt and TMDB.
 - [ADR 0005](docs/adr/0005-android-tv-app.md): the Android TV app, its player and the bridge between the two.
+- [ADR 0006](docs/adr/0006-account-and-sync.md): the BannerTV account, how screens sync through it, and the `sync` Worker.
+- [ADR 0007](docs/adr/0007-phone-app.md): the phone app, React Native on the TV's data layer.
 - [Android setup](docs/ANDROID_TV_SETUP.md): installing the Android app on a phone, an Android TV, a Fire TV or the emulator.
 
 ## At a glance
@@ -41,9 +43,11 @@ pnpm package      # out/com.bannertv.app_<version>_all.ipk
 pnpm tv:install   # build, check, package, install and open on the TV
 ```
 
-The Android app (`apps/androidtv`) is built by CI from the same `apps/webos/dist`; its APK is the run's `bannertv-apk` artifact. Building it locally needs Android Studio or the Android SDK and JDK 17 or newer: `pnpm build`, then `./gradlew assembleDebug` in `apps/androidtv`.
+The Android app (`apps/androidtv`) is built by CI from the same `apps/webos/dist` on a full build (below); its APK is the run's `bannertv-apk` artifact. Building it locally needs Android Studio or the Android SDK and JDK 17 or newer: `pnpm build`, then `./gradlew assembleDebug` in `apps/androidtv`.
 
-`pnpm lint`, `pnpm typecheck`, `pnpm format:check` and `pnpm check:bundle` run in CI with the rest. `check:bundle` fails when the bundle uses syntax or built-ins newer than webOS 5.0's Chromium 68, or grows past its budget.
+`pnpm lint`, `pnpm typecheck`, `pnpm format:check` and `pnpm check:bundle` run in CI's quick check, with the unit tests and the build, on every push. `check:bundle` fails when the bundle uses syntax or built-ins newer than webOS 5.0's Chromium 68, or grows past its budget.
+
+The journeys, the `.ipk`, the Android TV APK and the phone APK run only on a full build: every push to the combined test build (`test/all-together`), once each time the `full-ci` label is added to a pull request, or a run started by hand (Actions, CI, Run workflow). That keeps CI inside the 2,000 minutes a month GitHub Free gives this private repository. Pushes that change only Markdown or `docs/` run no CI.
 
 ## Layout
 

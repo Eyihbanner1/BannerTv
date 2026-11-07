@@ -161,6 +161,20 @@ export interface OrderOptions {
   maxBitrate?: number;
   /** The video's running time in seconds, for estimating bitrates from file sizes. */
   runtimeSeconds?: number;
+  /**
+   * The audio language wanted, as the engine or the profile names it ("eng",
+   * "es-MX"). In the quality and fast orders, streams that name only other
+   * languages rank below the rest. Unset: none chosen, and streams that name
+   * only languages other than English rank below the rest.
+   */
+  audioLanguage?: string;
+  /**
+   * The highest picture wanted first (a profile's Settings). Streams known to
+   * be above it rank below the rest in the quality and fast orders.
+   */
+  maxResolution?: Resolution;
+  /** HDR streams rank below the rest in the quality and fast orders (a profile's Settings). */
+  avoidHdr?: boolean;
 }
 
 /** One line of the player's Quality menu: the best stream at that resolution. */

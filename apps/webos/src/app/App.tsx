@@ -1,5 +1,6 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { memo, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { RASTER_AHEAD, warmBoxRef } from '../components/decode-ahead';
 import { Rail } from '../components/Rail';
 import { activeProfileId, profileSwitcher } from '../data/profiles';
 import { welcomed } from '../data/welcome';
@@ -17,14 +18,18 @@ import { ProfileEditScreen } from '../screens/profiles/ProfileEditScreen';
 import { ProfilePicker } from '../screens/profiles/ProfilePicker';
 import { ProfilesScreen } from '../screens/profiles/ProfilesScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
+import { AccountScreen } from '../screens/settings/AccountScreen';
 import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
+import { LanguagesScreen } from '../screens/settings/LanguagesScreen';
 import { StreamHelperScreen } from '../screens/settings/StreamHelperScreen';
 import { TraktScreen } from '../screens/settings/TraktScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { EventScreen } from '../screens/sports/EventScreen';
+import { ReminderBanner } from '../screens/sports/ReminderBanner';
 import { SportsScreen } from '../screens/sports/SportsScreen';
 import { StreamsScreen } from '../screens/streams/StreamsScreen';
 import { WelcomeScreen } from '../screens/welcome/WelcomeScreen';
+import { SPORTS_IN_BUILD } from './features';
 import { back, currentSection, openSection, type Route, router } from './router';
 import { createScreenSlot, ScreenSlotContext } from './screen-slot';
 import styles from './App.module.css';
@@ -42,6 +47,11 @@ function focusLeftBehind(screen: HTMLElement): boolean {
 // A route object lives as long as its stack entry, so its identity names one visit.
 const routeIds = new WeakMap<Route, number>();
 let nextRouteId = 0;
+/** Which screen a route shows: a catalog is Discover opened on one. */
+function screenOf(route: Route): string {
+  return route.name === 'catalog' ? 'discover' : route.name;
+}
+
 function routeId(route: Route): number {
   let id = routeIds.get(route);
   if (id === undefined) {
@@ -70,7 +80,15 @@ function Screen({ route }: { route: Route }) {
     case 'settings':
       return <SettingsScreen />;
     case 'details':
-      return <DetailsScreen type={route.type} id={route.id} preview={route.preview} />;
+      return (
+        <DetailsScreen
+          type={route.type}
+          id={route.id}
+          preview={route.preview}
+          video={route.video}
+          visit={routeId(route)}
+        />
+      );
     case 'diagnostics':
       return <DiagnosticsScreen />;
     case 'lab':
@@ -80,13 +98,17 @@ function Screen({ route }: { route: Route }) {
     case 'profiles':
       return <ProfilesScreen />;
     case 'profile-edit':
-      return <ProfileEditScreen id={route.id} />;
+      return <ProfileEditScreen id={route.id} unlocked={route.unlocked} />;
     case 'home-rows':
       return <HomeRowsScreen />;
     case 'trakt':
       return <TraktScreen />;
+    case 'account':
+      return <AccountScreen startOnJoin={route.join} />;
     case 'stream-helper':
       return <StreamHelperScreen />;
+    case 'languages':
+      return <LanguagesScreen />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;
@@ -192,6 +214,10 @@ export function App() {
   const ready = welcomeDone && profileId !== null;
   const root = stack[0]!.route;
   const top = stack[stack.length - 1]!.route;
+  // Two copies of one screen register the same focus keys, and closing one takes the
+  // other's away: a root covered by a copy of itself (Discover's See all over
+  // Discover) is left out, and built again from its memory once uncovered.
+  const rootCovered = top !== root && screenOf(top) === screenOf(root);
   const rootKey = `screen-${routeId(root)}`;
   const topKey = `screen-${routeId(top)}`;
   const { ref, focusKey } = useFocusable<object, HTMLElement>({
@@ -213,11 +239,15 @@ export function App() {
   const fullScreen = top.name === 'player';
   return (
     <div className={styles.app}>
+      {/* Where art is drawn ahead with the aheadMode tuning switch: under the rail, so with it. */}
+      {!fullScreen && RASTER_AHEAD && (
+        <div ref={warmBoxRef} className={styles.warm} aria-hidden="true" data-warm-ahead="" />
+      )}
       {!fullScreen && <Rail />}
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>
           {/* On first run the screens wait, so they cannot take focus from the welcome. */}
-          {ready && (
+          {ready && !rootCovered && (
             <ScreenSlot
               key={rootKey}
               route={root}
@@ -241,6 +271,8 @@ export function App() {
       {!welcomeDone && <WelcomeScreen />}
       {welcomeDone && profileId === null && <ProfilePicker mode="launch" />}
       {ready && switching && <ProfilePicker mode="switch" />}
+      {/* Match reminders (SP4), only once someone is watching. */}
+      {ready && SPORTS_IN_BUILD && <ReminderBanner />}
     </div>
   );
 }

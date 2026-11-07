@@ -4,10 +4,12 @@ import { assessStream } from './assess';
 import { isLighter } from './bitrate';
 import {
   closestCandidate,
+  namesOnlyOthers,
   orderStreams,
   otherLanguages,
   playableCandidates,
   qualityChoices,
+  streamInLanguage,
   streamTier,
 } from './order';
 import type {
@@ -1075,5 +1077,134 @@ describe('closestCandidate, for a step-down after buffering', () => {
       '720p',
     );
     expect(closestCandidate([], { entry: list[0]! })).toBeUndefined();
+  });
+});
+
+describe('the first ranking, by the audio language wanted', () => {
+  const dubbed = () =>
+    entries(UHD_HDR, [
+      ['2160p castellano', { facts: { resolution: '2160p', cached: true, languages: ['es'] } }],
+      ['2160p latino', { facts: { resolution: '2160p', cached: true, languages: ['es'] } }],
+      ['1080p', { facts: { resolution: '1080p', cached: true } }],
+      ['1080p multi', { facts: { resolution: '1080p', languages: ['multi', 'fr'] } }],
+      ['720p english', { facts: { resolution: '720p', languages: ['en'] } }],
+    ]);
+
+  it('puts dubs in other languages below every stream that has the language or says nothing', () => {
+    for (const order of ['quality', 'fast'] as const) {
+      expect(
+        labels(playableCandidates(dubbed(), order, UHD_HDR, { audioLanguage: 'eng' })),
+      ).toEqual(['1080p', '1080p multi', '720p english', '2160p castellano', '2160p latino']);
+    }
+  });
+
+  it('counts nothing chosen as wanting the film’s own language, English when unsaid', () => {
+    expect(labels(orderStreams(dubbed(), 'quality', UHD_HDR)).slice(0, 2)).toEqual([
+      '1080p',
+      '1080p multi',
+    ]);
+  });
+
+  it('puts streams in a language wanted other than English first, then those that say nothing', () => {
+    expect(labels(orderStreams(dubbed(), 'quality', UHD_HDR, { audioLanguage: 'es-ES' }))).toEqual([
+      '2160p castellano',
+      '2160p latino',
+      '1080p multi',
+      '1080p',
+      '720p english',
+    ]);
+  });
+
+  it("leaves the addons' order alone, and an unknown language changes nothing", () => {
+    expect(labels(orderStreams(dubbed(), 'addon', UHD_HDR, { audioLanguage: 'eng' }))).toEqual(
+      labels(dubbed()),
+    );
+    expect(
+      labels(orderStreams(dubbed(), 'quality', UHD_HDR, { audioLanguage: 'Klingon' })),
+    ).toEqual(labels(orderStreams(dubbed(), 'quality', UHD_HDR)));
+  });
+
+  it('still puts a stream that plays before a dub that may not', () => {
+    const list = entries(UHD_HDR, [
+      ['castellano', { facts: { resolution: '1080p', languages: ['es'] } }],
+      ['torrent', { source: 'torrent', facts: { resolution: '1080p' } }],
+    ]);
+    expect(labels(orderStreams(list, 'quality', UHD_HDR, { audioLanguage: 'en' }))).toEqual([
+      'castellano',
+      'torrent',
+    ]);
+  });
+
+  it('tells a dub from what the viewer wants', () => {
+    expect(namesOnlyOthers({ hdr: [], audio: [], languages: ['es'] }, 'eng')).toBe(true);
+    expect(namesOnlyOthers({ hdr: [], audio: [], languages: [] }, 'eng')).toBe(false);
+    expect(namesOnlyOthers({ hdr: [], audio: [], languages: ['multi', 'es'] }, 'en')).toBe(false);
+    expect(namesOnlyOthers({ hdr: [], audio: [], languages: ['es'] }, 'spa')).toBe(false);
+  });
+});
+
+describe('streamInLanguage, for "English audio: switch stream"', () => {
+  it('offers the stream in that language closest to what plays, never a clip', () => {
+    const list = entries(UHD_HDR, [
+      [
+        '2160p castellano',
+        { facts: { resolution: '2160p', languages: ['es'] }, bingeGroup: 'a|FLUX' },
+      ],
+      ['1080p sample', { facts: { resolution: '1080p', sample: true } }],
+      ['1080p', { facts: { resolution: '1080p' } }],
+      ['720p flux', { facts: { resolution: '720p' }, bingeGroup: 'a|FLUX' }],
+      ['720p english', { facts: { resolution: '720p', languages: ['en'] } }],
+    ]);
+    const reference = { entry: list[0]!, audioLanguage: 'spa' };
+    // Names English first; then, among those that say nothing, the same release.
+    expect(streamInLanguage(list, reference, 'eng')?.stream.name).toBe('720p english');
+    expect(streamInLanguage(list.slice(0, 4), reference, 'eng')?.stream.name).toBe('720p flux');
+  });
+
+  it('offers nothing when no other stream has the language', () => {
+    const list = entries(UHD_HDR, [
+      ['castellano', { facts: { resolution: '1080p', languages: ['es'] } }],
+      ['italiano', { facts: { resolution: '1080p', languages: ['it'] } }],
+      ['unnamed', { facts: { resolution: '720p' } }],
+    ]);
+    expect(streamInLanguage(list, { entry: list[0]! }, 'fr')).toBeUndefined();
+    expect(streamInLanguage(list.slice(0, 1), { entry: list[0]! }, 'en')).toBeUndefined();
+    expect(streamInLanguage(list, { entry: list[0]! }, 'Klingon')).toBeUndefined();
+  });
+});
+
+describe('the first ranking, within the picture limits a profile set', () => {
+  const list = () =>
+    entries(UHD_HDR, [
+      ['2160p hdr', { facts: { resolution: '2160p', hdr: ['HDR10'], cached: true } }],
+      ['2160p', { facts: { resolution: '2160p', cached: true } }],
+      ['1080p hdr', { facts: { resolution: '1080p', hdr: ['DV', 'HDR10'], cached: true } }],
+      ['1080p', { facts: { resolution: '1080p' } }],
+      ['unknown', { facts: {} }],
+    ]);
+
+  it('puts streams above the highest picture below the rest', () => {
+    expect(labels(orderStreams(list(), 'quality', UHD_HDR, { maxResolution: '1080p' }))).toEqual([
+      '1080p hdr',
+      '1080p',
+      'unknown',
+      '2160p hdr',
+      '2160p',
+    ]);
+  });
+
+  it('puts HDR below the rest when the profile avoids it, in both orders', () => {
+    expect(labels(orderStreams(list(), 'quality', UHD_HDR, { avoidHdr: true }))).toEqual([
+      '2160p',
+      '1080p',
+      'unknown',
+      '2160p hdr',
+      '1080p hdr',
+    ]);
+    expect(
+      labels(
+        playableCandidates(list(), 'fast', UHD_HDR, { avoidHdr: true, maxResolution: '1080p' }),
+      ),
+    ).toEqual(['1080p', 'unknown', '1080p hdr', '2160p', '2160p hdr']);
   });
 });

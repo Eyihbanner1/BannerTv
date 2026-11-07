@@ -84,6 +84,20 @@
   color: var(--bt-text-muted);
 }
 
+/* A genre that opens Discover: the words as before, a pill when focused. */
+.genre {
+  display: inline-block;
+  margin: 0 -10px;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.genreFocused {
+  background: var(--bt-action-focused);
+  color: #fff;
+  box-shadow: var(--bt-focus-ring);
+}
+
 .description {
   margin-top: 24px;
   font: var(--bt-text-body);
@@ -129,16 +143,31 @@
 
 /* Cast with TMDB's photos, under the buttons. */
 .cast {
-  margin-top: 48px;
+  margin-top: 40px;
   white-space: nowrap;
 }
 
-.person {
+.personSlot {
   display: inline-block;
   vertical-align: top;
-  width: 120px;
   margin-right: 24px;
+}
+
+.person {
+  display: block;
+  width: 120px;
+  padding: 8px 0;
+  border-radius: 16px;
   text-align: center;
+}
+
+.personFocused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+}
+
+.personFocused .personName {
+  color: var(--bt-text);
 }
 
 .face {
@@ -210,4 +239,44 @@
   background: var(--bt-action-focused);
   color: #fff;
   box-shadow: var(--bt-focus-ring);
+}
+
+/* The column slides up while focus is in More like this. */
+.info {
+  transition: transform var(--bt-motion) ease-out;
+}
+
+/* More like this: its own inset lines it up with the text above. Beside the
+   episodes it stops short of their panel; a film's runs to the edge. */
+.more {
+  width: 880px;
+  margin: 48px 0 0 calc(-1 * var(--bt-content-inset));
+}
+
+.moreWide {
+  width: 1736px;
+}
+
+/* "Best stream ready · 1080p" under the buttons. */
+.ready {
+  margin-top: 24px;
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+}
+
+.readyDot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 12px;
+  border-radius: 6px;
+  background: var(--bt-text-subtle);
+}
+
+.readyOn {
+  background: var(--bt-accent);
+}
+
+.readyOff {
+  background: var(--bt-danger);
 }

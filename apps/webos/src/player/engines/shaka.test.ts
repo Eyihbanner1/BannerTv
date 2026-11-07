@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createShakaEngine } from './shaka';
+import { createShakaEngine, shakaTextTrack } from './shaka';
 
 const script = vi.hoisted(() => {
   let resolve = () => undefined as void;
@@ -56,6 +56,23 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('shakaTextTrack', () => {
+  it('marks a track of forced lines only, by Shaka’s flag or its name', () => {
+    const track = (label: string | null, forced: boolean) =>
+      ({ id: 3, language: 'en', label, forced, active: false }) as unknown as Parameters<
+        typeof shakaTextTrack
+      >[0];
+    expect(shakaTextTrack(track(null, false))).toEqual({
+      id: '3',
+      lang: 'en',
+      label: '',
+      active: false,
+    });
+    expect(shakaTextTrack(track('English', true)).forced).toBe(true);
+    expect(shakaTextTrack(track('Signs & Songs', false)).forced).toBe(true);
+  });
 });
 
 describe('the Shaka engine', () => {

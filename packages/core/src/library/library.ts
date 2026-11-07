@@ -20,6 +20,12 @@ export interface LibraryItem {
   genres?: string[];
   /** Milliseconds since 1970. */
   addedAt: number;
+  /**
+   * Set on a title Trakt's watchlist brought in, which the BannerTV account
+   * never sends (ADR 0006, decision 4). Adding it again here drops it: the
+   * viewer then chose it in BannerTV.
+   */
+  from?: 'trakt';
 }
 
 /** A change made on the TV that Trakt has not been told about yet. */
@@ -27,6 +33,18 @@ export interface LibraryChange {
   op: 'add' | 'remove';
   id: string;
   type: ContentType;
+}
+
+/** What the BannerTV account changes in My List. */
+export interface LibraryAdoption {
+  set?: readonly LibraryItem[];
+  remove?: readonly string[];
+  /**
+   * The titles in `remove` go from this screen only, and stay on Trakt's
+   * list: joining an account with Use sets this screen's list aside, which
+   * removes nothing anywhere else.
+   */
+  onlyHere?: boolean;
 }
 
 /** A title as Trakt's watchlist lists it. */
@@ -89,6 +107,14 @@ export interface Library {
   mergeRemote(remote: readonly RemoteLibraryItem[]): Promise<void>;
   /** Forgets the sync state, for signing out of Trakt. The titles stay. */
   forgetRemote(): Promise<void>;
+  /**
+   * Makes My List match a change from the BannerTV account: titles in `set`
+   * are saved as given, their time and Trakt mark included, and ids in
+   * `remove` are taken out. A title taken out goes off Trakt's list too when
+   * that list has it, as remove() does; one put back drops a removal still
+   * waiting for Trakt.
+   */
+  adopt(change: LibraryAdoption): Promise<void>;
   /** Bumps on every change, for screens that show the library. */
   version(): number;
   subscribe(listener: Listener): () => void;
@@ -112,6 +138,7 @@ function readItem(value: unknown): LibraryItem | undefined {
     const genres = raw.genres.filter(isText).slice(0, 6);
     if (genres.length > 0) item.genres = genres;
   }
+  if (raw.from === 'trakt') item.from = 'trakt';
   return item;
 }
 
@@ -251,6 +278,8 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
         const old = current.items[at]!;
         const item = itemFrom(preview, old.addedAt);
         item.type = old.type;
+        // New artwork is not a choice made here: a title from Trakt stays Trakt's.
+        if (old.from) item.from = old.from;
         const same = (Object.keys(item) as Array<keyof LibraryItem>).every(
           (field) => JSON.stringify(item[field]) === JSON.stringify(old[field]),
         );
@@ -334,6 +363,7 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
             type: entry.type,
             name: entry.name,
             addedAt: entry.addedAt,
+            from: 'trakt',
           };
           if (entry.releaseInfo) item.releaseInfo = entry.releaseInfo;
           items.push(item);
@@ -360,6 +390,41 @@ export function createLibrary(options: { storage: KeyValueStore; now?: () => num
           ? current
           : { items: current.items, outbox: [], synced: [] },
       );
+    },
+    adopt(change) {
+      return state.updateNow((current) => {
+        const set = (change.set ?? [])
+          .map(readItem)
+          .filter((item): item is LibraryItem => item !== undefined);
+        const removing = new Set(change.remove ?? []);
+        set.forEach((item) => removing.delete(item.id));
+        const replaced = new Set(set.map((item) => item.id));
+        if (set.length === 0 && !current.items.some((item) => removing.has(item.id))) {
+          return current;
+        }
+        let outbox = current.outbox;
+        for (const item of current.items) {
+          if (!removing.has(item.id)) continue;
+          // As remove(): only a title on Trakt's list has anything there to take off.
+          outbox =
+            current.synced.indexOf(item.id) !== -1 && !change.onlyHere
+              ? queue(outbox, { op: 'remove', id: item.id, type: item.type })
+              : outbox.filter((c) => c.id !== item.id);
+        }
+        outbox = outbox.filter((c) => c.op !== 'remove' || !replaced.has(c.id));
+        const kept = newestFirst(
+          current.items
+            .filter((item) => !removing.has(item.id) && !replaced.has(item.id))
+            .concat(set),
+        ).slice(0, MAX_LIBRARY_ITEMS);
+        // A title that does not fit is not sent to Trakt only to be dropped here.
+        const fits = new Set(kept.map((item) => item.id));
+        return {
+          ...current,
+          items: kept,
+          outbox: outbox.filter((c) => c.op !== 'add' || fits.has(c.id)),
+        };
+      });
     },
     version: () => changes,
     subscribe: state.subscribe,

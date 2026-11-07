@@ -18,6 +18,13 @@ interface AndroidHost {
   /** The stream helper for the LG. Missing from apps built before it. */
   helper?(command: string): void;
   helperState?(): string;
+  /**
+   * Added to version 1 later, so missing from an older app and from the
+   * phone's stand-in: replaces BannerTV's cards on the system's Watch Next row.
+   */
+  watchNext?(cards: string): void;
+  /** Added later too: the link the app was opened with, as JSON, once; "" when none. */
+  takeLink?(): string;
 }
 
 /** The Android app, as it describes itself. */
@@ -50,6 +57,14 @@ export interface AndroidTrack {
   forced?: boolean;
 }
 
+/** One line group of the subtitles inside the file, as Android's player hands it over. */
+export interface AndroidCue {
+  /** With <b>, <i> and <u>, and &, < and > escaped; \n between lines. */
+  text: string;
+  /** Placed at the top of the picture. */
+  top?: boolean;
+}
+
 /**
  * News from Android's player. `load` is the id of the load command it is about, so news about a
  * stream the page has already moved on from can be told apart.
@@ -71,6 +86,11 @@ export type AndroidPlayerEvent = { load?: number } & (
   | { type: 'player'; event: 'time'; position: number; duration: number | null }
   | { type: 'player'; event: 'seeked'; position: number }
   | { type: 'player'; event: 'tracks'; audio: AndroidTrack[]; text: AndroidTrack[] }
+  /**
+   * What shows from `at` (seconds on the player's clock) for subtitle track `track`, until the
+   * next cues event: none when empty. Sent only after a text command with `cues: true`.
+   */
+  | { type: 'player'; event: 'cues'; track: string; at: number; cues: AndroidCue[] }
   | {
       type: 'player';
       event: 'error';
@@ -84,6 +104,8 @@ export type AndroidEvent =
   | { type: 'key'; key: string; repeat?: boolean }
   | { type: 'keyboard'; visible: boolean }
   | { type: 'relaunch' }
+  /** Opened from a link while running, such as a Watch Next card: takeLink() hands it over. */
+  | { type: 'open' }
   | AndroidPlayerEvent;
 
 export type AndroidPlayerCommand =
@@ -100,7 +122,8 @@ export type AndroidPlayerCommand =
   | { op: 'pause' }
   | { op: 'seek'; position: number }
   | { op: 'audio'; id: string }
-  | { op: 'text'; id: string | null }
+  /** cues: the page draws the file's own subtitles, so Android sends them rather than show them. */
+  | { op: 'text'; id: string | null; cues?: true }
   | { op: 'release' };
 
 declare global {
@@ -204,6 +227,32 @@ export function openExternal(url: string): void {
   host()?.openExternal(url);
 }
 
+/**
+ * Publishes to the system's own "Continue watching" row (Watch Next), or
+ * null when this Android app cannot: an older build, or the phone's player.
+ * Android itself does nothing on a phone, a Fire TV or before Android 8.
+ * Each list replaces the last; an empty one empties the row.
+ */
+export function androidWatchNext(): ((cards: readonly object[]) => void) | null {
+  const bridge = host();
+  const watchNext = bridge?.watchNext;
+  if (!bridge || typeof watchNext !== 'function') return null;
+  return (cards) => watchNext.call(bridge, JSON.stringify({ cards }));
+}
+
+/**
+ * The link Android was opened with and holds for the page, read once (the
+ * next read gives nothing), or null when there is none. What it says is
+ * checked by whoever opens it: another app can send one.
+ */
+export function takeAndroidLink(): unknown {
+  const bridge = host();
+  const takeLink = bridge?.takeLink;
+  if (!bridge || typeof takeLink !== 'function') return null;
+  // "" when nothing waits, which is no JSON.
+  return readJson<unknown>(() => takeLink.call(bridge));
+}
+
 const playerListeners = new Set<(event: AndroidPlayerEvent) => void>();
 
 /** Android's player events, until the returned function is called. */
@@ -258,6 +307,8 @@ function playerPaused(): boolean {
 export interface AndroidHooks {
   /** The app came back to the front, as webOSRelaunch does on the TV. */
   onRelaunch?: () => void;
+  /** The app was opened from a link while running; takeAndroidLink() has it. */
+  onOpen?: () => void;
 }
 
 /**
@@ -286,6 +337,9 @@ export function initAndroid(hooks: AndroidHooks = {}): void {
           return;
         case 'relaunch':
           hooks.onRelaunch?.();
+          return;
+        case 'open':
+          hooks.onOpen?.();
           return;
         case 'player':
           playerListeners.forEach((listener) => listener(event));

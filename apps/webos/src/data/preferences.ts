@@ -1,5 +1,6 @@
-import { createStore, MAIN_PROFILE_ID, type StreamOrder } from '@bannertv/core';
+import { createStore, MAIN_PROFILE_ID, type Store, type StreamOrder } from '@bannertv/core';
 import { activeProfileId } from './profiles';
+import { NO_FILTER, readStreamFilter, type StreamFilter } from '../player/stream-filter';
 
 export type SubtitleSize = 'small' | 'medium' | 'large' | 'huge';
 export type SubtitleColour = 'white' | 'yellow' | 'cyan' | 'green';
@@ -24,6 +25,8 @@ export interface Preferences {
   probing: 'auto' | 'on' | 'off';
   /** The order of the All streams list. */
   allStreamsOrder: StreamOrder;
+  /** The quick filter on the stream lists, kept from the last one chosen. */
+  streamFilter: StreamFilter;
   /** Learned from the last audio track chosen. Null: the stream's default. */
   audioLanguage: string | null;
   /** Learned from the last subtitles chosen. Null: subtitles off. */
@@ -33,17 +36,39 @@ export interface Preferences {
   tmdb: boolean;
   /** The third episode in a row to start by itself asks "Still watching?" first. */
   stillWatching: boolean;
+  // Languages and picture (Settings > Languages and picture, improvements list PL6).
+  /**
+   * always: subtitles in subtitleLanguage show for every title. foreign: only
+   * when the audio heard is in another language than they are.
+   */
+  subtitleWhen: 'always' | 'foreign';
+  /** The highest picture auto-play goes for first. Null: as high as the TV shows. */
+  maxResolution: MaxResolution | null;
+  /** Auto-play passes over HDR streams while one without HDR plays as well. */
+  avoidHdr: boolean;
+  /**
+   * A language chosen in the player also becomes the profile's own, for
+   * every title. Off: it stays with the title it was chosen for.
+   */
+  learnLanguages: boolean;
 }
+
+export type MaxResolution = '2160p' | '1080p' | '720p';
 
 export const DEFAULT_PREFERENCES: Preferences = {
   streamChoice: 'quality',
   probing: 'auto',
   allStreamsOrder: 'quality',
+  streamFilter: NO_FILTER,
   audioLanguage: null,
   subtitleLanguage: null,
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
   tmdb: true,
   stillWatching: true,
+  subtitleWhen: 'always',
+  maxResolution: null,
+  avoidHdr: false,
+  learnLanguages: false,
 };
 
 // Small and needed before the first stream is picked, so localStorage like the welcome flag.
@@ -55,6 +80,10 @@ function keyFor(profileId: string): string {
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.indexOf(value as T) !== -1 ? (value as T) : fallback;
+}
+
+function pickOr<T extends string, F>(value: unknown, allowed: readonly T[], fallback: F): T | F {
   return allowed.indexOf(value as T) !== -1 ? (value as T) : fallback;
 }
 
@@ -85,6 +114,7 @@ export function readPreferences(raw: string | null): Preferences {
       ['quality', 'fast', 'addon'] as const,
       d.allStreamsOrder,
     ),
+    streamFilter: readStreamFilter(stored.streamFilter),
     audioLanguage: nullableString(stored.audioLanguage, d.audioLanguage),
     subtitleLanguage: nullableString(stored.subtitleLanguage, d.subtitleLanguage),
     subtitleStyle: {
@@ -108,6 +138,14 @@ export function readPreferences(raw: string | null): Preferences {
     tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
     stillWatching:
       typeof stored.stillWatching === 'boolean' ? stored.stillWatching : d.stillWatching,
+    subtitleWhen: pick(stored.subtitleWhen, ['always', 'foreign'] as const, d.subtitleWhen),
+    maxResolution:
+      stored.maxResolution === null
+        ? null
+        : pickOr(stored.maxResolution, ['2160p', '1080p', '720p'] as const, d.maxResolution),
+    avoidHdr: typeof stored.avoidHdr === 'boolean' ? stored.avoidHdr : d.avoidHdr,
+    learnLanguages:
+      typeof stored.learnLanguages === 'boolean' ? stored.learnLanguages : d.learnLanguages,
   };
 }
 
@@ -135,6 +173,23 @@ preferences.subscribe(() => {
     // Without storage the choices last until the app closes.
   }
 });
+
+/**
+ * The preferences of a profile not in use, read from its own key and saved
+ * there, for the BannerTV account to create, join or catch it up (ADR 0006).
+ * The profile in use has `preferences`.
+ */
+export function profilePreferences(profileId: string): Store<Preferences> {
+  const store = createStore<Preferences>(load(profileId));
+  store.subscribe(() => {
+    try {
+      localStorage.setItem(keyFor(profileId), JSON.stringify(store.get()));
+    } catch {
+      // Then it is sent again the next time.
+    }
+  });
+  return store;
+}
 
 /** Forgets a deleted profile's preferences. */
 export function deletePreferences(profileId: string): void {

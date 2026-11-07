@@ -33,6 +33,11 @@ class JsEvents(private val webView: WebView) {
         send(JSONObject().put("type", "relaunch"))
     }
 
+    /** A link came in while running; the page takes it with takeLink(). */
+    fun open() {
+        send(JSONObject().put("type", "open"))
+    }
+
     fun keyboard(visible: Boolean) {
         send(JSONObject().put("type", "keyboard").put("visible", visible))
     }

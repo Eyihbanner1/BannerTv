@@ -62,6 +62,15 @@ export interface QueryOptions<T> {
   policy: CachePolicy;
   /** Also keep the response across launches in the CacheStore. */
   persist: boolean;
+  /**
+   * An answer equal to the copy on screen keeps that copy's objects, and one
+   * that changed keeps those of its parts that did not (keepEqual), so what
+   * draws it has nothing to do again. When that leaves the state as it was,
+   * subscribers are not told. Off for readers that take a new data object as
+   * news that an answer came, as the sports feed and the sports readings of
+   * Discover and Search do: they read kick-offs again as of then.
+   */
+  keepEqual?: boolean;
 }
 
 export interface QueryCache {
@@ -76,6 +85,86 @@ interface Entry {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+type Plain = Record<string, unknown>;
+
+function isPlain(value: unknown): value is Plain {
+  return (
+    typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function idOf(value: unknown): string | undefined {
+  return isPlain(value) && typeof value.id === 'string' ? value.id : undefined;
+}
+
+function shareList(prev: readonly unknown[], next: readonly unknown[]): readonly unknown[] {
+  let same = prev.length === next.length;
+  let copy: unknown[] | undefined;
+  let byId: Map<string, unknown> | undefined;
+  for (let i = 0; i < next.length; i++) {
+    const value = next[i];
+    const id = idOf(value);
+    let has = i < prev.length;
+    let old = prev[i];
+    // An item that moved is found by its id: a list with one title more keeps the rest.
+    if (id !== undefined && idOf(old) !== id) {
+      if (!byId) {
+        byId = new Map();
+        for (const item of prev) {
+          const key = idOf(item);
+          if (key !== undefined && !byId.has(key)) byId.set(key, item);
+        }
+      }
+      has = byId.has(id);
+      old = byId.get(id);
+    }
+    const kept = has ? share(old, value) : value;
+    if (same && !Object.is(kept, prev[i])) same = false;
+    if (!copy && !Object.is(kept, value)) copy = next.slice(0, i);
+    if (copy) copy.push(kept);
+  }
+  return same ? prev : (copy ?? next);
+}
+
+function shareRecord(prev: Plain, next: Plain): Plain {
+  const keys = Object.keys(next);
+  const prevKeys = Object.keys(prev);
+  let same = keys.length === prevKeys.length;
+  let copy: Plain | undefined;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    // Assigning it would set the copy's prototype instead.
+    if (key === '__proto__') return next;
+    const value = next[key];
+    const kept = Object.prototype.hasOwnProperty.call(prev, key) ? share(prev[key], value) : value;
+    if (same && (prevKeys[i] !== key || !Object.is(kept, prev[key]))) same = false;
+    if (!copy && !Object.is(kept, value)) {
+      copy = {};
+      for (let j = 0; j < i; j++) copy[keys[j]!] = next[keys[j]!];
+    }
+    if (copy) copy[key] = kept;
+  }
+  return same ? prev : (copy ?? next);
+}
+
+function share(prev: unknown, next: unknown): unknown {
+  if (Object.is(prev, next)) return prev;
+  if (Array.isArray(prev) && Array.isArray(next)) return shareList(prev, next);
+  if (isPlain(prev) && isPlain(next)) return shareRecord(prev, next);
+  return next;
+}
+
+/**
+ * `next`, with every part equal to the same part of `prev` swapped for prev's
+ * own object, so `prev` itself when all of it is equal. Only arrays and plain
+ * objects are looked into, their keys in the same order, and an array's items
+ * are matched by place or else by their `id`. Anything else is equal only to
+ * itself. Neither value is changed.
+ */
+export function keepEqual<T>(prev: unknown, next: T): T {
+  return share(prev, next) as T;
 }
 
 /**
@@ -135,12 +224,20 @@ export function createQueryCache(
 
         try {
           const result = await opts.fetch();
+          const value = opts.keepEqual ? keepEqual(state.data, result.value) : result.value;
           record = {
-            value: result.value,
+            value,
             storedAt: now(),
             ...policyFromHints(result.hints, opts.policy),
           };
-          set({ status: 'success', data: result.value, stale: false });
+          // An equal answer kept as it was, on a copy already shown as fresh: nothing to tell.
+          const shown =
+            opts.keepEqual === true &&
+            state.status === 'success' &&
+            state.data === value &&
+            !state.stale &&
+            state.error === undefined;
+          if (!shown) set({ status: 'success', data: value, stale: false });
           if (opts.persist && store) store.write(key, record).catch(() => undefined);
         } catch (error) {
           if (record && phaseOf(record, now()) !== 'expired') {

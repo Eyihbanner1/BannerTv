@@ -48,6 +48,14 @@
   box-shadow: inset 0 0 0 2px var(--bt-surface-3);
 }
 
+/* A filter with every part on says it all to Audio Guidance, and as much as fits here. */
+.filter {
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
 .buttonFocused {
   background: var(--bt-surface-3);
   color: var(--bt-text);

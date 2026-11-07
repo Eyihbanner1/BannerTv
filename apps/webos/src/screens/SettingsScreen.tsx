@@ -1,4 +1,5 @@
-import { useState, useSyncExternalStore } from 'react';
+import { MAIN_PROFILE_ID } from '@bannertv/core';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import appinfo from '../../webos-meta/appinfo.json';
 import { push } from '../app/router';
@@ -7,7 +8,8 @@ import { Button } from '../components/Button';
 import { Menu } from '../components/Menu';
 import { serviceStatus } from '../data/api';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
-import { isKidsProfile } from '../data/profiles';
+import { activeProfileId, isKidsProfile } from '../data/profiles';
+import { accountSection, checkAccountSection } from '../data/sync';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
 import styles from './Screen.module.css';
 import settings from './SettingsScreen.module.css';
@@ -55,8 +57,14 @@ function FullSettings() {
   const { t } = useTranslation();
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
   const service = useSyncExternalStore(serviceStatus.subscribe, serviceStatus.get);
+  const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
   const [open, setOpen] = useState<Open>(null);
   useScreenFocus('settings-stream-choice');
+  // The account is Main's to manage: other profiles, kids or not, never see it (ADR 0006).
+  const isMain = activeProfileId.get() === MAIN_PROFILE_ID;
+  useEffect(() => {
+    if (isMain) checkAccountSection();
+  }, [isMain]);
 
   return (
     <div className={styles.screen}>
@@ -110,6 +118,12 @@ function FullSettings() {
           label={t('settings.streamHelper')}
           onPress={() => push({ name: 'stream-helper' })}
         />
+        <Button
+          block
+          focusKey="settings-languages"
+          label={t('languages.title')}
+          onPress={() => push({ name: 'languages' })}
+        />
       </div>
       <div className={`${styles.column} ${settings.right}`}>
         <h2 className={settings.heading}>{t('settings.people')}</h2>
@@ -125,6 +139,14 @@ function FullSettings() {
           label={t('homeRows.title')}
           onPress={() => push({ name: 'home-rows' })}
         />
+        {isMain && section.shown && (
+          <Button
+            block
+            focusKey="settings-account"
+            label={t('settings.account')}
+            onPress={() => push({ name: 'account' })}
+          />
+        )}
         {(service.trakt || service.tmdb) && (
           <h2 className={`${settings.heading} ${settings.later}`}>{t('settings.services')}</h2>
         )}

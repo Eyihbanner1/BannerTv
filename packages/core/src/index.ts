@@ -20,6 +20,17 @@ export {
   setRowHidden,
 } from './addons/layout';
 export {
+  CONTINUE_LINE,
+  type HomeLine,
+  homeLines,
+  LIVE_SPORT_LINE,
+  MY_LIST_LINE,
+  moveLine,
+  type OwnLine,
+  ownLinePlaces,
+  setLineHidden,
+} from './addons/home-lines';
+export {
   type AddonAnswer,
   type AddonClient,
   BROWSE_TIMEOUT_MS,
@@ -39,14 +50,37 @@ export {
   withArtwork,
 } from './addons/client';
 export {
+  addressTag,
   type AddonCollection,
+  type CollectionAdoption,
   type CollectionState,
   createAddonCollection,
   InstallError,
   type InstallErrorKind,
   type InstalledAddon,
+  installIdOf,
+  MANIFEST_TIMEOUT_MS,
   type StoredAddon,
 } from './addons/collection';
+export {
+  type AddonHealth,
+  type AddonHealthMap,
+  type AddonHealthState,
+  type AddonHealthStore,
+  answerState,
+  createAddonHealth,
+  installForUrl,
+  installIdForUrl,
+  observeAnswers,
+  SLOW_SHARE,
+} from './addons/health';
+export {
+  type AddonSwitches,
+  addonSwitchesPart,
+  createAddonSwitches,
+  switchedOnOnly,
+  type SwitchesState,
+} from './addons/switches';
 export {
   BANNERTV_DEMO_ID,
   BANNERTV_DEMO_URL,
@@ -61,6 +95,16 @@ export {
   type PagerStatus,
 } from './addons/pager';
 export {
+  catalogsFromManyAddons,
+  type DiscoverResolved,
+  type DiscoverSelection,
+  discoverSelection,
+  genreSource,
+  moreLikeSource,
+  type MoreLikeSource,
+  resolveDiscover,
+} from './addons/browse';
+export {
   type CatalogSource,
   discoverSources,
   type DiscoverSource,
@@ -72,6 +116,7 @@ export { createLane, DroppedError, type Lane } from './lane';
 export {
   createLibrary,
   type Library,
+  type LibraryAdoption,
   type LibraryChange,
   type LibraryItem,
   MAX_LIBRARY_ITEMS,
@@ -85,6 +130,20 @@ export {
   type LibrarySort,
   libraryView,
 } from './library/views';
+export {
+  CALENDAR_MAX_TITLES,
+  CALENDAR_WINDOW,
+  type CalendarDay,
+  calendarDays,
+  type CalendarEntry,
+  calendarEntries,
+  type CalendarKind,
+  calendarStart,
+  calendarView,
+  type CalendarWindow,
+  type FollowedTitle,
+  followedTitles,
+} from './library/calendar';
 export { createLimiter, type Limiter } from './limiter';
 export { createPersisted, type Persisted, type PersistedOptions } from './persisted';
 export {
@@ -99,16 +158,28 @@ export {
 } from './query';
 export { type BandwidthMemory, createBandwidthMemory } from './playback/bandwidth';
 export {
+  cardNext,
+  caughtUpSeries,
   CONTINUE_LIMIT,
   type ContinueItem,
   continueItem,
   continueWatching,
   createPlayedVideos,
+  NEW_EPISODE_MS,
+  type PlayedAdoption,
   playedCard,
   type PlayedVideo,
   type PlayedVideos,
 } from './playback/continue';
 export { bingeEntry, type BingeHint, bingeHint, findBingeStream, nextVideo } from './playback/next';
+export {
+  createReleaseMemory,
+  MAX_RELEASE_TITLES,
+  type ReleaseChoice,
+  releaseChoice,
+  releaseHint,
+  type ReleaseMemory,
+} from './playback/releases';
 export {
   clampToWindow,
   judgeLive,
@@ -157,6 +228,25 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  BACK_TO_MIN_JUMP_S,
+  BACK_TO_MS,
+  offersBackTo,
+  SKIP_LANDS_AFTER_MS,
+  skipStep,
+} from './playback/seeking';
+export {
+  readSkipSegments,
+  SKIP_CARD_S,
+  SKIP_REARM_S,
+  SKIP_TAIL_S,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  type SkipKind,
+  skipRearms,
+  type SkipSegment,
+} from './playback/skips';
+export {
   type EndAction,
   endAction,
   type EndState,
@@ -168,24 +258,51 @@ export {
   UP_NEXT_REARM_S,
 } from './playback/up-next';
 export {
+  AWAY_MS,
   createProgressStore,
+  isUnmarked,
   MIN_RESUME_SECONDS,
+  type ProgressAdoption,
   type ProgressEntry,
+  type ProgressMark,
   type ProgressStore,
   type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+  resumeLeadIn,
   WATCHED_FRACTION,
 } from './playback/progress';
 export {
+  createSubtitleDrifts,
+  type DriftAdoption,
+  type DriftChoice,
+  MAX_SUBTITLE_DRIFTS,
+  type SavedDrift,
+  SUBTITLE_DRIFTS,
+  type SubtitleDrift,
+  type SubtitleDrifts,
+} from './playback/drifts';
+export {
   createSubtitleOffsets,
   MAX_SUBTITLE_OFFSETS,
+  type OffsetAdoption,
+  type SavedOffset,
   type SubtitleOffsets,
   subtitleFileKey,
 } from './playback/offsets';
+export {
+  createSubtitlePickMemory,
+  MAX_SUBTITLE_PICKS,
+  type SubtitlePick,
+  type SubtitlePickMemory,
+  subtitleRelease,
+} from './playback/subtitle-picks';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
 export {
   createTrackMemory,
   MAX_TRACK_TITLES,
+  type TrackAdoption,
   type TrackChoice,
   type TrackMemory,
 } from './playback/tracks';
@@ -197,6 +314,8 @@ export {
   KIDS_GENRE,
   KIDS_TYPES,
   kidsAddons,
+  kidsDetailsAllowed,
+  type KidsRatingFacts,
   kidsTitleAllowed,
   ratingAllowed,
   ukRating,
@@ -235,9 +354,18 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './search';
 export * from './sports';
 export { createStore } from './store';
+export * from './sync';
 export { assessStream, SEVERE_WARNINGS, streamRequestHeaders } from './streams/assess';
+export {
+  explainProblem,
+  type PlayAttempt,
+  type PlayProblem,
+  type ProblemExplained,
+  type ProblemInput,
+} from './streams/explain';
 export {
   DEFAULT_MAX_BITRATE,
   estimateBitrate,
@@ -249,10 +377,12 @@ export {
 export { describeStream } from './streams/facts';
 export {
   closestCandidate,
+  namesOnlyOthers,
   orderStreams,
   otherLanguages,
   playableCandidates,
   qualityChoices,
+  streamInLanguage,
   streamTier,
 } from './streams/order';
 export type {
@@ -274,6 +404,7 @@ export type {
   TvCapabilities,
   VideoCodec,
 } from './streams/types';
+export { isAdCue, stripAdCues } from './subtitles/ads';
 export { createCueIndex, type CueIndex } from './subtitles/cues';
 export { detectEncoding } from './subtitles/encoding';
 export {
@@ -282,7 +413,28 @@ export {
   languageKey,
   languageName,
 } from './subtitles/languages';
+export {
+  FRAME_RATE_RATIO,
+  isForcedName,
+  judgeScript,
+  judgeSubtitleFit,
+  judgeSubtitleFits,
+  profileSubtitles,
+  type Script,
+  type SubtitleFit,
+  type SubtitleProfile,
+  type VideoLength,
+} from './subtitles/fit';
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
+export {
+  clearlyBetter,
+  fitTier,
+  rankReason,
+  type RankOptions,
+  rankSubtitles,
+  type ReasonOptions,
+  UNREAD_TIER,
+} from './subtitles/rank';
 export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
@@ -297,6 +449,16 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export { TMDB_LOGO } from './integrations/tmdb/logo';
+export {
+  createIntroDbClient,
+  episodeOf,
+  INTRODB_POLICY,
+  INTRODB_TIMEOUT_MS,
+  INTRODB_URL,
+  type IntroDbClient,
+  type IntroDbClientOptions,
+} from './integrations/introdb/client';
 export {
   createTraktAccount,
   TRAKT_REFRESH_BEFORE_MS,
@@ -317,6 +479,13 @@ export {
   type TraktTarget,
   traktTarget,
 } from './integrations/trakt/ids';
+export {
+  createTraktMarks,
+  historyBody,
+  pausedIds,
+  type TraktMark,
+  type TraktMarks,
+} from './integrations/trakt/marks';
 export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
 export {
   createTraktSync,

@@ -23,13 +23,23 @@ interface PinPadProps {
   /** Called with all four digits; the pad then starts empty again. */
   onPin: (digits: string) => void;
   onClose: () => void;
+  /** Shows "Forgot PIN?" under the keys, for a pad asking for a profile's own PIN. */
+  onForgot?: () => void;
 }
 
 /**
  * Four digits, typed with the remote's number keys or picked on the pad.
  * The fourth digit sends the PIN; the digits are never shown, only dots.
  */
-export function PinPad({ focusKey, title, message, returnFocusKey, onPin, onClose }: PinPadProps) {
+export function PinPad({
+  focusKey,
+  title,
+  message,
+  returnFocusKey,
+  onPin,
+  onClose,
+  onForgot,
+}: PinPadProps) {
   const { t } = useTranslation();
   const [digits, setDigits] = useState('');
   const latest = useRef({ digits, onPin });
@@ -107,6 +117,19 @@ export function PinPad({ focusKey, title, message, returnFocusKey, onPin, onClos
           );
         })}
       </div>
+      {onForgot && (
+        <div className={styles.forgot}>
+          <Pressable
+            focusKey={`${focusKey}-forgot`}
+            label={t('pin.forgot')}
+            className={styles.forgotButton}
+            focusedClassName={styles.focused}
+            onPress={onForgot}
+          >
+            {t('pin.forgot')}
+          </Pressable>
+        </div>
+      )}
     </Overlay>
   );
 }

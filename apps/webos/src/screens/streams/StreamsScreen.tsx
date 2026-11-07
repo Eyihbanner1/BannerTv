@@ -1,25 +1,38 @@
-import { otherLanguages, parseRuntime, type StreamEntry, type StreamOrder } from '@bannertv/core';
+import { parseRuntime, type StreamEntry, type StreamOrder } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { type EventPlay, type PlayerRoute, replace, topRoute } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { Menu } from '../../components/Menu';
-import { Pressable } from '../../components/Pressable';
 import { addonClient, addonNames } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
 import { useQuery } from '../../data/use-query';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { playTrailer } from '../../platform/youtube';
-import { streamRowText, streamsStatus } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, streamFinder } from '../../player/finder';
 import { leaveSleepTimer } from '../../player/sleep';
+import {
+  filterButtonLabel,
+  filteredStatus,
+  filterKey,
+  shownStreams,
+} from '../../player/stream-filter';
+import { StreamFilterMenu } from './StreamFilterMenu';
+import { STREAM_ROW_HEIGHT, StreamRow } from './StreamRow';
 import styles from './StreamsScreen.module.css';
 
-const ITEM_HEIGHT = 168;
 const VISIBLE = 5;
 const OVERSCAN = 2;
 const ORDERS: readonly StreamOrder[] = ['quality', 'fast', 'addon'];
@@ -40,7 +53,8 @@ interface StreamsScreenProps {
 /**
  * Every stream the addons offered for one video, for choosing by hand when
  * auto-play's pick is not the one wanted. Streams this TV cannot play stay
- * in the list, last and dimmed, with the reason.
+ * in the list, last and dimmed, with the reason. A quick filter, kept for the
+ * profile, narrows it: picture size, cached only, addon, audio language.
  */
 export function StreamsScreen(props: StreamsScreenProps) {
   const { type, metaId, videoId, preview, startAt, event, backTo } = props;
@@ -51,6 +65,7 @@ export function StreamsScreen(props: StreamsScreenProps) {
     preferences.subscribe,
     () => preferences.get().allStreamsOrder,
   );
+  const filter = useSyncExternalStore(preferences.subscribe, () => preferences.get().streamFilter);
   // A sports event's page comes from the addon that listed it, never another one.
   const metaQuery = useMemo(
     () => (type === 'movie' || event ? null : addonClient.meta(type, metaId)),
@@ -60,6 +75,7 @@ export function StreamsScreen(props: StreamsScreenProps) {
   const item = meta ?? preview;
   const episode = meta?.videos.find((v) => v.id === videoId);
   const [sorting, setSorting] = useState(false);
+  const [filtering, setFiltering] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [anchor, setAnchor] = useState(0);
 
@@ -78,10 +94,16 @@ export function StreamsScreen(props: StreamsScreenProps) {
   useEffect(() => finder.setRuntime(parseRuntime(runtime)), [finder, runtime]);
   // Re-sorted when the order changes or more addons answer. The finder answers
   // again when the running time or the connection's limit changes.
-  const entries = useMemo(
-    () => listOrder(state.entries, order, finder.runtimeSeconds()),
+  const ordered = useMemo(
+    () => listOrder(state.entries, order, finder.orderOptions()),
     [state.entries, order, finder],
   );
+  const shown = useMemo(() => shownStreams(ordered, filter), [ordered, filter]);
+  const entries = shown.entries;
+  // Spatial navigation keeps the focus key a row was first drawn with. Another
+  // order or filter moves streams to other places, so their rows are drawn
+  // afresh; focus is on Sort or Filter then. A late addon's rows still slide in.
+  const generation = `${order}|${filterKey(filter)}|${shown.missed}`;
   const names = addonNames();
 
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
@@ -116,49 +138,48 @@ export function StreamsScreen(props: StreamsScreenProps) {
     }
   };
 
-  const first = Math.max(0, anchor - OVERSCAN);
-  const last = Math.min(entries.length, anchor + VISIBLE + OVERSCAN);
+  // Rows get handlers that never change, so a move redraws the rows whose
+  // focus changed and the one that slid into view, not every one drawn.
+  const latest = useRef({ entries, anchor, open });
+  useLayoutEffect(() => {
+    latest.current = { entries, anchor, open };
+  });
+  const onRowFocus = useCallback(
+    (index: number) => {
+      const target = Math.max(0, index - 1);
+      if (canSlide() && target !== latest.current.anchor) setAnchor(target);
+    },
+    [setAnchor],
+  );
+  const onRowPress = useCallback((index: number) => {
+    const { entries: list, open: play } = latest.current;
+    const entry = list[index];
+    if (entry) play(entry);
+  }, []);
+
+  // A filter changed elsewhere can leave fewer rows than the place slid to.
+  const top = Math.min(anchor, Math.max(0, entries.length - 1));
+  const first = Math.max(0, top - OVERSCAN);
+  const last = Math.min(entries.length, top + VISIBLE + OVERSCAN);
   const rows = [];
   for (let index = first; index < last; index++) {
     const entry = entries[index]!;
-    const { title, badges, playable, note, notes } = streamRowText(t, entry, {
-      heavy: isHeavy(entry, finder.runtimeSeconds()),
-      languages: otherLanguages(entry.facts),
-    });
-    const probe = state.probes[entryKey(entry)];
-    const name = names.get(entry.addonId) ?? entry.addonId;
     rows.push(
-      <Pressable
-        key={entryKey(entry)}
-        focusKey={`streams-item-${index}`}
-        label={[name, title, badges.join(', '), ...notes].filter(Boolean).join('. ')}
-        className={playable ? styles.stream : `${styles.stream} ${styles.unplayable}`}
-        focusedClassName={styles.focused}
-        style={{ top: index * ITEM_HEIGHT }}
-        onPress={() => open(entry)}
-        onFocus={() => {
-          const target = Math.max(0, index - 1);
-          if (canSlide() && target !== anchor) setAnchor(target);
-        }}
-      >
-        <div className={styles.addon}>{name}</div>
-        <div className={styles.text}>
-          <p className={styles.title}>{title}</p>
-          <p className={styles.badges}>
-            {badges.map((badge) => (
-              <span key={badge} className={styles.badge}>
-                {badge}
-              </span>
-            ))}
-            {probe === 'works' && <span className={styles.works}>{t('streams.tested')}</span>}
-          </p>
-          {note && <p className={playable ? styles.warning : styles.reason}>{note}</p>}
-        </div>
-      </Pressable>,
+      <StreamRow
+        key={`${generation}|${entryKey(entry)}`}
+        t={t}
+        index={index}
+        entry={entry}
+        addon={names.get(entry.addonId) ?? entry.addonId}
+        heavy={isHeavy(entry, finder.runtimeSeconds())}
+        tested={state.probes[entryKey(entry)] === 'works'}
+        onRowFocus={onRowFocus}
+        onRowPress={onRowPress}
+      />,
     );
   }
 
-  const status = streamsStatus(t, state, entries.length);
+  const status = filteredStatus(t, state, shown, ordered.length);
 
   return (
     <section className={styles.screen} aria-label={t('streams.title')}>
@@ -181,11 +202,18 @@ export function StreamsScreen(props: StreamsScreenProps) {
             {status}
           </p>
         </div>
-        <Button
-          focusKey="streams-sort"
-          label={t('streams.sortBy', { order: t(`streams.order.${order}`) })}
-          onPress={() => setSorting(true)}
-        />
+        <div className={styles.buttons}>
+          <Button
+            focusKey="streams-filter"
+            label={filterButtonLabel(t, filter, names)}
+            onPress={() => setFiltering(true)}
+          />
+          <Button
+            focusKey="streams-sort"
+            label={t('streams.sortBy', { order: t(`streams.order.${order}`) })}
+            onPress={() => setSorting(true)}
+          />
+        </div>
       </div>
       {note && <p className={styles.note}>{note}</p>}
       <FocusContext.Provider value={focusKey}>
@@ -195,7 +223,7 @@ export function StreamsScreen(props: StreamsScreenProps) {
           )}
           <div
             className={styles.track}
-            style={{ transform: `translateY(${-anchor * ITEM_HEIGHT}px)` }}
+            style={{ transform: `translateY(${-top * STREAM_ROW_HEIGHT}px)` }}
           >
             {rows}
           </div>
@@ -214,6 +242,17 @@ export function StreamsScreen(props: StreamsScreenProps) {
             setPreference('allStreamsOrder', value as StreamOrder);
           }}
           onClose={() => setSorting(false)}
+        />
+      )}
+      {filtering && (
+        <StreamFilterMenu
+          focusKey="streams-filter-menu"
+          entries={ordered}
+          filter={filter}
+          names={names}
+          returnFocusKey="streams-filter"
+          onChange={() => setAnchor(0)}
+          onClose={() => setFiltering(false)}
         />
       )}
     </section>
