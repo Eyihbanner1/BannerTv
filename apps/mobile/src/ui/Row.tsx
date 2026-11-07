@@ -24,7 +24,8 @@ export function Row({
   footer,
 }: {
   title: string;
-  tag?: string;
+  /** Muted words after the title, or a source's logo. */
+  tag?: ReactNode;
   items: readonly RowItem[] | null;
   shape: TileShape;
   onPress: (item: RowItem) => void;
@@ -42,10 +43,12 @@ export function Row({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        {tag ? (
+        {typeof tag === 'string' && tag !== '' ? (
           <Text style={styles.tag} numberOfLines={1}>
             {tag}
           </Text>
+        ) : typeof tag === 'object' ? (
+          tag
         ) : null}
         <View style={styles.spacer} />
         {onSeeAll && seeAllLabel ? (
@@ -78,6 +81,7 @@ export function Row({
             />
           )}
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={Separator}
           initialNumToRender={4}

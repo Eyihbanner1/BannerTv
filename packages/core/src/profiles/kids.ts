@@ -11,7 +11,17 @@ export const KIDS_GENRE = 'Family';
 
 // IMDb's and TMDB's genre names, compared in lower case.
 const FOR_CHILDREN = ['family', 'kids', 'children'];
-const NOT_FOR_CHILDREN = ['horror', 'thriller', 'crime', 'war', 'adult', 'erotic', 'erotica'];
+const NOT_FOR_CHILDREN = [
+  'horror',
+  'thriller',
+  'crime',
+  'war',
+  // TMDB's name for war series.
+  'war & politics',
+  'adult',
+  'erotic',
+  'erotica',
+];
 
 /**
  * Whether a kids profile may see a title, from what catalogs say about it.
@@ -69,6 +79,29 @@ export function ukRating(certificate: string, country: 'GB' | 'US'): string | un
 /** The stricter of two UK ratings. */
 export function stricterRating(a: string, b: string): string {
   return UK_ORDER.indexOf(b) > UK_ORDER.indexOf(a) ? b : a;
+}
+
+/**
+ * The strictest UK rating among a title's certificates: the UK's own, else
+ * the US's mapped. A film rated PG at the cinema and 15 on disc is a 15.
+ * Undefined when none reads as a rating.
+ */
+export function strictestUkRating(
+  uk: readonly string[],
+  us: readonly string[],
+): string | undefined {
+  for (const [list, country] of [
+    [uk, 'GB'],
+    [us, 'US'],
+  ] as const) {
+    let strictest = -1;
+    for (const certificate of list) {
+      const rating = ukRating(certificate, country);
+      if (rating !== undefined) strictest = Math.max(strictest, UK_ORDER.indexOf(rating));
+    }
+    if (strictest !== -1) return UK_ORDER[strictest];
+  }
+  return undefined;
 }
 
 /** Whether a title rated `rating` (a UK rating) may play in a kids profile allowing `max`. */
@@ -137,4 +170,32 @@ export function kidsSearchSources<S extends CatalogSource>(sources: readonly S[]
     (source) =>
       KIDS_TYPES.indexOf(source.catalog.type) !== -1 && !source.addon.manifest.behaviorHints.adult,
   );
+}
+
+/** What TMDB rates a title, as Details reads it. */
+export interface KidsRatingFacts {
+  /** A UK rating: the UK's certificate, else the US one mapped. */
+  certificate?: string;
+  /** The strictest of that country's ratings, when one is stricter than `certificate`. */
+  strictestCertificate?: string;
+}
+
+/**
+ * Whether a kids profile allowing `max` may play a title on Details (TV and
+ * phone alike), from its full details and what TMDB rates it. With a UK
+ * rating, the rating decides: the strictest of the country's (a film rated
+ * PG at the cinema and 15 on disc is a 15) must be within the profile's, and
+ * no genre may say it is not for children. Cinemeta's Family rows hold PG
+ * films whose details list only Animation or Adventure, so no Family genre is
+ * needed then. Without a rating, the details must list it as for families or
+ * children. A rated title needs a profile limit.
+ */
+export function kidsDetailsAllowed(
+  meta: Pick<MetaPreview, 'type' | 'genres'>,
+  rating: KidsRatingFacts | undefined,
+  max: KidsRating | undefined,
+): boolean {
+  const certificate = rating?.strictestCertificate ?? rating?.certificate;
+  if (certificate === undefined) return kidsTitleAllowed(meta);
+  return max !== undefined && ratingAllowed(certificate, max) && kidsTitleAllowed(meta, true);
 }

@@ -1,5 +1,5 @@
 import { phone } from '@brand/tokens/design';
-import { kidsTitleAllowed, moreLikeSource, ratingAllowed, tmdbImageUrl } from '@bannertv/core';
+import { kidsDetailsAllowed, kidsTitleAllowed, moreLikeSource, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient, addonCollection } from '@tv/data/addons';
 import { describeAddonError, formatDate, metaFacts } from '@tv/data/describe';
@@ -304,17 +304,12 @@ export function TitleScreen({
   const [now] = useState(Date.now);
   const [expanded, setExpanded] = useState(false);
 
-  // Kids: the same gate as the TV's Details.
+  // Kids: the TV's Details rule, shared in core.
   const kids = isKidsProfile();
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
   const kidsAllowed =
-    !kids ||
-    (kidsDecided &&
-      meta !== undefined &&
-      kidsTitleAllowed(meta) &&
-      (extra?.certificate === undefined ||
-        (kidsMax !== undefined && ratingAllowed(extra.certificate, kidsMax))));
+    !kids || (kidsDecided && meta !== undefined && kidsDetailsAllowed(meta, extra, kidsMax));
 
   const isMovie = titleType === 'movie';
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;

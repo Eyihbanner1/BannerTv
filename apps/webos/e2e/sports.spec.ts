@@ -999,6 +999,8 @@ test('a kick-off on another day keeps its time on a tile', async ({ page }) => {
   await page.keyboard.press('Enter');
   await page.keyboard.type('wolves');
   await expect(page.getByText("Nothing in your sports addons' lists matches.")).toBeVisible();
+  // The films found nothing either: Search says so, above the button.
+  await expect(page.getByText('Nothing found for “wolves”.')).toBeVisible();
   await page.keyboard.press('Escape');
   await press(page, 'ArrowDown', 'search-sports-addons');
   await page.keyboard.press('Enter');

@@ -6,10 +6,12 @@ import { discoverSources, searchSources } from '../addons/sources';
 import {
   buildKidsBoard,
   kidsAddons,
+  kidsDetailsAllowed,
   kidsDiscoverSources,
   kidsSearchSources,
   kidsTitleAllowed,
   ratingAllowed,
+  strictestUkRating,
   ukRating,
 } from './kids';
 
@@ -169,5 +171,53 @@ describe('kids Discover and Search', () => {
       true,
     );
     expect(sources.some((s) => s.addon === adult || s.addon === tv)).toBe(false);
+  });
+});
+
+describe('kidsDetailsAllowed', () => {
+  const film = (genres: string[]) => ({ type: 'movie', genres });
+
+  it('lets the strictest UK rating decide: a PG at the cinema and 15 on disc is a 15', () => {
+    const rated = { certificate: 'PG', strictestCertificate: '15' };
+    expect(kidsDetailsAllowed(film(['Family']), rated, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), rated, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: 'PG' }, 'PG')).toBe(true);
+  });
+
+  it('needs no Family genre with a rating, but never takes a genre not for children', () => {
+    // As Cinemeta's Family rows offer Moana: PG, and its details say Animation and Adventure.
+    expect(kidsDetailsAllowed(film(['Animation', 'Adventure']), { certificate: 'U' }, 'PG')).toBe(
+      true,
+    );
+    expect(kidsDetailsAllowed(film([]), { certificate: 'U' }, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Horror']), { certificate: 'PG' }, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family', 'Horror']), { certificate: 'PG' }, '12')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: '12' }, 'PG')).toBe(false);
+  });
+
+  it('needs Family without a rating, and a profile limit with one', () => {
+    expect(kidsDetailsAllowed(film(['Family', 'Comedy']), undefined, 'PG')).toBe(true);
+    expect(kidsDetailsAllowed(film(['Family', 'Comedy']), {}, undefined)).toBe(true);
+    expect(kidsDetailsAllowed(film(['Comedy']), {}, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film([]), undefined, 'PG')).toBe(false);
+    expect(kidsDetailsAllowed(film(['Family']), { certificate: 'U' }, undefined)).toBe(false);
+    expect(
+      kidsDetailsAllowed({ type: 'channel', genres: ['Family'] }, { certificate: 'U' }, 'PG'),
+    ).toBe(false);
+  });
+});
+
+describe('strictestUkRating', () => {
+  it("takes the UK's strictest certificate, else the US's mapped", () => {
+    expect(strictestUkRating(['PG', '15', '12A'], ['PG-13'])).toBe('15');
+    expect(strictestUkRating(['12A', 'PG'], [])).toBe('12');
+    expect(strictestUkRating(['', 'NR'], ['PG-13', 'G'])).toBe('12');
+    expect(strictestUkRating([], ['TV-Y'])).toBe('U');
+    expect(strictestUkRating([], ['NR'])).toBeUndefined();
+    expect(strictestUkRating([], [])).toBeUndefined();
+  });
+
+  it('counts a war series as not for children', () => {
+    expect(kidsTitleAllowed({ type: 'series', genres: ['Kids', 'War & Politics'] })).toBe(false);
   });
 });
