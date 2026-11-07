@@ -2,7 +2,15 @@ import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { mockPlayback, type PlaybackOptions, readKv, seedStreamAddon } from './play';
 import { mockServices, traktSignIn } from './services';
-import { APP_URL, expectFocus, expectFocusLabel, openSection, press, pressBack } from './tv';
+import {
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  openSection,
+  press,
+  pressBack,
+  railSections,
+} from './tv';
 
 /** The first episode of the series on Home, as Stremio names it, and the one after it. */
 const EPISODE = 'tt8000001:1:1';
@@ -34,6 +42,11 @@ function video(page: Page) {
 /** Plays the series' first episode from its page, as the viewer would. */
 async function playFirstEpisode(page: Page) {
   await page.goto(APP_URL);
+  await playFirstEpisodeFromHome(page);
+}
+
+/** The same, from Home's first tile, with no reload. */
+async function playFirstEpisodeFromHome(page: Page) {
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
   await press(page, 'Enter', 'details-episodes-0');
@@ -155,7 +168,15 @@ test('with "Start next at credits" on, the card counts ten seconds from the cred
   await page.keyboard.press('Enter');
   await expect(setting).toHaveAttribute('aria-label', 'Start next episode at the credits: On');
 
-  await playFirstEpisode(page);
+  // Back to Home by the rail, as the viewer goes: a reload just after the change can lose
+  // its write to storage on a busy machine (as search.spec.ts and streams-filter.spec.ts say).
+  await press(page, 'ArrowLeft', 'rail-settings');
+  const sections = await railSections(page);
+  for (const item of sections.slice(0, sections.indexOf('settings')).reverse()) {
+    await press(page, 'ArrowUp', `rail-${item}`);
+  }
+  await page.keyboard.press('Enter');
+  await playFirstEpisodeFromHome(page);
   const card = page.getByRole('dialog', { name: 'Up next' });
   await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
     timeout: 10000,
