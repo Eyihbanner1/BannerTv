@@ -74,9 +74,23 @@ describe('profileSubtitles', () => {
     expect(profileSubtitles([], 'Film.2021.1080p.WEB.SDH').hearingLabel).toBe(true);
     expect(profileSubtitles([], 'Film.2021.Forced.English').forcedLabel).toBe(true);
     expect(profileSubtitles([], 'Film.2021.Signs.&.Songs').forcedLabel).toBe(true);
+    expect(profileSubtitles([], 'Film.2021.Signs.&.Songs').songsLabel).toBe(true);
+    expect(profileSubtitles([], 'Film.2021.Forced.English').songsLabel).toBe(false);
     // A film called Signs is not a forced file.
     expect(profileSubtitles([], 'Signs.2002.1080p.BluRay').forcedLabel).toBe(false);
     expect(profileSubtitles([], 'Hi.Score.Girl.S01E01').hearingLabel).toBe(false);
+  });
+
+  it('takes a name that says the file is not forced for no forced tag at all', () => {
+    const forced = (label: string) => profileSubtitles([], label).forcedLabel;
+    expect(forced('Film.2021.1080p.BluRay.Non-Forced')).toBe(false);
+    expect(forced('Film 2021 (Full, no forced)')).toBe(false);
+    expect(forced('Film.2021.Not.Forced')).toBe(false);
+    expect(forced('Film.2021.non forced.srt')).toBe(false);
+    // A full file with the forced lines in it still says forced: its lines tell (judgeSubtitleFit).
+    expect(forced('Film.2021.Full+Forced')).toBe(true);
+    expect(isForcedName('English (Non-Forced)')).toBe(false);
+    expect(isForcedName('English, not forced')).toBe(false);
   });
 
   it('takes "Forced" at the start of a name for the film’s title, not a tag', () => {
@@ -211,13 +225,31 @@ describe('judgeSubtitleFit', () => {
     expect(judgeSubtitleFit(forced, film, 'en')).toMatchObject({ signs: true, unfit: true });
   });
 
-  it('trusts a name that says forced or signs and songs, however many lines the file has', () => {
-    const named = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Film.2021.Forced');
-    expect(judgeSubtitleFit(named, film, 'en')).toMatchObject({ signs: true, unfit: true });
-    expect(judgeSubtitleFit(named, { seconds: FILM_S, exact: false }, 'en').signs).toBe(true);
-    expect(judgeSubtitleFit(named, { exact: false }, 'en').signs).toBe(true);
-    const songs = profileSubtitles(dialogue(600, 30, FILM_S - 360), 'Film.2021.Signs.&.Songs');
-    expect(judgeSubtitleFit(songs, film, 'en').signs).toBe(true);
+  it('trusts a name that says signs and songs, however many lines the file has', () => {
+    const songs = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Film.2021.Signs.&.Songs');
+    expect(judgeSubtitleFit(songs, film, 'en')).toMatchObject({ signs: true, unfit: true });
+    expect(judgeSubtitleFit(songs, { seconds: FILM_S, exact: false }, 'en').signs).toBe(true);
+    expect(judgeSubtitleFit(songs, { exact: false }, 'en').signs).toBe(true);
+  });
+
+  it('trusts a name that says forced only while the file has fewer lines than a full one', () => {
+    // As many lines as a full file: one, with the forced lines in it.
+    for (const label of ['Film.2021.Forced', 'Film.2021.Full+Forced']) {
+      const named = profileSubtitles(dialogue(1300, 30, FILM_S - 360), label);
+      expect(judgeSubtitleFit(named, film, 'en')).toMatchObject({ signs: false, unfit: false });
+      expect(judgeSubtitleFit(named, { seconds: FILM_S, exact: false }, 'en').signs).toBe(false);
+      // With no length to judge its lines by, the name is trusted.
+      expect(judgeSubtitleFit(named, { exact: false }, 'en').signs).toBe(true);
+    }
+    // Under five lines a minute, the name is trusted.
+    const few = profileSubtitles(dialogue(500, 30, FILM_S - 360), 'Film.2021.Forced');
+    expect(judgeSubtitleFit(few, film, 'en')).toMatchObject({ signs: true, unfit: true });
+    // A name that says the file is not forced is not trusted as forced, whatever is known.
+    for (const label of ['Film.2021.1080p.BluRay.Non-Forced', 'Film 2021 (Full, no forced)']) {
+      const full = profileSubtitles(dialogue(1300, 30, FILM_S - 360), label);
+      expect(judgeSubtitleFit(full, film, 'en')).toMatchObject({ signs: false, unfit: false });
+      expect(judgeSubtitleFit(full, { exact: false }, 'en').signs).toBe(false);
+    }
     // A film whose title starts with the word is still judged by its lines.
     const title = profileSubtitles(dialogue(1300, 30, FILM_S - 360), 'Forced.Vengeance.1982.1080p');
     expect(judgeSubtitleFit(title, film, 'en')).toMatchObject({ signs: false, unfit: false });
@@ -287,6 +319,26 @@ describe('judgeSubtitleFit', () => {
     // Lines running on well past its end, line after line, are a drift.
     const behind = profileSubtitles(dialogue(500, 20, 2780));
     expect(judgeSubtitleFit(behind, episode, 'en').drift).toBe('behind');
+  });
+
+  it('says when its lines run on past the end, line after line, for other files to judge', () => {
+    const episode = { seconds: 1320, exact: true };
+    // 26 s past a 22-minute episode: too little for a drift on its own.
+    const past = judgeSubtitleFit(profileSubtitles(dialogue(370, 20, 1346)), episode, 'en');
+    expect(past).toMatchObject({ length: 'fits', runsOn: true });
+    expect(past.drift).toBeUndefined();
+    // A second past the end, or one late line, is not lines running on.
+    const justPast = profileSubtitles(dialogue(370, 20, 1321));
+    expect(judgeSubtitleFit(justPast, episode, 'en').runsOn).toBeUndefined();
+    const credit = profileSubtitles(
+      dialogue(370, 20, 1300).concat(cue(1340, 1344, 'Translated by Juan')),
+    );
+    expect(judgeSubtitleFit(credit, episode, 'en').runsOn).toBeUndefined();
+    // Nor is anything said with only the title's running time.
+    const fromPage = { seconds: 1320, exact: false };
+    expect(
+      judgeSubtitleFit(profileSubtitles(dialogue(370, 20, 1346)), fromPage, 'en').runsOn,
+    ).toBeUndefined();
   });
 
   it('takes no drift from a next-episode preview under a minute long after a short episode', () => {
@@ -580,6 +632,39 @@ describe('judgeSubtitleFits', () => {
     );
     expect(fits.get('plain')).toMatchObject({ length: 'fits', hearing: false });
     expect(fits.get('sdh')).toMatchObject({ length: 'fits', hearing: true });
+  });
+
+  it('never takes a whole file for part of one by its time on screen alone', () => {
+    // 1300 lines, one every 5.3 s, each on screen for `shown` seconds.
+    const timed = (shown: number) =>
+      Array.from({ length: 1300 }, (_, i) =>
+        cue(30 + i * 5.3, 30 + i * 5.3 + shown, ENGLISH[i % ENGLISH.length]!),
+      );
+    // Beside a file that keeps each line on until the next starts (made from a format with no
+    // end times), on screen for over twice as long.
+    const held = judgeSubtitleFits(
+      [
+        { id: 'ordinary', profile: profileSubtitles(timed(2.2)) },
+        { id: 'held', profile: profileSubtitles(timed(5.3)) },
+      ],
+      film,
+      'en',
+    );
+    expect(held.get('ordinary')).toMatchObject({ length: 'fits', unfit: false });
+    expect(held.get('held')).toMatchObject({ length: 'fits', unfit: false });
+    // Beside one whose line near the start was left on for an hour by mistake.
+    const typo = timed(1.6);
+    typo[100] = { ...typo[100]!, end: typo[100]!.start + 3600 };
+    const mistake = judgeSubtitleFits(
+      [
+        { id: 'ordinary', profile: profileSubtitles(timed(1.6)) },
+        { id: 'typo', profile: profileSubtitles(typo) },
+      ],
+      film,
+      'en',
+    );
+    expect(mistake.get('typo')!.length).toBe('fits');
+    expect(mistake.get('ordinary')).toMatchObject({ length: 'fits', unfit: false });
   });
 
   describe('an anime episode whose songs are sung one syllable to a line', () => {

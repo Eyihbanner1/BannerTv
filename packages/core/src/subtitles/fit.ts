@@ -159,6 +159,8 @@ export interface SubtitleProfile {
   hearingLabel: boolean;
   /** The release name says it holds only forced lines, or signs and songs. */
   forcedLabel: boolean;
+  /** The release name says signs and songs: trusted however many lines the file has. */
+  songsLabel: boolean;
 }
 
 /** Letters read for the script check: enough to judge, and no more than a TV needs to count. */
@@ -181,7 +183,10 @@ const SPEAKER = /^[-–—]?\s*[A-Z][A-Z0-9'’.# -]{1,28}:(?:\s|$)/;
 /** Music notes alone, with no words between them. */
 const MUSIC_ALONE = /^[\s♪♫#*~]*[♪♫][\s♪♫#*~]*$/;
 const HEARING_LABEL = /(?:^|[^a-z])(?:sdh|hearing[ ._-]?impaired)(?:[^a-z]|$)/i;
-const FORCED_LABEL = /(?:^|[^a-z])(?:forced|signs?[ ._-]*(?:&|and|\+|\/)[ ._-]*songs)(?:[^a-z]|$)/i;
+const FORCED_WORD = /(?:^|[^a-z])forced(?:[^a-z]|$)/i;
+const SONGS_LABEL = /(?:^|[^a-z])signs?[ ._-]*(?:&|and|\+|\/)[ ._-]*songs(?:[^a-z]|$)/i;
+/** Words that say a file is not forced ("Non-Forced", "no forced", "not forced"): no tag at all. */
+const NOT_FORCED = /(?:^|[^a-z])no[nt]?[ ._-]*forced(?=[^a-z]|$)/gi;
 /**
  * "Forced" as the first word of a name, with more words after it, is the
  * film's title (Forced.Vengeance.1982.1080p), not a tag, so only the rest of
@@ -191,16 +196,17 @@ const FORCED_LABEL = /(?:^|[^a-z])(?:forced|signs?[ ._-]*(?:&|and|\+|\/)[ ._-]*s
 const FORCED_TITLE = /^[\s._-]*forced(?=[ ._-]+(?!(?:srt|ass|ssa|vtt|sub|txt)$)[a-z0-9])/i;
 
 function isForcedLabel(label: string): boolean {
-  return FORCED_LABEL.test(label.replace(FORCED_TITLE, ''));
+  return isForcedName(label.replace(FORCED_TITLE, ''));
 }
 
 /**
  * Whether a stream track's own name says it holds only forced lines, or
  * signs and songs ("English (Forced)", "Signs & Songs"). A track's name is
- * not a release name, so "Forced" counts at its start too.
+ * not a release name, so "Forced" counts at its start too. "Non-Forced",
+ * "no forced" and "not forced" say the opposite, and do not count.
  */
 export function isForcedName(name: string): boolean {
-  return FORCED_LABEL.test(name);
+  return SONGS_LABEL.test(name) || FORCED_WORD.test(name.replace(NOT_FORCED, ' '));
 }
 
 function lineText(line: Cue['lines'][number]): string {
@@ -293,6 +299,7 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     hearingLines,
     hearingLabel: !!label && HEARING_LABEL.test(label),
     forcedLabel: !!label && isForcedLabel(label),
+    songsLabel: !!label && SONGS_LABEL.test(label),
   };
 }
 
@@ -363,6 +370,12 @@ export const FRAME_RATE_RATIO = 25 / (24000 / 1001);
 const SIGNS_PER_MINUTE = 1.2;
 /** Past this many lines a file is never taken for signs only by its few lines, however long the video. */
 const SIGNS_MAX_LINES = 150;
+/**
+ * Lines a minute from which a file whose name only says "forced" is a full
+ * file all the same ("Full+Forced"): a full file has about ten, a forced
+ * one far fewer. A name that says signs and songs is trusted whatever.
+ */
+const FULL_PER_MINUTE = 5;
 /** A file that stops before this share of the video, and over PARTIAL_GAP_S before its end, covers only part. */
 const PARTIAL_SHARE = 0.7;
 const PARTIAL_GAP_S = 600;
@@ -399,16 +412,23 @@ export interface SubtitleFit {
   hearing: boolean;
   /**
    * How its length sits against the video's: 'short' stops well before the
-   * end (part of the film, such as CD1) or is on screen for under half as
-   * long as the other files (a forced file), 'long' runs past the end by more than a
-   * frame-rate drift explains (another cut). Undefined when the video's
-   * length cannot be judged by.
+   * end (part of the film, such as CD1) or has under half the lines of the
+   * other files and is on screen for under half as long (a forced file),
+   * 'long' runs past the end by more than a frame-rate drift explains
+   * (another cut). Undefined when the video's length cannot be judged by.
    */
   length?: 'fits' | 'short' | 'long';
   /** The last line's end over the video's length, when known. */
   coverage?: number;
   /** A drift its length gives away: stretching fixes it. */
   drift?: SubtitleDrift;
+  /**
+   * Its last line, and its last three lines' ends, run on past the video's
+   * end by more than releases differ by: a drift that other files agreeing
+   * on an end can show (judgeSubtitleFits), if not its own length. Only with
+   * the video's own length.
+   */
+  runsOn?: boolean;
   /** Passed over like a file that could not be read: in another script, or signs only. */
   unfit: boolean;
 }
@@ -447,13 +467,15 @@ export function judgeSubtitleFit(
     profile.hearingLabel ||
     (profile.hearingLines >= HEARING_MIN_LINES &&
       profile.hearingLines / Math.max(1, profile.lines) >= HEARING_SHARE);
-  // A name that says so is trusted, however many lines the file has: the karaoke of a signs
-  // and songs file, one syllable to a line, gives it as many lines as a full file.
+  // A name that says signs and songs is trusted, however many lines the file has: the karaoke
+  // of its songs, one syllable to a line, gives it as many lines as a full file. One that only
+  // says forced is not, against a length to judge by, when the file has a full file's lines.
   const fit: SubtitleFit = { script, signs: profile.forcedLabel, hearing, unfit: false };
   const seconds = judgedLength(video);
   if (seconds !== undefined) {
     const perMinute = profile.lines / (seconds / 60);
-    if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
+    if (perMinute >= FULL_PER_MINUTE && !profile.songsLabel) fit.signs = false;
+    else if (perMinute < SIGNS_PER_MINUTE && profile.lines < SIGNS_MAX_LINES) fit.signs = true;
     fit.coverage = profile.end / seconds;
     const margin = pastEndMargin(seconds);
     if (profile.end < seconds * PARTIAL_SHARE && seconds - profile.end > PARTIAL_GAP_S) {
@@ -469,11 +491,12 @@ export function judgeSubtitleFit(
       // on a faster (PAL) video: stretched onto the video's clock, it ends in
       // time. Only when it runs on well past the end, line after line.
       fit.length = 'fits';
+      if (runsPastEnd(profile, seconds)) fit.runsOn = true;
       if (
         !fit.signs &&
         profile.end >= seconds * (1 + BEHIND_MIN_SHARE) &&
         profile.end - seconds >= BEHIND_MIN_PAST_S &&
-        runsPastEnd(profile, seconds)
+        fit.runsOn
       ) {
         fit.drift = 'behind';
       }
@@ -509,13 +532,16 @@ function agreedEnd(ends: readonly number[]): number | undefined {
 }
 
 /**
- * A file whose lines are on screen for under this share of the time the
- * others' that fit are (their median, `covered`) covers only part of the
- * video: a forced file with only the foreign-language scenes. A plain file
- * has 10 to 30% fewer lines than one for the hard of hearing of the same
- * film, far from this. Time rather than lines, so the karaoke of the songs
- * in a full file, one syllable to a line, does not make a plain file beside
- * it look like part of one.
+ * A file with under this share of the lines of the others that fit, whose
+ * lines are on screen for under this share of the time theirs are (their
+ * medians, `lines` and `covered`), covers only part of the video: a forced
+ * file with only the foreign-language scenes. A plain file has 10 to 30%
+ * fewer lines than one for the hard of hearing of the same film, far from
+ * this. Both, so that the karaoke of the songs in a full file, one syllable
+ * to a line, does not make a plain file beside it look like part of one by
+ * its lines; nor a file that keeps each line on until the next starts (one
+ * made from a format with no end times), or a line left on for an hour by
+ * mistake, make an ordinary file beside it look so by its time.
  */
 const PART_SHARE = 0.5;
 
@@ -523,9 +549,9 @@ const PART_SHARE = 0.5;
  * Judges the files offered in one language together: each on its own, then
  * against the others.
  *
- * - A file whose lines are on screen for under half as long as those of
- *   the others that fit covers only part ('short'), whatever its length.
- *   With the title's running time too.
+ * - A file with under half the lines of the others that fit, on screen for
+ *   under half as long as theirs, covers only part ('short'), whatever its
+ *   length. With the title's running time too.
  * - When at least two others that fit the video agree on where the last
  *   line goes, a file whose lines run on past the video's end falls behind
  *   ('behind': timed for film speed on a faster, PAL, video) when its end is
@@ -554,12 +580,18 @@ export function judgeSubtitleFits<K>(
     return !fit.unfit && fit.length === 'fits';
   });
   for (const file of whole) {
-    const others = whole.filter((other) => other !== file).map((other) => other.profile.covered);
-    if (others.length === 0 || file.profile.covered >= median(others) * PART_SHARE) continue;
+    const others = whole.filter((other) => other !== file).map((other) => other.profile);
+    if (others.length === 0) continue;
+    const lines = median(others.map((other) => other.lines));
+    const covered = median(others.map((other) => other.covered));
+    if (file.profile.lines >= lines * PART_SHARE || file.profile.covered >= covered * PART_SHARE) {
+      continue;
+    }
     // Its end says nothing of a frame rate: the lines are only some of the film's.
     const fit = fits.get(file.id)!;
     fit.length = 'short';
     delete fit.drift;
+    delete fit.runsOn;
   }
 
   if (!video.exact) return fits;
@@ -577,10 +609,10 @@ export function judgeSubtitleFits<K>(
   });
   for (const file of files) {
     const fit = fits.get(file.id)!;
+    // Its lines run on past the end, line after line: a lone late line (a translator's credit)
+    // is not lines running on.
+    if (fit.unfit || fit.length !== 'fits' || !fit.runsOn) continue;
     const end = file.profile.end;
-    if (fit.unfit || fit.length !== 'fits' || end <= seconds + margin) continue;
-    // A lone late line (a translator's credit) is not lines running on.
-    if (!runsPastEnd(file.profile, seconds)) continue;
     const others = steady.filter((other) => other !== file).map((other) => other.profile.end);
     const consensus = agreedEnd(others);
     if (consensus === undefined) continue;
