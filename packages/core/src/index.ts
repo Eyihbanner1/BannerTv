@@ -357,6 +357,7 @@ export {
   rankReason,
   type RankOptions,
   rankSubtitles,
+  type ReasonOptions,
   UNREAD_TIER,
 } from './subtitles/rank';
 export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';

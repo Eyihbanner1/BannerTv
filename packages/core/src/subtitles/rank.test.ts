@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { SubtitleFit } from './fit';
-import { clearlyBetter, fitTier, rankSubtitles, UNREAD_TIER } from './rank';
+import { clearlyBetter, fitTier, rankReason, rankSubtitles, UNREAD_TIER } from './rank';
 
 const FITS: SubtitleFit = {
   script: 'right',
@@ -13,6 +13,7 @@ const SDH: SubtitleFit = { ...FITS, hearing: true };
 const DRIFTS: SubtitleFit = { ...FITS, drift: 'behind' };
 const HALF: SubtitleFit = { ...FITS, length: 'short' };
 const SIGNS: SubtitleFit = { ...FITS, signs: true, unfit: true };
+const LONG: SubtitleFit = { ...FITS, length: 'long' };
 
 interface File {
   id: string;
@@ -20,6 +21,27 @@ interface File {
 }
 
 const video = { filename: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP.mkv' };
+
+const stableSort = Array.prototype.sort;
+
+/**
+ * Chromium 68 sorts arrays of more than 10 items unstably. Node sorts stably,
+ * so this stand-in turns ties around to show code that leans on stability.
+ */
+function sortUnstably() {
+  Array.prototype.sort = function <T>(this: T[], compare?: (a: T, b: T) => number): T[] {
+    const reversed = this.slice().reverse();
+    stableSort.call(reversed, compare);
+    reversed.forEach((item, index) => {
+      this[index] = item;
+    });
+    return this;
+  };
+}
+
+afterEach(() => {
+  Array.prototype.sort = stableSort;
+});
 
 function rank(
   files: File[],
@@ -76,6 +98,7 @@ describe('rankSubtitles', () => {
   });
 
   it('keeps the addon’s order where nothing tells files apart, however many there are', () => {
+    sortUnstably();
     const files = Array.from({ length: 30 }, (_, i) => ({ id: `f${i}` }));
     const fits: Record<string, SubtitleFit> = {};
     for (const file of files) fits[file.id] = FITS;
@@ -91,6 +114,52 @@ describe('rankSubtitles', () => {
   it('puts a file known to fit before one not read yet, and one not read before a drift', () => {
     const files = [{ id: 'drifts' }, { id: 'unread' }, { id: 'fits' }];
     expect(rank(files, { drifts: DRIFTS, fits: FITS })).toEqual(['fits', 'unread', 'drifts']);
+  });
+
+  it('lets a release match count only while the file is not read or reads whole', () => {
+    const files: File[] = [
+      { id: 'match', label: 'Open.Movie.2021.EXTENDED.1080p.WEB-DL-GROUP' },
+      { id: 'fits' },
+      { id: 'unread' },
+    ];
+    // Read as running long, it ranks by its fit like any other.
+    expect(rank(files, { match: LONG, fits: FITS })).toEqual(['fits', 'unread', 'match']);
+    expect(rank(files, { match: HALF, fits: FITS })).toEqual(['fits', 'unread', 'match']);
+    expect(rank(files, { match: DRIFTS, fits: FITS })).toEqual(['fits', 'unread', 'match']);
+    // Not read yet, or read whole (even for the hard of hearing), it stays first.
+    expect(rank(files, { fits: FITS })).toEqual(['match', 'fits', 'unread']);
+    expect(rank(files, { match: SDH, fits: FITS })).toEqual(['match', 'fits', 'unread']);
+    // Picked by hand, it stays first whatever its checks found.
+    expect(rank(files, { match: LONG, fits: FITS }, { remembered: 'match' })).toEqual([
+      'match',
+      'fits',
+      'unread',
+    ]);
+  });
+});
+
+describe('rankReason', () => {
+  const match = { id: 'match', label: 'Open.Movie.2021.1080p.WEB-DL-GROUP' };
+  const other = { id: 'other', label: 'Another.Film.1999.DVDRip-XYZ' };
+
+  it('puts the version picked by hand first, then a release match, then neither', () => {
+    expect(rankReason(match, { video, remembered: (file) => file === match })).toBe(0);
+    expect(rankReason(match, { video })).toBe(1);
+    expect(rankReason(other, { video })).toBe(2);
+  });
+
+  it('takes a match read as drifting, covering part, running long or unfit for no match', () => {
+    const reason = (fit: SubtitleFit | undefined, hearing = false) =>
+      rankReason(match, { video, fit: () => fit, hearing });
+    expect(reason(undefined)).toBe(1);
+    expect(reason(FITS)).toBe(1);
+    expect(reason(SDH)).toBe(1);
+    expect(reason(FITS, true)).toBe(1);
+    expect(reason(DRIFTS)).toBe(2);
+    expect(reason(HALF)).toBe(2);
+    expect(reason(LONG)).toBe(2);
+    expect(reason(SIGNS)).toBe(2);
+    expect(rankReason(match, { video, fit: () => LONG, remembered: () => true })).toBe(0);
   });
 });
 

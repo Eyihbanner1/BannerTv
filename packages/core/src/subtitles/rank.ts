@@ -39,13 +39,29 @@ export interface RankOptions<T> {
   hearing: boolean;
 }
 
-/** Why a file ranks where it does, best first: picked before, matching the release, then neither. */
+/**
+ * What rankReason needs: the video and the version picked by hand, and the
+ * checks' findings when known. Without `fit` a release match always counts.
+ */
+export type ReasonOptions<T> = Pick<RankOptions<T>, 'video' | 'remembered'> &
+  Partial<Pick<RankOptions<T>, 'fit' | 'hearing'>>;
+
+/**
+ * Why a file ranks where it does, best first: picked before, matching the
+ * release, then neither. A release name that matches is a guess, so it
+ * counts only while the file is not read yet or reads whole: once read as
+ * drifting, covering only part, running long or failing its checks, the
+ * file ranks by its fit like any other. The version picked by hand stays
+ * first whatever its checks found.
+ */
 export function rankReason<T extends { label?: string }>(
   item: T,
-  options: Pick<RankOptions<T>, 'video' | 'remembered'>,
+  options: ReasonOptions<T>,
 ): 0 | 1 | 2 {
   if (options.remembered?.(item)) return 0;
-  return releaseMatch(item.label, options.video) ? 1 : 2;
+  if (!releaseMatch(item.label, options.video)) return 2;
+  // A file not read yet sits below 2 (UNREAD_TIER), so its match still counts.
+  return fitTier(options.fit?.(item), options.hearing ?? false) >= 2 ? 2 : 1;
 }
 
 /**
