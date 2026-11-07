@@ -7,8 +7,8 @@ import { useReminders } from '@tv/screens/sports/use-reminder';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import i18next from 'i18next';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { Platform } from 'react-native';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { AppState, Platform } from 'react-native';
 import { openEvent } from '../nav/routes';
 
 /**
@@ -189,6 +189,17 @@ export function useMatchReminders(): void {
   const response = Notifications.useLastNotificationResponse();
   const queue = useRef<Promise<void>>(Promise.resolve());
   const handled = useRef<string | undefined>(undefined);
+  // Counts BannerTV's returns to the front, for one more pass each time. While notifications are
+  // off in the phone's settings a pass cancels what was scheduled; turned back on while BannerTV
+  // is in the background, nothing else would schedule the reminders again until they changed.
+  const [returns, setReturns] = useState(0);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setReturns((count) => count + 1);
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Kick-offs the addons have corrected since, and reminders too late to matter.
   useEffect(
@@ -206,7 +217,7 @@ export function useMatchReminders(): void {
   useEffect(() => {
     if (profile === null || !loaded) return;
     queue.current = queue.current.then(() => schedule(reminders, profile)).catch(() => undefined);
-  }, [reminders, profile, loaded]);
+  }, [reminders, profile, loaded, returns]);
 
   useEffect(() => {
     if (!response || profile === null || !welcomeDone) return;
