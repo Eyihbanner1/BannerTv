@@ -858,11 +858,11 @@ test('a next episode that airs while Home sits untouched joins the row on the ho
   await page.waitForTimeout(500);
   await expect(page.locator(`[data-row-key="${CONTINUE_ROW}"]`)).toHaveCount(0);
 
-  // Past the release and the next hour, with no key pressed.
+  // Past the release and the next hour, with no key pressed. Out within the week, it is New.
   await page.clock.fastForward(50 * minute);
   await expect(page.locator(`[data-focus-key="${CONTINUE_ROW}-tile-0"]`)).toHaveAttribute(
     'aria-label',
-    'Morevna Project, Next: S1:E2',
+    'Morevna Project, New: S1:E2',
   );
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await expect.poll(() => focusAgainstRows(page), { timeout: SLID_WITHIN_MS }).toBe('inside');

@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n';
-import { rememberScroll } from '../../navigation/focus-memory';
+import { rememberFocus, rememberScroll } from '../../navigation/focus-memory';
 import { EpisodeList } from './EpisodeList';
 
 const watched = new Set<string>();
@@ -104,6 +104,8 @@ describe('the episode list', () => {
     watched.add('tt1:1:6');
     seen.set('tt1:1:7', { position: 600, duration: 2400 });
     seen.set('tt1:1:10', { position: 100, duration: 100, watched: true });
+    // As focus leaves it on episode 8: the list starts where it was, not at startIndex.
+    rememberFocus('ep-test', 'details-episodes-7');
     rememberScroll('ep-test', 6);
     const list = drawn({
       focusKey: 'details-episodes',
@@ -160,6 +162,28 @@ describe('the episode list', () => {
     ]);
     watched.clear();
     seen.clear();
+  });
+
+  it('with nothing remembered, starts with the episode to start at second from the top', () => {
+    const list = drawn({
+      focusKey: 'e',
+      memoryKey: 'ep-start',
+      videos: season(12),
+      startIndex: 6,
+      onPress: () => undefined,
+    });
+    // Anchored on episode 6 (index 5): two above it, five in view and two below.
+    expect(list.map((item) => item.key)).toEqual([
+      'e-3',
+      'e-4',
+      'e-5',
+      'e-6',
+      'e-7',
+      'e-8',
+      'e-9',
+      'e-10',
+      'e-11',
+    ]);
   });
 
   it('starts at the top, and draws a short season whole', () => {

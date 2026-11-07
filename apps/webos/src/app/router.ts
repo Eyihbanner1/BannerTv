@@ -49,8 +49,11 @@ export function remembersPlace(route: { lab?: boolean; event?: EventPlay }): boo
 
 export type Route =
   | { name: Section }
-  /** `preview` is what the tile already knew, drawn while the full meta loads. */
-  | { name: 'details'; type: string; id: string; preview?: MetaPreview }
+  /**
+   * `preview` is what the tile already knew, drawn while the full meta loads.
+   * `video` is an episode to open the episodes on, as a Watch Next card names it.
+   */
+  | { name: 'details'; type: string; id: string; preview?: MetaPreview; video?: string }
   /** One sports event, as the Sports screen had it when it was opened. */
   | { name: 'event'; event: SportEvent }
   /** "See all" from a Home row: Discover, opened on that row's catalog and genre. */

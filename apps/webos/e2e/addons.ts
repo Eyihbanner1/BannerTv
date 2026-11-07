@@ -105,7 +105,14 @@ function preview(type: string, [id, name, year]: readonly [string, string, strin
   };
 }
 
-function seriesMeta(id: string, upcoming: readonly string[] = [], runtime?: string) {
+function seriesMeta(
+  id: string,
+  upcoming: readonly string[] = [],
+  runtime?: string,
+  recent: readonly string[] = [],
+) {
+  // Out yesterday, for episodes the series lists as new.
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const entry = SERIES.find(([seriesId]) => seriesId === id);
   if (!entry) return null;
   const videos = [];
@@ -122,7 +129,9 @@ function seriesMeta(id: string, upcoming: readonly string[] = [], runtime?: stri
         number: episode,
         released: upcoming.includes(`${id}:${season}:${episode}`)
           ? '2099-01-01T00:00:00.000Z'
-          : `202${season}-0${episode > 9 ? 9 : episode}-01T00:00:00.000Z`,
+          : recent.includes(`${id}:${season}:${episode}`)
+            ? yesterday
+            : `202${season}-0${episode > 9 ? 9 : episode}-01T00:00:00.000Z`,
         thumbnail: `https://episodes.metahub.space/${id}/${season}/${episode}/w780.jpg`,
         overview: `What happens in season ${season}, episode ${episode}.`,
       });
@@ -211,6 +220,8 @@ export interface MockOptions {
   catalogs?: Record<string, (route: Route) => Promise<void> | undefined>;
   /** Episodes, by video id, that the series lists as not out yet. */
   upcoming?: readonly string[];
+  /** Episodes, by video id, that came out yesterday. */
+  recent?: readonly string[];
   /** The series' running time, as its page gives it ("45 min"). It gives none otherwise. */
   seriesRuntime?: string;
 }
@@ -403,7 +414,7 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
       return json(route, {
         meta:
           meta[1] === 'series'
-            ? seriesMeta(id, options.upcoming, options.seriesRuntime)
+            ? seriesMeta(id, options.upcoming, options.seriesRuntime, options.recent)
             : movieMeta(id),
       });
     }
