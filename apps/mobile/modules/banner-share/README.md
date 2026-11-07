@@ -1,0 +1,3 @@
+# banner-share
+
+A local Expo module (autolinked from `modules/`) that hands the page the text another app shares with BannerTV, such as an addon's address shared from a browser. `app.config.ts` asks Android for text shares (`SEND`, `text/plain`). A share that starts the app is read once with `takeLaunchText()`; one that arrives while the app runs comes as the `shared` event with `{ text }`. `src/nav/use-addon-links.ts` reads both and holds an addon link in memory, and the Addons screen asks before adding it, for grown-up profiles only. The text can carry an addon's keys, so neither side logs it.

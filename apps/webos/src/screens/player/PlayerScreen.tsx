@@ -1719,6 +1719,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
             }
           }}
           onBack={back}
+          failedNames={finderState.failed}
         />
       )}
     </section>

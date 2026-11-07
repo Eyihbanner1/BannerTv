@@ -2,6 +2,7 @@ import {
   buildEvents,
   type CatalogContext,
   type CatalogFilter,
+  createFollows,
   createKickoffMemory,
   createLane,
   createMatcher,
@@ -29,9 +30,10 @@ import {
 } from '@bannertv/core';
 import { catalogAccepts, type ManifestCatalog, type MetaPreview } from '@bannertv/protocol';
 import { SPORTS_IN_BUILD } from '../app/features';
-import { addonClient, addonCollection } from './addons';
+import { addonClient, addonCollection, allAddons } from './addons';
 import { SPORTS_DATA_SCRIPT } from './sports-data-script';
-import { storage } from './storage';
+import { profileKv, storage } from './storage';
+import { storeNow } from './sync-clock';
 
 /** Sports requests use at most this many of the app's 6 request slots (docs/PLAN.md, Fetching and paging). */
 const SPORTS_REQUESTS = 2;
@@ -86,6 +88,12 @@ export const sportsState = createStore<SportsState>({
 
 /** The team and league data, once loaded. Grouping works without it, by what addons say. */
 export const sportsMatcher = createStore<Matcher | undefined>(undefined);
+
+/**
+ * The teams and competitions the profile in use follows (SP2), kept with its
+ * other stores and synced in its settings document.
+ */
+export const sportsFollows = createFollows({ storage: profileKv, now: storeNow });
 
 /** "Show in Sports" by addon id, with no prototype: the ids are the addons' to choose. */
 type Settings = { [manifestId: string]: SportsSetting };
@@ -207,16 +215,20 @@ export function startSports(): Promise<void> {
     evidence.forEach((value, key) => loaded.set(key, value));
     evidence = loaded;
     void kickoffs.load();
+    void sportsFollows.load();
     let before: readonly InstalledAddon[] = [];
     let wasReady = false;
+    // What is kept about an addon follows every install, so switching one off keeps its
+    // setting and kick-offs; what Sports shows follows only the addons switched on.
     const onCollection = () => {
-      const { addons, ready } = addonCollection.get();
+      const { addons, ready } = allAddons.get();
       if (wasReady) followCollection(before, addons);
       before = addons;
       wasReady = ready;
       detect();
     };
-    addonCollection.subscribe(onCollection);
+    allAddons.subscribe(onCollection);
+    addonCollection.subscribe(detect);
     onCollection();
   });
   return stored;

@@ -13,7 +13,11 @@ import ICON from '../../assets/images/icon.png';
 import { Button } from '../ui/Button';
 import { colors, radius, space, type } from '../ui/theme';
 
-/** The first run: what BannerTV is, the notice about addons, and joining an account. */
+/**
+ * The first run: what BannerTV is, the notice about addons, and the BannerTV account beside it,
+ * for Main: Create an account opens the account screen, Join with a code opens it on the code.
+ * Create shows only while the service takes new accounts.
+ */
 export function WelcomeScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -67,7 +71,12 @@ export function WelcomeScreen() {
       {offer ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{t('welcome.accountTitle')}</Text>
-          <Text style={styles.body}>{t('phone.welcomeJoinLead')}</Text>
+          <Text style={styles.body}>
+            {section.canCreate ? t('welcome.accountLead') : t('phone.welcomeJoinLead')}
+          </Text>
+          {section.canCreate ? (
+            <Button label={t('account.create')} onPress={() => go('/account', {})} />
+          ) : null}
           <Button label={t('welcome.join')} onPress={() => go('/account', { join: '1' })} />
         </View>
       ) : null}

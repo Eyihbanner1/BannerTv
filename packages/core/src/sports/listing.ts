@@ -62,7 +62,11 @@ export interface Listing {
   sequence?: string;
   /** Competition names the item gives, best first. */
   competitions: Array<{ text: string; source: CompetitionSource }>;
-  /** A suffix that may be a competition, used only when the dictionary knows it. */
+  /**
+   * A part of the name that may be a competition, used only when the
+   * dictionary knows it: ` - Competition` after the teams, or `Competition: `
+   * in front of a title with no teams.
+   */
   suffix?: string;
   /** A cup round or stage the addon sent. */
   round?: string;
@@ -89,6 +93,10 @@ const STAGE =
 // "Week 9: Bills at Chiefs"): the round, never a competition.
 const STAGE_PREFIX =
   /^(?:(?:round|matchday|week|game|day|leg|race|match|stage)\s*#?\d{1,3}|\d{1,2}(?:st|nd|rd|th)\s+(?:round|leg|game|day|week|stage))$/i;
+
+// A name in front of a title with no teams: "Formula 1: Mexican Grand Prix", "MotoGP - Sprint".
+// Bounded, so a long name with no separator fails at once.
+const TITLE_LEAD = /^([^:|]{2,40}?)\s*(?::|\s[-–|]\s)\s*\S/;
 
 const MAX_GENRES = 8;
 
@@ -271,6 +279,11 @@ export function readListing(item: MetaPreview, context: CatalogContext, now: num
     // "3rd T20I" is a stage; anything else may be a competition the dictionary knows.
     if (STAGE.test(split.suffix) || sequenceNumber(split.suffix)) listing.round = split.suffix;
     else listing.suffix = split.suffix;
+  } else if (!split && !listing.sides) {
+    // "Formula 1: Mexican Grand Prix": a race, fight card or session often starts with its
+    // competition, which counts only when the dictionary knows it.
+    const lead = TITLE_LEAD.exec(clean.title)?.[1];
+    if (lead && !STAGE_PREFIX.test(lead)) listing.suffix = lead;
   }
   genres.forEach((genre, index) => {
     // The first genre is usually the sport; any genre that is not one may name the competition.
