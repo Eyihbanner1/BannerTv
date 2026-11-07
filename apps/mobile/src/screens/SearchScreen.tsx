@@ -5,7 +5,9 @@ import {
   kidsSearchSources,
   type PlannedRow,
   type Query,
+  type RemoteAnswer,
   searchSources,
+  type Suggestion,
 } from '@bannertv/core';
 import { addonCollection } from '@tv/data/addons';
 import { describeAddonError, typeLabel } from '@tv/data/describe';
@@ -15,8 +17,13 @@ import {
   plannedCatalog,
   plannedQuery,
   plannedTitle,
+  type RemoteRow,
+  remoteRowType,
+  remoteTitle,
+  remoteTitles,
   type SearchHelp,
   searchHelp,
+  searchSuggestions,
   useQueryStates,
   useSmartSearch,
   visibleTitles,
@@ -38,6 +45,7 @@ import { Icon, OutlineIcon } from '../ui/icons';
 import { Message } from '../ui/Message';
 import { Row, type RowItem } from '../ui/Row';
 import { phoneArt } from '../ui/Tile';
+import { TmdbLogo } from '../ui/TmdbLogo';
 import { colors, gutter, radius, space, touch, type } from '../ui/theme';
 
 const TYPING_PAUSE_MS = 500;
@@ -45,6 +53,10 @@ const TYPING_PAUSE_MS = 500;
 const FIRST_RESULTS = 6;
 /** Titles a row for what the words mean shows at most, as Home's rows. */
 const MAX_ROW_ITEMS = 40;
+/** Suggestions offered while typing. */
+const MAX_SUGGESTIONS = 6;
+// One element for every TMDB row's title.
+const TMDB_TAG = <TmdbLogo />;
 const NO_SOURCES: readonly CatalogSource[] = [];
 const NO_DISCOVER: readonly DiscoverSource[] = [];
 
@@ -197,6 +209,61 @@ const PlannedSection = memo(function PlannedSection({
   );
 });
 
+/** A row from TMDB ("With Tom Hanks", "Stand-up comedy films"), with TMDB's logo. */
+const RemoteSection = memo(function RemoteSection({
+  row,
+  answer,
+  items,
+  onPress,
+}: {
+  row: RemoteRow;
+  answer: RemoteAnswer | undefined;
+  /** Null while TMDB is asked. */
+  items: Items | null;
+  onPress: (item: MetaPreview) => void;
+}) {
+  const { t } = useTranslation();
+  const rowItems = useMemo<RowItem[] | null>(
+    () => items?.map((item, index) => ({ item, key: `${index}:${item.id}` })) ?? null,
+    [items],
+  );
+  return (
+    <Row
+      title={remoteTitle(t, row, answer)}
+      tag={TMDB_TAG}
+      items={rowItems}
+      shape="poster"
+      onPress={(entry) => onPress(entry.item)}
+    />
+  );
+});
+
+/** What to search for, under the box while typing: recent searches, people, titles and genres. */
+function Suggestions({
+  items,
+  onPick,
+}: {
+  items: readonly Suggestion[];
+  onPick: (text: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (items.length === 0) return null;
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.suggestions}
+      contentContainerStyle={styles.chipsContent}
+      keyboardShouldPersistTaps="handled"
+      accessibilityLabel={t('search.suggestions')}
+    >
+      {items.map((item) => (
+        <Chip key={item.key} label={item.label} on={false} onPress={() => onPick(item.query)} />
+      ))}
+    </ScrollView>
+  );
+}
+
 /** One addon catalog's own results, from the search the screen already asked. */
 const AddonSection = memo(function AddonSection({
   source,
@@ -313,19 +380,22 @@ function Help({
 type Section =
   | { key: string; kind: 'waiting' }
   | { key: string; kind: 'top'; items: Items }
+  | { key: string; kind: 'remote'; index: number }
   | { key: string; kind: 'planned'; index: number }
   | { key: string; kind: 'fold' }
   | { key: string; kind: 'addon'; index: number };
 
 /**
- * The results for a term, top to bottom: Sports, Top results, rows for what the words mean
- * ("Comedy films"), then each addon's own results, folded under Top results. When the words
- * were read only by forgiving a typo, the addons' results come before the understood rows.
+ * The results for a term, top to bottom: suggestions, Sports, TMDB's rows for who or what the
+ * words name ("With Tom Hanks"), Top results, rows for what the words mean ("Stand-up comedy
+ * films", "Comedy films"), then each addon's own results, folded under Top results. When the
+ * words were read only by forgiving a typo, the addons' results come before the understood rows.
  * The kind chip narrows what is asked: `sources` holds only its type's catalogs, and only the
  * understood rows of its type are asked.
  */
 function Results({
   term,
+  text,
   kind,
   sources,
   sportsSources,
@@ -333,6 +403,8 @@ function Results({
   onPick,
 }: {
   term: string;
+  /** The words as typed so far, which suggestions follow before they are searched. */
+  text: string;
   kind: Kind;
   sources: readonly CatalogSource[];
   /** With sport installed: the Sports group's own searches, or null without sport. */
@@ -353,6 +425,25 @@ function Results({
   // The understood rows' own queries, read here too to know when they have answered.
   const plannedQueries = useMemo(() => planned.map((row) => plannedQuery(row)), [planned]);
   const plannedStates = useQueryStates(plannedQueries);
+  // TMDB's rows: those for who or what the words name first, then those for what they mean.
+  // A row of one type the chip leaves out is not asked.
+  const remote = useMemo(
+    () =>
+      smart.named.concat(smart.remote).filter((row) => {
+        const rowType = remoteRowType(row);
+        return rowType === undefined || keeps(kind, rowType);
+      }),
+    [smart.named, smart.remote, kind],
+  );
+  const namedCount = useMemo(
+    () => remote.filter((row) => smart.named.indexOf(row) !== -1).length,
+    [remote, smart.named],
+  );
+  const remoteStates = useQueryStates(useMemo(() => remote.map((row) => row.query), [remote]));
+  const suggestions = useMemo(
+    () => searchSuggestions(text, smart.multi, MAX_SUGGESTIONS),
+    [text, smart.multi],
+  );
   const [sportsFound, setSportsFound] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
 
@@ -380,6 +471,18 @@ function Results({
       }),
     [planned, plannedStates],
   );
+  const remoteItems = useMemo(
+    () =>
+      remote.map((row, index) => {
+        const data = remoteStates[index]?.data;
+        if (!data) return null;
+        // A row like another title holds that title's type: the chip keeps the row or not.
+        const rowType = remoteRowType(row, data);
+        if (rowType !== undefined && !keeps(kind, rowType)) return [];
+        return remoteTitles(data).filter((item) => keeps(kind, item.type));
+      }),
+    [remote, remoteStates, kind],
+  );
   const topItems = useMemo(
     () => (top.status === 'shown' ? top.items.filter((item) => keeps(kind, item.type)) : []),
     [top, kind],
@@ -396,15 +499,29 @@ function Results({
     const state = plannedStates[index];
     return state !== undefined && state.status === 'error' && state.data === undefined;
   };
+  const remoteFailed = (index: number) => {
+    const state = remoteStates[index];
+    return state !== undefined && state.status === 'error' && state.data === undefined;
+  };
   const searchFound = results.some((items) => (items?.length ?? 0) > 0);
-  const plannedFound = plannedItems.some((items) => (items?.length ?? 0) > 0);
+  const plannedFound =
+    plannedItems.some((items) => (items?.length ?? 0) > 0) ||
+    remoteItems.some((items) => (items?.length ?? 0) > 0);
   // Only while the group is there: it says nothing as it goes.
   const found = searchFound || plannedFound || (sportsSources !== null && sportsFound);
   const done =
+    smart.settled &&
     results.every((items) => items != null) &&
-    plannedItems.every((items, index) => items !== null || rowFailed(index));
+    plannedItems.every((items, index) => items !== null || rowFailed(index)) &&
+    remoteItems.every((items, index) => items !== null || remoteFailed(index));
   const someFailed = failed.some(Boolean);
-  const allFailed = done && !found && sources.length > 0 && failed.every(Boolean);
+  const everyFailed = sources.length > 0 && failed.every(Boolean);
+  const allFailed = done && !found && everyFailed;
+  // TMDB was not reached to say who the words name: Try again asks it again too.
+  const multiFailed =
+    smart.multiQuery !== null &&
+    smart.multi === undefined &&
+    smart.multiQuery.get().status === 'error';
   const nothing = done && !found && !allFailed;
   const help = useMemo(
     () => (nothing ? searchHelp(term, discover) : undefined),
@@ -417,17 +534,39 @@ function Results({
     plannedQueries.forEach((query, index) => {
       if (rowFailed(index)) query.retry();
     });
+    remote.forEach((row, index) => {
+      if (remoteFailed(index)) row.query.retry();
+    });
+    if (multiFailed) smart.multiQuery?.retry();
   };
+  // An addon failed: a note says there may be more. TMDB's rows go quietly, as on the TV.
+  const addonFailed = someFailed || planned.some((_, index) => rowFailed(index));
+  const canRetry = addonFailed || multiFailed || remote.some((_, index) => remoteFailed(index));
 
   const sections: Section[] = [];
+  // A TMDB row only adds to what the addons found: it goes quietly when it has nothing.
+  const fromTmdb = (index: number) => {
+    const items = remoteItems[index];
+    return !remoteFailed(index) && !(items && items.length === 0);
+  };
+  for (let index = 0; index < namedCount; index++) {
+    if (fromTmdb(index))
+      sections.push({ key: `remote-${remote[index]!.key}`, kind: 'remote', index });
+  }
   // Until Top results is decided, the addons' sections wait behind the fold, so the list
-  // only grows: they never fold away under the finger.
-  const waiting = top.status === 'waiting';
-  if (waiting && sources.length > 0 && !nothing && !allFailed) {
+  // only grows: they never fold away under the finger. With every addon failed it waits on,
+  // for Try again, so there is nothing to wait for.
+  const waiting = top.status === 'waiting' && sources.length > 0 && !everyFailed;
+  if (waiting && !nothing && !allFailed) {
     sections.push({ key: 'waiting', kind: 'waiting' });
   }
   if (topItems.length > 0) sections.push({ key: 'top', kind: 'top', items: topItems });
   const understood: Section[] = [];
+  for (let index = namedCount; index < remote.length; index++) {
+    if (fromTmdb(index)) {
+      understood.push({ key: `remote-${remote[index]!.key}`, kind: 'remote', index });
+    }
+  }
   planned.forEach((row, index) => {
     const items = plannedItems[index];
     // An understood row only adds to what the addons found: it goes quietly when it has nothing.
@@ -462,6 +601,15 @@ function Results({
         );
       case 'top':
         return <TopSection items={section.items} onPress={open} />;
+      case 'remote':
+        return (
+          <RemoteSection
+            row={remote[section.index]!}
+            answer={remoteStates[section.index]?.data}
+            items={remoteItems[section.index] ?? null}
+            onPress={open}
+          />
+        );
       case 'planned':
         return (
           <PlannedSection
@@ -501,13 +649,18 @@ function Results({
         term={term}
         help={help}
         someFailed={someFailed}
-        canRetry={someFailed || planned.some((_, index) => rowFailed(index))}
+        canRetry={canRetry}
         onPick={onPick}
         onRetry={retryFailed}
       />
     );
-  } else if (done && someFailed) {
-    footer = <Text style={[styles.small, styles.note]}>{t('search.someNoAnswer')}</Text>;
+  } else if (done && addonFailed) {
+    footer = (
+      <Message
+        lead={t('search.someNoAnswer')}
+        action={{ label: t('common.tryAgain'), onPress: retryFailed }}
+      />
+    );
   }
 
   return (
@@ -516,9 +669,12 @@ function Results({
       keyExtractor={(section) => section.key}
       renderItem={renderItem}
       ListHeaderComponent={
-        sportsSources ? (
-          <SportsResults term={term} sources={sportsSources} onContent={setSportsFound} />
-        ) : undefined
+        <>
+          <Suggestions items={suggestions} onPick={onPick} />
+          {sportsSources ? (
+            <SportsResults term={term} sources={sportsSources} onContent={setSportsFound} />
+          ) : null}
+        </>
       }
       ListFooterComponent={footer}
       keyboardShouldPersistTaps="handled"
@@ -643,6 +799,7 @@ export function SearchScreen() {
         <Results
           key={term}
           term={term}
+          text={text}
           kind={kind}
           sources={shownSources}
           sportsSources={sportsSources}
@@ -701,6 +858,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chips: { flexGrow: 0, marginTop: 14, marginBottom: space.s },
+  suggestions: { flexGrow: 0, paddingTop: space.s },
   chipsContent: { gap: space.s, paddingHorizontal: gutter },
   section: { paddingHorizontal: gutter, paddingTop: space.m, gap: space.m },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: space.s },
@@ -734,7 +892,6 @@ const styles = StyleSheet.create({
   meantText: { ...type.label, fontSize: 16, color: colors.accent },
   genres: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s },
   small: { ...type.small, color: colors.textSubtle },
-  note: { paddingHorizontal: gutter, paddingTop: space.xl },
   recent: { padding: gutter, gap: space.xs },
   heading: { ...type.heading, color: colors.text, marginBottom: space.s },
   recentRow: { flexDirection: 'row', alignItems: 'center', gap: space.m, minHeight: touch.min },

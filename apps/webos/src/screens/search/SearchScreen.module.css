@@ -81,3 +81,34 @@
   margin-bottom: 20px;
   color: var(--bt-text-muted);
 }
+
+/* TMDB's logo after the title of a row it supplied: smaller than BannerTV's own. */
+.tmdb {
+  display: inline-block;
+  width: 36px;
+  height: 36px;
+  vertical-align: -6px;
+}
+
+/* What to search for while typing: one line at the top of the results. */
+.suggestions {
+  height: 104px;
+  padding: 0 0 0 var(--bt-content-inset);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.suggestion {
+  display: inline-block;
+  vertical-align: top;
+  margin: 8px 20px 0 0;
+}
+
+.suggestionLabel {
+  display: inline-block;
+  vertical-align: top;
+  max-width: 300px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

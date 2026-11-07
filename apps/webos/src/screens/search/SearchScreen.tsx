@@ -6,6 +6,7 @@ import {
   type PlannedRow,
   type Query,
   searchSources,
+  type Suggestion,
 } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
@@ -34,8 +35,12 @@ import {
   plannedCatalog,
   plannedQuery,
   plannedTitle,
+  type RemoteRow,
+  remoteTitle,
+  remoteTitles,
   type SearchHelp,
   searchHelp,
+  searchSuggestions,
   useSmartSearch,
   visibleTitles,
 } from '../../data/search-results';
@@ -46,6 +51,7 @@ import { focusedKey } from '../../navigation/spatial';
 import { canSlide } from '../../platform/input-mode';
 import { openDetails } from '../home/Hero';
 import { SportsResults } from './SportsResults';
+import { TmdbLogo } from './TmdbLogo';
 import styles from './SearchScreen.module.css';
 
 /** Searching starts once typing pauses this long. */
@@ -55,6 +61,15 @@ const MIN_TERM_LENGTH = 2;
 const RESULT_PREFIX = 'search-res-';
 /** Rows of what the words mean. Not search-res-sports-, which is the Sports group's. */
 const PLANNED_PREFIX = `${RESULT_PREFIX}u-`;
+/** Rows from TMDB. */
+const REMOTE_PREFIX = `${RESULT_PREFIX}t-`;
+/** What to search for, offered while typing: kept apart from the results' focus. */
+const SUGGEST_PREFIX = 'search-suggest-';
+const SUGGEST_SLOT = 'suggest';
+/** As many as fit across the TV on one line. */
+const MAX_SUGGESTIONS = 4;
+// One element for every TMDB row, so a row is not drawn again for a new one.
+const TMDB_TAG = <TmdbLogo />;
 const TOP_KEY = `${RESULT_PREFIX}top`;
 const HELP_PREFIX = `${RESULT_PREFIX}help-`;
 const HELP_MEANT = `${HELP_PREFIX}meant`;
@@ -187,6 +202,98 @@ const PlannedResultRow = memo(function PlannedResultRow({
   );
 });
 
+interface RemoteResultRowProps {
+  row: RemoteRow;
+  /** How many titles the row shows: -1 while it is asked, 0 when it found none or failed. */
+  onCount: (key: string, count: number) => void;
+  onGone: (rowKey: string) => void;
+  onItemFocus: (rowKey: string) => void;
+  onItemPress: (item: MetaPreview) => void;
+}
+
+/** The key a TMDB row's count goes under, apart from the planned rows'. */
+const remoteCount = (row: RemoteRow) => `t-${row.key}`;
+
+/**
+ * A row from TMDB, such as "With Tom Hanks" or "Stand-up comedy films",
+ * with TMDB's logo. Its titles are by IMDb id, so they open on Details as
+ * any other; a kids profile sees only those within its rating.
+ */
+const RemoteResultRow = memo(function RemoteResultRow({
+  row,
+  onCount,
+  onGone,
+  onItemFocus,
+  onItemPress,
+}: RemoteResultRowProps) {
+  const { t } = useTranslation();
+  const state = useQuery(row.query);
+  const items = useMemo(() => (state.data ? remoteTitles(state.data) : null), [state.data]);
+  // Like a planned row, it only adds to what the addons found: it goes quietly when it has nothing.
+  const count = items ? items.length : state.status === 'error' ? 0 : -1;
+  const focusKey = `${REMOTE_PREFIX}${row.key}`;
+  const countKey = remoteCount(row);
+  useLayoutEffect(() => onCount(countKey, count), [onCount, countKey, count]);
+  useHandOff(focusKey, count === 0, onGone);
+  const onFocus = useCallback(() => onItemFocus(focusKey), [onItemFocus, focusKey]);
+  if (count === 0) return null;
+  return (
+    <Row
+      focusKey={focusKey}
+      title={remoteTitle(t, row, state.data)}
+      tag={TMDB_TAG}
+      shape="poster"
+      items={items}
+      onItemFocus={onFocus}
+      onItemPress={onItemPress}
+    />
+  );
+});
+
+interface SuggestionsProps {
+  items: readonly Suggestion[];
+  onPick: (term: string) => void;
+  /** A suggestion took focus: the view goes back to the top, where they are. */
+  onFocus: () => void;
+}
+
+/** What to search for, while typing: recent searches, people, titles and genres. */
+function Suggestions({ items, onPick, onFocus }: SuggestionsProps) {
+  const { t } = useTranslation();
+  // Each suggestion keeps its focus key as others come in around it (TMDB answers after
+  // the phrases), so the one focused stays focused. When it goes, focus takes its place.
+  const keys = items.map((item) => item.key).join(' ');
+  const before = useRef<readonly string[]>([]);
+  useLayoutEffect(() => {
+    const previous = before.current;
+    const now = keys === '' ? [] : keys.split(' ');
+    before.current = now;
+    const focused = focusedKey();
+    if (focused.indexOf(SUGGEST_PREFIX) !== 0 || now.length === 0) return;
+    const key = focused.slice(SUGGEST_PREFIX.length);
+    if (now.indexOf(key) !== -1) return;
+    const at = Math.min(Math.max(previous.indexOf(key), 0), now.length - 1);
+    void setFocus(`${SUGGEST_PREFIX}${now[at]}`);
+  }, [keys]);
+  if (items.length === 0) return null;
+  return (
+    <div className={styles.suggestions} role="group" aria-label={t('search.suggestions')}>
+      {items.map((item) => (
+        <div key={item.key} className={styles.suggestion}>
+          <Button
+            focusKey={`${SUGGEST_PREFIX}${item.key}`}
+            label={item.label}
+            onFocus={onFocus}
+            onPress={() => onPick(item.query)}
+          >
+            <span className={styles.suggestionLabel}>{item.label}</span>
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface HelpProps {
   /** Every addon failed: only Try again is offered. */
   allFailed: boolean;
@@ -257,6 +364,8 @@ function firstHelpKey(allFailed: boolean, help: SearchHelp | undefined): string 
 
 interface ResultsProps {
   term: string;
+  /** The words as typed so far, which suggestions follow before they are searched. */
+  text: string;
   sources: readonly CatalogSource[];
   /** Catalogs that can answer what the words mean. */
   discover: readonly DiscoverSource[];
@@ -267,15 +376,22 @@ interface ResultsProps {
 }
 
 /**
- * Search results, top to bottom: Sports, Top results across the addons, rows
- * for what the words mean ("Comedy films"), then each addon's own results.
- * When the words were read only by forgiving a typo, the addons' rows come
- * before the understood ones.
+ * Search results, top to bottom: Sports, suggestions, TMDB's rows for who or
+ * what the words name ("With Tom Hanks"), Top results across the addons,
+ * rows for what the words mean ("Stand-up comedy films", "Comedy films"),
+ * then each addon's own results. When the words were read only by forgiving
+ * a typo, the addons' rows come before the understood ones.
  */
-function Results({ term, sources, discover, sportsSources, onPick }: ResultsProps) {
+function Results({ term, text, sources, discover, sportsSources, onPick }: ResultsProps) {
   const { t } = useTranslation();
   const smart = useSmartSearch(term, sources, discover);
-  const { planned, plannedLast, queries, states, results, failed, top } = smart;
+  const { named, remote, multiQuery, planned, plannedLast, queries, states, results, failed, top } =
+    smart;
+  const suggestions = useMemo(
+    () => searchSuggestions(text, smart.multi, MAX_SUGGESTIONS),
+    [text, smart.multi],
+  );
+  const firstSuggestion = suggestions[0]?.key;
   const [counts, setCounts] = useState<Readonly<Record<string, number>>>({});
   const [sportsContent, setSportsContent] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -298,8 +414,13 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
     [sources],
   );
 
-  const plannedEmpty = planned.every((row) => counts[row.key] === 0);
-  const allFailed = sources.length > 0 && failed.every(Boolean) && plannedEmpty && !sportsContent;
+  const plannedEmpty =
+    planned.every((row) => counts[row.key] === 0) &&
+    named.every((row) => counts[remoteCount(row)] === 0) &&
+    remote.every((row) => counts[remoteCount(row)] === 0);
+  // Every addon failed, and TMDB has nothing either: only Try again is offered.
+  const allFailed =
+    sources.length > 0 && smart.settled && failed.every(Boolean) && plannedEmpty && !sportsContent;
   const someFailed = failed.some(Boolean);
   const nothing =
     !allFailed &&
@@ -315,14 +436,26 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
 
   // Every place focus can be in the track, in order, and whether it is drawn now.
   const slots = useMemo(() => {
+    const fromTmdb = (row: RemoteRow) => {
+      const key = `${REMOTE_PREFIX}${row.key}`;
+      return { key, focus: key, drawn: counts[remoteCount(row)] !== 0 };
+    };
     const list: { key: string; focus: string; drawn: boolean }[] = [
+      {
+        key: SUGGEST_SLOT,
+        focus: firstSuggestion === undefined ? '' : `${SUGGEST_PREFIX}${firstSuggestion}`,
+        drawn: firstSuggestion !== undefined,
+      },
       { key: HELP_SLOT, focus: helpKey ?? '', drawn: helpKey !== undefined },
+      ...named.map(fromTmdb),
       { key: TOP_KEY, focus: TOP_KEY, drawn: top.status === 'shown' },
     ];
-    const understood = planned.map((row) => {
-      const key = `${PLANNED_PREFIX}${row.key}`;
-      return { key, focus: key, drawn: counts[row.key] !== 0 };
-    });
+    const understood = remote.map(fromTmdb).concat(
+      planned.map((row) => {
+        const key = `${PLANNED_PREFIX}${row.key}`;
+        return { key, focus: key, drawn: counts[row.key] !== 0 };
+      }),
+    );
     const addons = sources.map((source, index) => {
       const key = `${RESULT_PREFIX}${source.key}`;
       const items = results[index] ?? null;
@@ -330,7 +463,20 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
       return { key, focus: key, drawn };
     });
     return list.concat(plannedLast ? addons.concat(understood) : understood.concat(addons));
-  }, [helpKey, top.status, planned, plannedLast, counts, sources, results, failed, allFailed]);
+  }, [
+    firstSuggestion,
+    helpKey,
+    named,
+    top.status,
+    remote,
+    planned,
+    plannedLast,
+    counts,
+    sources,
+    results,
+    failed,
+    allFailed,
+  ]);
   const latest = useRef(slots);
   const drawnRows = slots
     .filter((slot) => slot.drawn)
@@ -394,18 +540,36 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
       const query = plannedQuery(row);
       if (query.get().status === 'error') query.retry();
     }
-  }, [queries, states, planned]);
+    for (const row of named.concat(remote)) {
+      if (row.query.get().status === 'error') row.query.retry();
+    }
+    if (multiQuery?.get().status === 'error') multiQuery.retry();
+  }, [queries, states, planned, named, remote, multiQuery]);
 
-  const plannedRows = planned.map((row) => (
-    <PlannedResultRow
-      key={`u-${row.key}`}
+  const tmdbRow = (row: RemoteRow) => (
+    <RemoteResultRow
+      key={`t-${row.key}`}
       row={row}
       onCount={onCount}
       onGone={onGone}
       onItemFocus={onItemFocus}
       onItemPress={onItemPress}
     />
-  ));
+  );
+  const plannedRows = remote
+    .map(tmdbRow)
+    .concat(
+      planned.map((row) => (
+        <PlannedResultRow
+          key={`u-${row.key}`}
+          row={row}
+          onCount={onCount}
+          onGone={onGone}
+          onItemFocus={onItemFocus}
+          onItemPress={onItemPress}
+        />
+      )),
+    );
   const addonRows = sources.map((source, index) => (
     <ResultRow
       key={source.key}
@@ -437,6 +601,7 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
             onLeave={onSportsLeave}
           />
         )}
+        <Suggestions items={suggestions} onPick={onPick} onFocus={onHelpFocus} />
         {allFailed ? (
           <Help
             allFailed
@@ -456,6 +621,7 @@ function Results({ term, sources, discover, sportsSources, onPick }: ResultsProp
             onFocus={onHelpFocus}
           />
         ) : null}
+        {named.map(tmdbRow)}
         {top.status === 'shown' && (
           <Row
             focusKey={TOP_KEY}
@@ -577,6 +743,7 @@ export function SearchScreen() {
       <Results
         key={term}
         term={term}
+        text={text}
         sources={sources}
         discover={discover}
         sportsSources={sportsSources}

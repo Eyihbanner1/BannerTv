@@ -62,6 +62,11 @@ export interface PlanOptions {
   kids?: boolean;
   /** At most this many rows; MAX_UNDERSTOOD_ROWS when not given. */
   max?: number;
+  /**
+   * TMDB answers the moods it tags by keyword (stand-up comedy), so they get
+   * no stand-in genre rows from the catalogs.
+   */
+  remoteMoods?: boolean;
 }
 
 function same(a: string, b: string): boolean {
@@ -139,7 +144,8 @@ function typesFor(
  * it (Cinemeta's Popular, normally); a typed year from a catalog that lists
  * years (Cinemeta's New); "new" from its newest year; a typed catalog name,
  * that catalog. Moods with no catalog genre (stand-up comedy) get their
- * nearest genre's rows. Languages and decades need TMDB, so add none yet.
+ * nearest genre's rows, unless TMDB answers them. Languages and decades need
+ * TMDB (planRemote), so add none here.
  */
 export function planSearch(
   understanding: Understanding,
@@ -165,6 +171,7 @@ export function planSearch(
       case 'genre':
       case 'mood':
       case 'family':
+        if (options.remoteMoods && intent.kind === 'mood' && intent.tmdb?.keywords) break;
         for (const genre of intent.genres) {
           for (const type of types) {
             const source = usable.find(
@@ -239,7 +246,7 @@ export function planSearch(
         );
         break;
       }
-      // Languages and decades need TMDB's discover, which Search does not ask yet.
+      // Languages and decades need TMDB's discover: planRemote.
       case 'language':
       case 'decade':
         break;

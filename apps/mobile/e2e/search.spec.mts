@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { mockAddons } from '../../webos/e2e/addons.ts';
+import { mockServices } from '../../webos/e2e/services.ts';
 import { mockSports, seedSports, SPORTS_NOW } from '../../webos/e2e/sports.ts';
 
 /*
@@ -166,4 +167,47 @@ test.describe('with sport', () => {
     await expect(page.getByText('Listed by Test Sports')).toBeVisible();
     expect(errors).toEqual([]);
   });
+});
+
+test('Search: TMDB adds stand-up rows with its logo, people from suggestions, and titles like one', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true, search: true });
+  const field = await openSearch(page);
+
+  // Stand-up: TMDB's rows by its keywords, with its logo, and no Comedy rows standing in.
+  await field.fill('stand-up');
+  await expect(page.getByText('Stand-up comedy films', { exact: true })).toBeVisible();
+  await expect(page.getByText('Stand-up comedy series', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'From TMDB' }).first()).toBeVisible();
+  await expect(page.getByText('Comedy films', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Laugh Out Loud: Live, 2023' })).toBeVisible();
+  // The Series chip keeps only the series row.
+  await page.getByRole('button', { name: 'Series', exact: true }).click();
+  await expect(page.getByText('Stand-up comedy films', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Stand-up comedy series', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Films and series', exact: true }).click();
+
+  // A few letters of a name: suggestions offer the people TMDB knows by them.
+  await field.fill('tom h');
+  await page.getByRole('button', { name: 'Tom Hanks', exact: true }).click();
+  await expect(field).toHaveValue('Tom Hanks');
+  await expect(page.getByText('With Tom Hanks', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Band of Neighbours, 2001' })).toBeVisible();
+
+  // Titles like another.
+  await field.fill('films like the matrix');
+  await expect(page.getByText('Films like The Matrix', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wired Reality, 2023' })).toBeVisible();
+  expect(tmdb.searches).toEqual(
+    expect.arrayContaining([
+      'discover?type=movie&keywords=9716,356038,362573',
+      'multi?query=tom hanks',
+      'person?id=31&role=cast',
+      'like?query=the matrix&type=movie',
+    ]),
+  );
+  expect(errors).toEqual([]);
 });

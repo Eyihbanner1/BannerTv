@@ -1,5 +1,7 @@
-import { expect, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
+import { KIDS_ID, main, seedProfiles } from './profiles';
+import { mockServices } from './services';
 import { APP_URL, expectFocus, openSection, press, pressBack, watchErrors } from './tv';
 
 const FIELD = 'search-field';
@@ -390,4 +392,172 @@ test('when no addon answers, Search says so and offers Try again', async ({ page
     'data-focus-key',
     new RegExp(`^${MOVIE_RESULTS}-tile-0$`),
   );
+});
+
+/** Opens Search from Home and starts typing in the box. */
+async function typeInSearch(page: Page, words: string, firstTile = `${FIRST_ROW}-tile-0`) {
+  await page.goto(APP_URL);
+  await expectFocus(page, firstTile);
+  await openSection(page, 'search');
+  await expectFocus(page, FIELD);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(words);
+}
+
+test('Search asks TMDB for stand-up comedy, with TMDB’s logo and no stand-in rows', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true, search: true });
+  await typeInSearch(page, 'stand-up');
+
+  const films = page.locator('[data-row-key="search-res-t-tmdb-movie-standup"]');
+  await expect(films.locator('h2')).toHaveText('Stand-up comedy films');
+  await expect(films.getByRole('img', { name: 'From TMDB' })).toBeVisible();
+  await expect(films.locator('[data-focus-key$="-tile-0"]')).toHaveAttribute(
+    'aria-label',
+    'Laugh Out Loud: Live, 2023',
+  );
+  const series = page.locator('[data-row-key="search-res-t-tmdb-series-standup"]');
+  await expect(series.locator('h2')).toHaveText('Stand-up comedy series');
+  // TMDB answers the mood by its keywords, so the addons' Comedy rows do not stand in for it.
+  await expect(page.locator('[data-row-key^="search-res-u-"]')).toHaveCount(0);
+  expect(tmdb.searches).toEqual(
+    expect.arrayContaining([
+      'discover?type=movie&keywords=9716,356038,362573',
+      'discover?type=series&keywords=9716,356038,362573',
+    ]),
+  );
+  // The words are understood, so nobody is looked for.
+  expect(tmdb.searches.filter((asked) => asked.indexOf('multi') === 0)).toEqual([]);
+
+  // Down from the box: the suggestion first, then the rows.
+  // Each suggestion is keyed by its words, so one stays focused as others come in.
+  await press(page, 'ArrowDown', 'search-suggest-standupcomedy');
+  await expect(page.locator('[data-focus-key="search-suggest-standupcomedy"]')).toHaveText(
+    'Stand-up comedy',
+  );
+  await press(page, 'ArrowDown', 'search-res-t-tmdb-movie-standup-tile-0');
+  await press(page, 'ArrowDown', 'search-res-t-tmdb-series-standup-tile-0');
+  expect(errors).toEqual([]);
+});
+
+test('suggestions offer people TMDB knows, and a person’s name gives a row of their work', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true, search: true });
+  await typeInSearch(page, 'tom h');
+
+  const suggestion = (index: number) =>
+    page.locator('[data-focus-key^="search-suggest-"]').nth(index);
+  await expect(suggestion(0)).toHaveText('Tom Hanks');
+  await expect(suggestion(1)).toHaveText('Tom Hardy');
+  await expect(suggestion(2)).toHaveText('Tomb Raider (2018)');
+  // Two words a few letters short of a name are not that person yet.
+  await expect(page.locator('[data-row-key^="search-res-t-tmdb-person"]')).toHaveCount(0);
+
+  await press(page, 'ArrowDown', 'search-suggest-tomhank');
+  await page.keyboard.press('Enter');
+  await expectFocus(page, FIELD);
+  await expect(page.locator('input[aria-label="Search"]')).toHaveValue('Tom Hanks');
+  const person = page.locator('[data-row-key="search-res-t-tmdb-person-31"]');
+  await expect(person.locator('h2')).toHaveText('With Tom Hanks');
+  await expect(person.getByRole('img', { name: 'From TMDB' })).toBeVisible();
+  await expect(person.locator('[data-focus-key$="-tile-1"]')).toHaveAttribute(
+    'aria-label',
+    'Band of Neighbours, 2001',
+  );
+  // The person is no longer suggested once searched; the others still are.
+  await expect(suggestion(0)).toHaveText('Tom Hardy');
+  expect(tmdb.searches).toEqual(
+    expect.arrayContaining([
+      'multi?query=tom h',
+      'multi?query=tom hanks',
+      'person?id=31&role=cast',
+    ]),
+  );
+  expect(errors).toEqual([]);
+});
+
+test('“films like” a title asks TMDB for titles like it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true, search: true });
+  await typeInSearch(page, 'films like the matrix');
+
+  const like = page.locator('[data-row-key="search-res-t-tmdb-like"]');
+  await expect(like.locator('h2')).toHaveText('Films like The Matrix');
+  await expect(like.locator('[data-focus-key$="-tile-0"]')).toHaveAttribute(
+    'aria-label',
+    'Wired Reality, 2023',
+  );
+  expect(tmdb.searches).toContain('like?query=the matrix&type=movie');
+  expect(tmdb.searches.filter((asked) => asked.indexOf('multi') === 0)).toEqual([]);
+
+  // Without a type the words may be a title's own name: TMDB is asked what it knows first.
+  const box = page.locator('input[aria-label="Search"]');
+  await box.fill('something like summer');
+  await expect(page.getByText('Nothing found for “something like summer”.')).toBeVisible();
+  await expect(like).toHaveCount(0);
+  expect(tmdb.searches).toContain('multi?query=something like summer');
+  expect(tmdb.searches).not.toContain('like?query=summer');
+  // TMDB knows no title of that name: the words ask for titles like one.
+  await box.fill('something like inception');
+  await expect(like.locator('h2')).toHaveText('Films like The Matrix');
+  expect(tmdb.searches).toEqual(
+    expect.arrayContaining(['multi?query=something like inception', 'like?query=inception']),
+  );
+  expect(errors).toEqual([]);
+});
+
+test('a kids profile’s TMDB rows keep to titles within its UK rating', async ({ page }) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true, search: true });
+  await seedProfiles(page, {
+    profiles: [main(), { id: KIDS_ID, name: 'Robin', colour: 3, kids: 'PG' }],
+    lastId: KIDS_ID,
+    askAtLaunch: false,
+  });
+  await typeInSearch(page, 'snow', 'home-0-movie-top-genre-family-tile-0');
+
+  // Words that name no genre: TMDB's titles by name, each checked by its rating.
+  const titles = page.locator('[data-row-key="search-res-t-tmdb-titles"]');
+  await expect(titles.locator('h2')).toHaveText('Suitable for kids');
+  await expect(titles.locator('[data-focus-key$="-tile-0"]')).toHaveAttribute(
+    'aria-label',
+    'Snow Friends, 2023',
+  );
+  // Rated 12A at the cinema and 15 at home: a 15, above the profile's PG.
+  await expect(titles.locator('[data-focus-key$="-tile-1"]')).toHaveCount(0);
+  expect(tmdb.searches).toContain('titles?query=snow&ratings=1');
+  // A kids profile is never offered people, so nobody is looked for.
+  expect(tmdb.searches.filter((asked) => asked.indexOf('multi') === 0)).toEqual([]);
+
+  // A genre: TMDB's family titles of it, within the rating.
+  const input = page.locator('input[aria-label="Search"]');
+  await input.fill('comedy');
+  const comedy = page.locator('[data-row-key="search-res-t-tmdb-movie-comedy"]');
+  await expect(comedy.locator('[data-focus-key$="-tile-0"]')).toHaveAttribute(
+    'aria-label',
+    'Puddle Jumpers, 2023',
+  );
+  await expect(comedy.locator('[data-focus-key$="-tile-1"]')).toHaveCount(0);
+  expect(tmdb.searches).toContain('discover?type=movie&genres=35&any=10751&certification=PG');
+  expect(errors).toEqual([]);
+});
+
+test('a service without Search’s routes leaves Search to the addons', async ({ page }) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  const { tmdb } = await mockServices(page, { tmdb: true });
+  await typeInSearch(page, 'stand-up');
+  // The stand-in rows from the addons' Comedy catalogs, as before.
+  await expect(page.locator('[data-row-key^="search-res-u-"]').first()).toBeVisible();
+  await expect(page.locator('[data-row-key^="search-res-t-"]')).toHaveCount(0);
+  expect(tmdb.searches).toEqual([]);
+  expect(errors).toEqual([]);
 });

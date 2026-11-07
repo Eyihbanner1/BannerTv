@@ -5,7 +5,7 @@ import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from '../addons/defaults';
 import { discoverSources } from '../addons/sources';
 import { addonPhrases, planSearch } from './plan';
 import { topResults } from './rank';
-import { didYouMean, genreChips } from './suggest';
+import { didYouMean, genreChips, suggestions } from './suggest';
 import { understand } from './understand';
 
 function installed(manifest: unknown, transportUrl: string): InstalledAddon {
@@ -239,5 +239,71 @@ describe('suggestions', () => {
     expect(genreChips('hurrer', sources, { kids: true }).map((chip) => chip.label)).not.toContain(
       'Horror',
     );
+  });
+});
+
+describe('suggestions', () => {
+  it('offers recent searches, then TMDB people and titles, then phrases and known titles', () => {
+    expect(
+      suggestions('stan', {
+        recent: ['stand by me', 'dune'],
+        remote: {
+          people: [{ id: 1, name: 'Stanley Tucci', knownFor: [] }],
+          titles: [
+            { name: 'Stand by Me', type: 'movie', year: '1986' },
+            { name: 'Stan & Ollie', type: 'movie', year: '2018' },
+          ],
+        },
+        known: ['Stanleyville', 'Dune'],
+      }),
+    ).toEqual([
+      { label: 'stand by me', query: 'stand by me', kind: 'recent', key: 'standbyme' },
+      { label: 'Stanley Tucci', query: 'Stanley Tucci', kind: 'person', key: 'stanleytucci' },
+      { label: 'Stan & Ollie (2018)', query: 'Stan & Ollie', kind: 'title', key: 'stanandolly' },
+      { label: 'Stand-up comedy', query: 'Stand-up comedy', kind: 'phrase', key: 'standupcomedy' },
+      { label: 'Stanleyville', query: 'Stanleyville', kind: 'known', key: 'stanleyville' },
+    ]);
+  });
+
+  it("keys each suggestion by its words, so a list that changes keeps each one's key", () => {
+    const before = suggestions('tom').map((item) => item.key);
+    const after = suggestions('tom', {
+      remote: { people: [{ id: 31, name: 'Tom Hanks', knownFor: [] }], titles: [] },
+    }).map((item) => item.key);
+    expect(after[0]).toBe('tomhank');
+    for (const key of before) expect(after).toContain(key);
+    for (const key of after) expect(key).toMatch(/^[a-z0-9]+$/);
+  });
+
+  it('offers nothing for one letter or for the words themselves, and at most six', () => {
+    expect(suggestions('s')).toEqual([]);
+    expect(suggestions('korean').map((item) => item.label)).toEqual([]);
+    expect(suggestions('co').length).toBeLessThanOrEqual(6);
+    expect(suggestions('kor').map((item) => item.label)).toEqual(['Korean']);
+  });
+
+  it('gives a kids profile no people, no TMDB titles and no genres not for children', () => {
+    const kids = suggestions('hor', {
+      kids: true,
+      remote: { people: [{ id: 1, name: 'Horace', knownFor: [] }], titles: [] },
+    });
+    expect(kids).toEqual([]);
+    expect(suggestions('hor').map((item) => item.label)).toEqual(['Horror']);
+    expect(suggestions('fam', { kids: true }).map((item) => item.label)).toEqual(['Family']);
+  });
+});
+
+describe('planSearch with TMDB', () => {
+  it('leaves moods TMDB tags by keyword to TMDB, and keeps genres', () => {
+    const sources = discoverSources(cinemeta);
+    expect(planSearch(understand('stand-up'), sources, { remoteMoods: true })).toEqual([]);
+    expect(planSearch(understand('stand-up films'), sources).map((row) => row.label)).toEqual([
+      'Comedy',
+    ]);
+    expect(
+      planSearch(understand('comedy films'), sources, { remoteMoods: true }).map(
+        (row) => row.label,
+      ),
+    ).toEqual(['Comedy']);
   });
 });

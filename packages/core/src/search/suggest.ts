@@ -1,5 +1,6 @@
 import { kidsTitleAllowed } from '../profiles/kids';
 import type { DiscoverSource } from '../addons/sources';
+import type { MultiAnswer } from './service';
 import { vocabulary, type VocabularyEntry } from './vocabulary';
 import { distance, keyOf, typosAllowed, wordsOf } from './words';
 
@@ -94,4 +95,79 @@ export function genreChips(
     if (entry && chosen.indexOf(entry) === -1) chosen.push(entry);
   }
   return chosen.slice(0, max).map((entry) => ({ label: entry.label, query: entry.label }));
+}
+
+/** Something Search offers to search for while the words are typed. */
+export interface Suggestion {
+  /** As shown: "Stand-up comedy", "Tom Hanks", "Dune (2021)". */
+  label: string;
+  /** What choosing it searches for. */
+  query: string;
+  kind: 'recent' | 'person' | 'title' | 'phrase' | 'known';
+  /** The query as Search compares words, [a-z0-9] only and unique in the list: safe for focus keys. */
+  key: string;
+}
+
+export interface SuggestionSources {
+  /** Recent searches, newest first. */
+  recent?: readonly string[];
+  /** Titles already known here: My List and Continue Watching. */
+  known?: readonly string[];
+  /** What TMDB knows by these words, when it was asked. */
+  remote?: MultiAnswer;
+  /** A kids profile: no people or TMDB titles, and only genres for children. */
+  kids?: boolean;
+  /** At most this many; 6 when not given. */
+  max?: number;
+}
+
+function folded(text: string): string {
+  return wordsOf(text).join(' ');
+}
+
+/**
+ * What to offer while the words are typed, best first: recent searches that
+ * begin with them, then people and titles TMDB knows by them, genres and
+ * moods Search understands, and titles in My List. Nothing for one letter,
+ * and nothing that is the words themselves.
+ */
+export function suggestions(text: string, sources: SuggestionSources = {}): Suggestion[] {
+  const typed = folded(text);
+  if (typed.length < 2) return [];
+  const max = sources.max ?? 6;
+  const found: Suggestion[] = [];
+  const seen = new Set<string>([keyOf(wordsOf(text))]);
+  const add = (label: string, query: string, kind: Suggestion['kind']) => {
+    const key = keyOf(wordsOf(query));
+    if (key === '' || seen.has(key) || found.length >= max) return;
+    seen.add(key);
+    found.push({ label, query, kind, key });
+  };
+  const begins = (candidate: string) => {
+    const other = folded(candidate);
+    return other.indexOf(typed) === 0 || other.indexOf(` ${typed}`) !== -1;
+  };
+
+  for (const term of sources.recent ?? []) if (begins(term)) add(term, term, 'recent');
+  if (!sources.kids && sources.remote) {
+    const { people, titles } = sources.remote;
+    for (const person of people.slice(0, 2)) add(person.name, person.name, 'person');
+    for (const title of titles.slice(0, 3)) {
+      add(title.year ? `${title.name} (${title.year})` : title.name, title.name, 'title');
+    }
+  }
+  for (const entry of vocabulary()) {
+    if (entry.kind === 'new') continue;
+    if (sources.kids && (entry.kind === 'genre' || entry.kind === 'mood')) {
+      if (!kidsTitleAllowed({ type: 'movie', genres: [...entry.genres, 'Family'] })) continue;
+    }
+    if (
+      begins(entry.label) ||
+      entry.phrases.some((phrase) => folded(phrase).indexOf(typed) === 0)
+    ) {
+      add(entry.label, entry.label, 'phrase');
+    }
+  }
+  for (const name of sources.known ?? []) if (begins(name)) add(name, name, 'known');
+  return found;
 }

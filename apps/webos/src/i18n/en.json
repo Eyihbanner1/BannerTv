@@ -67,7 +67,20 @@
     "didYouMean": "Did you mean “{{term}}”?",
     "tryGenres": "Or look through a genre:",
     "noAnswer": "None of your addons answered, so Search could not look. Check the connection, then try again.",
-    "someNoAnswer": "Some addons didn't answer, so there may be more to find."
+    "someNoAnswer": "Some addons didn't answer, so there may be more to find.",
+    "personCast": "With {{name}}",
+    "personDirecting": "Directed by {{name}}",
+    "personWriting": "Written by {{name}}",
+    "like": "Like {{name}}",
+    "likeFilms": "Films like {{name}}",
+    "likeSeries": "Series like {{name}}",
+    "kidsTitles": "Suitable for kids",
+    "newWhatFilms": "New {{what}} films",
+    "newWhatSeries": "New {{what}} series",
+    "fromYear": "{{row}} from {{year}}",
+    "fromDecade": "{{row}} from the {{decade}}s",
+    "fromTmdb": "From TMDB",
+    "suggestions": "Suggestions"
   },
   "sports": {
     "title": "Sports",
@@ -507,7 +520,7 @@
     "trakt": "Trakt",
     "tmdb": "Extra details from TMDB: {{value}}",
     "stillWatching": "Ask \"Still watching?\": {{value}}",
-    "tmdbCredit": "Extra details and images from TMDB. BannerTV uses the TMDB API but is not endorsed or certified by TMDB.",
+    "tmdbCredit": "Extra details, images and some search results come from TMDB. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
     "account": "BannerTV account"
   },
   "diagnostics": {

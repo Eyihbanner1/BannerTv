@@ -11,6 +11,7 @@ import {
   kidsSearchSources,
   kidsTitleAllowed,
   ratingAllowed,
+  strictestUkRating,
   ukRating,
 } from './kids';
 
@@ -201,5 +202,20 @@ describe('kidsDetailsAllowed', () => {
     expect(
       kidsDetailsAllowed({ type: 'channel', genres: ['Family'] }, { certificate: 'U' }, 'PG'),
     ).toBe(false);
+  });
+});
+
+describe('strictestUkRating', () => {
+  it("takes the UK's strictest certificate, else the US's mapped", () => {
+    expect(strictestUkRating(['PG', '15', '12A'], ['PG-13'])).toBe('15');
+    expect(strictestUkRating(['12A', 'PG'], [])).toBe('12');
+    expect(strictestUkRating(['', 'NR'], ['PG-13', 'G'])).toBe('12');
+    expect(strictestUkRating([], ['TV-Y'])).toBe('U');
+    expect(strictestUkRating([], ['NR'])).toBeUndefined();
+    expect(strictestUkRating([], [])).toBeUndefined();
+  });
+
+  it('counts a war series as not for children', () => {
+    expect(kidsTitleAllowed({ type: 'series', genres: ['Kids', 'War & Politics'] })).toBe(false);
   });
 });

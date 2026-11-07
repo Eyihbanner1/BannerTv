@@ -11,7 +11,17 @@ export const KIDS_GENRE = 'Family';
 
 // IMDb's and TMDB's genre names, compared in lower case.
 const FOR_CHILDREN = ['family', 'kids', 'children'];
-const NOT_FOR_CHILDREN = ['horror', 'thriller', 'crime', 'war', 'adult', 'erotic', 'erotica'];
+const NOT_FOR_CHILDREN = [
+  'horror',
+  'thriller',
+  'crime',
+  'war',
+  // TMDB's name for war series.
+  'war & politics',
+  'adult',
+  'erotic',
+  'erotica',
+];
 
 /**
  * Whether a kids profile may see a title, from what catalogs say about it.
@@ -60,6 +70,29 @@ export function ukRating(certificate: string, country: 'GB' | 'US'): string | un
   if (country === 'US') return FROM_US[value];
   const uk = value === '12A' ? '12' : value;
   return UK_ORDER.indexOf(uk) !== -1 ? uk : undefined;
+}
+
+/**
+ * The strictest UK rating among a title's certificates: the UK's own, else
+ * the US's mapped. A film rated PG at the cinema and 15 on disc is a 15.
+ * Undefined when none reads as a rating.
+ */
+export function strictestUkRating(
+  uk: readonly string[],
+  us: readonly string[],
+): string | undefined {
+  for (const [list, country] of [
+    [uk, 'GB'],
+    [us, 'US'],
+  ] as const) {
+    let strictest = -1;
+    for (const certificate of list) {
+      const rating = ukRating(certificate, country);
+      if (rating !== undefined) strictest = Math.max(strictest, UK_ORDER.indexOf(rating));
+    }
+    if (strictest !== -1) return UK_ORDER[strictest];
+  }
+  return undefined;
 }
 
 /** Whether a title rated `rating` (a UK rating) may play in a kids profile allowing `max`. */

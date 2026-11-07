@@ -1,6 +1,6 @@
 # BannerTV API
 
-A Cloudflare Worker that lets the TV use Trakt and TMDB without their keys in the app package or in this repository. See ADR 0004, item 9.
+A Cloudflare Worker that lets the TV use Trakt and TMDB without their keys in the app package or in this repository. See ADR 0004, items 9 and 13 (since 6 November 2026 Search may ask TMDB; Home and Discover still never do).
 
 The Trakt client ID (and client secret, for a Trakt app old enough to have one) and the TMDB key are Worker secrets. The TV calls the Worker with simple requests (GET, or POST with a plain-text body), so browsers never send a preflight, and every answer carries `Access-Control-Allow-Origin: *`. The Worker passes on only the Trakt and TMDB calls BannerTV makes, adds the keys, and caches TMDB's answers for a day at the edge. Requests carry viewers' Trakt tokens, so it keeps no logs (observability is off in `wrangler.toml`), and no answer repeats a secret, a token or a request body.
 
@@ -8,7 +8,7 @@ The Trakt client ID (and client secret, for a Trakt app old enough to have one) 
 
 ### `GET /status`
 
-`{"trakt": true, "tmdb": true}`: whether each service's keys are set (for Trakt, the client ID; the secret is optional). The app hides Trakt and TMDB until they are.
+`{"trakt": true, "tmdb": true, "search": true}`: whether each service's keys are set (for Trakt, the client ID; the secret is optional). The app hides Trakt and TMDB until they are. `search` is true when the TMDB key is set and this Worker has the `/search` routes below; an app finding no `search` field (a Worker from before them) leaves Search to the addons.
 
 ### `POST /trakt`
 
@@ -70,6 +70,20 @@ The query may hold `append_to_response` (any of `images`, `credits`, `aggregate_
 
 TMDB's 200 answers are cached for a day in Cloudflare's edge cache (each data centre keeps its own), under the Worker's own address for the call with the query sorted, never the key, and are served with `Cache-Control: public, max-age=86400`. Everything else the Worker answers carries `Cache-Control: no-store`.
 
+### `GET /search/<route>?<query>`
+
+Search's rows from TMDB, answered with titles by IMDb id so the app opens them on Details as any other: `{"titles": [{"id": "tt0109830", "type": "movie", "name": "Forrest Gump", "year": "1994", "poster": "/abc.jpg", "genres": ["Comedy", "Drama"]}]}`. Each title's IMDb id costs one more TMDB call, so a route answers with at most 20 titles, asking TMDB at most 6 at a time: at most 22 TMDB calls and two edge-cache calls a request, under the free plan's 50. TMDB is always asked with the adult filter off, and titles it marks adult are left out. With `ratings=1` (or a `certification`) each title also carries `"certificates": {"GB": [...], "US": [...]}`, TMDB's UK and US ratings, for a kids profile to check.
+
+| Route | Query | TMDB asked |
+| --- | --- | --- |
+| `discover` | `type` (`movie` or `series`); optional `genres` (all of), `any` (one of), `keywords` (any of), each up to a few TMDB ids, comma-separated; `language` (ISO 639-1), `country` (ISO 3166-1), `from` and `to` (years), `newest=1`, `certification` (`U`, `PG` or `12`) | `discover/movie` or `discover/tv`; films filtered by GB certificate, series by reading each one's ratings |
+| `multi` | `query` | `search/multi`: answers `{"people": [...], "titles": [...]}` for suggestions, at most 5 people and 8 titles |
+| `person` | `id` (TMDB's person id), `role` (`cast`, `directing`, `writing` or `any`), optional `ratings=1` | `person/<id>/combined_credits`, leaving out talk and news shows and appearances as themselves |
+| `like` | `query`, optional `type`, optional `ratings=1` | `search/movie`, `search/tv` or `search/multi`, then the first title's `recommendations`; the answer adds `"like": {"name", "type", "year"}` |
+| `titles` | `query`, optional `type`, optional `ratings=1` | `search/movie`, `search/tv` or `search/multi` |
+
+The words are folded (trimmed, single spaces, lower case) and at most 100 characters. Anything else is 400 `{"error":"path"}`; without a key 503 `{"error":"unconfigured"}`; when TMDB fails 502 `{"error":"upstream"}`. Whole answers are cached for a day like TMDB's own; an answer missing some titles (a lookup failed) carries `"partial": true`, is served with `Cache-Control: no-store` and is not cached, so the next search asks again. A row needing some genres and one of several others (Comedy, and Family or Kids) is asked of TMDB once for each of those others, since one call cannot say both, and the lists are merged.
+
 `TMDB_API_KEY` can be a v3 API key, which goes in the query as `api_key`, or a v4 read access token (it starts `eyJ`), which goes in `Authorization: Bearer`.
 
 ## Deploy
@@ -91,7 +105,7 @@ npx wrangler@4 secret put TRAKT_CLIENT_SECRET   # only for a Trakt app that has 
 
 Each `secret put` asks for the value and sends it straight to Cloudflare, so it never appears in the repository or in a chat. A secret takes effect as soon as it is put, with no new deploy.
 
-To check, open <https://api.bannertv.workers.dev/status>. It shows `{"trakt":true,"tmdb":true}`; a `false` means that service's key is missing (the Trakt client ID, or the TMDB key), so put it again.
+To check, open <https://api.bannertv.workers.dev/status>. It shows `{"trakt":true,"tmdb":true,"search":true}`; a `false` means that service's key is missing (the Trakt client ID, or the TMDB key), so put it again.
 
 The free Workers plan covers a household many times over: it allows 100,000 requests a day, and a TV makes a sync every 30 minutes, a few scrobbles per title watched, and a couple of TMDB requests per Details page.
 

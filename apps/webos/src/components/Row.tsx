@@ -5,7 +5,15 @@ import {
   setFocus,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   recallFocus,
@@ -65,8 +73,8 @@ export function nextTile(
 interface RowProps {
   focusKey: string;
   title: string;
-  /** Muted words after the title, such as "Movies". */
-  tag?: string;
+  /** Muted words after the title, such as "Movies", or a source's logo. Keep an element's identity between draws. */
+  tag?: ReactNode;
   shape: TileShape;
   /** Null while loading: the row shows focusable placeholders. */
   items: readonly MetaPreview[] | null;

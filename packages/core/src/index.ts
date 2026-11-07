@@ -322,6 +322,7 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export { TMDB_LOGO } from './integrations/tmdb/logo';
 export {
   createIntroDbClient,
   episodeOf,
