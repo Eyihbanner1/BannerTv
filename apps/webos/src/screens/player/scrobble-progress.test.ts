@@ -1449,6 +1449,148 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(40)', 'pause(41)', 'stop(41)']);
   });
 
+  it('forgets skips in a clip that played from 0, once Try again finds its length', () => {
+    // Android: Sources opens a clip with no length yet where the episode is,
+    // at 1250 s (its last reading was a moment before). It cannot seek, so it
+    // stands there a moment and then plays from 0. Paused, a skip goes back
+    // to 0, and a second one, from 0, the player holds. It fails; Try again
+    // opens it there, it plays from 0 again and its 129 s length comes.
+    type Step = [Played, typeof known, number, number];
+    const clipFromZero = (skips: [number, number][], ranTo = 3, play?: Step) => {
+      const at = skips[skips.length - 1]![0];
+      return trakt([
+        [played(1245, 2820, 'playing'), known, 1245, 0],
+        [played(1249.5, 2820, 'playing'), known, 1249.5, 0],
+        [played(1250, 0, 'loading', false, CLIP), known, 1250, 0],
+        [played(1250, 0, 'playing', false, CLIP), known, 1250, 0],
+        [played(1250, 0, 'playing', false, CLIP), known, 1250, 0],
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(ranTo, 0, 'playing', false, CLIP), known, ranTo, 0],
+        [played(ranTo, 0, 'paused', false, CLIP), known, ranTo, 0],
+        ...skips.map(([to, moves]): Step => [
+          played(to, 0, 'paused', false, CLIP),
+          known,
+          to,
+          moves,
+        ]),
+        ...(play ? [play] : []),
+        [played(at, 0, 'buffering', false, CLIP), known, at, 0],
+        [played(at, 0, 'failed', false, CLIP), known, at, 0],
+        [played(at, 0, 'loading', false, CLIP), known, at, 0],
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(80, 0, 'playing', false, CLIP), known, 80, 0],
+        [played(80, 129, 'playing', false, CLIP), known, 80, 0],
+        [played(80, 129, 'paused', false, CLIP), known, 80, 0],
+      ]);
+    };
+    const held: [number, number][] = [
+      [0, 1],
+      [600, 2],
+    ];
+    expect(clipFromZero(held)).toEqual([
+      'start(44)',
+      'pause(0)',
+      'start(0)',
+      'pause(44)',
+      'stop(44)',
+    ]);
+    // Or played to its end first, its clock a moment past the length it gives.
+    expect(clipFromZero(held, 130)).toEqual([
+      'start(44)',
+      'pause(5)',
+      'start(0)',
+      'pause(44)',
+      'stop(44)',
+    ]);
+    // Or Play after the skips, where it shows the place it holds as it plays.
+    expect(clipFromZero(held, 3, [played(600, 0, 'playing', false, CLIP), known, 600, 2])).toEqual([
+      'start(44)',
+      'pause(0)',
+      'start(21)',
+      'pause(44)',
+      'stop(44)',
+    ]);
+    // Four skips held, to 2400 s: never 85%, which Trakt would take for watched.
+    expect(
+      clipFromZero([
+        [0, 1],
+        [600, 2],
+        [1200, 3],
+        [1800, 4],
+        [2400, 5],
+      ]),
+    ).toEqual(['start(44)', 'pause(0)', 'start(0)', 'pause(44)', 'stop(44)']);
+  });
+
+  it('takes no clock that ran 2 s or less after a move in a clip for its own', () => {
+    // A clip with no length yet opens at the episode's 1250 s and shows only
+    // that as it plays. Paused, a skip the player takes moves it to 1850 s;
+    // on Play its clock reads a moment on. It fails; Try again shows 129 s.
+    expect(
+      trakt([
+        [played(1245, 2820, 'playing'), known, 1245, 0],
+        [played(1250, 2820, 'playing'), known, 1250, 0],
+        [played(1250, 0, 'loading', false, CLIP), known, 1250, 0],
+        [played(1250, 0, 'playing', false, CLIP), known, 1250, 0],
+        [played(1250, 0, 'paused', false, CLIP), known, 1250, 0],
+        [played(1850, 0, 'paused', false, CLIP), known, 1850, 1],
+        [played(1850, 0, 'playing', false, CLIP), known, 1850, 1],
+        [played(1851.5, 0, 'playing', false, CLIP), known, 1851.5, 1],
+        [played(1851.5, 0, 'failed', false, CLIP), known, 1851.5, 1],
+        [played(1851.5, 0, 'loading', false, CLIP), known, 1851.5, 0],
+        [played(5, 129, 'playing', false, CLIP), known, 5, 0],
+      ]),
+    ).toEqual(['start(44)', 'pause(44)', 'start(66)', 'stop(44)']);
+  });
+
+  it('takes a skip the player takes as a clip plays for a move, not for its clock running', () => {
+    // As above, with the skip taken as the clip plays, before it fails.
+    expect(
+      trakt([
+        [played(1245, 2820, 'playing'), known, 1245, 0],
+        [played(1250, 2820, 'playing'), known, 1250, 0],
+        [played(1250, 0, 'loading', false, CLIP), known, 1250, 0],
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(3, 0, 'playing', false, CLIP), known, 3, 0],
+        [played(603, 0, 'playing', false, CLIP), known, 603, 1],
+        [played(603, 0, 'failed', false, CLIP), known, 603, 1],
+        [played(603, 0, 'loading', false, CLIP), known, 603, 0],
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(5, 129, 'playing', false, CLIP), known, 5, 0],
+      ]),
+    ).toEqual(['start(44)', 'stop(44)']);
+  });
+
+  it('keeps a move in a file that played from 0 past a clip’s length, when Try again finds a clip', () => {
+    // Android: a file with no length opened at 1250 s plays from 0 to 400 s,
+    // so it is no 129 s clip; a skip the player takes moves it to 1000 s. It
+    // fails, and Try again gets a 129 s clip from the link.
+    type Step = [Played, typeof known, number, number];
+    const ranPastClip = (between: Step[]) =>
+      trakt([
+        [played(1245, 2820, 'playing'), known, 1245, 0],
+        [played(1250, 2820, 'playing'), known, 1250, 0],
+        [played(1250, 0, 'loading', false, OTHER), known, 1250, 0],
+        [played(0, 0, 'playing', false, OTHER), known, 0, 0],
+        [played(200, 0, 'playing', false, OTHER), known, 200, 0],
+        [played(400, 0, 'playing', false, OTHER), known, 400, 0],
+        ...between,
+        [played(1000, 0, 'playing', false, OTHER), known, 1000, between.length > 0 ? 2 : 1],
+        [played(1000, 0, 'failed', false, OTHER), known, 1000, 1],
+        [played(1000, 0, 'loading', false, OTHER), known, 1000, 0],
+        [played(5, 129, 'playing', false, OTHER), known, 5, 0],
+      ]);
+    expect(ranPastClip([])).toEqual(['start(44)', 'stop(35)']);
+    // Or with a skip back to 100 s first, which it plays on from a little.
+    expect(
+      ranPastClip([
+        [played(100, 0, 'playing', false, OTHER), known, 100, 1],
+        [played(105, 0, 'playing', false, OTHER), known, 105, 1],
+        [played(110, 0, 'playing', false, OTHER), known, 110, 1],
+      ]),
+    ).toEqual(['start(44)', 'stop(35)']);
+  });
+
   it('never stops a clip that ends at 100%', () => {
     expect(
       trakt(

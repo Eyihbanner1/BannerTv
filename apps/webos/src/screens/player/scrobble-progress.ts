@@ -90,6 +90,12 @@ interface Reached {
    * player does not trust never does: it shows only where it started.
    */
   ran: boolean;
+  /**
+   * How far that clock ran on by itself, from one reading to the next as it
+   * played with no move taken between: never past a clip's length. Not the
+   * jump to where a file that cannot seek starts, nor a move.
+   */
+  ranTo: number;
 }
 
 /** Earlier files' places kept, newest last. */
@@ -122,8 +128,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let openedCarry: number | undefined;
   /** Where this opening's clock started from: openedCarry, or a move it took. */
   let origin: number | undefined;
-  /** Whether this opening's clock has run on from its origin by itself. */
+  /** Whether this opening's clock has run on from its origin by itself, and how far. */
   let ran = false;
+  let ranTo = -Infinity;
+  /** Where this opening's clock last read as it played, until it stops playing. */
+  let lastPlaying: number | undefined;
   /** The player's count of moves taken, as this opening last saw it. */
   let movesSeen: number | undefined;
   /**
@@ -188,14 +197,14 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   };
   // Places this link reached before it showed a length, now that it shows it
   // is a clip `upTo` long: they may be its own clock, which never passes it,
-  // or, while it never ran on by itself, shows only where it started from
-  // (where the player opened it, or a move the viewer took in it). A
-  // broadcast's clock may be anywhere.
+  // or, unless that clock ran on by itself, and on past it, show only where
+  // it started from (where the player opened it, or a move the viewer took
+  // in it). A broadcast's clock may be anywhere.
   const forgetUnmeasured = (entry: SessionState['entry'], upTo = Infinity) => {
     const clock = (place: Reached) =>
       place.duration === 0 &&
       place.entry === entry &&
-      (place.position <= upTo + SAME_PLACE_S || !place.ran);
+      (place.position <= upTo + SAME_PLACE_S || !place.ran || place.ranTo <= upTo + SAME_PLACE_S);
     for (let index = earlier.length - 1; index >= 0; index--) {
       if (clock(earlier[index]!)) earlier.splice(index, 1);
     }
@@ -209,17 +218,15 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   // before stands, unless this opening reached a newer one: a clip's opening
   // reaches none, and what it could have made of its clock is forgotten.
   // A held place whose clock ran is kept behind a newer one with no length,
-  // which may yet prove a place in a clip, and one there still ran.
+  // which may yet prove a place in a clip.
   const startOver = () => {
     const held = movedTo;
     movedTo = undefined;
     if (reached && !wasClip) {
       if (reached.duration > 0) keep(reached);
       else {
-        const same =
-          held?.ran === true && Math.abs(held.position - reached.position) <= SAME_PLACE_S;
         if (held?.ran) keep(held);
-        movedTo = same ? { ...reached, ran: true } : reached;
+        movedTo = reached;
       }
     } else movedTo = held;
     reached = undefined;
@@ -229,6 +236,8 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     openedCarry = undefined;
     origin = undefined;
     ran = false;
+    ranTo = -Infinity;
+    lastPlaying = undefined;
     movesSeen = undefined;
     wasClip = false;
   };
@@ -327,6 +336,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       if (played && Math.abs(state.position - (origin ?? state.position)) > SAME_PLACE_S) {
         ran = true;
       }
+      if (state.status === 'playing') {
+        if (!took && lastPlaying !== undefined && state.position > lastPlaying) {
+          ranTo = Math.max(ranTo, state.position);
+        }
+        lastPlaying = state.position;
+      } else lastPlaying = undefined;
       const inside = state.duration === 0 || played || state.position <= state.duration;
       // A place it reached by its own length stands when the length goes
       // (another player taking over the link) and the player opens on there.
@@ -348,6 +363,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
           entry: state.entry,
           moved: !played && state.duration === 0,
           ran,
+          ranTo,
         };
       } else if (
         reached?.moved &&
