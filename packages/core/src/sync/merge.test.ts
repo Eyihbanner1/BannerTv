@@ -192,17 +192,22 @@ describe('tidyItems', () => {
     expect((kept.v200 as { v: { card?: unknown } }).v.card).toBeUndefined();
   });
 
-  it('keeps 300 track choices and offsets, and 300 Home rows', () => {
+  it('keeps 300 track choices, offsets and drift fixes, and 300 Home rows', () => {
     const settings = newItems();
     for (let i = 0; i < 310; i++) {
       settings[`track/tt${i}`] = { t: NOW - i, v: { a: 'en' } };
       settings[`offset/k${i}`] = { t: NOW - i, v: 1.5 };
+      settings[`drift/k${i}`] = { t: NOW - i, v: 'auto' };
     }
     settings['home/order'] = { t: 1, v: Array.from({ length: 310 }, (_, i) => `row${i}`) };
     settings['pref/tmdb'] = { t: 1, v: true };
     const kept = tidyItems('p/main/settings', settings, NOW);
     expect(Object.keys(kept).filter((key) => key.indexOf('track/') === 0).length).toBe(300);
     expect(Object.keys(kept).filter((key) => key.indexOf('offset/') === 0).length).toBe(300);
+    expect(Object.keys(kept).filter((key) => key.indexOf('drift/') === 0).length).toBe(300);
+    // The newest are the ones kept.
+    expect(kept['drift/k0']).toEqual({ t: NOW, v: 'auto' });
+    expect(kept['drift/k300']).toBeUndefined();
     expect((kept['home/order'] as { v: string[] }).v.length).toBe(300);
     expect(kept['pref/tmdb']).toEqual({ t: 1, v: true });
   });

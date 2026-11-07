@@ -40,6 +40,8 @@ export const DOCUMENT_CAPS = {
   watchCards: 200,
   track: 300,
   offset: 300,
+  /** Subtitle drift fixes, `drift/<fileKey>`, as many as the timings. */
+  drift: 300,
   /** Home row ids in `home/order` and `home/hidden`. */
   rows: 300,
   /** Followed teams and competitions, `follow/team/*` and `follow/comp/*` together. */
@@ -262,16 +264,19 @@ export function tidyItems(document: string, items: Items, now: number): Items {
   } else if (kind === 'settings') {
     const tracks: string[] = [];
     const offsets: string[] = [];
+    const drifts: string[] = [];
     const follows: string[] = [];
     for (const key of keys) {
       if (key.indexOf('track/') === 0) tracks.push(key);
       else if (key.indexOf('offset/') === 0) offsets.push(key);
+      else if (key.indexOf('drift/') === 0) drifts.push(key);
       else if (key.indexOf('follow/') === 0) follows.push(key);
       else if (key === 'home/order' || key === 'home/hidden') kept[key] = cutList(working[key]!);
       else kept[key] = working[key]!;
     }
     cap(working, tracks, DOCUMENT_CAPS.track, kept);
     cap(working, offsets, DOCUMENT_CAPS.offset, kept);
+    cap(working, drifts, DOCUMENT_CAPS.drift, kept);
     cap(working, follows, DOCUMENT_CAPS.follows, kept);
   } else if (kind === 'profiles') {
     for (const key of keys) {
