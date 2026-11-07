@@ -1,0 +1,38 @@
+# ADR 0007: The phone app
+
+- Status: accepted, first test build for Phase 5 step 3 on the branch `claude/project-thread-woa5lw`
+- Date: 31 October 2026
+
+## Context
+
+Phase 5's order is the Android TV app (ADR 0005), the BannerTV account (ADR 0006), then phone apps. On 31 October 2026 Eyitayo asked for the phone app to start alongside the account's LG test round instead of after it, and chose React Native, as the Phase 5 plan said, over showing the LG app's code in a phone-shaped web page.
+
+Four facts shaped the design:
+
+- The Android TV app already runs on phones, but it is the TV's 1920x1080 layout scaled down and held sideways. Eyitayo tried it and found it unpolished. A phone wants its own screens: upright, touch-first, with tabs, sheets and the system's Back.
+- Almost everything below the screens (addons, catalogs, the stream finder and its ranking, the playback session, subtitles, Continue Watching, My List, profiles and PINs, Trakt and the account's sync) is plain TypeScript in `packages/core` and `apps/webos/src/data`, `src/player` and `src/i18n`. Writing it again for the phone would make two of everything, and the account only works if both sides store the same things the same way.
+- That shared code expects a browser: `localStorage`, `sessionStorage`, IndexedDB, Web Crypto, `window`, `document`, events and a `<video>` element.
+- Media3 ExoPlayer plays Matroska, HLS and DASH with the phone's hardware decoders. `expo-video` wraps it on Android (and AVPlayer on iOS).
+
+## Decision
+
+1. **React Native through Expo.** `apps/mobile` is an Expo SDK 58 app (React Native 0.88, React 19, expo-router). The native Android project is generated from `app.config.ts` on every CI run (`expo prebuild`), never kept in the repository. The version is the LG app's, from `appinfo.json`, with the same `versionCode` rule as ADR 0005.
+2. **The phone imports the TV's data layer as it is.** Screens import `apps/webos/src` through the `@tv/*` alias and `@bannertv/core` from the workspace. Nothing in `apps/webos/src` changes for the phone. Metro resolves React, React DOM, i18next and react-i18next from `apps/mobile`, so one React runs.
+3. **Browser stand-ins, not rewrites.** A Babel plugin (`build/web-globals-plugin.js`) gives the shared files the phone's own `window`, `document`, `localStorage`, `sessionStorage`, `history`, events, `HTMLMediaElement` and `TextDecoder` (`src/runtime/web-globals.ts`). `localStorage` is synchronous SQLite; `sessionStorage`, the address's hash and `window.name` live in memory and survive the app starting itself again, as a page's do across a reload. Metro swaps three modules for phone versions: IndexedDB (`src/shims/idb.ts`, over expo-sqlite), Web Crypto (`src/shims/web-crypto.ts`, over expo-crypto and @noble) and `data/sync-reload` (`src/shims/sync-reload.ts`, which reads the phone's screens instead of the TV's router). Starting the app again, where the TV reloads the page, remounts the screens from a clean store.
+4. **The player is the Android TV app's bridge.** `src/player/phone-host.ts` implements ADR 0005's protocol version 1 (`window.BannerAndroid`) over expo-video, and `src/player/video-element.ts` is the `<video>` element the TV's Android engine drives. So the TV's playback session, stream finder and failover, subtitles, Continue Watching and Trakt scrobbling run unchanged. The phone reports itself as `tv: false` with no DTS, TrueHD, Dolby Vision or 4K, and leaves HEVC, AV1 and HDR10 unknown until it reads its decoders.
+5. **Upright, sideways for the film.** The app is portrait. The player turns to landscape while it is open and back after (`src/player/orientation.ts`), hides the system bars, and keeps the screen on while playing. A tap shows or hides the controls, a double tap on either side skips ten seconds, the bar scrubs, and sheets hold audio, subtitles and the stream list.
+6. **Phone screens.** Five tabs (Home, Search, Sports, My List, Settings), with title pages, match pages, catalogs, All streams, the player, Addons, "Who's watching?" and the account pushed over them. Sports follows the TV's rules: the tab shows only while an addon has sports catalogs and never for a kids profile, Home's Live sport row stands in for the sports catalogs, a match asks only the addons that listed it, and a match is never kept for Continue Watching. The player has the TV's Quality menu beside Sources. The welcome and the profile picker cover the screens at launch as on the TV. The phone's own strings are added to the TV's English (`src/i18n/phone.ts`), with the lines that speak of a TV or a remote reworded.
+7. **The account, Main only.** The phone follows ADR 0006's rules: only Main sees the account; showing the code and deleting the account ask for Main's PIN; joining refuses Bring past six profiles. The first build joins, syncs, shows the code, leaves and deletes; making an account stays on the TV for now.
+8. **A test package beside the TV app.** The test build is `com.bannertv.app.phonetest`, "BannerTV phone test", so it installs beside the Android TV app's test build on the same phone. It is a release build signed with the Expo template's fixed debug key, so each test APK installs over the last. The store package name and signing are decided with the store listing.
+9. **Checked in CI two ways.** The `Phone APK` job first runs the web journeys (`apps/mobile/e2e`): the phone app's web build, held like a phone, against the TV journeys' fake addons, through the welcome, Home, adding an addon, a title, All streams and playing a film. Then it builds the APK (about half an hour) and uploads it as `bannertv-phone-apk`. The web build exists for these checks only.
+
+## Consequences
+
+- A change to the TV's data layer reaches the phone with no phone work, and a change that breaks the phone shows in the phone's typecheck and journeys.
+- The phone carries some TV code it never runs (the remote's focus library comes in through `data/sync-reload`'s original, which Metro replaces, and through type imports). The bundle is about 5.5 MB of Hermes bytecode.
+- Code that draws with the remote's focus library cannot be imported. Where a TV screen holds pure helpers (the account's status line and join plan), the phone keeps a copy in `src/data/account-text.ts`.
+- expo-video sends no event when a seek completes, does not say how many channels an audio track has, and the phone has no gzip stream decoder, so gzipped subtitle files from an addon are not shown yet.
+- The React Compiler is off. The shared hooks read their stores during render, as the TV app (which has no compiler) expects, and the compiler kept their first answers.
+- Links from outside the app (`bannertv://`) open Home only (`src/app/+native-intent.ts`), and the account and Addons routes check the profile themselves.
+- A local Expo module (`modules/banner-relaunch`) reports a launcher tap on the running app as the bridge's `relaunch`, so a PIN profile or "Ask at launch" asks "Who's watching?" again, as on the Android TV app.
+- Not yet on the phone: making an account, Trakt sign-in, editing profiles, Discover, Sports in Search, downloads, casting, picture in picture, tablets and iPhone.

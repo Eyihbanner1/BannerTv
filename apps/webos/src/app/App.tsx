@@ -1,5 +1,6 @@
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { memo, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { RASTER_AHEAD, warmBoxRef } from '../components/decode-ahead';
 import { Rail } from '../components/Rail';
 import { activeProfileId, profileSwitcher } from '../data/profiles';
 import { welcomed } from '../data/welcome';
@@ -17,6 +18,7 @@ import { ProfileEditScreen } from '../screens/profiles/ProfileEditScreen';
 import { ProfilePicker } from '../screens/profiles/ProfilePicker';
 import { ProfilesScreen } from '../screens/profiles/ProfilesScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
+import { AccountScreen } from '../screens/settings/AccountScreen';
 import { HomeRowsScreen } from '../screens/settings/HomeRowsScreen';
 import { TraktScreen } from '../screens/settings/TraktScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -79,11 +81,13 @@ function Screen({ route }: { route: Route }) {
     case 'profiles':
       return <ProfilesScreen />;
     case 'profile-edit':
-      return <ProfileEditScreen id={route.id} />;
+      return <ProfileEditScreen id={route.id} unlocked={route.unlocked} />;
     case 'home-rows':
       return <HomeRowsScreen />;
     case 'trakt':
       return <TraktScreen />;
+    case 'account':
+      return <AccountScreen startOnJoin={route.join} />;
     case 'player':
       // A new episode is a new player, so its session and subtitles start afresh.
       return <PlayerScreen key={route.videoId} {...route} />;
@@ -210,6 +214,10 @@ export function App() {
   const fullScreen = top.name === 'player';
   return (
     <div className={styles.app}>
+      {/* Where art is drawn ahead with the aheadMode tuning switch: under the rail, so with it. */}
+      {!fullScreen && RASTER_AHEAD && (
+        <div ref={warmBoxRef} className={styles.warm} aria-hidden="true" data-warm-ahead="" />
+      )}
       {!fullScreen && <Rail />}
       <FocusContext.Provider value={focusKey}>
         <main ref={ref} className={styles.content}>

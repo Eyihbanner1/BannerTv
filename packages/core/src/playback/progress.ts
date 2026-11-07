@@ -35,6 +35,18 @@ export interface ProgressEntry {
    * Left out for every other video.
    */
   continueRow?: false;
+  /**
+   * Set on progress Trakt brought in (a video paused or finished there),
+   * which the BannerTV account never sends (ADR 0006, decision 4). Playing
+   * the video here drops it.
+   */
+  from?: 'trakt';
+}
+
+/** What the BannerTV account changes in progress. */
+export interface ProgressAdoption {
+  set?: readonly ProgressEntry[];
+  remove?: readonly string[];
 }
 
 export type ProgressUpdate = Pick<
@@ -68,6 +80,13 @@ export interface ProgressStore {
    */
   merge(entries: readonly ProgressEntry[]): Promise<number>;
   /**
+   * Makes progress match a change from the BannerTV account: entries in
+   * `set` are kept as given, their time included and with no rescaling, and
+   * videos in `remove` are forgotten. Once the list has been read, the
+   * change is made before adopt() returns; only the save comes later.
+   */
+  adopt(change: ProgressAdoption): Promise<void>;
+  /**
    * Where to resume in seconds, or undefined to start from the beginning:
    * never near either end, nor in a video whose length is unknown.
    */
@@ -97,13 +116,14 @@ function isId(value: unknown): value is string {
 /** A saved entry, or undefined when any field is missing or of the wrong kind. */
 function readEntry(value: unknown): ProgressEntry | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { metaId, type, videoId, position, duration, updatedAt, watched, continueRow } =
+  const { metaId, type, videoId, position, duration, updatedAt, watched, continueRow, from } =
     value as Record<string, unknown>;
   if (!isId(metaId) || !isId(type) || !isId(videoId)) return undefined;
   if (!isAmount(position) || !isAmount(duration) || !isAmount(updatedAt)) return undefined;
   if (typeof watched !== 'boolean') return undefined;
   const entry: ProgressEntry = { metaId, type, videoId, position, duration, updatedAt, watched };
   if (continueRow === false) entry.continueRow = false;
+  if (from === 'trakt') entry.from = 'trakt';
   return entry;
 }
 
@@ -177,6 +197,17 @@ export function createProgressStore(options: {
       if (entries.size <= maxEntries) break;
       entries.delete(videoId);
     }
+  }
+
+  /** After entries came in from elsewhere: least recently updated first again, trimmed, saved. */
+  function resort() {
+    // Trimming then drops the oldest, wherever they came from.
+    const sorted = readEntries(Array.from(entries.values()));
+    entries.clear();
+    sorted.forEach(put);
+    trim();
+    save();
+    changed();
   }
 
   async function read() {
@@ -291,14 +322,33 @@ export function createProgressStore(options: {
         taken += 1;
       }
       if (taken === 0) return 0;
-      // Kept least recently updated first, so trimming drops the oldest, wherever they came from.
-      const sorted = readEntries(Array.from(entries.values()));
-      entries.clear();
-      sorted.forEach(put);
-      trim();
-      save();
-      changed();
+      resort();
       return taken;
+    },
+    adopt(change) {
+      const take = () => {
+        let touched = false;
+        for (const videoId of change.remove ?? []) {
+          if (entries.delete(videoId)) touched = true;
+        }
+        for (const value of change.set ?? []) {
+          const entry = readEntry(value);
+          if (!entry) continue;
+          entries.set(entry.videoId, entry);
+          touched = true;
+        }
+        if (touched) resort();
+      };
+      // Once the list has been read, the change is made before adopt() returns (SyncPart.adopt).
+      if (loaded) {
+        take();
+        return Promise.resolve();
+      }
+      return load()
+        .catch(() => undefined)
+        .then(() => {
+          if (loaded) take();
+        });
     },
     resumeAt(videoId) {
       const entry = entries.get(videoId);

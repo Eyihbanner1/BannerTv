@@ -1,29 +1,53 @@
+// First, so it reads the clock as the bundle starts to run (a launch mark).
+import { bootInfo } from './platform/boot';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../../brand/tokens/tokens.css';
 import './styles/fonts.css';
 import './styles/base.css';
 import { App } from './app/App';
+import { startBootMarks } from './app/boot-marks';
 import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
-import { startSports } from './data/sports';
+import {
+  holdSportsMatcher,
+  startSports,
+  traceSportsMatcher,
+  wantSportsMatcher,
+} from './data/sports';
+import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { initAndroid } from './platform/android';
-import { bootInfo } from './platform/boot';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { initInputMode } from './platform/input-mode';
-import { applyTuning, changedTuning } from './platform/tuning';
+import { afterLaunch } from './platform/launch';
+import { bootMark, mark } from './platform/marks';
+import { applyTuning, changedTuning, tuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
+import { readPlayMarks } from './player/play-marks';
 
 function fitToWindow(root: HTMLElement) {
-  // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop, scale to fit.
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  root.style.transform = scale < 1 ? `scale(${scale})` : '';
+  // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop or a phone,
+  // scale to fit, in the middle. The window is measured on the root element: a phone's
+  // browser widens innerWidth to the 1920px page, so the UI would barely shrink.
+  const html = document.documentElement;
+  const width = html.clientWidth;
+  const height = html.clientHeight;
+  const scale = Math.min(width / 1920, height / 1080);
+  const scaled = scale < 1;
+  root.style.transform = scaled
+    ? `translate(${(width - 1920 * scale) / 2}px, ${(height - 1080 * scale) / 2}px) scale(${scale})`
+    : '';
+  // base.css makes the page 1920x1080, which a phone would let the person pan about.
+  for (const element of [html, document.body]) {
+    element.style.width = scaled ? `${width}px` : '';
+    element.style.height = scaled ? `${height}px` : '';
+  }
 }
 
 function start() {
@@ -35,6 +59,8 @@ function start() {
     document.documentElement.classList.add('low-power');
   }
   applyTuning(document.documentElement);
+  // The stages of the latest Play, read from the web inspector.
+  if (tuning.marks) window.__bannertvPlay = readPlayMarks;
   if (!isWebOS()) {
     fitToWindow(root);
     window.addEventListener('resize', () => fitToWindow(root));
@@ -50,7 +76,15 @@ function start() {
   startLibraryData();
   checkServiceStatus();
   startTrakt();
+  if (tuning.matcherAt === 'idle') {
+    holdSportsMatcher();
+    afterLaunch(wantSportsMatcher);
+  }
   void startSports();
+  startSync();
+  // After the reads above have started, so watching them changes no order.
+  startBootMarks();
+  if (tuning.marks) traceSportsMatcher(mark);
 
   createRoot(root).render(
     <StrictMode>
@@ -58,6 +92,7 @@ function start() {
     </StrictMode>,
   );
   console.info('[BannerTV] started', bootInfo, 'tuning', changedTuning());
+  bootMark('boot:start-end');
 }
 
 start();

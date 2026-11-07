@@ -72,3 +72,26 @@
 .actions > * {
   margin-right: 24px;
 }
+
+/* The account, beside the welcome rather than in its way. */
+.account {
+  position: absolute;
+  top: 264px;
+  left: 1440px;
+  width: 400px;
+  /* The last button's own margin makes up the bottom. */
+  padding: 32px 32px 12px;
+  border-radius: 16px;
+  background: var(--bt-surface-1);
+}
+
+.accountTitle {
+  margin-bottom: 12px;
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+}
+
+.accountLead {
+  margin-bottom: 28px;
+  color: var(--bt-text-muted);
+}

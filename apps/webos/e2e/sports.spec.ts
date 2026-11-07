@@ -1013,3 +1013,55 @@ test('odd items stay text, inside their tiles', async ({ page }) => {
   expect(tile.beyond).toBe(false);
   expect(realErrors(errors)).toEqual([]);
 });
+
+/** The team list's script, once the page has added it. */
+async function dataScripts(page: Page): Promise<string[]> {
+  return (await addedScripts(page)).filter((src) => src.includes('/data/'));
+}
+
+test.describe('with the team list held back until the launch settles (matcherAt idle)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem('bannertv.tuning', JSON.stringify({ matcherAt: 'idle' })),
+    );
+  });
+
+  test('it loads once Home has been still a moment', async ({ page }) => {
+    const errors = watchErrors(page);
+    await startWithSports(page);
+    expect(await dataScripts(page)).toEqual([]);
+    await expect
+      .poll(() => dataScripts(page))
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('focus going into the Live sport row loads it at once, and its matches read the same', async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    await startWithSports(page);
+    expect(await dataScripts(page)).toEqual([]);
+    await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+    await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
+    // Sooner than the launch could settle after these presses.
+    await expect
+      .poll(() => dataScripts(page), { timeout: 1500 })
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+    await expect
+      .poll(() => tileLabels(page, LIVE_ROW))
+      .toEqual([
+        'Arsenal v Brighton, EFL Cup, live now',
+        'Celtic v Rangers, Scottish football, Starting 19:40',
+      ]);
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('opening Sports loads it at once', async ({ page }) => {
+    await startWithSports(page);
+    await openSection(page, 'sports');
+    await expect
+      .poll(() => dataScripts(page), { timeout: 1500 })
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+  });
+});

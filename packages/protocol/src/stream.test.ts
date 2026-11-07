@@ -145,4 +145,22 @@ describe('parseSubtitlesResponse', () => {
     ]);
     expect(response.dropped).toBe(1);
   });
+
+  it('keeps the first copy of a repeated id and counts the repeat as dropped', () => {
+    const response = parseSubtitlesResponse({
+      subtitles: [
+        { id: '1', url: 'https://a.example/en.srt', lang: 'eng' },
+        { id: '2', url: 'https://a.example/fr.srt', lang: 'fre' },
+        { id: '1', url: 'https://a.example/en-again.srt', lang: 'eng' },
+        { url: 'https://a.example/de.srt', lang: 'ger' },
+        { id: 'https://a.example/de.srt', url: 'https://a.example/de-2.srt', lang: 'ger' },
+      ],
+    });
+    expect(response.subtitles.map((s) => s.url)).toEqual([
+      'https://a.example/en.srt',
+      'https://a.example/fr.srt',
+      'https://a.example/de.srt',
+    ]);
+    expect(response.dropped).toBe(2);
+  });
 });

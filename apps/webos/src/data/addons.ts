@@ -6,6 +6,8 @@ import {
   DEFAULT_ADDONS,
 } from '@bannertv/core';
 import { fetchJson } from '../platform/http';
+import { tuning } from '../platform/tuning';
+import { createPlayerFirst, type PlayerVideo } from './player-first';
 import { isKidsProfile } from './profiles';
 import { storage } from './storage';
 
@@ -26,13 +28,26 @@ export const requestLimiter = createLimiter(MAX_REQUESTS);
 /** Cached answers, kept across launches: addons' and TMDB's. */
 export const queryCache = createQueryCache({ store: storage.cache });
 
+// The videos a player has open, when their requests go first (tuning `playFirst`).
+const playerFirst = tuning.playFirst ? createPlayerFirst() : undefined;
+
 export const addonClient = createAddonClient({
   collection: addonCollection,
   queries: queryCache,
   limiter: requestLimiter,
   fetchJson,
   kidsOnly: isKidsProfile,
+  playPriority: playerFirst?.priority,
 });
+
+/**
+ * While a player has these videos, their stream and subtitles requests go
+ * ahead of every other request waiting for a slot, those already waiting
+ * too, when the `playFirst` tuning switch is on. Returns the release.
+ */
+export function putVideosFirst(videos: readonly PlayerVideo[]): () => void {
+  return playerFirst ? playerFirst.put(videos) : () => undefined;
+}
 
 /** Each installed addon's name, by its manifest id. */
 export function addonNames(): Map<string, string> {

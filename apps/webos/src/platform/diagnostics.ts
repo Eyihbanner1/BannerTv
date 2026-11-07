@@ -1,3 +1,4 @@
+import { checkSyncCrypto } from '@bannertv/core';
 import appinfo from '../../webos-meta/appinfo.json';
 import { recentBackTimes } from '../navigation/back-timing';
 import { androidCapabilities, androidHostInfo, isAndroid } from './android';
@@ -9,6 +10,7 @@ import {
   webOSReleaseForSdkVersion,
 } from './engine';
 import { changedTuning } from './tuning';
+import { pageCrypto } from './web-crypto';
 import { isWebOS, lunaCall, readDeviceInfo } from './webos';
 
 export type DiagnosticRow = readonly [label: string, value: string];
@@ -87,6 +89,21 @@ function checkIndexedDB(): Promise<string> {
       resolve(`fails: ${String(error)}`);
     }
   });
+}
+
+/**
+ * The BannerTV account's self-test (ADR 0006): which known answers this
+ * engine's Web Crypto gets wrong, if any. The account stays hidden unless all pass.
+ */
+async function checkWebCrypto(): Promise<string> {
+  const crypto = pageCrypto();
+  if (!crypto) return 'not available';
+  try {
+    const failed = await checkSyncCrypto(crypto);
+    return failed.length === 0 ? 'works' : `fails: ${failed.join(', ')}`;
+  } catch (error) {
+    return `fails: ${String(error)}`;
+  }
 }
 
 function mediaRows(): DiagnosticRow[] {
@@ -190,7 +207,11 @@ function backTimes(): string {
 export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
   const ua = navigator.userAgent;
   const chromium = parseChromiumMajor(ua);
-  const [indexedDBResult, tv] = await Promise.all([checkIndexedDB(), tvRows()]);
+  const [indexedDBResult, tv, webCrypto] = await Promise.all([
+    checkIndexedDB(),
+    tvRows(),
+    checkWebCrypto(),
+  ]);
 
   return [
     {
@@ -218,6 +239,8 @@ export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
             : (webOSReleaseForChromium(chromium) ?? 'older than 3'),
         ],
         ['Supported', yesNo(isSupportedEngine(ua))],
+        ['Secure context', yesNo(window.isSecureContext === true)],
+        ['Web Crypto', webCrypto],
         ['Window', `${window.innerWidth} x ${window.innerHeight} @ ${window.devicePixelRatio}x`],
         ['User agent', ua],
       ],

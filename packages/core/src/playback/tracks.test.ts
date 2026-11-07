@@ -127,3 +127,27 @@ describe('createPersisted', () => {
     expect(told).toBe(true);
   });
 });
+
+describe('track choices and the BannerTV account', () => {
+  it('lists every choice, tells of changes, and adopts the account’s', async () => {
+    const memory = createTrackMemory({ storage: memoryKeyValueStore() });
+    await memory.rememberAudio('tt1', 'jpn');
+    await memory.rememberSubtitle('tt2', null);
+    let notified = 0;
+    memory.subscribe(() => (notified += 1));
+    await memory.adopt({
+      set: [
+        { metaId: 'tt3', audio: 'eng' },
+        { metaId: 'tt1', subtitle: 'fre' },
+      ],
+      remove: ['tt2'],
+    });
+    expect(memory.choices()).toEqual([
+      { metaId: 'tt3', audio: 'eng' },
+      { metaId: 'tt1', subtitle: 'fre' },
+    ]);
+    expect(notified).toBe(1);
+    await memory.adopt({ remove: ['tt2'] });
+    expect(notified).toBe(1);
+  });
+});

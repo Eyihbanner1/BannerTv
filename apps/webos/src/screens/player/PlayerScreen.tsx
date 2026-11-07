@@ -15,6 +15,10 @@ import {
   qualityChoices,
   rearms,
   secondsToEnd,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  skipRearms,
   type SleepChoice,
   sleepPhase,
   SPEED_KINDS,
@@ -51,6 +55,7 @@ import { Menu } from '../../components/Menu';
 import { addonClient } from '../../data/addons';
 import { playedVideos, progress, speedMemory } from '../../data/playback';
 import { preferences } from '../../data/preferences';
+import { useSkipSegments } from '../../data/skips';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
 import { markActivity, sinceInput } from '../../navigation/activity';
@@ -63,8 +68,9 @@ import { playTrailer } from '../../platform/youtube';
 import { pickAudio } from '../../player/audio';
 import { headlineBadges, resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
-import { entryKey, holdProbing, isHeavy, streamFinder } from '../../player/finder';
+import { entryKey, holdProbing, isHeavy, putPlayerFirst, streamFinder } from '../../player/finder';
 import { formatClock, formatTime, guessMimeType } from '../../player/media';
+import { playMark } from '../../player/play-marks';
 import {
   createPlaybackSession,
   INITIAL_SESSION_STATE,
@@ -82,6 +88,7 @@ import { EpisodesSheet } from './EpisodesSheet';
 import { InfoSheet } from './InfoSheet';
 import { type PlayerAction, PlayerControls } from './PlayerControls';
 import { PlayerProblem } from './PlayerProblem';
+import { SkipCard } from './SkipCard';
 import { SleepScreen, SleepWarning } from './SleepTimer';
 import { SourcesSheet } from './SourcesSheet';
 import { StillWatching } from './StillWatching';
@@ -354,6 +361,39 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const cardUp = showsCount && !chrome && !warns;
   const warningUp = warns && !chrome;
 
+  // Skip intro and Skip recap, from IntroDB's timings for this episode: in
+  // Up Next's corner as the intro or recap plays, while nothing else is on
+  // screen, for SKIP_CARD_S, then gone until a rewind brings it back. It only
+  // offers; it never skips by itself. Never over a clip, a broadcast, the Lab
+  // or sports.
+  const skips = useSkipSegments(type, videoId, !props.lab && !sportsEvent);
+  const skipping =
+    state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
+  // The intro or recap the card was for, where it first showed, and whether it was let go.
+  const [skipShown, setSkipShown] = useState<{ key: string; at: number; gone: boolean } | null>(
+    null,
+  );
+  if (skipping && !waiting) {
+    const key = skipKey(skipping);
+    if (!skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position)) {
+      setSkipShown({ key, at: state.position, gone: false });
+    }
+  } else if (!waiting && skipShown && skipRearms(skipShown.at, state.position)) {
+    // Back before the intro or recap: it shows again when playback reaches it,
+    // even after OK or Back let it go.
+    setSkipShown(null);
+  }
+  const skipUp =
+    !!skipping &&
+    skipShown !== null &&
+    skipShown.key === skipKey(skipping) &&
+    !skipShown.gone &&
+    !skipCardDone(skipShown.at, state.position, state.rate) &&
+    !chrome &&
+    !held &&
+    !cardUp &&
+    !warns;
+
   const subtitles = useSubtitles(
     type,
     videoId,
@@ -408,7 +448,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const element = videoRef.current;
     if (!element) return;
     setVideo(element);
+    playMark(finder, 'open');
+    // Whether auto-play's choice will have to wait for the addons, for the play:chosen mark.
+    const settledAtOpen = finder.get().settled;
     const releaseProbing = holdProbing();
+    // This video's stream and subtitles requests go first (tuning playFirst).
+    const releaseFirst = putPlayerFirst(type, videoId, sportsEvent);
     // A sports match saves nothing and never resumes; a replay keeps its place
     // like any other video, but never goes on Continue Watching.
     const remember = remembersPlace(props);
@@ -434,13 +479,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
         setResumedAt(start);
         const entry = props.stream ?? (await finder.choose(props.binge));
         if (cancelled) return;
-        if (entry) created.play(entry, start);
-        else setNothing(true);
+        if (entry) {
+          playMark(finder, 'chosen', props.stream ? 'picked' : settledAtOpen ? 'ready' : 'waited');
+          created.play(entry, start);
+        } else setNothing(true);
       });
     return () => {
       cancelled = true;
       created.destroy();
       releaseProbing();
+      releaseFirst();
     };
     // One session per video: the screen remounts for another episode.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -908,17 +956,35 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (next) playEpisode(next);
   }
 
-  // As a card (Up Next, the sleep timer's warning) goes with focus, focus goes
-  // to the controls that came up in its place, else to the picture. A sheet,
-  // a dialog or the dark screen takes it itself.
-  const card = cardUp || warningUp;
+  /** Skip intro or Skip recap: to its end, and the card goes. */
+  function skipSegment() {
+    if (!session || !skipping) return;
+    // A skip still to land would undo it.
+    cancelScrub();
+    session.seek(skipping.end);
+    setSkipShown((shown) => shown && { ...shown, gone: true });
+  }
+  function letSkipGo() {
+    setSkipShown((shown) => shown && { ...shown, gone: true });
+  }
+
+  // As a card (Up Next, the sleep timer's warning, Skip intro) goes with focus,
+  // focus goes to the controls that came up in its place, else to the picture.
+  // A sheet, a dialog or the dark screen takes it itself.
+  const card = cardUp || warningUp || skipUp;
   const hadCard = useRef(card);
   useEffect(() => {
     if (card === hadCard.current) return;
     hadCard.current = card;
     if (card || panel || problem || asleep || asking) return;
     const at = focusedKey();
-    if (at.indexOf('player-upnext') !== 0 && at.indexOf('player-sleepwarn') !== 0) return;
+    if (
+      at.indexOf('player-upnext') !== 0 &&
+      at.indexOf('player-sleepwarn') !== 0 &&
+      at.indexOf('player-skip') !== 0
+    ) {
+      return;
+    }
     void setFocus(chrome ? 'player-play' : 'player-surface');
     // Only the card going matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1368,6 +1434,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
           seconds={count}
           onPlay={playNextEpisode}
           onDismiss={() => setUpNextDismissed(true)}
+          onControls={() => show('player-play')}
+        />
+      )}
+      {skipUp && skipping && (
+        <SkipCard
+          kind={skipping.kind}
+          onSkip={skipSegment}
+          onDismiss={letSkipGo}
           onControls={() => show('player-play')}
         />
       )}
