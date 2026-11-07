@@ -1,6 +1,12 @@
 import { memoryKeyValueStore } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
-import { createSubtitleDrifts, DRIFT_RATES, stretchCues } from './drift';
+import {
+  createSubtitleDrifts,
+  DRIFT_RATES,
+  driftInUse,
+  driftKeptWithTiming,
+  stretchCues,
+} from './drift';
 
 const line = (text: string) => [[{ text }]];
 
@@ -40,5 +46,39 @@ describe('the drift store', () => {
     const drifts = createSubtitleDrifts({ storage });
     await drifts.load();
     expect(drifts.get('a')).toBe('ahead');
+  });
+});
+
+describe('driftInUse and driftKeptWithTiming', () => {
+  const file = { canFix: true, evidence: 'behind' as const, kept: null, offset: 0 };
+
+  it('fixes the drift a file’s length gives away by itself, unless the viewer chose', () => {
+    expect(driftInUse(file)).toEqual({ drift: 'behind', auto: true });
+    expect(driftInUse({ ...file, evidence: null })).toEqual({ drift: null, auto: false });
+    // The viewer's own fix, or No fix, stands.
+    expect(driftInUse({ ...file, kept: 'ahead' })).toEqual({ drift: 'ahead', auto: false });
+    expect(driftInUse({ ...file, kept: 'none' })).toEqual({ drift: null, auto: false });
+    // A timing the viewer set on the file before stands too.
+    expect(driftInUse({ ...file, offset: 1.5 })).toEqual({ drift: null, auto: false });
+    // Not where no drift fix applies.
+    expect(driftInUse({ ...file, canFix: false, kept: 'ahead' })).toEqual({
+      drift: null,
+      auto: false,
+    });
+  });
+
+  it('keeps the fix the player made as the viewer’s once they move the timing, so it stays on', () => {
+    const auto = driftInUse(file);
+    expect(driftKeptWithTiming(auto, 0.5)).toBe('behind');
+    expect(driftKeptWithTiming(auto, -0.1)).toBe('behind');
+    // With the fix kept and the timing moved, the fix is still on, now as the viewer's.
+    expect(driftInUse({ ...file, kept: 'behind', offset: 0.5 })).toEqual({
+      drift: 'behind',
+      auto: false,
+    });
+    // Reset on a file at 0 keeps nothing; neither does a fix the viewer chose, already kept.
+    expect(driftKeptWithTiming(auto, 0)).toBeNull();
+    expect(driftKeptWithTiming(driftInUse({ ...file, kept: 'ahead' }), 0.5)).toBeNull();
+    expect(driftKeptWithTiming(driftInUse({ ...file, evidence: null }), 0.5)).toBeNull();
   });
 });

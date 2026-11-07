@@ -112,12 +112,65 @@ export const DEFAULT_STREAMS: readonly TestStream[] = [
   },
 ];
 
+/** Seconds as an SRT time: 00:01:02,500. */
+function srtTime(seconds: number): string {
+  const ms = Math.round(seconds * 1000);
+  const two = (n: number) => String(n).padStart(2, '0');
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor(ms / 60_000) % 60;
+  const secs = Math.floor(ms / 1000) % 60;
+  return `${two(hours)}:${two(minutes)}:${two(secs)},${String(ms % 1000).padStart(3, '0')}`;
+}
+
+/** SRT text of these lines: start and end in seconds, then the text. */
+function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
+  return lines
+    .map(([start, end, text], i) => `${i + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`)
+    .join('\n');
+}
+
+/** A line every `every` seconds from `from` seconds until `until`, numbered after `name`. */
+function dialogue(
+  name: string,
+  from: number,
+  until: number,
+  every = 10,
+): Array<[number, number, string]> {
+  const lines: Array<[number, number, string]> = [];
+  for (let at = from, n = 1; at < until; at += every, n++)
+    lines.push([at, at + 4, `${name}, line ${n}`]);
+  return lines;
+}
+
+/**
+ * Three English files for the 10-minute video (any /long- path), as an
+ * addon might send them, best last: a few signs only; one whose lines run on
+ * past the video's end (timed for another frame rate); and the full one, with
+ * the advert OpenSubtitles adds at its start and end.
+ */
+export const LONG_SUBTITLES = {
+  signs: srt([
+    [1, 4, 'A SIGN ON THE DOOR'],
+    [240, 243, 'A SIGN ON THE ROAD'],
+    [560, 563, 'A SIGN AT THE END'],
+  ]),
+  // Its last lines end up to 25 s past the video's end, line after line: by more than half
+  // of what timing for film speed on a 25 fps video gives (4.3%), so its drift is fixed.
+  past: srt(dialogue('Running past the end', 1, 625, 5)),
+  full: srt([
+    [0.2, 2.5, 'Advertise your product or brand here\ncontact www.OpenSubtitles.org today'],
+    ...dialogue('The full file', 3, 575),
+    [585, 590, 'Support us and become VIP member\nto remove all ads from www.OpenSubtitles.org'],
+  ]),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
   en2: '1\n00:00:00,500 --> 00:00:40,000\nThe second English file\n',
   fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
   fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
+  ...LONG_SUBTITLES,
 };
 
 export interface PlaybackMock {

@@ -1,4 +1,4 @@
-import type { Cue, SubtitleDrift } from '@bannertv/core';
+import type { Cue, DriftChoice, SubtitleDrift } from '@bannertv/core';
 
 /*
  * Subtitles that slide further out of step as the film goes on were timed
@@ -34,4 +34,38 @@ export function stretchCues(cues: readonly Cue[], drift: SubtitleDrift | null): 
   if (drift === null) return cues;
   const rate = DRIFT_RATES[drift];
   return cues.map((cue) => ({ ...cue, start: cue.start / rate, end: cue.end / rate }));
+}
+
+/** The drift fix in use on the file showing, and whether the player made it by itself. */
+export interface DriftInUse {
+  drift: SubtitleDrift | null;
+  /** Made by the player, from the file's length: the viewer chose none. */
+  auto: boolean;
+}
+
+/**
+ * The drift fix for the file showing: the viewer's own when they chose one
+ * for it ('none' is no fix); else the one its length gives away (`evidence`),
+ * made by the player, unless the viewer set a timing on the file before
+ * (theirs stands). None where a drift fix does not apply (`canFix`).
+ */
+export function driftInUse(file: {
+  canFix: boolean;
+  evidence: SubtitleDrift | null;
+  kept: DriftChoice | null;
+  offset: number;
+}): DriftInUse {
+  if (!file.canFix) return { drift: null, auto: false };
+  if (file.kept !== null) return { drift: file.kept === 'none' ? null : file.kept, auto: false };
+  if (file.evidence !== null && file.offset === 0) return { drift: file.evidence, auto: true };
+  return { drift: null, auto: false };
+}
+
+/**
+ * The drift fix to keep as the viewer's own as they move the timing to
+ * `offset`: the one the player made, so the lines they move stay stretched
+ * as they see them, now and next time. Null when there is none to keep.
+ */
+export function driftKeptWithTiming(inUse: DriftInUse, offset: number): SubtitleDrift | null {
+  return inUse.auto && offset !== 0 ? inUse.drift : null;
 }

@@ -5,6 +5,7 @@ import {
   detectEncoding,
   parseSubtitleText,
   type QueryState,
+  stripAdCues,
   subtitleFileKey,
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
@@ -96,7 +97,8 @@ async function download(url: string, lang: string): Promise<Cue[]> {
     if (bytes.length > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
     if (isGzip(bytes)) bytes = await gunzip(bytes);
     const text = new TextDecoder(detectEncoding(bytes, lang)).decode(bytes);
-    const cues = parseSubtitleText(text);
+    // The lines subtitle sites add (adverts, the site's address, credits for the file) never show.
+    const cues = stripAdCues(parseSubtitleText(text));
     if (cues.length === 0) throw new SubtitleLoadError('The subtitle file has no lines');
     return cues;
   } finally {
@@ -104,7 +106,10 @@ async function download(url: string, lang: string): Promise<Cue[]> {
   }
 }
 
-/** Downloads and reads a subtitle file once; a failed one can be tried again. */
+/**
+ * Downloads and reads a subtitle file once, without the adverts and credits
+ * subtitle sites add; a failed one can be tried again.
+ */
 export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Promise<Cue[]> {
   const existing = cache.get(option.url);
   if (existing) {

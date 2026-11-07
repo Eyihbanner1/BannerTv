@@ -1,6 +1,10 @@
 import type { StreamEntry } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
-import type { SubtitleChoice, SubtitleStatus } from '../screens/player/use-subtitles';
+import type {
+  SubtitleCheck,
+  SubtitleChoice,
+  SubtitleStatus,
+} from '../screens/player/use-subtitles';
 import type { EngineTrack } from './engines/types';
 import type { SubtitleOption } from './subtitles';
 import {
@@ -12,7 +16,7 @@ import {
   subtitleVersions,
   versionGroups,
   versionId,
-  versionNote,
+  versionNotes,
 } from './subtitle-versions';
 
 const IN_THE_STREAM = 'In the stream';
@@ -125,12 +129,50 @@ describe('subtitle versions', () => {
       release: 'Film.2024.1080p.WEB-DL.x264-GROUP',
     };
     const other = { ...matching, release: 'Film.2024.720p.BluRay' };
-    expect(versionNote(matching, true, 'loading', video)).toBe('loading');
-    expect(versionNote(matching, true, 'failed', video)).toBe('failed');
-    expect(versionNote(matching, false, 'failed', video)).toBe('skipped');
-    expect(versionNote(matching, false, undefined, video)).toBe('matches');
-    expect(versionNote(other, false, undefined, video)).toBeUndefined();
-    expect(versionNote(matching, false, undefined, {})).toBeUndefined();
+    expect(versionNotes(matching, true, 'loading', video)).toEqual(['loading']);
+    expect(versionNotes(matching, true, 'failed', video)).toEqual(['failed']);
+    expect(versionNotes(matching, false, 'failed', video)).toEqual(['skipped']);
+    expect(versionNotes(matching, false, undefined, video)).toEqual(['matches']);
+    expect(versionNotes(other, false, undefined, video)).toEqual([]);
+    expect(versionNotes(matching, false, undefined, {})).toEqual([]);
+  });
+
+  it('says what reading a file found, a drift fixed by itself, then the match and lines for the hard of hearing', () => {
+    const video = { filename: 'Film.2024.1080p.WEB-DL.x264-GROUP.mkv' };
+    const version = {
+      choice: { kind: 'file', key: 'os#1' } as const,
+      lang: 'eng',
+      source: 'OpenSubtitles v3',
+      release: 'Film.2024.1080p.WEB-DL.x264-GROUP',
+    };
+    const plain = { ...version, release: undefined };
+    expect(versionNotes(plain, false, undefined, video, { hearing: true })).toEqual(['hearing']);
+    expect(
+      versionNotes(plain, false, undefined, video, { hearing: false, problem: 'script' }),
+    ).toEqual(['otherScript']);
+    expect(
+      versionNotes(plain, false, undefined, video, { hearing: false, problem: 'signs' }),
+    ).toEqual(['signs']);
+    expect(
+      versionNotes(plain, true, undefined, video, { hearing: false, problem: 'short' }),
+    ).toEqual(['short']);
+    expect(versionNotes(plain, true, undefined, video, { hearing: true, autoDrift: true })).toEqual(
+      ['driftFixed', 'hearing'],
+    );
+    // Two at most: the most telling.
+    expect(
+      versionNotes(version, true, undefined, video, {
+        hearing: true,
+        problem: 'long',
+        autoDrift: true,
+      }),
+    ).toEqual(['long', 'driftFixed']);
+    expect(versionNotes(version, false, undefined, video, { hearing: true })).toEqual([
+      'matches',
+      'hearing',
+    ]);
+    // Loading or a failure says only that.
+    expect(versionNotes(version, true, 'loading', video, { hearing: true })).toEqual(['loading']);
   });
 
   it('picks a language’s first version that has not failed, or its first when all have', () => {
@@ -152,6 +194,39 @@ describe('subtitle versions', () => {
       kind: 'file',
       key: 'os#1',
     });
+  });
+
+  it('starts a language on a version that was not passed over for its checks, if it has one', () => {
+    const versions = subtitleVersions(
+      {
+        tracks: [],
+        options: [option('os#1', 'eng'), option('os#2', 'eng'), option('os#3', 'eng')],
+      },
+      IN_THE_STREAM,
+    );
+    const [group] = versionGroups(versions, null, createOrderMemory());
+    const none = () => undefined;
+    const checks =
+      (problems: Record<string, SubtitleCheck['problem']>) =>
+      (choice: NonNullable<SubtitleChoice>): SubtitleCheck | undefined =>
+        choice.kind === 'file' && problems[choice.key]
+          ? { hearing: false, problem: problems[choice.key] }
+          : undefined;
+    expect(
+      languageFirstPick(group!, none, checks({ 'os#1': 'signs', 'os#2': 'script' })).choice,
+    ).toEqual({ kind: 'file', key: 'os#3' });
+    // Part of the video is still better than nothing to pick from.
+    expect(languageFirstPick(group!, none, checks({ 'os#1': 'short' })).choice).toEqual({
+      kind: 'file',
+      key: 'os#1',
+    });
+    expect(
+      languageFirstPick(
+        group!,
+        none,
+        checks({ 'os#1': 'signs', 'os#2': 'signs', 'os#3': 'script' }),
+      ).choice,
+    ).toEqual({ kind: 'file', key: 'os#1' });
   });
 
   it('tells choices apart by kind as well as id, and Off is no version', () => {

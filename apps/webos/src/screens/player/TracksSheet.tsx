@@ -8,19 +8,21 @@ import { preferences } from '../../data/preferences';
 import { focusedKey } from '../../navigation/spatial';
 import { inputMode } from '../../platform/input-mode';
 import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
-import { resolutionLabel, streamTitle } from '../../player/describe';
+import { resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import {
   createOrderMemory,
   DRIFT_CHOICES,
+  isUnfit,
   languageFirstPick,
+  playingRelease,
   sameChoice,
   subtitlesValue,
   subtitleVersions,
   type SubtitleVersion,
   VERSION_NOTES,
   versionGroups,
-  versionNote,
+  versionNotes,
 } from '../../player/subtitle-versions';
 import { formatOffset, offsetWay, stepOffset, TIMING_STEPS } from '../../player/timing';
 import { type SheetRow, SheetList } from './SheetList';
@@ -97,23 +99,24 @@ export function TracksSheet(props: TracksSheetProps) {
     groups.find((group) => group.key === chosenLanguage) ??
     groups[0];
 
-  const video = entry
-    ? { filename: entry.stream.behaviorHints.filename, title: streamTitle(entry) }
-    : {};
+  const video = playingRelease(entry);
   const versionRow = ({ item, number }: { item: SubtitleVersion; number?: number }): SheetRow => {
     const selected = sameChoice(item.choice, choice);
     const status = subtitles.statusOf(item.choice);
-    const note = versionNote(item, selected, status, video);
-    const said = note ? t(VERSION_NOTES[note]) : undefined;
+    const check = subtitles.checkOf(item.choice);
+    const said = versionNotes(item, selected, status, video, check).map((note) =>
+      t(VERSION_NOTES[note]),
+    );
     return {
       focusKey: versionKey(item.choice),
       label:
         number === undefined
           ? item.source
           : t('player.sourceNumber', { source: item.source, number }),
-      detail: [item.release, said].filter(Boolean).join(' · ') || undefined,
+      detail: [item.release, ...said].filter(Boolean).join(' · ') || undefined,
       selected,
-      dim: status === 'failed',
+      // Passed over, for good reason: still there to pick by hand.
+      dim: status === 'failed' || isUnfit(check),
       onPress: () => subtitles.choose(item.choice),
     };
   };
@@ -143,7 +146,10 @@ export function TracksSheet(props: TracksSheetProps) {
           if (inputMode.get() !== 'pointer') void setFocus(versionKey(chosen.choice));
           return;
         }
-        subtitles.choose(languageFirstPick(group, subtitles.statusOf).choice);
+        subtitles.choose(
+          languageFirstPick(group, subtitles.statusOf, subtitles.checkOf).choice,
+          'language',
+        );
       },
     })),
   ];
@@ -304,7 +310,7 @@ export function TracksSheet(props: TracksSheetProps) {
           )}
           <p className={styles.kept}>
             {subtitles.canFixDrift
-              ? `${t('player.driftHint')} ${t('player.timingKept')}`
+              ? `${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`
               : t('player.timingKept')}
           </p>
         </Pane>

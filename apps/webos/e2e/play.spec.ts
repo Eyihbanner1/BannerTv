@@ -3276,6 +3276,120 @@ test('each version says where it is from and how it is doing, and its timing is 
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
 });
 
+/** Records every piece of text the page draws, for a check that some never showed. */
+async function recordDrawnText(page: Page) {
+  await page.addInitScript(() => {
+    const drawn: string[] = [];
+    (window as unknown as { drawnText: string[] }).drawnText = drawn;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'characterData') drawn.push(record.target.textContent ?? '');
+        record.addedNodes.forEach((node) => drawn.push(node.textContent ?? ''));
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+}
+
+function drawnText(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as { drawnText: string[] }).drawnText.join('\n'));
+}
+
+test('the first subtitles to show are the full file: signs only and a file running past the end are passed over, and adverts never show', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    // The 10-minute video, so the files' lengths can be judged against it.
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    // As OpenSubtitles might list them: the worst first, and no release names.
+    subtitleList: [
+      { id: 'signs', lang: 'eng' },
+      { id: 'past', lang: 'eng' },
+      { id: 'full', lang: 'eng' },
+    ],
+    // The full file comes last, as from a slow server: the first lines wait for it.
+    subtitleDelayMs: { full: 1200 },
+  });
+  await recordDrawnText(page);
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // The full file's first line, at 3 s; its advert, at the very start, was taken out.
+  await expect(page.getByText('The full file, line 1')).toBeVisible();
+  const drawn = await drawnText(page);
+  expect(drawn).not.toContain('OpenSubtitles.org');
+  expect(drawn).not.toContain('Advertise your product');
+  // The signs file listed first, and the one running past the end, never showed a line.
+  expect(drawn).not.toContain('A SIGN');
+  expect(drawn).not.toContain('Running past the end');
+
+  // The sheet says why: the signs file has only a few lines, and is dimmed.
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toHaveAttribute(
+    'aria-label',
+    'English, 3 versions',
+  );
+  const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
+  const past = page.locator(`[data-focus-key="${OPENSUBTITLES}#past"]`);
+  const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
+  await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
+  await expect(signs).toHaveClass(/dim/);
+  await expect(past).toHaveText('OpenSubtitles v3 2');
+  await expect(full).toHaveText('OpenSubtitles v3 3');
+  await expect(past).not.toHaveClass(/dim/);
+  await expect(full).not.toHaveClass(/dim/);
+  await press(page, 'ArrowRight', `${OPENSUBTITLES}#full`);
+
+  // Picked by hand, the file running past the end shows, its drift fixed for it, and the
+  // pick is kept for this release by who the file is, never its link.
+  await press(page, 'ArrowUp', `${OPENSUBTITLES}#past`);
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(/^Running past the end, line \d+$/)).toBeVisible({ timeout: 12000 });
+  await expect(past).toHaveText('OpenSubtitles v3 2Drift fixed for you');
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
+    'drift fixed',
+  );
+  await expect
+    .poll(async () => readKv(page, 'subtitlePicks'))
+    .toEqual([
+      {
+        metaId: MOVIE,
+        release: 'binge:test-1080p',
+        file: expect.stringMatching(/^[0-9a-z]+$/),
+      },
+    ]);
+  // Nothing of the fix is kept while the player made it.
+  expect((await readKv(page, 'subtitleDrift')) ?? []).toEqual([]);
+
+  // A tenth of a second later: the timing moves by that, and the fix stays on, kept now as
+  // the viewer's own for this file.
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await page.keyboard.press('Enter');
+  const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
+  await expect(timing).toContainText('+0.1 s');
+  await expect(timing).toContainText('drift fixed');
+  await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
+    'aria-label',
+    'Falling behind, in use',
+  );
+  await expect
+    .poll(async () => readKv(page, 'subtitleDrift'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'behind' }]);
+  await expect
+    .poll(async () => readKv(page, 'subtitleOffsets'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.1 }]);
+  expect(await drawnText(page)).not.toContain('OpenSubtitles.org');
+});
+
 test('rows keep their places as more subtitles arrive, and every row answers the pointer', async ({
   page,
 }) => {

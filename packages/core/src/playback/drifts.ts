@@ -14,25 +14,34 @@ export type SubtitleDrift = 'ahead' | 'behind';
 
 export const SUBTITLE_DRIFTS: readonly SubtitleDrift[] = ['ahead', 'behind'];
 
+/**
+ * What the viewer chose for a file: a drift fix, or 'none', kept only where
+ * the player had fixed the file's drift by itself (its length gave it away)
+ * and the viewer took the fix off, so it is never put back on that file.
+ */
+export type DriftChoice = SubtitleDrift | 'none';
+
 const KEY = 'subtitleDrift';
 export const MAX_SUBTITLE_DRIFTS = 300;
 
 export interface SavedDrift {
   /** Who the file is, as made by subtitleFileKey: never a link. */
   key: string;
-  drift: SubtitleDrift;
+  drift: DriftChoice;
 }
 
 /**
  * The drift fix the viewer chose for each subtitle file, kept like its timing:
  * at most MAX_SUBTITLE_DRIFTS files, the least recently changed dropped first.
- * No fix is not kept.
+ * No fix is not kept, except as 'none' where it takes off a fix the player
+ * made by itself.
  */
 export interface SubtitleDrifts {
   load(): Promise<void>;
-  /** The drift fix kept for the file, if any. */
-  get(key: string): SubtitleDrift | undefined;
-  remember(key: string, drift: SubtitleDrift | null): Promise<void>;
+  /** The drift fix kept for the file, or 'none' where the viewer took off the player's own. */
+  get(key: string): DriftChoice | undefined;
+  /** Null forgets the choice: the file is as it was, and the player may fix it by itself. */
+  remember(key: string, drift: DriftChoice | null): Promise<void>;
   /** Every file's drift fix, the least recently changed first. */
   drifts(): readonly SavedDrift[];
   /**
@@ -51,8 +60,8 @@ export interface DriftAdoption {
   remove?: readonly string[];
 }
 
-function isDrift(value: unknown): value is SubtitleDrift {
-  return value === 'ahead' || value === 'behind';
+function isChoice(value: unknown): value is DriftChoice {
+  return value === 'ahead' || value === 'behind' || value === 'none';
 }
 
 function readDrifts(saved: unknown): SavedDrift[] {
@@ -64,7 +73,7 @@ function readDrifts(saved: unknown): SavedDrift[] {
     const raw = saved[i] as Record<string, unknown> | null;
     if (typeof raw !== 'object' || raw === null) continue;
     const { key, drift } = raw;
-    if (typeof key !== 'string' || key === '' || seen.has(key) || !isDrift(drift)) continue;
+    if (typeof key !== 'string' || key === '' || seen.has(key) || !isChoice(drift)) continue;
     seen.add(key);
     drifts.unshift({ key, drift });
   }
