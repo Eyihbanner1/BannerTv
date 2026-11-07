@@ -67,6 +67,18 @@
   color: var(--bt-accent);
 }
 
+/* Not out yet: dimmed, as the player's Episodes sheet shows it. */
+.soon .thumb,
+.soon .title,
+.soon .overview {
+  opacity: 0.55;
+}
+
+/* OK on an episode not out yet: the date line answers. */
+.told {
+  color: var(--bt-text);
+}
+
 .overview {
   margin-top: 6px;
   font: 500 24px/1.35 var(--bt-font);

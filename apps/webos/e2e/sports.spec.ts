@@ -129,6 +129,53 @@ async function startWithSports(page: Page, options: SportsOptions = {}) {
   return { requests, playback };
 }
 
+test('Home rows lists Live sport, which moves to the top and hides like a row', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { requests } = await startWithSports(page);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  // Continue Watching, My List, the first catalog row, then Live sport, as on Home.
+  await press(page, 'ArrowDown', 'home-rows-bannertv-my-list-show');
+  await press(page, 'ArrowDown', 'home-rows-0-movie-top-show');
+  await press(page, 'ArrowDown', 'home-rows-bannertv-live-sport-show');
+  await press(page, 'ArrowLeft', 'home-rows-bannertv-live-sport-down');
+  await press(page, 'ArrowLeft', 'home-rows-bannertv-live-sport-up');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(async () => ((await readKv(page, 'homeLayout')) as { order: string[] })?.order[0])
+    .toBe('bannertv:live-sport');
+  await pressBack(page);
+  await pressBack(page);
+  const rows = page.locator('main [data-row-key]');
+  await expect(rows.nth(0)).toHaveAttribute('data-row-key', LIVE_ROW);
+  await expect(rows.nth(1)).toHaveAttribute('data-row-key', FIRST_ROW);
+
+  // Hidden, it is neither drawn nor asked for again.
+  await openSection(page, 'settings');
+  await press(page, 'ArrowRight', 'settings-profiles');
+  await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'Enter', 'home-rows-bannertv-continue-show');
+  // Now second, under Continue Watching.
+  await press(page, 'ArrowDown', 'home-rows-bannertv-live-sport-show');
+  await page.keyboard.press('Enter');
+  await expectFocusLabel(page, 'Show Live sport on Home');
+  await pressBack(page);
+  await pressBack(page);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await expect(page.locator(`[data-row-key="${LIVE_ROW}"]`)).toHaveCount(0);
+  const asked = requests.all.length;
+  await page.waitForTimeout(500);
+  expect(requests.all.slice(asked).filter((request) => request.includes('/live.json'))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('Sports shows in the rail only while a sports addon is installed', async ({ page }) => {
   const errors = watchErrors(page);
   await page.clock.install({ time: SPORTS_NOW });
@@ -1014,4 +1061,56 @@ test('odd items stay text, inside their tiles', async ({ page }) => {
   expect(tile.hit).toBe(true);
   expect(tile.beyond).toBe(false);
   expect(realErrors(errors)).toEqual([]);
+});
+
+/** The team list's script, once the page has added it. */
+async function dataScripts(page: Page): Promise<string[]> {
+  return (await addedScripts(page)).filter((src) => src.includes('/data/'));
+}
+
+test.describe('with the team list held back until the launch settles (matcherAt idle)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem('bannertv.tuning', JSON.stringify({ matcherAt: 'idle' })),
+    );
+  });
+
+  test('it loads once Home has been still a moment', async ({ page }) => {
+    const errors = watchErrors(page);
+    await startWithSports(page);
+    expect(await dataScripts(page)).toEqual([]);
+    await expect
+      .poll(() => dataScripts(page))
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('focus going into the Live sport row loads it at once, and its matches read the same', async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    await startWithSports(page);
+    expect(await dataScripts(page)).toEqual([]);
+    await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+    await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
+    // Sooner than the launch could settle after these presses.
+    await expect
+      .poll(() => dataScripts(page), { timeout: 1500 })
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+    await expect
+      .poll(() => tileLabels(page, LIVE_ROW))
+      .toEqual([
+        'Arsenal v Brighton, EFL Cup, live now',
+        'Celtic v Rangers, Scottish football, Starting 19:40',
+      ]);
+    expect(realErrors(errors)).toEqual([]);
+  });
+
+  test('opening Sports loads it at once', async ({ page }) => {
+    await startWithSports(page);
+    await openSection(page, 'sports');
+    await expect
+      .poll(() => dataScripts(page), { timeout: 1500 })
+      .toEqual([expect.stringMatching(/\/data\/sports-data\.js$/)]);
+  });
 });

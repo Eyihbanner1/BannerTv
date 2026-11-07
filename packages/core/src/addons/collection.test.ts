@@ -237,6 +237,93 @@ describe('createAddonCollection', () => {
     // Only the one that failed is old enough to try again.
     expect(fetchJson.mock.calls.map(([url]) => url)).toEqual([STREMIO_DEFAULTS[1]!.transportUrl]);
   });
+
+  it('keeps every addon as it is when the refreshed manifests are unchanged, and saves the time', async () => {
+    // As from the network: equal JSON, never the same objects.
+    const sent = (url: string) => {
+      const addon = STREMIO_DEFAULTS.find((a) => a.transportUrl === url)!;
+      return Promise.resolve(JSON.parse(JSON.stringify(addon.manifest)) as unknown);
+    };
+    const fetchJson = vi.fn(sent);
+    const { collection, storage, setTime } = setup(fetchJson);
+    await collection.load();
+    const before = collection.get();
+    const rawBefore = collection.toStored().map((item) => item.manifest);
+    const listener = vi.fn();
+    collection.subscribe(listener);
+    setTime(5000);
+    await collection.refreshManifests(1000);
+
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    expect(listener).not.toHaveBeenCalled();
+    expect(collection.get()).toBe(before);
+    const stored = collection.toStored();
+    expect(stored.map((item) => item.fetchedAt)).toEqual([5000, 5000]);
+    stored.forEach((item, index) => expect(item.manifest).toBe(rawBefore[index]));
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.fetchedAt)).toEqual([5000, 5000]);
+    expect(saved.map((item) => item.manifest)).toEqual(rawBefore);
+
+    // The checked time counts: nothing is due again until it is a day old.
+    fetchJson.mockClear();
+    setTime(5500);
+    await collection.refreshManifests(1000);
+    expect(fetchJson).not.toHaveBeenCalled();
+
+    // And the next launch reads it back.
+    const again = createAddonCollection({
+      storage,
+      fetchJson,
+      defaults: STREMIO_DEFAULTS,
+      now: () => 5500,
+    });
+    await again.load();
+    expect(again.get().addons.map((a) => a.fetchedAt)).toEqual([5000, 5000]);
+    await again.refreshManifests(1000);
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it('replaces only the addon whose manifest changed', async () => {
+    const fetchJson = vi.fn((url: string): Promise<unknown> => {
+      const addon = STREMIO_DEFAULTS.find((a) => a.transportUrl === url)!;
+      const manifest = JSON.parse(JSON.stringify(addon.manifest)) as { version: string };
+      if (url === CINEMETA_URL) manifest.version = '9.9.9';
+      return Promise.resolve(manifest);
+    });
+    const { collection, storage, setTime } = setup(fetchJson);
+    await collection.load();
+    const [cinemeta, subtitles] = collection.get().addons;
+    const listener = vi.fn();
+    collection.subscribe(listener);
+    setTime(5000);
+    await collection.refreshManifests(1000);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    const [newCinemeta, newSubtitles] = collection.get().addons;
+    expect(newCinemeta).not.toBe(cinemeta);
+    expect(newCinemeta!.manifest.version).toBe('9.9.9');
+    expect(newCinemeta!.fetchedAt).toBe(5000);
+    expect(newSubtitles).toBe(subtitles);
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.fetchedAt)).toEqual([5000, 5000]);
+    expect((saved[0]!.manifest as { version: string }).version).toBe('9.9.9');
+  });
+
+  it('forgets the checked time once an addon is installed again', async () => {
+    const fetchJson = vi.fn((url: string): Promise<unknown> => {
+      const addon = STREMIO_DEFAULTS.find((a) => a.transportUrl === url);
+      return Promise.resolve(JSON.parse(JSON.stringify(addon ? addon.manifest : EXTRA_MANIFEST)));
+    });
+    const { collection, setTime } = setup(fetchJson);
+    await collection.load();
+    setTime(5000);
+    await collection.refreshManifests(1000);
+    setTime(7000);
+    await collection.install(CINEMETA_URL);
+    expect(collection.toStored()[0]!.fetchedAt).toBe(7000);
+    expect(collection.get().addons[0]!.fetchedAt).toBe(7000);
+    expect(collection.toStored()[1]!.fetchedAt).toBe(5000);
+  });
 });
 
 describe('the collection and the BannerTV account', () => {

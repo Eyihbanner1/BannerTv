@@ -365,7 +365,9 @@
     "buffering": "Loading",
     "skipWhere": "{{time}} of {{length}}",
     "upNext": "Up next",
-    "playNextIn": "Play now ({{seconds}})",
+    "nextEpisodeIn": "Next episode in {{seconds}} s",
+    "playNow": "Play now",
+    "playNowCounting": "Play now. {{count}}",
     "keepWatching": "Keep watching",
     "skipIntro": "Skip intro",
     "skipRecap": "Skip recap",
@@ -619,7 +621,11 @@
     "show": "Show",
     "hideLabel": "Hide {{name}} from Home",
     "showLabel": "Show {{name}} on Home",
-    "hiddenFrom": "Hidden · {{addon}}"
+    "hiddenFrom": "Hidden · {{addon}}",
+    "hidden": "Hidden",
+    "continueNote": "Always first",
+    "myListNote": "Your list, newest first",
+    "liveSportNote": "Matches live now on your sports addons"
   },
   "library": {
     "show": "Show",
@@ -768,5 +774,29 @@
     "setupConfirmed": "The account is made. BannerTV is still sending this screen's data, and carries on when it can reach its service.",
     "setupJoining": "Joining the account didn't finish. BannerTV carries on when it can reach its service.",
     "tryNow": "Try now"
+  },
+  "browsing": {
+    "play": "Play",
+    "playEpisode": "Play S{{season}}:E{{episode}}",
+    "outOn": "Not out yet. Out on {{date}}",
+    "removeFromContinue": "Remove from Continue Watching",
+    "removeFromList": "Remove from My List",
+    "addToList": "Add to My List",
+    "markWatched": "Mark as watched",
+    "markUnwatched": "Mark as unwatched",
+    "markSeasonWatched": "Mark season {{season}} as watched",
+    "markSeasonUnwatched": "Mark season {{season}} as unwatched",
+    "watched": "Watched",
+    "markTitleWatched": "Mark {{name}} as watched",
+    "markTitleUnwatched": "Watched. Mark {{name}} as unwatched",
+    "moreFrom": "More {{genre}} from {{addon}}",
+    "streamReady": "Best stream ready",
+    "findingStream": "Finding the best stream",
+    "noStreamYet": "No stream found yet",
+    "newEpisodeNote": "New: S{{season}}:E{{episode}}",
+    "newNote": "New episode",
+    "browseGenre": "Browse {{genre}} from {{addon}}",
+    "genreFrom": "{{genre}} from {{addon}}",
+    "searchPerson": "{{name}}, search for more with them"
   }
 }

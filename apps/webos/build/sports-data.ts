@@ -13,11 +13,7 @@ export function sportsData(options: { file: string; global: string; from: string
   const source = () => {
     // Re-serialised so a hand-edited file with stray whitespace stays small.
     const json = JSON.stringify(JSON.parse(readFileSync(options.from, 'utf8')));
-    // Chromium 68 predates ES2019's JSON superset: these two must be escaped in a string literal.
-    const literal = JSON.stringify(json)
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029');
-    return `window.${options.global}=JSON.parse(${literal});\n`;
+    return `window.${options.global}=JSON.parse(${singleQuoted(json)});\n`;
   };
   return {
     name: 'bannertv:sports-data',
@@ -33,4 +29,20 @@ export function sportsData(options: { file: string; global: string; from: string
       this.emitFile({ type: 'asset', fileName: options.file, source: source() });
     },
   };
+}
+
+/**
+ * `text` as a single-quoted JavaScript string literal. JSON is full of double
+ * quotes and has few apostrophes, so this saves a backslash per quote: about
+ * 13% of the sports data. Chromium 68 predates ES2019's JSON superset, so the
+ * line and paragraph separators are escaped too. JSON.stringify output holds
+ * no other line terminator.
+ */
+export function singleQuoted(text: string): string {
+  const body = text
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  return `'${body}'`;
 }

@@ -21,8 +21,21 @@ export async function expectFocus(page: Page, focusKey: string): Promise<void> {
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute('data-focus-key', focusKey);
 }
 
-/** Presses a remote key and waits for focus to land on `focusKey`. */
+/**
+ * Waits until focus is not on a row or grid tile whose catalog has yet to answer. Such a tile
+ * takes focus and says "Loading" (home.loadingTile), and OK on it opens nothing, so a person
+ * waits for the title to show before pressing OK. Arrows on it are fine: journeys test those.
+ */
+export async function expectLoadedFocus(page: Page): Promise<void> {
+  await expect(page.locator('[data-focused="true"][aria-label="Loading"]')).toHaveCount(0);
+}
+
+/**
+ * Presses a remote key and waits for focus to land on `focusKey`. OK waits first for a
+ * loading tile under focus to show its title, as a person would.
+ */
 export async function press(page: Page, key: string, focusKey: string): Promise<void> {
+  if (key === 'Enter') await expectLoadedFocus(page);
   await page.keyboard.press(key);
   await expectFocus(page, focusKey);
   await page.waitForTimeout(KEY_GAP_MS);
@@ -44,8 +57,12 @@ export async function expectFocusLabel(page: Page, label: string): Promise<void>
   await expect(page.locator('[data-focused="true"]')).toHaveAttribute('aria-label', label);
 }
 
-/** Presses a remote key and waits for focus to land on the element labelled `label`. */
+/**
+ * Presses a remote key and waits for focus to land on the element labelled `label`. OK
+ * waits first for a loading tile under focus to show its title, as `press` does.
+ */
 export async function pressTo(page: Page, key: string, label: string): Promise<void> {
+  if (key === 'Enter') await expectLoadedFocus(page);
   await page.keyboard.press(key);
   await expectFocusLabel(page, label);
   await page.waitForTimeout(KEY_GAP_MS);

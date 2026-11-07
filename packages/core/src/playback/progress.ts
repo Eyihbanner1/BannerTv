@@ -9,6 +9,15 @@ export const MIN_RESUME_SECONDS = 30;
 /** Resuming this close to the end would only show the credits, so it starts over instead. */
 export const END_SECONDS = 60;
 /**
+ * A resume starts this many seconds before where the viewer stopped, so they
+ * come back at the start of the line they left rather than in the middle of it.
+ */
+export const RESUME_LEAD_IN_S = 5;
+/** After a day or more away, further back, to pick the scene up again. */
+export const RESUME_LEAD_IN_AWAY_S = 10;
+/** Last watched longer ago than this counts as a day away. */
+export const AWAY_MS = 24 * 60 * 60 * 1000;
+/**
  * Trakt keeps progress as a rounded percentage. Within this share of the
  * video's own place it is the same place, as when the TV's stop comes back.
  */
@@ -41,6 +50,32 @@ export interface ProgressEntry {
    * the video here drops it.
    */
   from?: 'trakt';
+  /**
+   * When the viewer last marked this video not watched, kept on later saves:
+   * the account's watched ticks older than it don't count (sync/merge.ts).
+   */
+  unmarkedAt?: number;
+}
+
+/**
+ * Marked not watched (Mark as unwatched) and not played or marked watched
+ * since: it counts as not watched whatever Trakt's ticks say, and is not
+ * where the viewer is up to.
+ */
+export function isUnmarked(entry: ProgressEntry | undefined): boolean {
+  return (
+    entry !== undefined &&
+    !entry.watched &&
+    entry.unmarkedAt !== undefined &&
+    entry.unmarkedAt >= entry.updatedAt
+  );
+}
+
+/** A video to mark watched or not watched, as a title's page lists it. */
+export interface ProgressMark {
+  metaId: string;
+  type: ContentType;
+  videoId: string;
 }
 
 /** What the BannerTV account changes in progress. */
@@ -71,6 +106,29 @@ export interface ProgressStore {
   /** Forgets the position (Start over); keeps nothing about the video. */
   clear(videoId: string): void;
   /**
+   * Marks videos watched, or not watched, as the viewer says. One marked
+   * watched sits at its end, so it never resumes and Continue Watching offers
+   * the episode after it; one marked not watched goes back to its start. Each
+   * gets a fresh time, a millisecond apart in the order given, so the last is
+   * the most recent and the account takes them as edits; marked here, they
+   * are this screen's own, not Trakt's. One marked not watched gets that
+   * time as its `unmarkedAt` too (see isUnmarked): a tick from Trakt does not
+   * show on it, and it is not where the viewer is up to (Continue Watching
+   * and History pass over it).
+   * `keepLatest` names a video whose entry stays the most recent, the place
+   * the viewer is up to, as when earlier episodes are marked watched. Writes
+   * straight away.
+   */
+  mark(videos: readonly ProgressMark[], watched: boolean, keepLatest?: string): void;
+  /**
+   * Takes a title off Continue Watching until it plays again: its latest
+   * entry keeps its place and watched mark, is marked to stay off the row
+   * (continueRow false), and gets a fresh time, so the account takes it as an
+   * edit and Trakt's older progress does not bring the title back. False when
+   * the title has no progress.
+   */
+  leaveRow(metaId: string): boolean;
+  /**
    * Brings in progress made elsewhere (Trakt): each entry replaces the
    * video's own only when it is newer. A video watched here stays watched.
    * When the TV knows the video's length, an entry's place is read as a
@@ -91,6 +149,14 @@ export interface ProgressStore {
    * never near either end, nor in a video whose length is unknown.
    */
   resumeAt(videoId: string): number | undefined;
+  /**
+   * Where playing from saved progress starts: resumeAt, a few seconds early
+   * (resumeLeadIn), but never before MIN_RESUME_SECONDS. Undefined when it
+   * starts from the beginning. What Details
+   * says ("Resume from 42:10") stays resumeAt; a switch of stream keeps its
+   * exact place and never asks this.
+   */
+  resumeFrom(videoId: string, now?: number): number | undefined;
   /** Bumps on every change, for screens that show progress. */
   version(): number;
   subscribe(listener: Listener): () => void;
@@ -105,6 +171,31 @@ function seconds(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+/**
+ * Where a resume starts: RESUME_LEAD_IN_S before `position`, or
+ * RESUME_LEAD_IN_AWAY_S when it was last watched a day or more before `now`
+ * (milliseconds, as `updatedAt`). Never before 0. A clock set back before
+ * `updatedAt` counts as no time away.
+ */
+export function resumeLeadIn(position: number, updatedAt: number, now: number): number {
+  const away = now - updatedAt >= AWAY_MS;
+  return Math.max(0, position - (away ? RESUME_LEAD_IN_AWAY_S : RESUME_LEAD_IN_S));
+}
+
+/**
+ * Where to resume an entry, or undefined to start from the beginning: never
+ * near either end, nor in a video whose length is unknown.
+ */
+function resumeAt(entry: ProgressEntry | undefined): number | undefined {
+  if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
+  // No known length, as for a live broadcast: there is no place in it to come back to.
+  if (entry.duration <= 0) return undefined;
+  if (entry.duration - entry.position < END_SECONDS) return undefined;
+  // A rewatch resumes too, but never from the credits of one already seen.
+  if (entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
+  return entry.position;
+}
+
 function isAmount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
@@ -116,14 +207,25 @@ function isId(value: unknown): value is string {
 /** A saved entry, or undefined when any field is missing or of the wrong kind. */
 function readEntry(value: unknown): ProgressEntry | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { metaId, type, videoId, position, duration, updatedAt, watched, continueRow, from } =
-    value as Record<string, unknown>;
+  const {
+    metaId,
+    type,
+    videoId,
+    position,
+    duration,
+    updatedAt,
+    watched,
+    continueRow,
+    from,
+    unmarkedAt,
+  } = value as Record<string, unknown>;
   if (!isId(metaId) || !isId(type) || !isId(videoId)) return undefined;
   if (!isAmount(position) || !isAmount(duration) || !isAmount(updatedAt)) return undefined;
   if (typeof watched !== 'boolean') return undefined;
   const entry: ProgressEntry = { metaId, type, videoId, position, duration, updatedAt, watched };
   if (continueRow === false) entry.continueRow = false;
   if (from === 'trakt') entry.from = 'trakt';
+  if (isAmount(unmarkedAt)) entry.unmarkedAt = unmarkedAt;
   return entry;
 }
 
@@ -179,6 +281,8 @@ export function createProgressStore(options: {
   let loaded = false;
   // Videos started over before the saved list arrived: their saved entries must not come back.
   const clearedEarly = new Set<string>();
+  // Videos started over, with when they were last marked not watched, for their next save.
+  const startedOver = new Map<string, number>();
   let writing = false;
   let dirty = false;
 
@@ -288,6 +392,9 @@ export function createProgressStore(options: {
       };
       // Each record says it again: the same video played from elsewhere can go on the row.
       if (update.continueRow === false) entry.continueRow = false;
+      const unmarkedAt = entries.get(update.videoId)?.unmarkedAt ?? startedOver.get(update.videoId);
+      if (unmarkedAt !== undefined) entry.unmarkedAt = unmarkedAt;
+      startedOver.delete(update.videoId);
       put(entry);
       trim();
       save();
@@ -295,10 +402,57 @@ export function createProgressStore(options: {
       return entry;
     },
     clear(videoId) {
+      // Started over: the next save keeps when it was last marked not watched.
+      const unmarkedAt = entries.get(videoId)?.unmarkedAt;
+      if (unmarkedAt !== undefined) startedOver.set(videoId, unmarkedAt);
       const had = entries.delete(videoId);
       if (!loaded) clearedEarly.add(videoId);
       if (had || !loaded) save();
       if (had) changed();
+    },
+    mark(videos, watched, keepLatest) {
+      if (videos.length === 0) return;
+      const kept = keepLatest === undefined ? undefined : entries.get(keepLatest);
+      const at = now() - videos.length + (kept ? 0 : 1);
+      videos.forEach((video, index) => {
+        const own = entries.get(video.videoId);
+        const duration = own?.duration ?? 0;
+        const entry: ProgressEntry = {
+          metaId: video.metaId,
+          type: video.type,
+          videoId: video.videoId,
+          // At its end, or back at its start. An unknown length stays unknown.
+          position: watched ? duration : 0,
+          duration,
+          updatedAt: at + index,
+          watched,
+        };
+        if (own?.continueRow === false) entry.continueRow = false;
+        const unmarkedAt = watched ? own?.unmarkedAt : at + index;
+        if (unmarkedAt !== undefined) entry.unmarkedAt = unmarkedAt;
+        put(entry);
+      });
+      // Restamped, not changed, so it is still where the viewer is up to.
+      if (kept && entries.get(kept.videoId) === kept) put({ ...kept, updatedAt: now() });
+      trim();
+      save();
+      changed();
+    },
+    leaveRow(metaId) {
+      let latest: ProgressEntry | undefined;
+      for (const entry of entries.values()) {
+        // Marked not watched is not where the viewer is up to, so not what the row shows.
+        if (entry.metaId !== metaId || isUnmarked(entry)) continue;
+        if (!latest || entry.updatedAt >= latest.updatedAt) latest = entry;
+      }
+      if (!latest) return false;
+      const entry: ProgressEntry = { ...latest, continueRow: false, updatedAt: now() };
+      // The viewer's choice here, not Trakt's.
+      delete entry.from;
+      put(entry);
+      save();
+      changed();
+      return true;
     },
     async merge(incoming) {
       await load().catch(() => undefined);
@@ -318,7 +472,12 @@ export function createProgressStore(options: {
           if (same && (own.watched || !entry.watched)) continue;
           entry = { ...entry, position: share * own.duration, duration: own.duration };
         }
-        entries.set(entry.videoId, own?.watched ? { ...entry, watched: true } : entry);
+        const taking: ProgressEntry = own?.watched ? { ...entry, watched: true } : { ...entry };
+        // Never dropped: the account counts only watched ticks newer than it.
+        if (own?.unmarkedAt !== undefined && taking.unmarkedAt === undefined) {
+          taking.unmarkedAt = own.unmarkedAt;
+        }
+        entries.set(entry.videoId, taking);
         taken += 1;
       }
       if (taken === 0) return 0;
@@ -350,15 +509,14 @@ export function createProgressStore(options: {
           if (loaded) take();
         });
     },
-    resumeAt(videoId) {
+    resumeAt: (videoId) => resumeAt(entries.get(videoId)),
+    resumeFrom(videoId, at = now()) {
       const entry = entries.get(videoId);
-      if (!entry || entry.position < MIN_RESUME_SECONDS) return undefined;
-      // No known length, as for a live broadcast: there is no place in it to come back to.
-      if (entry.duration <= 0) return undefined;
-      if (entry.duration - entry.position < END_SECONDS) return undefined;
-      // A rewatch resumes too, but never from the credits of one already seen.
-      if (entry.position >= entry.duration * WATCHED_FRACTION) return undefined;
-      return entry.position;
+      const place = resumeAt(entry);
+      if (place === undefined || !entry) return undefined;
+      // Never led in below where a resume begins: the first reading is saved
+      // at once, and one under that would drop the video from Continue Watching.
+      return Math.max(MIN_RESUME_SECONDS, resumeLeadIn(place, entry.updatedAt, at));
     },
     version: () => changes,
     subscribe(listener) {

@@ -11,7 +11,12 @@ import { eventsFromItems } from '../../data/sports';
 import { useQuery } from '../../data/use-query';
 import { focusedKey } from '../../navigation/spatial';
 import { fixtureText } from '../sports/fixture';
-import { useMinuteClock, useSportsFeed, useViewOptions } from '../sports/use-sports';
+import {
+  useMinuteClock,
+  useSportsFeed,
+  useSportsMatcher,
+  useViewOptions,
+} from '../sports/use-sports';
 import styles from './SearchScreen.module.css';
 
 const MAX_RESULTS = 40;
@@ -153,6 +158,8 @@ export function SportsResults({
   const feed = useSportsFeed();
   const now = useMinuteClock();
   const view = useViewOptions(feed.events, now);
+  // A sports search finds teams by every name the team and league data knows.
+  useSportsMatcher();
   const found = useMemo(
     () => searchEvents(feed.events, term, view).slice(0, MAX_RESULTS),
     [feed.events, term, view],

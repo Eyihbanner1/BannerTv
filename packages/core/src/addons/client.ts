@@ -15,6 +15,7 @@ import {
 import type { FetchJson } from '../http';
 import type { Limiter } from '../limiter';
 import type { CachePolicy, Query, QueryCache } from '../query';
+import { neverSports } from '../sports/detect';
 import type { AddonCollection, InstalledAddon } from './collection';
 
 /** Catalog and meta requests give up after this long. */
@@ -109,6 +110,14 @@ export interface CatalogOptions {
    * so its policy and limit always apply.
    */
   lane?: Limiter;
+  /**
+   * A refreshed answer keeps the objects of the copy on screen it equals
+   * (QueryOptions.keepEqual), for Home's rows. Like the policy, it is set by
+   * the first screen to ask for this catalog. Only a catalog that can never
+   * be read as sports (neverSports) takes it: the sports readings take a new
+   * list as a new answer, and read its kick-offs again.
+   */
+  keepEqual?: boolean;
 }
 
 /** One item as one addon listed it, for requests that must go to that addon only. */
@@ -184,21 +193,32 @@ export function createAddonClient(options: {
    * addons not marked adult, and details are cached apart from everyone else's.
    */
   kidsOnly?: () => boolean;
+  /**
+   * How urgent a stream or subtitles request for this video is, read each
+   * time one of the limiter's slots frees: higher goes ahead of the others
+   * waiting. Left out, every request waits its turn in the order asked.
+   */
+  playPriority?: (type: string, videoId: string) => number;
 }): AddonClient {
-  const { collection, queries, limiter, fetchJson, kidsOnly = () => false } = options;
+  const { collection, queries, limiter, fetchJson, kidsOnly = () => false, playPriority } = options;
   const usable = () => {
     const { addons } = collection.get();
     return kidsOnly() ? addons.filter((addon) => !addon.manifest.behaviorHints.adult) : addons;
   };
   const get = (url: string) => limiter.run(() => fetchJson(url, { timeoutMs: BROWSE_TIMEOUT_MS }));
-  const getForPlay = (url: string) =>
-    limiter.run(() => fetchJson(url, { timeoutMs: PLAY_TIMEOUT_MS }));
-  const streamQuery = (url: string) =>
+  // Each request carries the video its address names, so whichever caller made the cached
+  // query first does not matter.
+  const getForPlay = (url: string, type: string, videoId: string) =>
+    limiter.run(
+      () => fetchJson(url, { timeoutMs: PLAY_TIMEOUT_MS }),
+      playPriority && (() => playPriority(type, videoId)),
+    );
+  const streamQuery = (url: string, type: string, videoId: string) =>
     queries.query(url, {
       policy: STREAM_POLICY,
       persist: false,
       fetch: async () => {
-        const response = parseStreamResponse(await getForPlay(url));
+        const response = parseStreamResponse(await getForPlay(url, type, videoId));
         // The addon's own cache hints are ignored: links can expire long before them.
         return { value: response.streams, hints: {} };
       },
@@ -211,6 +231,11 @@ export function createAddonClient(options: {
       return queries.query(lane ? `lane:${url}` : url, {
         policy: options.policy ?? CATALOG_POLICY,
         persist: options.persist !== false,
+        keepEqual:
+          options.keepEqual === true &&
+          addon.manifest.catalogs.some(
+            (catalog) => catalog.type === type && catalog.id === catalogId && neverSports(catalog),
+          ),
         fetch: async () => {
           const json = lane ? await lane.run(() => get(url)) : await get(url);
           const response = parseCatalogResponse(json, type);
@@ -223,6 +248,8 @@ export function createAddonClient(options: {
       return queries.query(`${kidsOnly() ? 'kids:' : ''}meta:${type}:${id}`, {
         policy: META_POLICY,
         persist: true,
+        // Its readers (Details, the player, Continue Watching) go by what it holds, not the object.
+        keepEqual: true,
         fetch: async () => {
           const addons = usable().filter((addon) =>
             supportsResource(addon.manifest, 'meta', type, id),
@@ -268,7 +295,7 @@ export function createAddonClient(options: {
         const url = resourceUrl(source.addon.transportUrl, 'stream', source.type, source.id);
         if (seen.has(url)) continue;
         seen.add(url);
-        answers.push({ addon: source.addon, query: streamQuery(url) });
+        answers.push({ addon: source.addon, query: streamQuery(url, source.type, source.id) });
       }
       return answers;
     },
@@ -278,7 +305,11 @@ export function createAddonClient(options: {
         .filter((addon) => supportsResource(addon.manifest, 'stream', type, videoId))
         .map((addon) => ({
           addon,
-          query: streamQuery(resourceUrl(addon.transportUrl, 'stream', type, videoId)),
+          query: streamQuery(
+            resourceUrl(addon.transportUrl, 'stream', type, videoId),
+            type,
+            videoId,
+          ),
         }));
     },
 
@@ -294,7 +325,7 @@ export function createAddonClient(options: {
               policy: SUBTITLES_POLICY,
               persist: false,
               fetch: async () => {
-                const response = parseSubtitlesResponse(await getForPlay(url));
+                const response = parseSubtitlesResponse(await getForPlay(url, type, videoId));
                 return { value: response.subtitles, hints: {} };
               },
             }),

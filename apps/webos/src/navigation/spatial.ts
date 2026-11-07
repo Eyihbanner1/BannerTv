@@ -45,7 +45,8 @@ export function movedByWheel(): boolean {
  * each a forced layout. A row's tiles never need it: the row moves between
  * them by index, and Up and Down leave the row as a whole. So a tile inside a
  * row (marked `data-row-key`) is not measured, which spares a dozen forced
- * layouts each time a row is drawn. The row itself still is.
+ * layouts each time a row is drawn. The row itself still is. The poster grid
+ * moves between its tiles by index too, while it is marked `data-index-nav`.
  */
 class RowTileAdapter extends BaseWebAdapter {
   constructor(service: ConstructorParameters<typeof BaseWebAdapter>[0]) {
@@ -53,8 +54,11 @@ class RowTileAdapter extends BaseWebAdapter {
     const measure = this.measureLayout;
     this.measureLayout = (component: FocusableComponent) => {
       const { node } = component;
-      const row = node && node.parentElement ? node.parentElement.closest('[data-row-key]') : null;
-      if (!row) return measure(component);
+      const byIndex =
+        node && node.parentElement
+          ? node.parentElement.closest('[data-row-key], [data-index-nav]')
+          : null;
+      if (!byIndex) return measure(component);
       return Promise.resolve({
         node,
         x: 0,
