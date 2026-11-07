@@ -12,7 +12,9 @@ import {
   profiles,
   profileSwitcher,
 } from '../../data/profiles';
+import { refreshAccount } from '../../data/sync';
 import { useBack } from '../../navigation/use-back';
+import { ForgotPin } from './ForgotPin';
 import styles from './ProfilePicker.module.css';
 
 export const RAIL_PROFILE_FOCUS_KEY = 'rail-profile';
@@ -61,6 +63,7 @@ export function ProfilePicker({ mode }: ProfilePickerProps) {
   const label = useProfileLabel();
   const [asking, setAsking] = useState<Profile | null>(null);
   const [message, setMessage] = useState<string | undefined>(undefined);
+  const [forgetting, setForgetting] = useState<Profile | null>(null);
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'profile-picker',
     isFocusBoundary: true,
@@ -73,6 +76,12 @@ export function ProfilePicker({ mode }: ProfilePickerProps) {
     // Focus lands once, on the profile most likely to be wanted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A profile just made on another screen shows here without waiting for the next sync (item
+  // A8). At launch the account starts once someone is chosen, and its first pull follows.
+  useEffect(() => {
+    if (mode === 'switch') void refreshAccount();
+  }, [mode]);
 
   useBack(
     'overlay',
@@ -149,6 +158,22 @@ export function ProfilePicker({ mode }: ProfilePickerProps) {
           returnFocusKey={() => `profile-${asking.id}`}
           onPin={(digits) => tryPin(asking, digits)}
           onClose={() => setAsking(null)}
+          onForgot={() => {
+            setForgetting(asking);
+            setAsking(null);
+          }}
+        />
+      )}
+      {forgetting && (
+        <ForgotPin
+          profile={forgetting}
+          returnFocusKey={() => `profile-${forgetting.id}`}
+          // The PIN is off: the profile opens as an unlocked one would.
+          onCleared={() => {
+            setForgetting(null);
+            chooseProfile(forgetting.id);
+          }}
+          onClose={() => setForgetting(null)}
         />
       )}
     </FocusContext.Provider>

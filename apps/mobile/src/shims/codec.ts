@@ -134,6 +134,25 @@ export function encodeClone(value: unknown): string {
   return JSON.stringify(encodeValue(value));
 }
 
-export function decodeClone(text: string): unknown {
+/**
+ * Whether a stored text is plain JSON, which the full decode would only copy: it holds no tag
+ * (every tag is written under the key "$bt"), no "__proto__" key (which the copy would turn into
+ * a prototype), and no \u escape that could spell either. JSON.parse alone then gives exactly
+ * what the full decode gives. Most of what is stored (catalog pages, titles, progress, My List)
+ * is like this. Each search starts at a rare character: a quote starts nearly every token of
+ * JSON, and searching from one is many times slower.
+ */
+export function plainJson(text: string): boolean {
+  return (
+    text.indexOf(`${TAG}"`) === -1 && text.indexOf('__proto__') === -1 && text.indexOf('\\u') === -1
+  );
+}
+
+/** The full decode: every array and object copied, and every tag read back. */
+export function decodeCloneFully(text: string): unknown {
   return decodeValue(JSON.parse(text) as unknown);
+}
+
+export function decodeClone(text: string): unknown {
+  return plainJson(text) ? (JSON.parse(text) as unknown) : decodeCloneFully(text);
 }

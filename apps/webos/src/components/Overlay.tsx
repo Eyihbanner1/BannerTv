@@ -21,9 +21,10 @@ interface OverlayProps {
   onBack?: () => boolean;
   /**
    * 'side' slides in from the right (menus), 'center' is a dialog, 'bottom'
-   * rises from the bottom and leaves the picture above it clear.
+   * rises from the bottom and leaves the picture above it clear, and
+   * 'banner' is a small card at the top right over a clear screen.
    */
-  placement: 'side' | 'center' | 'bottom';
+  placement: 'side' | 'center' | 'bottom' | 'banner';
   /** Whether a pointer click outside closes it. Not for a layer whose closing leaves the screen. */
   closeOnOutsideClick?: boolean;
   children: ReactNode;
@@ -78,7 +79,9 @@ export function Overlay(props: OverlayProps) {
       <div className={styles.layer}>
         <div
           className={
-            placement === 'bottom' ? `${styles.backdrop} ${styles.clear}` : styles.backdrop
+            placement === 'bottom' || placement === 'banner'
+              ? `${styles.backdrop} ${styles.clear}`
+              : styles.backdrop
           }
           onClick={closeOnOutsideClick ? onOutsideClick : undefined}
         />

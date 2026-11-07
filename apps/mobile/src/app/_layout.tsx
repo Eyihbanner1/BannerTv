@@ -3,10 +3,10 @@ import { welcomed } from '@tv/data/welcome';
 import { noteInput } from '@tv/navigation/activity';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { keepOrientation } from '../player/orientation';
 import { ProfilePicker } from '../screens/ProfilePicker';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { colors } from '../ui/theme';
@@ -14,41 +14,46 @@ import { colors } from '../ui/theme';
 /**
  * The app's frame. The screens stay mounted underneath; until the welcome is done and someone
  * is chosen, the welcome or "Who's watching?" covers them, as on the TV.
+ *
+ * No GestureHandlerRootView: no screen uses a gesture-handler gesture (touches go through React
+ * Native's own responders), and importing the library at launch also loads Reanimated and
+ * Worklets, which start a second JavaScript runtime the app never uses.
  */
 export default function RootLayout() {
   const welcomeDone = useSyncExternalStore(welcomed.subscribe, welcomed.get);
   const profileId = useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
+  // Upright unless the player is open, also after the app starts again with Android still
+  // holding the last run's sideways lock, and on every return to the front.
+  useEffect(() => keepOrientation(), []);
   const cover = !welcomeDone ? (
     <WelcomeScreen />
   ) : profileId === null ? (
     <ProfilePicker mode="launch" />
   ) : null;
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <StatusBar style="light" />
-        <View
-          style={styles.root}
-          onStartShouldSetResponderCapture={() => {
-            noteInput();
-            return false;
+    <SafeAreaProvider style={styles.root}>
+      <StatusBar style="light" />
+      <View
+        style={styles.root}
+        onStartShouldSetResponderCapture={() => {
+          noteInput();
+          return false;
+        }}
+      >
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bg },
+            animation: 'slide_from_right',
           }}
         >
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.bg },
-              animation: 'slide_from_right',
-            }}
-          >
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
-            <Stack.Screen name="profiles" options={{ animation: 'fade_from_bottom' }} />
-          </Stack>
-          {cover ? <View style={styles.cover}>{cover}</View> : null}
-        </View>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
+          <Stack.Screen name="profiles" options={{ animation: 'fade_from_bottom' }} />
+        </Stack>
+        {cover ? <View style={styles.cover}>{cover}</View> : null}
+      </View>
+    </SafeAreaProvider>
   );
 }
 

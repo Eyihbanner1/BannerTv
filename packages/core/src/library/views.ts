@@ -1,6 +1,6 @@
 import type { MetaPreview } from '@bannertv/protocol';
 import type { PlayedVideo } from '../playback/continue';
-import type { ProgressEntry } from '../playback/progress';
+import { isUnmarked, type ProgressEntry } from '../playback/progress';
 import type { LibraryItem } from './library';
 
 export type LibraryKind = 'all' | 'movie' | 'series';
@@ -73,7 +73,9 @@ export function historyView(
   const previews: MetaPreview[] = [];
   for (const entry of entries) {
     if (previews.length >= HISTORY_LIMIT) break;
-    if (seen.has(entry.metaId) || (kind !== 'all' && entry.type !== kind)) continue;
+    if (isUnmarked(entry) || seen.has(entry.metaId) || (kind !== 'all' && entry.type !== kind)) {
+      continue;
+    }
     const played = card(entry.videoId);
     if (!played) continue;
     seen.add(entry.metaId);

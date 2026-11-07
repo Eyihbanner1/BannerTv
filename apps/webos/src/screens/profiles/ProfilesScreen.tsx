@@ -1,5 +1,5 @@
 import type { Profile } from '@bannertv/core';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { push } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -14,6 +14,8 @@ import {
   profiles,
   setAskAtLaunch,
 } from '../../data/profiles';
+import { refreshAccount } from '../../data/sync';
+import { ForgotPin } from './ForgotPin';
 import { useProfileLabel } from './ProfilePicker';
 import screen from '../Screen.module.css';
 import styles from './ProfilesScreen.module.css';
@@ -33,7 +35,12 @@ export function ProfilesScreen() {
   const label = useProfileLabel();
   const [asking, setAsking] = useState<Profile | null>(null);
   const [message, setMessage] = useState<string | undefined>(undefined);
+  const [forgetting, setForgetting] = useState<Profile | null>(null);
   useScreenFocus(`profiles-${state.profiles[0]!.id}`);
+  // The list shows what the account has now, not what it had at the last sync (item A8).
+  useEffect(() => {
+    void refreshAccount();
+  }, []);
 
   /** `unlocked`: its PIN was just entered, so its page does not ask for it again. */
   const edit = (profile: Profile, unlocked = false) =>
@@ -122,6 +129,22 @@ export function ProfilesScreen() {
             }
           }}
           onClose={() => setAsking(null)}
+          onForgot={() => {
+            setForgetting(asking);
+            setAsking(null);
+          }}
+        />
+      )}
+      {forgetting && (
+        <ForgotPin
+          profile={forgetting}
+          returnFocusKey={`profiles-${forgetting.id}`}
+          // Its page opens with Set a PIN, the PIN being off now.
+          onCleared={() => {
+            setForgetting(null);
+            edit(forgetting);
+          }}
+          onClose={() => setForgetting(null)}
         />
       )}
     </div>

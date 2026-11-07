@@ -117,6 +117,21 @@ function sourceRank(entry: StreamEntry): number {
   return source === undefined ? UNKNOWN_SOURCE_RANK : SOURCE_RANK[source];
 }
 
+/**
+ * 0 for a stream within the profile's limits, 1 for one with HDR it wants to
+ * avoid, 2 for one above its highest picture, 3 for both. A resolution not
+ * stated is never above the limit.
+ */
+function pictureLimits(entry: StreamEntry, options: OrderOptions): number {
+  const resolution = entry.facts.resolution;
+  const above =
+    options.maxResolution !== undefined &&
+    resolution !== undefined &&
+    RESOLUTIONS.indexOf(resolution) < RESOLUTIONS.indexOf(options.maxResolution);
+  const hdr = options.avoidHdr === true && entry.facts.hdr.length > 0;
+  return (above ? 2 : 0) + (hdr ? 1 : 0);
+}
+
 function scorer(options: OrderOptions): (addonId: string) => number {
   const read = options.addonScore;
   if (!read) return () => 0.5;
@@ -154,13 +169,21 @@ function keyFor(
   tv: TvCapabilities,
   score: (addonId: string) => number,
   options: OrderOptions,
+  wanted: readonly string[],
 ): Key {
   const head = streamTier(entry);
   if (order === 'addon') return [head, entry.addonRank, entry.rank];
+  // A dub the viewer can't follow is worse than any picture, so the language
+  // comes straight after how likely a stream is to play; then the limits the
+  // profile set on the picture.
+  const language = languageRank(entry.facts, wanted);
+  const limits = pictureLimits(entry, options);
   if (order === 'fast') {
     const size = entry.facts.sizeBytes;
     return [
       head,
+      language,
+      limits,
       heavy(entry, options),
       -cacheRank(entry),
       fastResolutionRank(entry.facts.resolution),
@@ -178,6 +201,8 @@ function keyFor(
   return [
     head,
     isCinema(entry) ? 1 : 0,
+    language,
+    limits,
     heavy(entry, options),
     -resolutionRank(entry, tv),
     -cacheRank(entry),
@@ -211,10 +236,11 @@ export function orderStreams(
   options: OrderOptions = {},
 ): StreamEntry[] {
   const score = scorer(options);
+  const wanted = wantedLanguages(options.audioLanguage);
   const keyed = entries.map((entry, index) => ({
     entry,
     index,
-    key: keyFor(entry, order, tv, score, options),
+    key: keyFor(entry, order, tv, score, options, wanted),
   }));
   // Chromium 68 sorts more than 10 items unstably, so ties fall back to the
   // original position.
@@ -266,11 +292,17 @@ function spoken(facts: StreamFacts): string[] {
   return facts.languages.filter((code) => code !== 'multi');
 }
 
+/** An audio language as an engine or a profile names it ("eng", "es-MX"), as ISO 639-1, or none. */
+function wantedLanguages(language: string | undefined): string[] {
+  const code = language ? languageKey(language).split('-')[0]! : '';
+  return LANGUAGE_CODE.test(code) ? [code] : [];
+}
+
 /** The languages heard now: the playing track's, else those the playing stream names. */
 function heardLanguages(reference: QualityReference | undefined): string[] {
   if (!reference) return [];
-  const track = reference.audioLanguage ? languageKey(reference.audioLanguage).split('-')[0]! : '';
-  return LANGUAGE_CODE.test(track) ? [track] : spoken(reference.entry.facts);
+  const track = wantedLanguages(reference.audioLanguage);
+  return track.length > 0 ? track : spoken(reference.entry.facts);
 }
 
 /**
@@ -291,6 +323,17 @@ function languageFit(facts: StreamFacts, heard: readonly string[]): number {
   if (multi) return LIKELY_SAME;
   if (named.length === 0) return heard.indexOf('en') >= 0 ? LIKELY_SAME : UNSTATED;
   return OTHER_LANGUAGES;
+}
+
+/**
+ * For the first ranking, lower is better: the language wanted or probably so
+ * (a stream that says nothing counts as the film's own language), then one
+ * that says nothing while a language other than English is wanted, then a
+ * dub in other languages only.
+ */
+function languageRank(facts: StreamFacts, wanted: readonly string[]): number {
+  const fit = languageFit(facts, wanted);
+  return fit === OTHER_LANGUAGES ? 2 : fit === UNSTATED ? 1 : 0;
 }
 
 /**
@@ -463,4 +506,53 @@ export function closestCandidate(
     }
   }
   return best;
+}
+
+/**
+ * The stream to offer for hearing `language` instead ("English audio: switch
+ * stream"): one that names it, is MULTi or Dual, or says nothing while the
+ * language is English (Torrentio flags only other languages). Never what
+ * plays now, nor a clip. The likeliest to play well first, then one that
+ * names the language, then light enough and cached, then the same release
+ * and family of source as what plays, then the order given. Undefined when
+ * none fits.
+ */
+export function streamInLanguage(
+  ordered: readonly StreamEntry[],
+  reference: QualityReference,
+  language: string,
+  options: OrderOptions = {},
+): StreamEntry | undefined {
+  const wanted = wantedLanguages(language);
+  if (wanted.length === 0) return undefined;
+  const playing = releaseOf(reference.entry);
+  let best: StreamEntry | undefined;
+  let bestKey: Key = [];
+  for (let index = 0; index < ordered.length; index++) {
+    const entry = ordered[index]!;
+    if (entry.stream === reference.entry.stream || isClip(entry, reference)) continue;
+    const fit = languageFit(entry.facts, wanted);
+    if (fit > LIKELY_SAME) continue;
+    const release = releaseOf(entry);
+    const sameRelease = same(release.binge, playing.binge) || same(release.group, playing.group);
+    const key = [
+      playGroup(entry),
+      fit,
+      heavy(entry, options),
+      -cacheRank(entry),
+      sameRelease ? 0 : 1,
+      same(release.family, playing.family) ? 0 : 1,
+      index,
+    ];
+    if (best === undefined || compareKeys(key, bestKey) < 0) {
+      best = entry;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
+/** Whether a stream names only audio languages other than `language`: a dub, for that viewer. */
+export function namesOnlyOthers(facts: StreamFacts, language: string): boolean {
+  return languageFit(facts, wantedLanguages(language)) === OTHER_LANGUAGES;
 }

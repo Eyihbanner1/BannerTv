@@ -113,13 +113,14 @@ describe('status', () => {
   it('says which services have keys, without showing them', async () => {
     const all = await call('GET', '/status');
     expect(all.status).toBe(200);
-    expect(all.json()).toEqual({ trakt: true, tmdb: true });
+    expect(all.json()).toEqual({ trakt: true, tmdb: true, search: true });
     expect(all.headers.get('Cache-Control')).toBe('no-store');
     expect(all.headers.get('Content-Type')).toContain('application/json');
 
     expect((await call('GET', '/status', { env: {} })).json()).toEqual({
       trakt: false,
       tmdb: false,
+      search: false,
     });
     // Trakt issues no secret to newer apps, so the client id alone is enough.
     for (const idOnly of [
@@ -129,17 +130,20 @@ describe('status', () => {
       expect((await call('GET', '/status', { env: idOnly })).json()).toEqual({
         trakt: true,
         tmdb: false,
+        search: false,
       });
     }
     const secretOnly: Env = { TRAKT_CLIENT_ID: ' ', TRAKT_CLIENT_SECRET: 'trakt-client-secret' };
     expect((await call('GET', '/status', { env: secretOnly })).json()).toEqual({
       trakt: false,
       tmdb: false,
+      search: false,
     });
     const tmdbOnly: Env = { TMDB_API_KEY: V4_TOKEN };
     expect((await call('GET', '/status', { env: tmdbOnly })).json()).toEqual({
       trakt: false,
       tmdb: true,
+      search: true,
     });
   });
 });
@@ -349,6 +353,23 @@ describe('trakt', () => {
     expect(sent).toHaveLength(5);
   });
 
+  it('removes one paused item with a DELETE that carries no body', async () => {
+    // Trakt answers a removal with 204 and no body at all.
+    const sent = fakeUpstream(() => new Response(null, { status: 204 }));
+    const response = await trakt({
+      method: 'DELETE',
+      path: '/sync/playback/13',
+      token: 'viewer-token',
+    });
+    expect(response.json()).toEqual({ status: 204, data: null });
+    expect(sent).toHaveLength(1);
+    const request = sent[0]!;
+    expect(request.method).toBe('DELETE');
+    expect(request.url).toBe('https://api.trakt.tv/sync/playback/13');
+    expect(request.headers.get('Authorization')).toBe('Bearer viewer-token');
+    expect(request.body).toBeUndefined();
+  });
+
   it('refuses what it does not pass on, without asking Trakt', async () => {
     const sent = fakeUpstream(() => reply('{}'));
     for (const body of [
@@ -356,7 +377,8 @@ describe('trakt', () => {
       'not json',
       '{"method":"GET","path":"/sync/watchlist"',
       JSON.stringify({ method: 'GET', path: '/users/me' }),
-      JSON.stringify({ method: 'DELETE', path: '/sync/playback/123' }),
+      JSON.stringify({ method: 'DELETE', path: '/sync/playback/abc' }),
+      JSON.stringify({ method: 'DELETE', path: '/sync/playback/123?limit=1' }),
       JSON.stringify({ method: 'POST', path: '/sync/watched/movies' }),
       JSON.stringify({ method: 'GET', path: '/sync/watchlist?api_key=x' }),
       JSON.stringify({ method: 'GET', path: '/sync/watchlist', token: 'two words' }),
@@ -607,6 +629,489 @@ describe('tmdb', () => {
     vi.stubGlobal('caches', undefined);
     expect((await call('GET', '/tmdb/movie/603')).text).toBe(MOVIE);
     expect(sent).toHaveLength(2);
+  });
+});
+
+describe('search', () => {
+  /** A fake TMDB for Search: answers by path, and records each call's path and query. */
+  function fakeTmdb(answers: Record<string, unknown | ((query: URLSearchParams) => unknown)>) {
+    const asked: { path: string; query: URLSearchParams }[] = [];
+    const sent = fakeUpstream((request) => {
+      const url = new URL(request.url);
+      const path = url.pathname.replace(/^\/3\//, '');
+      url.searchParams.delete('api_key');
+      asked.push({ path, query: url.searchParams });
+      const answer = answers[path];
+      if (answer === undefined) return reply('{"status_code":34}', 404);
+      if (answer instanceof Response) return answer;
+      const body = typeof answer === 'function' ? answer(url.searchParams) : answer;
+      return reply(JSON.stringify(body));
+    });
+    return { asked, sent };
+  }
+
+  const tv = (id: number, name: string) => ({
+    id,
+    name,
+    first_air_date: '2020-01-01',
+    genre_ids: [16],
+  });
+
+  const listed = (id: number, title: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    release_date: '1999-03-31',
+    poster_path: `/p${id}.jpg`,
+    genre_ids: [35],
+    ...extra,
+  });
+
+  it('answers a discover row with titles by IMDb id, asking TMDB with the adult filter off', async () => {
+    const cache = fakeCache();
+    const { asked } = fakeTmdb({
+      'discover/movie': {
+        results: [listed(1, 'Kill Tony'), listed(2, 'No IMDb'), listed(3, 'Gone')],
+      },
+      'movie/1/external_ids': { id: 1, imdb_id: 'tt0000001' },
+      'movie/2/external_ids': { id: 2, imdb_id: null },
+    });
+    const response = await call(
+      'GET',
+      '/search/discover?type=movie&keywords=9716,356038&genres=35&from=1990&to=1999',
+    );
+    expect(response.status).toBe(200);
+    expect(response.json()).toEqual({
+      titles: [
+        {
+          id: 'tt0000001',
+          type: 'movie',
+          name: 'Kill Tony',
+          year: '1999',
+          poster: '/p1.jpg',
+          genres: ['Comedy'],
+        },
+      ],
+    });
+    const discover = asked[0]!;
+    expect(discover.path).toBe('discover/movie');
+    expect(Object.fromEntries(discover.query)).toEqual({
+      include_adult: 'false',
+      include_video: 'false',
+      language: 'en-GB',
+      page: '1',
+      with_genres: '35',
+      with_keywords: '9716|356038',
+      'primary_release_date.gte': '1990-01-01',
+      'primary_release_date.lte': '1999-12-31',
+      sort_by: 'popularity.desc',
+    });
+    // One TMDB call a title for its IMDb id; a title TMDB has no IMDb id for is left out.
+    expect(asked.map((entry) => entry.path)).toEqual([
+      'discover/movie',
+      'movie/1/external_ids',
+      'movie/2/external_ids',
+      'movie/3/external_ids',
+    ]);
+    // Movie 3 was not found: an answer, so the whole is cached for a day.
+    expect(Array.from(cache.keys())).toEqual([
+      `${ORIGIN}/search/discover?from=1990&genres=35&keywords=9716%2C356038&to=1999&type=movie`,
+    ]);
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=86400');
+  });
+
+  it('asks series by first air date, the newest first with a following, never after today', async () => {
+    fakeCache();
+    vi.useFakeTimers({ now: Date.parse('2026-11-06T12:00:00Z'), toFake: ['Date'] });
+    const { asked } = fakeTmdb({ 'discover/tv': { results: [] } });
+    const response = await call(
+      'GET',
+      '/search/discover?type=series&language=ko&newest=1&any=10751,10762',
+    );
+    expect(response.json()).toEqual({ titles: [] });
+    expect(Object.fromEntries(asked[0]!.query)).toEqual({
+      include_adult: 'false',
+      language: 'en-GB',
+      page: '1',
+      with_genres: '10751|10762',
+      with_original_language: 'ko',
+      'first_air_date.lte': '2026-11-06',
+      sort_by: 'first_air_date.desc',
+      'vote_count.gte': '20',
+    });
+  });
+
+  it("limits a kids profile's films by UK certificate, and reads every title's ratings", async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'discover/movie': { results: [listed(5, 'Paddington', { genre_ids: [10751, 35] })] },
+      'movie/5': {
+        id: 5,
+        genres: [
+          { id: 10751, name: 'Family' },
+          { id: 35, name: 'Comedy' },
+        ],
+        external_ids: { imdb_id: 'tt1109624' },
+        release_dates: {
+          results: [
+            {
+              iso_3166_1: 'GB',
+              release_dates: [
+                { certification: 'PG', type: 3 },
+                { certification: '', type: 4 },
+              ],
+            },
+            { iso_3166_1: 'US', release_dates: [{ certification: 'PG', type: 3 }] },
+            { iso_3166_1: 'FR', release_dates: [{ certification: 'U', type: 3 }] },
+          ],
+        },
+      },
+    });
+    const response = await call(
+      'GET',
+      '/search/discover?type=movie&genres=35&any=10751&certification=PG',
+    );
+    expect(Object.fromEntries(asked[0]!.query)).toMatchObject({
+      with_genres: '35,10751',
+      certification_country: 'GB',
+      'certification.lte': 'PG',
+    });
+    expect(asked[1]!.path).toBe('movie/5');
+    expect(asked[1]!.query.get('append_to_response')).toBe('external_ids,release_dates');
+    expect(response.json()).toEqual({
+      titles: [
+        {
+          id: 'tt1109624',
+          type: 'movie',
+          name: 'Paddington',
+          year: '1999',
+          poster: '/p5.jpg',
+          genres: ['Family', 'Comedy'],
+          certificates: { GB: ['PG'], US: ['PG'] },
+        },
+      ],
+    });
+  });
+
+  it("reads a series' UK and US ratings, which TMDB's discover cannot filter by", async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'discover/tv': {
+        results: [{ id: 7, name: 'Bluey', first_air_date: '2018-10-01', genre_ids: [16] }],
+      },
+      'tv/7': {
+        id: 7,
+        genres: [{ id: 10762, name: 'Kids' }],
+        external_ids: { imdb_id: 'tt7678620' },
+        content_ratings: {
+          results: [
+            { iso_3166_1: 'GB', rating: 'U' },
+            { iso_3166_1: 'US', rating: 'TV-Y' },
+          ],
+        },
+      },
+    });
+    const response = await call(
+      'GET',
+      '/search/discover?type=series&any=10751,10762&certification=U',
+    );
+    expect(asked[0]!.query.get('certification.lte')).toBeNull();
+    expect(asked[1]!.query.get('append_to_response')).toBe('external_ids,content_ratings');
+    expect(response.json()).toEqual({
+      titles: [
+        {
+          id: 'tt7678620',
+          type: 'series',
+          name: 'Bluey',
+          year: '2018',
+          genres: ['Kids'],
+          certificates: { GB: ['U'], US: ['TV-Y'] },
+        },
+      ],
+    });
+  });
+
+  it('suggests people and titles for the words, without asking anything more', async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'search/multi': {
+        results: [
+          {
+            media_type: 'person',
+            id: 31,
+            name: 'Tom Hanks',
+            known_for_department: 'Acting',
+            profile_path: '/hanks.jpg',
+            known_for: [
+              { media_type: 'movie', id: 13, title: 'Forrest Gump' },
+              { media_type: 'tv', id: 4613, name: 'Band of Brothers' },
+            ],
+          },
+          { media_type: 'movie', id: 13, title: 'Forrest Gump', release_date: '1994-06-23' },
+          { media_type: 'tv', id: 1, name: 'Tom and Jerry', first_air_date: '1965' },
+          { media_type: 'movie', id: 99, title: 'Hidden', adult: true },
+        ],
+      },
+    });
+    const response = await call('GET', '/search/multi?query=%20Tom%20%20HANKS%20');
+    expect(asked).toHaveLength(1);
+    expect(Object.fromEntries(asked[0]!.query)).toEqual({
+      include_adult: 'false',
+      language: 'en-GB',
+      page: '1',
+      query: 'tom hanks',
+    });
+    expect(response.json()).toEqual({
+      people: [
+        {
+          id: 31,
+          name: 'Tom Hanks',
+          department: 'Acting',
+          photo: '/hanks.jpg',
+          knownFor: ['Forrest Gump', 'Band of Brothers'],
+        },
+      ],
+      titles: [
+        { name: 'Forrest Gump', type: 'movie', year: '1994' },
+        { name: 'Tom and Jerry', type: 'series', year: '1965' },
+      ],
+    });
+  });
+
+  it("answers a person's best-known work, without talk shows or guest spots", async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'person/525/combined_credits': {
+        cast: [
+          {
+            media_type: 'tv',
+            id: 22,
+            name: 'The Tonight Show',
+            genre_ids: [10767],
+            vote_count: 900,
+          },
+          { media_type: 'movie', id: 23, title: 'Cameo', character: 'Himself', vote_count: 800 },
+        ],
+        crew: [
+          {
+            media_type: 'movie',
+            id: 27205,
+            title: 'Inception',
+            job: 'Director',
+            vote_count: 30000,
+          },
+          { media_type: 'movie', id: 27205, title: 'Inception', job: 'Writer', vote_count: 30000 },
+          {
+            media_type: 'movie',
+            id: 155,
+            title: 'The Dark Knight',
+            job: 'Director',
+            vote_count: 40000,
+          },
+          { media_type: 'movie', id: 1, title: 'Producing', job: 'Producer', vote_count: 50000 },
+        ],
+      },
+      'movie/155/external_ids': { imdb_id: 'tt0468569' },
+      'movie/27205/external_ids': { imdb_id: 'tt1375666' },
+    });
+    const response = await call('GET', '/search/person?id=525&role=directing');
+    expect(asked.map((entry) => entry.path)).toEqual([
+      'person/525/combined_credits',
+      'movie/155/external_ids',
+      'movie/27205/external_ids',
+    ]);
+    expect(response.json()).toEqual({
+      titles: [
+        { id: 'tt0468569', type: 'movie', name: 'The Dark Knight', genres: [] },
+        { id: 'tt1375666', type: 'movie', name: 'Inception', genres: [] },
+      ],
+    });
+  });
+
+  it('answers titles like one it finds by name, saying which it found', async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'search/movie': { results: [listed(603, 'The Matrix')] },
+      'movie/603/recommendations': { results: [listed(604, 'The Matrix Reloaded')] },
+      'movie/604/external_ids': { imdb_id: 'tt0234215' },
+    });
+    const response = await call('GET', '/search/like?query=The%20Matrix&type=movie');
+    expect(asked[0]!.query.get('query')).toBe('the matrix');
+    expect(response.json()).toEqual({
+      like: { name: 'The Matrix', type: 'movie', year: '1999' },
+      titles: [
+        {
+          id: 'tt0234215',
+          type: 'movie',
+          name: 'The Matrix Reloaded',
+          year: '1999',
+          poster: '/p604.jpg',
+          genres: ['Comedy'],
+        },
+      ],
+    });
+    // Without a type, the first film or series found by any name.
+    const any = fakeTmdb({
+      'search/multi': { results: [{ media_type: 'person', id: 1, name: 'Neo' }] },
+    });
+    expect((await call('GET', '/search/like?query=neo')).json()).toEqual({ titles: [] });
+    expect(any.asked.map((entry) => entry.path)).toEqual(['search/multi']);
+  });
+
+  it('finds titles by name for a kids profile, with their ratings', async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'search/multi': {
+        results: [
+          { media_type: 'movie', id: 9, title: 'Frozen', release_date: '2013-11-20' },
+          { media_type: 'person', id: 1, name: 'Frozen Person' },
+        ],
+      },
+      'movie/9': {
+        genres: [{ name: 'Animation' }, { name: 'Family' }],
+        external_ids: { imdb_id: 'tt2294629' },
+        release_dates: { results: [{ iso_3166_1: 'GB', release_dates: [{ certification: 'U' }] }] },
+      },
+    });
+    const response = await call('GET', '/search/titles?query=frozen&ratings=1');
+    expect(asked.map((entry) => entry.path)).toEqual(['search/multi', 'movie/9']);
+    expect(response.json()).toEqual({
+      titles: [
+        {
+          id: 'tt2294629',
+          type: 'movie',
+          name: 'Frozen',
+          year: '2013',
+          genres: ['Animation', 'Family'],
+          certificates: { GB: ['U'], US: [] },
+        },
+      ],
+    });
+  });
+
+  it('asks for at most twenty titles, six at a time', async () => {
+    fakeCache();
+    let open = 0;
+    let most = 0;
+    const many = Array.from({ length: 25 }, (_, index) => listed(index + 1, `Title ${index + 1}`));
+    const sent = fakeUpstream(async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/3/discover/movie') return reply(JSON.stringify({ results: many }));
+      open += 1;
+      most = Math.max(most, open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open -= 1;
+      const id = /movie\/(\d+)\//.exec(path)![1]!;
+      return reply(JSON.stringify({ imdb_id: `tt${id.padStart(7, '0')}` }));
+    });
+    const response = await call('GET', '/search/discover?type=movie&genres=35');
+    expect(sent).toHaveLength(21);
+    expect(most).toBeLessThanOrEqual(6);
+    expect((response.json() as { titles: unknown[] }).titles).toHaveLength(20);
+  });
+
+  it('asks once for each of several "one of" genres beside needed ones, and merges the lists', async () => {
+    fakeCache();
+    const { asked } = fakeTmdb({
+      'discover/tv': (query: URLSearchParams) =>
+        query.get('with_genres') === '16,10751'
+          ? { results: [tv(1, 'Family toon'), tv(2, 'Both')] }
+          : { results: [tv(3, 'Kids toon'), tv(2, 'Both')] },
+      'tv/1/external_ids': { imdb_id: 'tt0000001' },
+      'tv/2/external_ids': { imdb_id: 'tt0000002' },
+      'tv/3/external_ids': { imdb_id: 'tt0000003' },
+    });
+    const response = await call('GET', '/search/discover?type=series&genres=16&any=10751,10762');
+    // Animation and Family, then Animation and Kids: TMDB cannot be asked both in one.
+    expect(
+      asked
+        .filter((entry) => entry.path === 'discover/tv')
+        .map((entry) => entry.query.get('with_genres')),
+    ).toEqual(['16,10751', '16,10762']);
+    // Each title once, taking from each list in turn.
+    expect(
+      (response.json() as { titles: { name: string }[] }).titles.map((title) => title.name),
+    ).toEqual(['Family toon', 'Kids toon', 'Both']);
+
+    // A needed genre that is one of them already: one call, as before.
+    const again = fakeTmdb({ 'discover/tv': { results: [] } });
+    await call('GET', '/search/discover?type=series&genres=10762&any=10751,10762');
+    expect(again.asked.map((entry) => entry.query.get('with_genres'))).toEqual(['10762']);
+  });
+
+  it('keeps an answer TMDB only partly gave out of the cache, and answers 502 when it gives none', async () => {
+    const cache = fakeCache();
+    fakeTmdb({
+      'discover/movie': { results: [listed(1, 'One'), listed(2, 'Two')] },
+      'movie/1/external_ids': { imdb_id: 'tt0000001' },
+      'movie/2/external_ids': reply('{"status_code":25}', 429),
+    });
+    const partial = await call('GET', '/search/discover?type=movie&genres=35');
+    // The body says so too, as the app cannot read the header through its fetch.
+    expect(partial.json()).toEqual({
+      titles: [expect.objectContaining({ id: 'tt0000001' })],
+      partial: true,
+    });
+    expect(partial.headers.get('Cache-Control')).toBe('no-store');
+    expect(cache.size).toBe(0);
+
+    fakeTmdb({ 'discover/movie': reply('{"status_code":7}', 401) });
+    const failed = await call('GET', '/search/discover?type=movie&genres=35');
+    expect(failed.status).toBe(502);
+    expect(failed.json()).toEqual({ error: 'upstream' });
+    expect(cache.size).toBe(0);
+  });
+
+  it('refuses anything it does not answer, without asking TMDB', async () => {
+    fakeCache();
+    const sent = fakeUpstream(() => reply('{}'));
+    for (const path of [
+      '/search/discover',
+      '/search/discover?type=episode',
+      '/search/discover?type=movie&genres=35&genres=27',
+      '/search/discover?type=movie&genres=35,35',
+      '/search/discover?type=movie&genres=1,2,3,4,5,6',
+      '/search/discover?type=movie&genres=action',
+      '/search/discover?type=movie&keywords=9716|356038',
+      '/search/discover?type=movie&language=KO',
+      '/search/discover?type=movie&country=gb',
+      '/search/discover?type=movie&from=1899',
+      '/search/discover?type=movie&from=2000&to=1990',
+      '/search/discover?type=movie&newest=yes',
+      '/search/discover?type=movie&certification=15',
+      '/search/discover?type=movie&sort_by=revenue.desc',
+      '/search/discover?type=movie&include_adult=true',
+      '/search/multi',
+      '/search/multi?query=',
+      '/search/multi?query=%20%20',
+      `/search/multi?query=${'a'.repeat(101)}`,
+      '/search/multi?query=a%00b',
+      '/search/multi?query=dune&include_adult=true',
+      '/search/person?id=abc',
+      '/search/person?id=1&role=producer',
+      '/search/person?id=1&ratings=yes',
+      '/search/like?type=movie',
+      '/search/like?query=dune&type=anime',
+      '/search/titles?query=dune&page=2',
+      '/search/trending',
+      '/search/',
+    ]) {
+      const response = await call('GET', path);
+      expect(response.status, path).toBe(400);
+      expect(response.json()).toEqual({ error: 'path' });
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it('answers 503 without a TMDB key, and comes from the cache the second time', async () => {
+    fakeCache();
+    const none = await call('GET', '/search/multi?query=dune', { env: {} });
+    expect(none.status).toBe(503);
+    expect(none.json()).toEqual({ error: 'unconfigured' });
+    const { asked } = fakeTmdb({ 'search/multi': { results: [] } });
+    await call('GET', '/search/multi?query=Dune');
+    const again = await call('GET', '/search/multi?query=dune');
+    expect(asked).toHaveLength(1);
+    expect(again.json()).toEqual({ people: [], titles: [] });
   });
 });
 

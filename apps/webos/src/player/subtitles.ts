@@ -5,10 +5,12 @@ import {
   detectEncoding,
   parseSubtitleText,
   type QueryState,
+  stripAdCues,
   subtitleFileKey,
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
+import { hashStream } from './stream-hash';
 
 /** A subtitle file the viewer can pick. Never shows its link, which can carry account keys. */
 export interface SubtitleOption {
@@ -95,7 +97,8 @@ async function download(url: string, lang: string): Promise<Cue[]> {
     if (bytes.length > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
     if (isGzip(bytes)) bytes = await gunzip(bytes);
     const text = new TextDecoder(detectEncoding(bytes, lang)).decode(bytes);
-    const cues = parseSubtitleText(text);
+    // The lines subtitle sites add (adverts, the site's address, credits for the file) never show.
+    const cues = stripAdCues(parseSubtitleText(text));
     if (cues.length === 0) throw new SubtitleLoadError('The subtitle file has no lines');
     return cues;
   } finally {
@@ -103,7 +106,10 @@ async function download(url: string, lang: string): Promise<Cue[]> {
   }
 }
 
-/** Downloads and reads a subtitle file once; a failed one can be tried again. */
+/**
+ * Downloads and reads a subtitle file once, without the adverts and credits
+ * subtitle sites add; a failed one can be tried again.
+ */
 export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Promise<Cue[]> {
   const existing = cache.get(option.url);
   if (existing) {
@@ -117,6 +123,14 @@ export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Pro
   promise.catch(() => cache.delete(option.url));
   while (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
   return promise;
+}
+
+/**
+ * Forgets the files read so far, as the player screen closes: those read
+ * only for their checks would otherwise stay in memory after it.
+ */
+export function clearSubtitleCache(): void {
+  cache.clear();
 }
 
 /**
@@ -142,6 +156,8 @@ function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleO
  * Every subtitle on offer for one stream: the stream's own first, then each
  * subtitles addon's in the collection's order. Addons are asked with the
  * stream's hash, size and file name, so they can match the exact release.
+ * A stream whose addon sent no hash has it read from the file first, for a
+ * few seconds at most; addons are asked without it if it can't be read.
  */
 export function subtitleList(
   type: string,
@@ -158,6 +174,9 @@ export function subtitleList(
   const state = createStore<SubtitleListState>({ options: own, pending: 0 });
   let answers: ReadonlyArray<AddonAnswer<Subtitle[]>> = [];
   let unsubscribe: Array<() => void> = [];
+  // Bumped by stop(), so a hash read that ends after it asks no addon.
+  let run = 0;
+  let hashing = false;
 
   function refresh() {
     const states: Array<QueryState<Subtitle[]>> = answers.map((answer) => answer.query.get());
@@ -174,18 +193,38 @@ export function subtitleList(
     state.set({ options, pending });
   }
 
+  function ask(videoHash: string | undefined, videoSize: number | undefined) {
+    const { filename } = stream.behaviorHints;
+    answers = addonClient.subtitles(type, videoId, { videoHash, videoSize, filename });
+    unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
+    answers.forEach((answer) => answer.query.load());
+    refresh();
+  }
+
   return {
     get: state.get,
     subscribe: state.subscribe,
     start() {
-      if (answers.length > 0) return;
-      const { videoHash, videoSize, filename } = stream.behaviorHints;
-      answers = addonClient.subtitles(type, videoId, { videoHash, videoSize, filename });
-      unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
-      answers.forEach((answer) => answer.query.load());
-      refresh();
+      if (answers.length > 0 || hashing) return;
+      const { videoHash, videoSize } = stream.behaviorHints;
+      const source = stream.source;
+      if (videoHash || source.kind !== 'url') {
+        ask(videoHash, videoSize);
+        return;
+      }
+      const current = ++run;
+      hashing = true;
+      // Still looking: the addons have not been asked yet.
+      state.set({ ...state.get(), pending: Math.max(1, state.get().pending) });
+      void hashStream(source.url, videoSize).then((found) => {
+        if (current !== run) return;
+        hashing = false;
+        ask(found?.videoHash, found?.videoSize ?? videoSize);
+      });
     },
     stop() {
+      run++;
+      hashing = false;
       unsubscribe.forEach((undo) => undo());
       unsubscribe = [];
       // Starting again asks the query cache, which still holds the answers.

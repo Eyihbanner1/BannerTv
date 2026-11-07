@@ -25,6 +25,7 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { PinPad } from '../../components/PinPad';
 import { TextField } from '../../components/TextField';
 import { useBack } from '../../navigation/use-back';
+import { asideDate, asideLines, asideRestarts } from '../../data/account-aside';
 import { pinGuard, profiles } from '../../data/profiles';
 import {
   accountCode,
@@ -32,6 +33,9 @@ import {
   accountSection,
   type AccountState,
   accountState,
+  asideCopy,
+  bringBackAside,
+  checkAsideCopy,
   confirmAccount,
   createAccount,
   deleteAccount,
@@ -75,7 +79,9 @@ type Dialog =
   | { kind: 'pin'; then: Guarded }
   | { kind: 'leave' }
   | { kind: 'delete' }
-  | { kind: 'use'; code: string };
+  | { kind: 'use'; code: string }
+  /** Bringing back what Use set aside: into the account, or onto this screen alone. */
+  | { kind: 'back'; signedIn: boolean; restarts: boolean };
 
 const MINUTE_MS = 60 * 1000;
 
@@ -194,12 +200,15 @@ function viewOf(step: Step, state: AccountState): string {
  * asks for it before a new account is made. Back goes back a step, then to
  * Settings, but waits while a create, a confirm, a join, a leave or a
  * delete runs. The welcome's Join with a code opens it on the code (`startOnJoin`);
- * its Create an account opens the menu, on Create.
+ * its Create an account opens the menu, on Create. While the copy a join
+ * with Use kept lasts, the menu says what it holds and offers to bring it
+ * back, signed in or out.
  */
 export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(accountState.subscribe, accountState.get);
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
+  const copy = useSyncExternalStore(asideCopy.subscribe, asideCopy.get);
   const now = useNow();
   const [step, setStep] = useState<Step>(() =>
     startOnJoin && !syncOn() ? { name: 'join' } : { name: 'menu' },
@@ -212,6 +221,7 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
   const action = useRef(0);
   useEffect(() => {
     openAccount();
+    checkAsideCopy();
     return () => {
       action.current += 1;
     };
@@ -374,6 +384,21 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
         else if (problem === 'profiles' || problem === 'unknown' || problem === 'invalid') {
           toMenu(t(`account.${problem}`));
         } else toMenu(t('account.failed'));
+      },
+      true,
+    );
+
+  const bringBack = () =>
+    busy(
+      t('account.aside.bringing'),
+      bringBackAside,
+      // When profiles came back, the app starts again instead.
+      () => toMenu(t('account.aside.done')),
+      (error) => {
+        const problem = problemOf(error);
+        if (problem === 'profiles' || problem === 'none') toMenu(t(`account.aside.${problem}`));
+        else if (problem === 'offline') toMenu(t('account.offline'));
+        else toMenu(t('account.failed'));
       },
       true,
     );
@@ -611,6 +636,32 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
     body = renderMenu();
   }
 
+  /** What the copy a join with Use kept holds, and the button that brings it back, while it lasts. */
+  function renderAside(signedIn: boolean): ReactNode {
+    if (!copy) return null;
+    return (
+      <section className={styles.aside} aria-label={t('account.aside.title')}>
+        <h2 className={styles.heading}>{t('account.aside.title')}</h2>
+        <p className={styles.help}>{t('account.aside.lead', { date: asideDate(copy.until) })}</p>
+        <ul className={styles.plan}>
+          {asideLines(t, copy).map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <div className={styles.actions}>
+          <Button
+            block
+            focusKey="account-bring-back"
+            label={t('account.aside.bring')}
+            onPress={() =>
+              setDialog({ kind: 'back', signedIn, restarts: asideRestarts(copy, here) })
+            }
+          />
+        </div>
+      </section>
+    );
+  }
+
   function renderMenu(): ReactNode {
     const status = state.status;
     if (status.state === 'off') {
@@ -640,6 +691,7 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
               }}
             />
           </div>
+          {renderAside(false)}
         </>
       );
     }
@@ -769,6 +821,7 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
             onPress={() => guarded('delete', 'account-delete')}
           />
         </div>
+        {renderAside(true)}
       </>
     );
   }
@@ -859,6 +912,24 @@ export function AccountScreen({ startOnJoin = false }: { startOnJoin?: boolean }
             const code = dialog.code;
             setDialog(null);
             join(code, 'use');
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'back' && (
+        <ConfirmDialog
+          focusKey="account-back-dialog"
+          title={t('account.aside.confirmTitle')}
+          message={[
+            t(dialog.signedIn ? 'account.aside.intoAccount' : 'account.aside.onScreen'),
+            ...(dialog.restarts ? [t('account.aside.restarts')] : []),
+          ].join(' ')}
+          confirmLabel={t('account.aside.confirm')}
+          cancelLabel={t('common.cancel')}
+          returnFocusKey="account-bring-back"
+          onConfirm={() => {
+            setDialog(null);
+            bringBack();
           }}
           onCancel={() => setDialog(null)}
         />

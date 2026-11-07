@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.bannercues'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.bannercues"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // expo-video's VideoPlayer, whose ExoPlayer this listens on: its source project, or the
+  // prebuilt library autolinking chose for it.
+  implementation expoModule.getExpoDependency("expo-video")
+  // expo-video keeps Media3 to itself. Its own version, so Gradle resolves a single copy.
+  implementation "androidx.media3:media3-exoplayer:1.9.1"
+  implementation "androidx.media3:media3-ui:1.9.1"
+}

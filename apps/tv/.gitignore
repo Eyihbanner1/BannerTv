@@ -1,0 +1,9 @@
+.expo/
+dist/
+expo-env.d.ts
+# Made by `expo prebuild` in CI; the app's native setup lives in app.config.ts.
+/android/
+/ios/
+# Installed with npm on its own, outside the workspace's lockfile (README.md).
+package-lock.json
+.metro-health-check*

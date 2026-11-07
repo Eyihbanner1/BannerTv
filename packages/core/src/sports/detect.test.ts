@@ -11,6 +11,7 @@ import {
   isSportsCatalog,
   looksLikeSports,
   needsEvidence,
+  neverSports,
   sportsCatalogFilter,
   sportsCatalogs,
 } from './detect';
@@ -185,5 +186,25 @@ describe('first-page evidence', () => {
     expect(needsEvidence(catalog('Today', 'today', 'sport'))).toBe(false);
     expect(needsEvidence(catalog('Popular', 'top', 'movie'))).toBe(false);
     expect(needsEvidence(cinemetaAddon.manifest.catalogs[0]!)).toBe(false);
+  });
+
+  it('says which catalogs no setting or first page can make sports', () => {
+    const popular = catalog('Popular', 'top', 'movie');
+    const football = catalog('Football', 'football', 'movie');
+    const channel = catalog('Popular', 'top', 'tv');
+    expect(neverSports(popular)).toBe(true);
+    expect(neverSports(catalog('Featured', 'imdbRating', 'series'))).toBe(true);
+    expect(neverSports(football)).toBe(false);
+    expect(neverSports(catalog('Live', 'live', 'series'))).toBe(false);
+    expect(neverSports(channel)).toBe(false);
+    expect(neverSports(catalog('Today', 'today', 'sport'))).toBe(false);
+    // Whatever the setting and the first page say.
+    const sporty = () => true;
+    for (const setting of ['auto', 'yes', 'no'] as const) {
+      const options = { setting: () => setting, evidence: sporty };
+      expect(isSportsCatalog(cinemetaAddon, popular, options)).toBe(false);
+    }
+    expect(isSportsCatalog(cinemetaAddon, football, { evidence: sporty })).toBe(true);
+    expect(isSportsCatalog(cinemetaAddon, channel, { setting: () => 'yes' })).toBe(true);
   });
 });

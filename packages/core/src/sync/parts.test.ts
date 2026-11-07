@@ -5,6 +5,7 @@ import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from '../addons/defau
 import { createHomeLayout } from '../addons/layout';
 import { createLibrary } from '../library/library';
 import { createPlayedVideos } from '../playback/continue';
+import { createSubtitleDrifts } from '../playback/drifts';
 import { createSubtitleOffsets } from '../playback/offsets';
 import { createProgressStore } from '../playback/progress';
 import { createTrackMemory } from '../playback/tracks';
@@ -21,6 +22,7 @@ import {
   libraryPart,
   mergeRowOrder,
   profileParts,
+  subtitleDriftsPart,
   subtitleOffsetsPart,
   trackMemoryPart,
   watchPart,
@@ -252,6 +254,48 @@ describe('watchPart', () => {
     expect(played.get('tt1')).toBeUndefined();
   });
 
+  it('sends when a video was last marked not watched, compares it, and hands it on', async () => {
+    const { progress, played } = stores();
+    const unwatched = {
+      metaId: 'tt5',
+      type: 'movie' as const,
+      videoId: 'tt5',
+      position: 0,
+      duration: 6000,
+      updatedAt: 4000,
+      watched: false,
+      unmarkedAt: 4000,
+    };
+    // The progress store keeps the field once the Mark as unwatched work lands; here it is shown one.
+    const shown = { ...progress, recent: () => [unwatched], get: () => unwatched };
+    const part = watchPart('main', shown, played);
+    expect(part.snapshot().get('tt5')!.v).toEqual({
+      metaId: 'tt5',
+      type: 'movie',
+      position: 0,
+      duration: 6000,
+      watched: false,
+      unmarkedAt: 4000,
+    });
+    const base = { metaId: 'tt5', type: 'movie', position: 0, duration: 6000, watched: false };
+    expect(part.compare!('tt5', { ...base, unmarkedAt: 4000 })).not.toEqual(
+      part.compare!('tt5', base),
+    );
+
+    const adopt = vi.spyOn(progress, 'adopt');
+    const plain = watchPart('main', progress, played);
+    await plain.load();
+    await plain.adopt(
+      change({
+        tt5: { t: 4000, v: { ...base, unmarkedAt: 4000 } },
+        tt6: { t: 4100, v: { ...base, metaId: 'tt6', unmarkedAt: 'soon' } },
+      }),
+    );
+    const handed = adopt.mock.calls[0]![0].set!;
+    expect(handed.find((entry) => entry.videoId === 'tt5')!.unmarkedAt).toBe(4000);
+    expect('unmarkedAt' in handed.find((entry) => entry.videoId === 'tt6')!).toBe(false);
+  });
+
   it("marks Trakt's progress and leaves it out of the person's own data", async () => {
     const { progress, played, setTime } = stores(3000);
     const part = watchPart('main', progress, played);
@@ -358,6 +402,58 @@ describe('trackMemoryPart and subtitleOffsetsPart', () => {
   });
 });
 
+describe('subtitleDriftsPart', () => {
+  it('carries drift fixes beside the timings, where no fix is gone', async () => {
+    const drifts = createSubtitleDrifts({ storage: memoryKeyValueStore() });
+    const part = subtitleDriftsPart('main', drifts);
+    expect(part.document).toBe('p/main/settings');
+    expect(part.prefixes).toEqual(['drift/']);
+    await part.load();
+    await drifts.remember('k1', 'behind');
+    await drifts.remember('k2', 'none');
+    expect(part.snapshot()).toEqual(
+      new Map([
+        ['drift/k1', { v: 'behind' }],
+        ['drift/k2', { v: 'none' }],
+      ]),
+    );
+    await drifts.remember('k1', null);
+    expect(part.snapshot()).toEqual(new Map([['drift/k2', { v: 'none' }]]));
+  });
+
+  it('takes only the agreed words from the account, oldest first, and removals', async () => {
+    const drifts = createSubtitleDrifts({ storage: memoryKeyValueStore() });
+    const part = subtitleDriftsPart('main', drifts);
+    await part.load();
+    await drifts.remember('gone', 'ahead');
+    await part.adopt(
+      change(
+        {
+          'drift/k4': { t: 3, v: 'auto' },
+          'drift/k3': { t: 2, v: 'ahead' },
+          'drift/k2': { t: 1, v: 'behind' },
+          'drift/bad': { t: 1, v: 'sideways' },
+          'drift/odd': { t: 1, v: 7 },
+        },
+        ['drift/gone'],
+      ),
+    );
+    expect(drifts.drifts()).toEqual([
+      { key: 'k2', drift: 'behind' },
+      { key: 'k3', drift: 'ahead' },
+      { key: 'k4', drift: 'auto' },
+    ]);
+  });
+
+  it("is one of every profile's parts, over a store of its own", () => {
+    const stores = createProfileStores(memoryKeyValueStore());
+    const parts = profileParts('main', stores);
+    expect(
+      parts.map((p) => p.prefixes).filter((prefixes) => prefixes.indexOf('drift/') !== -1),
+    ).toHaveLength(1);
+  });
+});
+
 describe('collectionPart', () => {
   const EXTRA_URL = 'https://addon.example.com/manifest.json';
   const EXTRA_MANIFEST = {
@@ -429,6 +525,42 @@ describe('collectionPart', () => {
     expect(part.removedDefaults!()).toEqual([`a/${demo!.installId}`]);
   });
 
+  it('sees no change from a daily refresh that finds the same manifests, which still saves the time', async () => {
+    // As from the network: equal JSON, never the same objects.
+    const fetchJson = vi.fn((url: string) => {
+      const addon = DEFAULT_ADDONS.find((a) => a.transportUrl === url)!;
+      return Promise.resolve(JSON.parse(JSON.stringify(addon.manifest)) as unknown);
+    });
+    const storage = memoryKeyValueStore();
+    let time = 1000;
+    const collection = createAddonCollection({
+      storage,
+      fetchJson,
+      defaults: DEFAULT_ADDONS,
+      now: () => time,
+    });
+    const part = collectionPart(collection);
+    await collection.load();
+    const before = part.snapshot();
+    const listener = vi.fn();
+    part.subscribe(listener);
+    time = 5000;
+    await collection.refreshManifests(1000);
+
+    expect(fetchJson).toHaveBeenCalledTimes(DEFAULT_ADDONS.length);
+    expect(listener).not.toHaveBeenCalled();
+    const after = part.snapshot();
+    before.forEach((item, key) => {
+      if (key !== 'order') expect(after.get(key)).toBe(item);
+    });
+    expect(after.get('order')).toEqual(before.get('order'));
+    expect(collection.toStored().map((item) => item.fetchedAt)).toEqual(
+      DEFAULT_ADDONS.map(() => 5000),
+    );
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.fetchedAt)).toEqual(DEFAULT_ADDONS.map(() => 5000));
+  });
+
   it('counts defaults by address, whatever the given list', async () => {
     const { collection } = setup();
     await collection.load();
@@ -448,6 +580,7 @@ describe('profileParts', () => {
     expect(parts.map((part) => part.document)).toEqual([
       'p/abc123/list',
       'p/abc123/watch',
+      'p/abc123/settings',
       'p/abc123/settings',
       'p/abc123/settings',
       'p/abc123/settings',

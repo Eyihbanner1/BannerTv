@@ -87,6 +87,11 @@ export interface TvCapabilities {
   dts: boolean | null;
   /** Dolby TrueHD audio. In none of LG's format tables, so false unless the TV says otherwise. */
   truehd: boolean | null;
+  /**
+   * The player can send an addon's request headers with the link (Android's
+   * player). Left out where it cannot: webOS's `<video>` sends none of its own.
+   */
+  requestHeaders?: boolean;
 }
 
 /** Why a stream may not play well on this TV. Each becomes one plain sentence in the picker. */
@@ -116,7 +121,7 @@ export type StreamAction =
   | { kind: 'external' }
   | {
       kind: 'unavailable';
-      /** torrent: needs a streaming server. proxy-headers: needs headers <video> cannot send. */
+      /** torrent: needs a streaming server. proxy-headers: needs headers the player can't send. */
       reason: 'torrent' | 'proxy-headers';
     };
 
@@ -156,6 +161,20 @@ export interface OrderOptions {
   maxBitrate?: number;
   /** The video's running time in seconds, for estimating bitrates from file sizes. */
   runtimeSeconds?: number;
+  /**
+   * The audio language wanted, as the engine or the profile names it ("eng",
+   * "es-MX"). In the quality and fast orders, streams that name only other
+   * languages rank below the rest. Unset: none chosen, and streams that name
+   * only languages other than English rank below the rest.
+   */
+  audioLanguage?: string;
+  /**
+   * The highest picture wanted first (a profile's Settings). Streams known to
+   * be above it rank below the rest in the quality and fast orders.
+   */
+  maxResolution?: Resolution;
+  /** HDR streams rank below the rest in the quality and fast orders (a profile's Settings). */
+  avoidHdr?: boolean;
 }
 
 /** One line of the player's Quality menu: the best stream at that resolution. */

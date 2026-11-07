@@ -1,0 +1,67 @@
+html,
+body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: #0b0815;
+  color: #f1edff;
+  font-family: 'Urbanist', sans-serif;
+}
+
+#app,
+.mt-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+}
+
+.mt-page {
+  padding: 96px 120px;
+}
+
+.mt-page h1 {
+  margin: 0 0 24px;
+  font-size: 56px;
+}
+
+.mt-lead {
+  max-width: 1300px;
+  margin: 0 0 40px;
+  font-size: 28px;
+  line-height: 40px;
+  color: #b9b0d6;
+}
+
+.mt-button {
+  width: 1000px;
+  margin-bottom: 16px;
+  padding: 20px 32px;
+  border-radius: 14px;
+  background: #1b1430;
+  font-size: 30px;
+}
+
+.mt-button.mt-selected {
+  background: #6a3bf0;
+  box-shadow: 0 0 0 4px #c9b5ff;
+}
+
+.mt-table {
+  border-collapse: collapse;
+  font-size: 24px;
+}
+
+.mt-table th,
+.mt-table td {
+  padding: 12px 20px;
+  border-bottom: 1px solid #261c42;
+  text-align: left;
+}
+
+.mt-table th {
+  color: #b9b0d6;
+  font-weight: 600;
+}

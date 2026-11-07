@@ -81,9 +81,13 @@ export function parseStream(value: unknown): Stream | undefined {
   if (!source) return undefined;
 
   const subtitles: Subtitle[] = [];
+  const seen = new Set<string>();
   for (const item of readList(record.subtitles)) {
     const subtitle = parseSubtitle(item);
-    if (subtitle && !subtitles.some((s) => s.id === subtitle.id)) subtitles.push(subtitle);
+    if (subtitle && !seen.has(subtitle.id)) {
+      seen.add(subtitle.id);
+      subtitles.push(subtitle);
+    }
   }
 
   const hints = asRecord(record.behaviorHints) ?? {};
