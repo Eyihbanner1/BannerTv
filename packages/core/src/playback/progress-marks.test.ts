@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { historyView } from '../library/views';
 import { memoryKeyValueStore } from '../storage';
 import { continueWatching, type PlayedVideo } from './continue';
-import { createProgressStore, isUnmarked, type ProgressMark } from './progress';
+import { createProgressStore, isUnmarked, type ProgressMark, RESUME_LEAD_IN_S } from './progress';
 
 function mark(videoId: string, metaId = 'tt9'): ProgressMark {
   return { metaId, type: 'series', videoId };
@@ -214,7 +214,7 @@ describe('Continue Watching and History with marks', () => {
       ['e3', episodeCard('e3', 3)],
     ]);
     expect(continueWatching(progress, (id) => cards.get(id), 2_000)).toEqual([
-      expect.objectContaining({ videoId: 'e3', startAt: 600 }),
+      expect.objectContaining({ videoId: 'e3', startAt: 600 - RESUME_LEAD_IN_S }),
     ]);
     expect(historyView(progress.recent(), (id) => cards.get(id), 'all')).toHaveLength(1);
   });

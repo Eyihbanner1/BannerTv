@@ -200,6 +200,13 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  BACK_TO_MIN_JUMP_S,
+  BACK_TO_MS,
+  offersBackTo,
+  SKIP_LANDS_AFTER_MS,
+  skipStep,
+} from './playback/seeking';
+export {
   readSkipSegments,
   SKIP_CARD_S,
   SKIP_REARM_S,
@@ -223,6 +230,7 @@ export {
   UP_NEXT_REARM_S,
 } from './playback/up-next';
 export {
+  AWAY_MS,
   createProgressStore,
   isUnmarked,
   MIN_RESUME_SECONDS,
@@ -231,6 +239,9 @@ export {
   type ProgressMark,
   type ProgressStore,
   type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+  resumeLeadIn,
   WATCHED_FRACTION,
 } from './playback/progress';
 export {
