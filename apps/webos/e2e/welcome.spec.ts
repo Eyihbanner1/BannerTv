@@ -11,6 +11,9 @@ test('the first launch welcomes the user once, then opens Home', async ({ page }
   await expect(
     welcome.getByText("BannerTV doesn't host or provide any films or series."),
   ).toBeVisible();
+  // The account's service does not answer, so the welcome offers no account.
+  await page.waitForTimeout(500);
+  await expect(welcome.getByRole('region')).toHaveCount(0);
 
   // Focus stays on the welcome: the rail and Home wait underneath.
   await press(page, 'ArrowLeft', 'welcome-start');

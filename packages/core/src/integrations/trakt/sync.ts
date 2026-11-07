@@ -190,6 +190,7 @@ function pausedEntry(value: unknown, kept: Kept): ProgressEntry | undefined {
     duration,
     updatedAt,
     watched: false,
+    from: 'trakt',
   };
 }
 
@@ -249,6 +250,7 @@ function watchedShows(items: readonly unknown[], since: number, kept: Kept): Wat
       duration: minutes * 60,
       updatedAt: latest.at,
       watched: true,
+      from: 'trakt',
     });
   }
   return { videoIds, otherVideoIds, finished };

@@ -1,4 +1,4 @@
-import { createStore, MAIN_PROFILE_ID, type StreamOrder } from '@bannertv/core';
+import { createStore, MAIN_PROFILE_ID, type Store, type StreamOrder } from '@bannertv/core';
 import { activeProfileId } from './profiles';
 
 export type SubtitleSize = 'small' | 'medium' | 'large' | 'huge';
@@ -135,6 +135,23 @@ preferences.subscribe(() => {
     // Without storage the choices last until the app closes.
   }
 });
+
+/**
+ * The preferences of a profile not in use, read from its own key and saved
+ * there, for the BannerTV account to create, join or catch it up (ADR 0006).
+ * The profile in use has `preferences`.
+ */
+export function profilePreferences(profileId: string): Store<Preferences> {
+  const store = createStore<Preferences>(load(profileId));
+  store.subscribe(() => {
+    try {
+      localStorage.setItem(keyFor(profileId), JSON.stringify(store.get()));
+    } catch {
+      // Then it is sent again the next time.
+    }
+  });
+  return store;
+}
 
 /** Forgets a deleted profile's preferences. */
 export function deletePreferences(profileId: string): void {

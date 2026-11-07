@@ -71,3 +71,19 @@ describe('subtitleFileKey', () => {
     expect(link).not.toContain('secret');
   });
 });
+
+describe('subtitle timings and the BannerTV account', () => {
+  it('lists every timing and adopts the account’s, 0 being a removal', async () => {
+    const offsets = createSubtitleOffsets({ storage: memoryKeyValueStore() });
+    await offsets.remember('a', 0.5);
+    await offsets.remember('b', 1);
+    await offsets.adopt({
+      set: [
+        { key: 'c', offset: -2.04 },
+        { key: 'b', offset: 0 },
+      ],
+      remove: ['a'],
+    });
+    expect(offsets.offsets()).toEqual([{ key: 'c', offset: -2 }]);
+  });
+});

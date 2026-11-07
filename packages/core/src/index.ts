@@ -39,12 +39,15 @@ export {
   withArtwork,
 } from './addons/client';
 export {
+  addressTag,
   type AddonCollection,
+  type CollectionAdoption,
   type CollectionState,
   createAddonCollection,
   InstallError,
   type InstallErrorKind,
   type InstalledAddon,
+  installIdOf,
   type StoredAddon,
 } from './addons/collection';
 export {
@@ -72,6 +75,7 @@ export { createLane, DroppedError, type Lane } from './lane';
 export {
   createLibrary,
   type Library,
+  type LibraryAdoption,
   type LibraryChange,
   type LibraryItem,
   MAX_LIBRARY_ITEMS,
@@ -104,6 +108,7 @@ export {
   continueItem,
   continueWatching,
   createPlayedVideos,
+  type PlayedAdoption,
   playedCard,
   type PlayedVideo,
   type PlayedVideos,
@@ -157,6 +162,18 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  readSkipSegments,
+  SKIP_CARD_S,
+  SKIP_REARM_S,
+  SKIP_TAIL_S,
+  skipAt,
+  skipCardDone,
+  skipKey,
+  type SkipKind,
+  skipRearms,
+  type SkipSegment,
+} from './playback/skips';
+export {
   type EndAction,
   endAction,
   type EndState,
@@ -170,6 +187,7 @@ export {
 export {
   createProgressStore,
   MIN_RESUME_SECONDS,
+  type ProgressAdoption,
   type ProgressEntry,
   type ProgressStore,
   type ProgressUpdate,
@@ -178,6 +196,8 @@ export {
 export {
   createSubtitleOffsets,
   MAX_SUBTITLE_OFFSETS,
+  type OffsetAdoption,
+  type SavedOffset,
   type SubtitleOffsets,
   subtitleFileKey,
 } from './playback/offsets';
@@ -186,6 +206,7 @@ export { createProgressTracker, type ProgressTracker } from './playback/tracker'
 export {
   createTrackMemory,
   MAX_TRACK_TITLES,
+  type TrackAdoption,
   type TrackChoice,
   type TrackMemory,
 } from './playback/tracks';
@@ -237,6 +258,7 @@ export {
 } from './storage';
 export * from './sports';
 export { createStore } from './store';
+export * from './sync';
 export { assessStream, SEVERE_WARNINGS } from './streams/assess';
 export {
   DEFAULT_MAX_BITRATE,
@@ -297,6 +319,15 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export {
+  createIntroDbClient,
+  episodeOf,
+  INTRODB_POLICY,
+  INTRODB_TIMEOUT_MS,
+  INTRODB_URL,
+  type IntroDbClient,
+  type IntroDbClientOptions,
+} from './integrations/introdb/client';
 export {
   createTraktAccount,
   TRAKT_REFRESH_BEFORE_MS,

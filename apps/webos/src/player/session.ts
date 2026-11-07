@@ -13,9 +13,11 @@ import {
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
+import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
+import { playMark } from './play-marks';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
 export const STALL_MS = 20000;
@@ -23,6 +25,8 @@ export const STALL_MS = 20000;
 export const START_TIMEOUT_MS = 30000;
 /** Auto-play moves to another stream at most this many times before asking the user. */
 export const MAX_FAILOVERS = 3;
+/** HTMLMediaElement.HAVE_METADATA: the element knows the stream's length and size. */
+const HAVE_METADATA = 1;
 /** After this much playback a source counts as having worked. */
 const WORKED_AFTER_S = 30;
 /**
@@ -166,6 +170,33 @@ export interface PlaybackSession {
   destroy(): void;
 }
 
+/** The bar moves on at least every thousandth of its length, however short the video. */
+const BAR_STEPS = 1000;
+
+type ClockReading = Pick<SessionState, 'position' | 'duration' | 'liveWindow' | 'behind'>;
+
+function sameWindow(a: LiveWindow | null, b: LiveWindow | null): boolean {
+  if (!a || !b) return a === b;
+  return a.start === b.start && a.live === b.live && a.slack === b.slack;
+}
+
+/**
+ * Whether a reading of the media clock changes what the player shows, so it
+ * is worth a render. The times show whole seconds, and on a film the bar
+ * moves less than a pixel a second, so a reading within the same second is
+ * left out, unless a thousandth of the bar is less than a second (a short
+ * video). The length, a broadcast's window and how far behind live it is
+ * always count.
+ */
+export function clockShows(before: ClockReading, next: ClockReading): boolean {
+  if (next.duration !== before.duration || next.behind !== before.behind) return true;
+  if (!sameWindow(before.liveWindow, next.liveWindow)) return true;
+  if (Math.floor(next.position) !== Math.floor(before.position)) return true;
+  const kept = next.liveWindow;
+  const span = kept ? kept.live - kept.start : next.duration;
+  return span > 0 && Math.abs(next.position - before.position) >= span / BAR_STEPS;
+}
+
 export const INITIAL_SESSION_STATE: SessionState = {
   status: 'idle',
   entry: null,
@@ -230,6 +261,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   const special = options.type === 'series' && /:0:\d+$/.test(options.videoId);
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
+  // Gives up on a stream auto-play chose that says nothing of itself (tuning metadataTimeoutMs).
+  let metadataTimer: number | undefined;
   // Judges a wait still going on, once it alone would make the stream count as struggling.
   let judgeTimer: number | undefined;
   let destroyed = false;
@@ -244,6 +277,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let wantedText: string | null = null;
   // Shaka lets go of the video element asynchronously; the next engine waits for it.
   let releasing: Promise<void> = Promise.resolve();
+  // The status when the clock was last read into the state.
+  let tickStatus: SessionStatus | undefined;
 
   function release() {
     const old = engine;
@@ -258,9 +293,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     clearTimeout(stallTimer);
     clearTimeout(startTimer);
     clearTimeout(judgeTimer);
+    clearTimeout(metadataTimer);
     stallTimer = undefined;
     startTimer = undefined;
     judgeTimer = undefined;
+    metadataTimer = undefined;
   }
 
   /**
@@ -521,6 +558,31 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => fail(new PlaybackError('network', 'The stream did not start'), current),
       START_TIMEOUT_MS,
     );
+    armMetadata(current);
+  }
+
+  /**
+   * With the `metadataTimeoutMs` tuning switch set, a stream auto-play chose
+   * that has not said how long it is by then gives way to the next, as one
+   * that failed would: a server that takes the connection and sends nothing
+   * would otherwise hold the first picture up for the whole start time. Only
+   * when there is a next to go to, so the start time still has the last word,
+   * and never on a stream the viewer picked. Its clock stops, as the start's
+   * does, while the viewer has the stream paused before its first picture.
+   */
+  function armMetadata(current: number) {
+    clearTimeout(metadataTimer);
+    metadataTimer = undefined;
+    const limit = tuning.metadataTimeoutMs;
+    if (!(limit > 0) || !options.autoFailover || handPicked || viewerChose) return;
+    metadataTimer = window.setTimeout(() => {
+      metadataTimer = undefined;
+      if (current !== attempt || destroyed || startedPlaying) return;
+      // Read from the element too: Android's player says so without the event.
+      if (video.readyState >= HAVE_METADATA) return;
+      if (failovers >= MAX_FAILOVERS || !finder.next(tried)) return;
+      fail(new PlaybackError('network', 'The stream sent nothing'), current);
+    }, limit);
   }
 
   const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
@@ -542,6 +604,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       },
     ],
     [
+      'loadedmetadata',
+      () => {
+        if (!engine) return;
+        clearTimeout(metadataTimer);
+        metadataTimer = undefined;
+        playMark(finder, 'metadata');
+      },
+    ],
+    [
       'playing',
       () => {
         // From a stream let go of (its engine can still be telling, as Android's
@@ -553,6 +624,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         judgeLength(current);
         if (current !== attempt || !engine) return;
         clearTimers();
+        if (!startedPlaying) playMark(finder, 'first-frame');
         startedPlaying = true;
         const buffered = endBuffering();
         patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
@@ -638,7 +710,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
-        patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
+        const reading = { position: trusted ?? lastStartAt, duration, ...judge(position) };
+        // About four readings a second: only those that change what shows, or the first since
+        // the status changed, render the player again.
+        const shown = state.get();
+        if (shown.status !== tickStatus || clockShows(shown, reading)) {
+          tickStatus = shown.status;
+          patch(reading);
+        }
       },
     ],
     [
@@ -824,6 +903,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             firstTrusted = undefined;
             lastPosition = undefined;
           }
+          playMark(finder, 'load', created.name);
           await created.load(url, at);
         } catch (error) {
           listener.fatal(
@@ -854,7 +934,9 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       stallTimer = undefined;
       if (!startedPlaying) {
         clearTimeout(startTimer);
+        clearTimeout(metadataTimer);
         startTimer = undefined;
+        metadataTimer = undefined;
       }
       pausedByViewer = true;
       video.pause();

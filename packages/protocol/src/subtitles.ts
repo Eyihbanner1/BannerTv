@@ -25,11 +25,14 @@ export function parseSubtitlesResponse(value: unknown): SubtitlesResponse {
     throw new ProtocolError('The subtitles response has no subtitles list');
   }
   const subtitles: Subtitle[] = [];
+  const seen = new Set<string>();
   let dropped = 0;
   for (const item of record.subtitles) {
     const subtitle = parseSubtitle(item);
-    if (subtitle && !subtitles.some((s) => s.id === subtitle.id)) subtitles.push(subtitle);
-    else dropped++;
+    if (subtitle && !seen.has(subtitle.id)) {
+      seen.add(subtitle.id);
+      subtitles.push(subtitle);
+    } else dropped++;
   }
   return { subtitles, dropped, cache: readCacheHints(record) };
 }

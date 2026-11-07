@@ -5,6 +5,7 @@ import type { Page, Route } from '@playwright/test';
 import demoWorker from '../../../services/demo/src/worker';
 import { API_SERVICE } from '../src/data/api-service';
 import { PAIR_SERVICE } from '../src/data/pairing';
+import { SYNC_SERVICE } from '../src/data/sync-service';
 
 /**
  * A fake Cinemeta and OpenSubtitles for the journeys, so they never touch the
@@ -300,6 +301,22 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   if (API_SERVICE) {
     await page.route(`${API_SERVICE}/status`, (route) =>
       json(route, { trakt: false, tmdb: false }),
+    );
+  }
+  // IntroDB has no intro or recap timings for any title unless mockPlayback gives some.
+  await page.route(/^https:\/\/api\.introdb\.app\//, (route) =>
+    json(route, { intro: null, recap: null, outro: null }),
+  );
+  // The BannerTV account's service not set up yet: its address answers, but not as the
+  // service, so Settings leaves the account out. mockSync puts the service there.
+  if (SYNC_SERVICE) {
+    await page.route(`${SYNC_SERVICE}/**`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        headers: { 'access-control-allow-origin': '*' },
+        body: '<!doctype html><title>Nothing here yet</title>',
+      }),
     );
   }
   await page.route(/^https:\/\/(images|episodes)\.metahub\.space\//, (route) =>

@@ -5,9 +5,10 @@ import {
   MAIN_PROFILE_ID,
   MAX_NAME_LENGTH,
   PROFILE_COLOURS,
+  type StoredPin,
 } from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { back } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
@@ -22,6 +23,7 @@ import { deleteProfile } from '../../data/profile-delete';
 import {
   activeProfileId,
   addProfile,
+  pinGuard,
   profiles,
   setProfilePin,
   updateProfile,
@@ -32,8 +34,17 @@ import styles from './ProfileEditScreen.module.css';
 const KIDS_OFF = 'off';
 const COLOURS = Array.from({ length: PROFILE_COLOURS }, (_, index) => index);
 
-/** Setting a PIN: typed once, then again to be sure. */
-type PinStep = { step: 'first' } | { step: 'again'; first: string };
+/** The same saved PIN: one set again, here or on another screen, is not. */
+const samePin = (a: StoredPin, b: StoredPin) => a.salt === b.salt && a.hash === b.hash;
+
+/**
+ * Changing a PIN: the one it has, unless it is known on this page, then the
+ * new one typed once and again to be sure. Removing one takes only the first.
+ */
+type PinStep =
+  | { step: 'current'; then: 'change' | 'remove' }
+  | { step: 'first' }
+  | { step: 'again'; first: string };
 
 /**
  * One profile's name, colour and kids setting, saved together; its PIN and
@@ -41,8 +52,14 @@ type PinStep = { step: 'first' } | { step: 'again'; first: string };
  *
  * Your own profile cannot become a kids profile, since what a kids profile
  * may see is fixed when it opens, and Main is never one: Main set BannerTV up.
+ *
+ * Changing or removing a PIN asks for the one it has first, Main's and your
+ * own included, since Main's PIN guards the BannerTV account (ADR 0006).
+ * It is not asked again once known on this page: entered to open it
+ * (`unlocked`), entered here, or just chosen. A PIN changed since on
+ * another screen is not that one, and is asked for.
  */
-export function ProfileEditScreen({ id }: { id?: string }) {
+export function ProfileEditScreen({ id, unlocked = false }: { id?: string; unlocked?: boolean }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(profiles.subscribe, profiles.get);
   const existing = id === undefined ? undefined : state.profiles.find((p) => p.id === id);
@@ -53,6 +70,10 @@ export function ProfileEditScreen({ id }: { id?: string }) {
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [pin, setPin] = useState<PinStep | null>(null);
   const [pinMessage, setPinMessage] = useState<string | undefined>(undefined);
+  const [knownPin, setKnownPin] = useState(unlocked ? existing?.pin : undefined);
+  const pinKnown = !!existing?.pin && !!knownPin && samePin(existing.pin, knownPin);
+  // Where the PIN pad sends focus as it closes: the button that opened it, while it is there.
+  const pinFrom = useRef('profile-pin');
   const [deleting, setDeleting] = useState(false);
   useScreenFocus('profile-name');
 
@@ -76,6 +97,24 @@ export function ProfileEditScreen({ id }: { id?: string }) {
       return;
     }
     back();
+  };
+
+  const lockedMessage = (profileId: string) =>
+    t('pin.locked', { seconds: Math.ceil(pinGuard.waitMs(profileId) / 1000) });
+
+  const changePin = (then: 'change' | 'remove') => {
+    if (!existing) return;
+    pinFrom.current = then === 'remove' ? 'profile-pin-remove' : 'profile-pin';
+    if (existing.pin && !pinKnown) {
+      setPinMessage(pinGuard.waitMs(existing.id) > 0 ? lockedMessage(existing.id) : undefined);
+      setPin({ step: 'current', then });
+    } else if (then === 'change') {
+      setPinMessage(undefined);
+      setPin({ step: 'first' });
+    } else {
+      setProfilePin(existing.id, null);
+      void setFocus('profile-pin');
+    }
   };
 
   const kidsOptions = [
@@ -161,10 +200,7 @@ export function ProfileEditScreen({ id }: { id?: string }) {
                 block
                 focusKey="profile-pin"
                 label={existing.pin ? t('pin.change') : t('pin.set')}
-                onPress={() => {
-                  setPinMessage(undefined);
-                  setPin({ step: 'first' });
-                }}
+                onPress={() => changePin('change')}
               />
             )}
             {existing?.pin && (
@@ -172,10 +208,7 @@ export function ProfileEditScreen({ id }: { id?: string }) {
                 block
                 focusKey="profile-pin-remove"
                 label={t('pin.remove')}
-                onPress={() => {
-                  setProfilePin(existing.id, null);
-                  void setFocus('profile-pin');
-                }}
+                onPress={() => changePin('remove')}
               />
             )}
             {canDelete && (
@@ -192,15 +225,42 @@ export function ProfileEditScreen({ id }: { id?: string }) {
       {existing && pin && (
         <PinPad
           focusKey="profile-pin-pad"
-          title={pin.step === 'first' ? t('pin.choose') : t('pin.again')}
+          title={
+            pin.step === 'current'
+              ? t('pin.enterFor', { name: existing.name })
+              : pin.step === 'first'
+                ? t('pin.choose')
+                : t('pin.again')
+          }
           message={pinMessage}
-          returnFocusKey="profile-pin"
+          returnFocusKey={() => pinFrom.current}
           onPin={(digits) => {
-            if (pin.step === 'first') {
+            if (pin.step === 'current') {
+              const result = pinGuard.attempt(existing, digits);
+              if (result !== 'ok') {
+                setPinMessage(result === 'locked' ? lockedMessage(existing.id) : t('pin.wrong'));
+                return;
+              }
+              setKnownPin(existing.pin);
+              setPinMessage(undefined);
+              if (pin.then === 'change') {
+                setPin({ step: 'first' });
+              } else {
+                // Remove PIN goes with it, so focus lands on Set a PIN.
+                pinFrom.current = 'profile-pin';
+                setProfilePin(existing.id, null);
+                setPin(null);
+              }
+            } else if (existing.pin && !pinKnown) {
+              // Another screen changed the PIN while this pad was open: the new one is asked for first.
+              setPinMessage(t('pin.changedElsewhere'));
+              setPin({ step: 'current', then: 'change' });
+            } else if (pin.step === 'first') {
               setPinMessage(undefined);
               setPin({ step: 'again', first: digits });
             } else if (digits === pin.first) {
               setProfilePin(existing.id, digits);
+              setKnownPin(profiles.get().profiles.find((p) => p.id === existing.id)?.pin);
               setPin(null);
             } else {
               setPinMessage(t('pin.mismatch'));

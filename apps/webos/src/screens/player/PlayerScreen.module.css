@@ -686,6 +686,16 @@
   margin-right: 20px;
 }
 
+/* Skip intro or Skip recap: one button in Up Next's corner, with no card behind it. */
+.skipCard {
+  position: absolute;
+  right: var(--bt-safe-x);
+  bottom: 96px;
+  border-radius: 16px;
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.5);
+  z-index: 3;
+}
+
 .problemTitle {
   margin: 0 0 24px;
   font: var(--bt-text-heading);
