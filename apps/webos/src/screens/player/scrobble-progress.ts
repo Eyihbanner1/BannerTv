@@ -61,7 +61,10 @@ export interface ScrobblePlace {
    * carryOn is where the player would open the next file now.
    */
   see(state: Played, runtimes: Runtimes, carryOn?: number): void;
-  /** Whether the file playing now is a clip. */
+  /**
+   * Whether the file playing now is a clip: by its length, or, while it shows
+   * none, by what its link was when it was opened before.
+   */
   clip(state: Played, runtimes: Runtimes): boolean;
   /**
    * The percent to tell Trakt now. While a clip plays, the place the last
@@ -108,14 +111,25 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let wasClip = false;
   /**
    * This link has been a clip, or a broadcast, and has shown no other length
-   * since: opened again (Try again, the live edge), it is one until it does.
-   * The length it last showed is judged again once the running time comes.
+   * since: opened again (Try again, the live edge), it is one until it does,
+   * or until the viewer moves it and the player takes the move. The length it
+   * last showed is judged again once the running time comes.
    */
   let linkWasClip = false;
   let linkWasLive = false;
   let linkLength = 0;
-  const clip = (state: Played, runtimes: Runtimes) =>
+  /** A clip by what the player shows of it now. */
+  const judged = (state: Played, runtimes: Runtimes) =>
     isClip(state, runtimes.knownRuntimeSeconds, videoId);
+  const linkIsClip = (runtimes: Runtimes) =>
+    linkWasClip ||
+    (linkLength > 0 &&
+      isClip({ ...NO_PLAY, duration: linkLength }, runtimes.knownRuntimeSeconds, videoId));
+  /** A clip by what its link was, while it shows no length of its own. */
+  const remembered = (state: Played, runtimes: Runtimes) =>
+    !state.live && state.duration === 0 && state.entry === file && linkIsClip(runtimes);
+  const clip = (state: Played, runtimes: Runtimes) =>
+    judged(state, runtimes) || remembered(state, runtimes);
   // As percent() measures it, by the title's running time as it is now when
   // the file gave no length.
   const measure = (place: Reached, runtimes: Runtimes) =>
@@ -145,18 +159,23 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     earlier.push(place);
     if (earlier.length > KEPT) earlier.shift();
   };
-  const forgetMoves = (entry: SessionState['entry']) => {
+  // Places this link reached before it showed a length: the clip's own clock,
+  // now that it shows it is one.
+  const forgetUnmeasured = (entry: SessionState['entry']) => {
     for (let index = earlier.length - 1; index >= 0; index--) {
-      if (earlier[index]!.moved && earlier[index]!.entry === entry) earlier.splice(index, 1);
+      if (earlier[index]!.duration === 0 && earlier[index]!.entry === entry) {
+        earlier.splice(index, 1);
+      }
     }
   };
   // What the file reached is kept, if it was the title, and it starts over.
-  // A place only moved to counts once the next opening starts there, as the
-  // session opens it where a move it took leads.
+  // A place with no length to judge it by counts once the next opening starts
+  // there: the session opens it where a real file got to, or a move it took
+  // leads, but where a clip's clock is never.
   const startOver = () => {
     movedTo = undefined;
     if (reached && !wasClip) {
-      if (reached.moved) movedTo = reached;
+      if (reached.duration === 0) movedTo = reached;
       else keep(reached);
     }
     reached = undefined;
@@ -165,10 +184,6 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     openedAt = undefined;
     wasClip = false;
   };
-  const linkIsClip = (runtimes: Runtimes) =>
-    linkWasClip ||
-    (linkLength > 0 &&
-      isClip({ ...NO_PLAY, duration: linkLength }, runtimes.knownRuntimeSeconds, videoId));
   const place: ScrobblePlace = {
     see(state, runtimes, carryOn) {
       const opening = state.status === 'loading' || state.status === 'idle';
@@ -197,37 +212,47 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         begun = true;
         linkWasLive = true;
         reached = undefined;
-        forgetMoves(state.entry);
+        forgetUnmeasured(state.entry);
         return;
       }
       if (state.duration > 0) {
         linkLength = state.duration;
         linkWasLive = false;
-        if (!clip(state, runtimes)) linkWasClip = false;
+        if (!judged(state, runtimes)) linkWasClip = false;
       }
-      if (clip(state, runtimes)) {
-        // Found out late (its running time came after it started): nothing it
-        // reached counts, nor any place it was only moved to.
+      if (judged(state, runtimes)) {
+        // Found out late (its running time came after it started, or its
+        // length after it played): nothing this link reached before it showed
+        // a length counts, nor anything it reaches now.
         wasClip = true;
         reached = undefined;
-        forgetMoves(state.entry);
+        forgetUnmeasured(state.entry);
         return;
       }
       // Once this file has played, or shows its own length, a place inside
       // it; or, with no length, once the viewer moved it from where it opened
       // and the player took the move (it opens the next file there).
       const underWay =
-        state.status === 'playing' || state.status === 'paused' || state.status === 'buffering';
+        state.status === 'playing' ||
+        state.status === 'paused' ||
+        state.status === 'buffering' ||
+        (state.duration > 0 && (state.status === 'loading' || state.status === 'failed'));
       if (!underWay || wasClip) return;
       const inside = state.duration === 0 || played || state.position <= state.duration;
       const moved =
         state.duration === 0 &&
         !played &&
         !linkWasLive &&
-        !linkIsClip(runtimes) &&
         carryOn !== undefined &&
         Math.abs(carryOn - state.position) <= SAME_PLACE_S &&
         Math.abs(state.position - (openedAt ?? state.position)) > SAME_PLACE_S;
+      if (moved) {
+        // The player took it: this is the title now, whatever the link was.
+        linkWasClip = false;
+        linkLength = 0;
+      }
+      // Still a clip by what its link was: nothing it reaches counts.
+      if (remembered(state, runtimes)) return;
       if (inside && (played || state.duration > 0 || moved)) {
         reached = {
           position: state.position,
@@ -246,9 +271,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       const opening = state.duration === 0 && (state.entry !== file || !played);
       if (!opening) return percent(state, runtimes.runtimeSeconds);
       // A file still opening, with no length of its own yet, is at the place
-      // it opens at. A clip or a broadcast opened again is at its own clock:
-      // the last real file's place, or nothing.
-      if (state.entry === file && (linkWasLive || linkIsClip(runtimes))) return kept;
+      // it opens at. A broadcast opened again is at its own clock: the last
+      // real file's place, or nothing.
+      if (state.entry === file && linkWasLive) return kept;
       // Opening where the last real file got to, it is there by that file's
       // measure, not by the title's running time.
       if (last && Math.abs(last.position - state.position) <= SAME_PLACE_S) return kept;
