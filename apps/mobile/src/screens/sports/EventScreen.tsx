@@ -3,6 +3,8 @@ import {
   type EventState,
   localClock,
   localDate,
+  MAX_REMINDERS,
+  remindAt,
   type SportEvent,
 } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
@@ -11,17 +13,20 @@ import { itemSources } from '@tv/data/sports';
 import { useQuery } from '@tv/data/use-query';
 import { OPEN_PAGE_REST_MS, usePrefetch } from '@tv/player/prefetch';
 import { dayName } from '@tv/screens/sports/fixture';
+import { useReminder } from '@tv/screens/sports/use-reminder';
 import type { TFunction } from 'i18next';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { allowReminders, canNotify } from '../../data/match-reminders';
 import { eventPlay, goBack, openPlayer, openStreams } from '../../nav/routes';
 import { Artwork } from '../../ui/Artwork';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/icons';
 import { colors, space, type } from '../../ui/theme';
+import { FollowButtons } from './FollowButtons';
 import { useMinuteClock, useOnShow, useSportsFeed, useViewOptions } from './use-sports';
 
 // The TV's event page helpers (apps/webos/src/screens/sports/EventScreen.tsx), which sits
@@ -101,7 +106,8 @@ function TeamBadges({ event }: { event: Pick<SportEvent, 'homeLogo' | 'awayLogo'
 /**
  * One match: teams, competition, local kick-off, state, which addons list it, the addon's
  * background and any badges. Watch picks a stream across every source; All streams lists them.
- * Only the addons that listed it are asked, for its page and its streams.
+ * Only the addons that listed it are asked, for its page and its streams. A match still to come
+ * offers Remind me, a notification just before kick-off. Its teams and competition can be followed.
  */
 export function EventScreen({ event: opened }: { event: SportEvent }) {
   const { t } = useTranslation();
@@ -129,6 +135,13 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
   const state = eventState(event, view);
   const live = state === 'live' || state === 'live-unknown';
   const name = displayName(t, event);
+  // The phone asks to notify at the first Remind me only, and says so if it may not.
+  const [denied, setDenied] = useState(false);
+  const remind = useReminder(event, name, view.now, async () => {
+    const allowed = await allowReminders();
+    setDenied(!allowed);
+    return allowed;
+  });
   const background =
     meta?.background ?? event.sources.find((source) => source.background)?.background;
   const competition = [
@@ -203,10 +216,31 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
               onPress={() => watch(true)}
               style={styles.wide}
             />
+            {canNotify && remind.offered ? (
+              <Button
+                icon={remind.reminder ? 'check' : 'bell'}
+                label={t(remind.reminder ? 'sportsRemind.on' : 'sportsRemind.remind')}
+                onPress={remind.toggle}
+                style={styles.wide}
+              />
+            ) : null}
+            {remind.reminder ? (
+              <Text style={styles.facts} accessibilityLiveRegion="polite">
+                {t('phone.reminders.note', { time: localClock(remindAt(remind.reminder)) })}
+              </Text>
+            ) : null}
+            {remind.full || denied ? (
+              <Text style={styles.facts} accessibilityLiveRegion="polite">
+                {remind.full
+                  ? t('sportsRemind.full', { count: MAX_REMINDERS })
+                  : t('phone.reminders.denied')}
+              </Text>
+            ) : null}
           </View>
         ) : (
           <Text style={styles.facts}>{t('sports.addonGone')}</Text>
         )}
+        <FollowButtons event={event} />
         {meta?.description ? <Text style={styles.description}>{meta.description}</Text> : null}
       </View>
     </ScrollView>

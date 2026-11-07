@@ -1063,6 +1063,204 @@ test('odd items stay text, inside their tiles', async ({ page }) => {
   expect(realErrors(errors)).toEqual([]);
 });
 
+/** A match page's Follow buttons, in their order. */
+function followButtons(page: Page) {
+  return page.locator('[data-focus-key^="event-follow-"]');
+}
+
+/** The first line of each tile's label in a row: the two sides. */
+async function rowMatches(page: Page, rowKey: string): Promise<string[]> {
+  return (await tileLabels(page, rowKey)).map((label) => label.split(',')[0]!);
+}
+
+test('following a team or a competition puts its matches first, on Sports and on Home', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await startWithSports(page);
+  // Before anything is followed, the Live sport row goes by competition.
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${LIVE_ROW}-tile-0`);
+  expect(await rowMatches(page, LIVE_ROW)).toEqual(['Arsenal v Brighton', 'Celtic v Rangers']);
+
+  // Celtic v Rangers' page offers both sides, but not Scottish football: that row is
+  // BannerTV's guess from the teams, not a competition.
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'ArrowDown', 'sports-row-c-country-gb-sct-football-tile-0');
+  await press(page, 'Enter', 'event-watch');
+  await expect(followButtons(page)).toHaveText(['Follow Celtic', 'Follow Rangers']);
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'Enter', 'event-follow-0');
+  await expect(followButtons(page)).toHaveText(['Following Celtic', 'Follow Rangers']);
+
+  // Back finds the match in the Following row, first; the row it came from has gone.
+  await pressBack(page);
+  await expectFocus(page, 'sports-row-following-tile-0');
+  await expect(sportsRows(page)).toHaveText([
+    'Following',
+    'EFL Cup · 1 live of 2',
+    'Earlier today',
+  ]);
+  expect(await tileLabels(page, 'sports-row-following')).toEqual([
+    expect.stringMatching(/^Celtic v Rangers, Scottish football, /),
+  ]);
+  // Kept for this profile, by the team's key rather than the name on the page.
+  const saved = (await readKv(page, 'sports.follows')) as Array<{ kind: string; id: string }>;
+  expect(saved.map((follow) => `${follow.kind} ${follow.id}`)).toEqual(['team football:celtic']);
+
+  // Home's Live sport row now starts with it.
+  await pressBack(page);
+  await expectFocus(page, 'sports-day-1');
+  await pressBack(page);
+  await expect(page.locator(`[data-row-key="${FIRST_ROW}"]`)).toBeVisible();
+  await expect
+    .poll(() => rowMatches(page, LIVE_ROW))
+    .toEqual(['Celtic v Rangers', 'Arsenal v Brighton']);
+
+  // A competition: every EFL Cup match joins Following, by kick-off.
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+  await press(page, 'ArrowDown', 'sports-row-following-tile-0');
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'ArrowRight', `${EFL_CUP}-tile-1`);
+  await press(page, 'Enter', 'event-watch');
+  await expect(followButtons(page)).toHaveText([
+    'Follow Manchester City',
+    'Follow Burnley',
+    'Follow EFL Cup',
+  ]);
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'ArrowRight', 'event-follow-1');
+  await press(page, 'ArrowRight', 'event-follow-2');
+  await press(page, 'Enter', 'event-follow-2');
+  await expect(followButtons(page).last()).toHaveText('Following EFL Cup');
+  await pressBack(page);
+  await expectFocus(page, 'sports-row-following-tile-2');
+  await expect(sportsRows(page)).toHaveText(['Following · 1 live of 3', 'Earlier today']);
+  expect(await rowMatches(page, 'sports-row-following')).toEqual([
+    'Arsenal v Brighton',
+    'Celtic v Rangers',
+    'Manchester City v Burnley',
+  ]);
+  // Live now starts with Following too.
+  await press(page, 'ArrowUp', 'sports-day-1');
+  await press(page, 'ArrowLeft', 'sports-day-0');
+  await expect(sportsRows(page).first()).toHaveText('Following · 1 live of 2');
+
+  // Unfollowing gives the competition its row back, and Back finds the match in it.
+  await press(page, 'ArrowRight', 'sports-day-1');
+  await expect(sportsRows(page).first()).toHaveText('Following · 1 live of 3');
+  await press(page, 'ArrowDown', 'sports-row-following-tile-0');
+  await press(page, 'ArrowRight', 'sports-row-following-tile-1');
+  await press(page, 'ArrowRight', 'sports-row-following-tile-2');
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'ArrowDown', 'event-follow-0');
+  await press(page, 'ArrowRight', 'event-follow-1');
+  await press(page, 'ArrowRight', 'event-follow-2');
+  await press(page, 'Enter', 'event-follow-2');
+  await expect(followButtons(page).last()).toHaveText('Follow EFL Cup');
+  await pressBack(page);
+  await expectFocus(page, `${EFL_CUP}-tile-1`);
+  await expect(sportsRows(page)).toHaveText([
+    'Following',
+    'EFL Cup · 1 live of 2',
+    'Earlier today',
+  ]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
+/** The reminder banner, by what it says. */
+function reminderBanner(page: Page, name: string) {
+  return page.getByRole('dialog', { name: `${name} is starting` });
+}
+
+test('Remind me shows a banner just before kick-off, after the player if it was open', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { playback } = await startWithSports(page);
+  await openSection(page, 'sports');
+  await expectFocus(page, 'sports-day-1');
+
+  // Arsenal v Brighton is live: nothing to remind of.
+  await press(page, 'ArrowDown', `${EFL_CUP}-tile-0`);
+  await press(page, 'Enter', 'event-watch');
+  await expect(page.locator('[data-focus-key="event-remind"]')).toHaveCount(0);
+  await pressBack(page);
+  await expectFocus(page, `${EFL_CUP}-tile-0`);
+
+  // Manchester City v Burnley kicks off at 20:00: a reminder at 19:55.
+  await press(page, 'ArrowRight', `${EFL_CUP}-tile-1`);
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'ArrowRight', 'event-streams');
+  await press(page, 'ArrowRight', 'event-remind');
+  await expect(page.locator('[data-focus-key="event-remind"]')).toHaveText('Remind me');
+  await press(page, 'Enter', 'event-remind');
+  await expect(page.locator('[data-focus-key="event-remind"]')).toHaveText('Reminder on');
+  await expect(page.getByText("BannerTV reminds you at 19:55 if it's open then.")).toBeVisible();
+  await pressBack(page);
+
+  // Celtic v Rangers at 19:40: a reminder at 19:35. Kept for this profile, by the
+  // match's key and its two sides, never the addon's address.
+  await press(page, 'ArrowDown', 'sports-row-c-country-gb-sct-football-tile-0');
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'ArrowRight', 'event-streams');
+  await press(page, 'ArrowRight', 'event-remind');
+  await press(page, 'Enter', 'event-remind');
+  await expect(page.getByText("BannerTV reminds you at 19:35 if it's open then.")).toBeVisible();
+  const saved = (await readKv(page, 'sports.reminders')) as Array<{ name: string }>;
+  expect(saved.map((reminder) => reminder.name)).toEqual([
+    'Celtic v Rangers',
+    'Manchester City v Burnley',
+  ]);
+  expect(JSON.stringify(saved)).not.toContain('example.com');
+  await pressBack(page);
+
+  // Arsenal v Brighton plays through 19:35: the player is never covered.
+  await press(page, 'ArrowUp', `${EFL_CUP}-tile-1`);
+  await press(page, 'ArrowLeft', `${EFL_CUP}-tile-0`);
+  await press(page, 'Enter', 'event-watch');
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(() =>
+      page
+        .locator('video:not([aria-hidden])')
+        .evaluate((video: HTMLVideoElement) => !video.paused && video.currentTime > 0),
+    )
+    .toBe(true);
+  expect(playback.media).toContain('/match-1080p.webm');
+  await page.clock.fastForward(6 * MINUTE);
+  await page.waitForTimeout(500);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // Leaving it, the banner comes, with focus on Watch; Back gives focus back.
+  await pressBack(page);
+  await expect(reminderBanner(page, 'Celtic v Rangers')).toBeVisible();
+  await expect(reminderBanner(page, 'Celtic v Rangers')).toContainText('Starts at 19:40');
+  await expectFocus(page, 'reminder-banner-watch');
+  await pressBack(page);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expectFocus(page, 'event-watch');
+  await expect(page.locator('section[aria-label="Arsenal v Brighton"]')).toBeVisible();
+
+  // At 19:55, Watch opens Manchester City v Burnley, and Back returns to where focus was.
+  await page.clock.fastForward(20 * MINUTE);
+  await expect(reminderBanner(page, 'Manchester City v Burnley')).toBeVisible();
+  await expectFocus(page, 'reminder-banner-watch');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('section[aria-label="Manchester City v Burnley"]')).toBeVisible();
+  await expectFocus(page, 'event-watch');
+  await expect(page.locator('[data-focus-key="event-remind"]')).toHaveCount(0);
+  await pressBack(page);
+  await expect(page.locator('section[aria-label="Arsenal v Brighton"]')).toBeVisible();
+  await expectFocus(page, 'event-watch');
+  // Each shows once.
+  await expect.poll(() => readKv(page, 'sports.reminders')).toEqual([]);
+  expect(realErrors(errors)).toEqual([]);
+});
+
 /** The team list's script, once the page has added it. */
 async function dataScripts(page: Page): Promise<string[]> {
   return (await addedScripts(page)).filter((src) => src.includes('/data/'));

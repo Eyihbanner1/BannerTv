@@ -61,3 +61,20 @@
   box-shadow: var(--bt-focus-ring);
   transform: scale(var(--bt-focus-scale));
 }
+
+/* Under the keys and quieter than them: a way out, not a key. */
+.forgot {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.forgotButton {
+  display: inline-block;
+  padding: 0 32px;
+  height: 64px;
+  border-radius: 16px;
+  color: var(--bt-text-muted);
+  font: var(--bt-text-label);
+  line-height: 64px;
+  transition: transform var(--bt-motion) ease-out;
+}

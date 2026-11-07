@@ -203,10 +203,11 @@ export function EpisodeList({
     if (video) current.onFocusVideo?.(video);
     rememberFocus(current.memoryKey, `${current.focusKey}-${index}`);
     const target = Math.max(0, index - 1);
-    if (canSlide() && target !== current.anchor) {
-      setAnchor(target);
-      rememberScroll(current.memoryKey, target);
-    }
+    const next = canSlide() ? target : current.anchor;
+    if (next !== current.anchor) setAnchor(next);
+    // Kept with the focus every time, also when the list did not slide: a list
+    // opened on an episode far down, and left from it, comes back with it drawn.
+    rememberScroll(current.memoryKey, next);
   }, []);
   const onItemPress = useCallback((index: number) => {
     const { videos: list, onPress: press } = latest.current;

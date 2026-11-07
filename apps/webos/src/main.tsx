@@ -11,6 +11,7 @@ import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
 import { startStreamHelper } from './data/helper';
 import { startLibraryData } from './data/library';
+import { startOpenLinks } from './data/open-link';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
 import {
@@ -21,9 +22,10 @@ import {
 } from './data/sports';
 import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
+import { startWatchNext } from './data/watch-next';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
-import { initAndroid } from './platform/android';
+import { androidWatchNext, initAndroid, isAndroid, takeAndroidLink } from './platform/android';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { startFrameMeter } from './platform/frame-meter';
 import { initInputMode } from './platform/input-mode';
@@ -73,7 +75,9 @@ function start() {
   initNavigation();
   initInputMode();
   initLifecycle(askAgainOnRelaunch);
-  initAndroid({ onRelaunch: askAgainOnRelaunch });
+  // A card on Android's own home screen opens its title, cold or while the app runs.
+  const onOpen = isAndroid() ? startOpenLinks(takeAndroidLink) : undefined;
+  initAndroid({ onRelaunch: askAgainOnRelaunch, onOpen });
   startStreamHelper();
   startAddons();
   startPlaybackData();
@@ -86,6 +90,8 @@ function start() {
   }
   void startSports();
   startSync();
+  const publishWatchNext = androidWatchNext();
+  if (publishWatchNext) startWatchNext(publishWatchNext);
   // After the reads above have started, so watching them changes no order.
   startBootMarks();
   if (tuning.marks) traceSportsMatcher(mark);

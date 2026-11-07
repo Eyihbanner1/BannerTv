@@ -1,17 +1,26 @@
 import { MAIN_PROFILE_ID } from '@bannertv/core';
 import { serviceStatus } from '@tv/data/api';
 import { preferences, setPreference, type Preferences } from '@tv/data/preferences';
-import { addonCollection } from '@tv/data/addons';
+import { allAddons } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
-import { accountSection, accountState, checkAccountSection } from '@tv/data/sync';
+import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
 import { traktAccount } from '@tv/data/trakt';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { statusLine } from '../data/account-text';
+import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { ListRow } from '../ui/Button';
 import { SubtitleStyleChoices, useSubtitleStyle } from '../player/SubtitleStyle';
@@ -73,7 +82,8 @@ export function SettingsScreen() {
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
   const account = useSyncExternalStore(accountState.subscribe, accountState.get);
   const list = useSyncExternalStore(profiles.subscribe, profiles.get).profiles;
-  const addons = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
+  // Every install, those switched off too: Addons lists them all.
+  const addons = useSyncExternalStore(allAddons.subscribe, allAddons.get);
   const trakt = useSyncExternalStore(traktAccount.subscribe, traktAccount.get);
   const [choosing, setChoosing] = useState<Choice | null>(null);
   const [styling, setStyling] = useState(false);
@@ -83,10 +93,13 @@ export function SettingsScreen() {
   const profile = activeProfile();
 
   const [now, setNow] = useState(() => Date.now());
+  const { refreshing, onRefresh } = useAccountRefresh();
   // Each visit, as the TV's Settings mounts on each: a failed check offline tries again later.
+  // The profiles shown are the account's now, not as of the last sync (item A8).
   useFocusEffect(
     useCallback(() => {
       if (isMain) checkAccountSection();
+      void refreshAccount();
     }, [isMain]),
   );
   useEffect(() => {
@@ -99,7 +112,10 @@ export function SettingsScreen() {
     account.engine !== 'running'
       ? undefined
       : account.status.state === 'off'
-        ? t('account.join')
+        ? // Signed out: what the account page offers, Join alone while new accounts are closed.
+          section.canCreate
+          ? t('phone.accountMakeOrJoin')
+          : t('account.join')
         : account.status.state === 'setup' || account.status.state === 'gone'
           ? undefined
           : statusLine(t, account.status, now);
@@ -109,6 +125,15 @@ export function SettingsScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + space.m }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.action]}
+          progressViewOffset={insets.top}
+        />
+      }
     >
       <Text style={styles.title} accessibilityRole="header">
         {t('phone.tabs.settings')}
@@ -165,6 +190,11 @@ export function SettingsScreen() {
           </Section>
 
           <Section title={t('phone.libraryAndAccounts')}>
+            <ListRow
+              title={t('profiles.title')}
+              value={t('phone.profilesCount', { count: list.length })}
+              onPress={() => router.push('/manage-profiles')}
+            />
             <ListRow
               title={t('phone.addons')}
               {...(addons.ready

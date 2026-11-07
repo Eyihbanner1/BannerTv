@@ -127,14 +127,37 @@
   text-overflow: ellipsis;
 }
 
+/* How the addon last answered, in the description's place. */
+.state,
+.failing {
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.failing {
+  color: #ffb4c4;
+}
+
+/* Switched off: dimmed, its buttons as they are, so it can be switched on again. */
+.off .logo,
+.off .text {
+  opacity: 0.45;
+}
+
 .actions {
   flex: none;
   white-space: nowrap;
 }
 
+/* Narrower than other buttons: a card can hold seven, with room left for its name. */
 .actions > * {
-  min-width: 200px;
-  margin-left: 20px;
+  min-width: 140px;
+  margin-left: 16px;
+  padding-right: 28px;
+  padding-left: 28px;
 }
 
 .disabled {

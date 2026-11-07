@@ -5,9 +5,11 @@ import {
   ASIDE_KEY,
   deleteSyncKeys,
   expireAside,
+  loadAside,
   loadBase,
   loadPending,
   loadSyncState,
+  readAside,
   readSyncState,
   saveBase,
   savePending,
@@ -201,5 +203,56 @@ describe('expireAside', () => {
     await storage.set(ASIDE_KEY, { v: 1, at: NOW + 400 * DAY, until: NOW + 430 * DAY });
     await expireAside(storage, NOW);
     expect(await storage.get(ASIDE_KEY)).toMatchObject({ at: NOW, until: NOW + 30 * DAY });
+  });
+
+  it('keeps a copy being brought back past its 30 days, for the launch that finishes it', async () => {
+    const storage = memoryKeyValueStore();
+    const aside = { v: 1, at: NOW - 31 * DAY, until: NOW - DAY, documents: {}, back: true };
+    await storage.set(ASIDE_KEY, aside);
+    await expireAside(storage, NOW);
+    expect(await storage.get(ASIDE_KEY)).toEqual(aside);
+  });
+});
+
+describe('reading the set-aside copy', () => {
+  it('keeps what is an item of the copy and drops what is not', () => {
+    const saved = {
+      v: 1,
+      at: 1,
+      until: 2,
+      back: true,
+      documents: {
+        'p/main/list': [
+          ['tt1', { v: { type: 'movie' }, t: 5 }],
+          ['__proto__', { v: 1 }],
+          ['tt2', { v: { type: 'movie' }, t: -1, trakt: true }],
+          ['gone', { t: 5 }],
+          [3, { v: 1 }],
+          'nonsense',
+        ],
+        addons: 'nonsense',
+      },
+    };
+    const aside = readAside(saved)!;
+    expect(aside.back).toBe(true);
+    expect(aside.documents['p/main/list']).toEqual([
+      ['tt1', { v: { type: 'movie' }, t: 5 }],
+      ['__proto__', { v: 1 }],
+      ['tt2', { v: { type: 'movie' }, trakt: true }],
+    ]);
+    expect(Object.keys(aside.documents)).toEqual(['p/main/list']);
+    expect(readAside({ ...saved, v: 2 })).toBeUndefined();
+    expect(readAside({ ...saved, until: 'soon' })).toBeUndefined();
+    expect(readAside(null)).toBeUndefined();
+  });
+
+  it('tells a copy that cannot be read from none', async () => {
+    const storage = memoryKeyValueStore();
+    expect(await loadAside(storage)).toBeUndefined();
+    const failing: KeyValueStore = {
+      ...storage,
+      get: () => Promise.reject(new Error('IDB aborted')),
+    };
+    await expect(loadAside(failing)).rejects.toThrow('IDB aborted');
   });
 });

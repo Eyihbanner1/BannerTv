@@ -145,6 +145,7 @@ androidComponents {
 dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.core)
+    implementation(libs.androidx.tvprovider)
     implementation(libs.androidx.webkit)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.dash)
