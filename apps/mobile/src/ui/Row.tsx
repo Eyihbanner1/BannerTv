@@ -18,15 +18,19 @@ export function Row({
   items,
   shape,
   onPress,
+  onLongPress,
   onSeeAll,
   seeAllLabel,
   footer,
 }: {
   title: string;
-  tag?: string;
+  /** Muted words after the title, or a source's logo. */
+  tag?: ReactNode;
   items: readonly RowItem[] | null;
   shape: TileShape;
   onPress: (item: RowItem) => void;
+  /** A long press on a tile, for a row that offers more than opening it. */
+  onLongPress?: (item: RowItem) => void;
   onSeeAll?: () => void;
   seeAllLabel?: string;
   /** Shown instead of tiles: an error with Try again, for example. */
@@ -39,10 +43,12 @@ export function Row({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        {tag ? (
+        {typeof tag === 'string' && tag !== '' ? (
           <Text style={styles.tag} numberOfLines={1}>
             {tag}
           </Text>
+        ) : typeof tag === 'object' ? (
+          tag
         ) : null}
         <View style={styles.spacer} />
         {onSeeAll && seeAllLabel ? (
@@ -71,9 +77,11 @@ export function Row({
               {...(entry.note ? { note: entry.note } : {})}
               {...(entry.progress !== undefined ? { progress: entry.progress } : {})}
               onPress={() => onPress(entry)}
+              {...(onLongPress ? { onLongPress: () => onLongPress(entry) } : {})}
             />
           )}
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={Separator}
           initialNumToRender={4}

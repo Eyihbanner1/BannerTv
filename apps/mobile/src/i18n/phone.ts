@@ -32,6 +32,11 @@ const PHONE = {
   stop: 'Stop',
   back10: 'Back 10 seconds',
   forward10: 'Forward 10 seconds',
+  seekingTo: 'Going to {{time}}',
+  sceneIntro: 'Intro',
+  sceneRecap: 'Recap',
+  backTo: 'Back to {{time}}',
+  backToLabel: 'Go back to {{time}}, where you were',
   playLabel: 'Play',
   pauseLabel: 'Pause',
   leavePlayer: 'Leave the player',
@@ -87,6 +92,11 @@ const PHONE = {
   episodes: 'Episodes',
   upNext: 'Up next',
   close: 'Close',
+  // Search: what only the phone's list needs.
+  search: {
+    /** The line that opens each addon's own results, under Top results. */
+    eachAddon: 'Results from each addon',
+  },
   profilesCount_one: '{{count}} profile',
   profilesCount_other: '{{count}} profiles',
   askAtLaunch: 'Ask who’s watching when BannerTV opens',

@@ -28,7 +28,13 @@ import { focusedKey } from '../../navigation/spatial';
 import { useBack } from '../../navigation/use-back';
 import { canSlide } from '../../platform/input-mode';
 import { fixtureText, groupTitle, stripLabel } from './fixture';
-import { useMinuteClock, useSportsFeed, useViewOptions, useWantSports } from './use-sports';
+import {
+  useMinuteClock,
+  useSportsFeed,
+  useSportsMatcher,
+  useViewOptions,
+  useWantSports,
+} from './use-sports';
 import styles from './SportsScreen.module.css';
 
 /** Focus resting this long on a day of the strip opens it; OK opens it at once. */
@@ -180,6 +186,7 @@ export function SportsScreen() {
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
 
   useWantSports(day);
+  useSportsMatcher();
   useEffect(() => {
     memory.day = day;
   }, [day]);

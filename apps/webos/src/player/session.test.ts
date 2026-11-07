@@ -1,9 +1,18 @@
 import type { LiveWindow, Resolution, StreamEntry } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
+import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
 import {
+  clearLandings,
+  LANDING_KEY,
+  LANDING_SETTLE_MS,
+  type LandingMode,
+  recentLandings,
+} from './landing';
+import {
+  clockShows,
   LIVE_TICK_MS,
   createPlaybackSession,
   REBUFFER_WINDOW_MS,
@@ -46,6 +55,19 @@ const kept = vi.hoisted(() => ({
     subscribe: () => () => undefined,
   },
 }));
+
+// The tester's switches, which a test can change.
+const tuned = vi.hoisted(() => ({}) as Tuning);
+
+vi.mock(import('../platform/tuning'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, tuning: Object.assign(tuned, actual.TUNING_DEFAULTS) };
+});
+
+// The play stage marks the session sets, by the finder they belong to.
+const marks = vi.hoisted(() => ({ playMark: vi.fn() }));
+
+vi.mock('./play-marks', () => ({ playMark: marks.playMark }));
 
 vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
@@ -97,6 +119,8 @@ class FakeVideo extends EventTarget {
   playbackRate = 1;
   // A two-hour film, so the bitrates below follow from the sizes.
   duration = 7200;
+  // Left out unless a test says the stream has told its length (HAVE_METADATA is 1).
+  readyState?: number;
 
   play() {
     if (this.paused) {
@@ -250,11 +274,17 @@ beforeEach(() => {
   kept.sourceMemory.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
+  marks.playMark.mockClear();
+  Object.assign(tuned, TUNING_DEFAULTS);
+  // Each landing read is printed for the TV round; here the log is read instead.
+  clearLandings();
+  vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('a paused stream', () => {
@@ -972,7 +1002,7 @@ describe('a live stream', () => {
     video.fire('timeupdate');
   }
 
-  it('says how far behind live it is, keeps jumps within what it keeps, and goes back to live', async () => {
+  it('says how far behind live it is, keeps jumps inside what it keeps, and goes back to live', async () => {
     const { video, session } = setup();
     await live(session, video);
     lastEngine().window = { start: 7000, live: 7200, slack: 6 };
@@ -984,9 +1014,10 @@ describe('a live stream', () => {
     session.seek(7400);
     expect(video.currentTime).toBe(7200);
     expect(session.get().behind).toBe(0);
+    // A segment in from the oldest kept, which drops out next.
     session.seek(6000);
-    expect(video.currentTime).toBe(7000);
-    expect(session.get().behind).toBe(200);
+    expect(video.currentTime).toBe(7006);
+    expect(session.get().behind).toBe(194);
     session.goToLive();
     expect(video.currentTime).toBe(7200);
     expect(session.get().behind).toBe(0);
@@ -1291,5 +1322,442 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('where a jump lands', () => {
+  /** The tester's switch, as `localStorage.setItem('bannertv.landing', mode)` sets it before the player opens. */
+  function landingMode(mode: LandingMode | null) {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => (key === LANDING_KEY ? mode : null),
+    });
+  }
+
+  /** The element finishes a jump at `at`, as the TV's player does: it says so, then its clock moves on. */
+  function land(video: FakeVideo, at: number) {
+    video.currentTime = at;
+    video.fire('seeked');
+    vi.advanceTimersByTime(250);
+    video.currentTime = at + 0.25;
+    video.fire('timeupdate');
+  }
+
+  it('logs where the picture really landed, with nothing of the address, and the bar follows it', async () => {
+    landingMode('measure');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+    // webOS reads 0 for a moment: not where it landed.
+    video.fire('seeked');
+    video.currentTime = 0;
+    video.fire('timeupdate');
+    expect(recentLandings()).toHaveLength(0);
+    vi.advanceTimersByTime(250);
+    video.currentTime = 1796.25;
+    video.fire('timeupdate');
+
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({
+        engine: 'hls.js',
+        container: 'mkv',
+        mode: 'measure',
+        paused: false,
+        wanted: 1800,
+        aimed: 1800,
+        landed: 1796.25,
+        miss: -3.75,
+        corrected: false,
+      }),
+    ]);
+    expect(session.get().position).toBe(1796.25);
+    expect(session.trustedPosition()).toBe(1796.25);
+    expect(console.info).toHaveBeenCalledTimes(1);
+    const [line] = vi.mocked(console.info).mock.calls[0]!;
+    expect(line).toMatch(/^\[BannerTV landing\] hls\.js mkv, measure, playing: /);
+    for (const said of [String(line), JSON.stringify(recentLandings())]) {
+      expect(said).not.toMatch(/media\.example\.com|first|https?:/);
+    }
+  });
+
+  it.each([
+    ["in 'measure'", 'measure' as const],
+    ['with no switch set, as it ships', null],
+  ])('changes nothing %s: every jump goes where it was asked, once', async (_name, mode) => {
+    landingMode(mode);
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    expect(video.currentTime).toBe(1796.25);
+    session.seek(2400);
+    expect(video.currentTime).toBe(2400);
+    land(video, 2396);
+    expect(video.currentTime).toBe(2396.25);
+    expect(recentLandings().map((landing) => landing.aimed)).toEqual([1800, 2400]);
+    expect(recentLandings().map((landing) => landing.mode)).toEqual(['measure', 'measure']);
+    expect(lastEngine().seeks).toBe(2);
+  });
+
+  it("jumps once more after a miss in 'again', only once, and not as the viewer's jump", async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    // Further by the miss, at once.
+    expect(video.currentTime).toBe(1803.75);
+    expect(lastEngine().seeks).toBe(1);
+    expect(session.get()).toMatchObject({ status: 'playing', position: 1796.25 });
+    expect(recentLandings()).toHaveLength(0);
+    // The second jump's end reads its aim back: the bar shows the place asked for, not the aim.
+    video.fire('timeupdate');
+    expect(session.get().position).toBe(1800);
+    expect(session.trustedPosition()).toBe(1800);
+
+    // Short again, and left there: a second jump is never corrected.
+    land(video, 1801);
+    expect(video.currentTime).toBe(1801.25);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(video.currentTime).toBe(1801.25);
+    expect(lastEngine().seeks).toBe(1);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({
+        mode: 'again',
+        wanted: 1800,
+        landed: 1796.25,
+        corrected: true,
+        secondAimed: 1803.75,
+        secondLanded: 1801.25,
+        secondMiss: 1.25,
+      }),
+    ]);
+    // The bar and the next skip go from where the picture is.
+    expect(session.get().position).toBe(1801.25);
+    expect(session.trustedPosition()).toBe(1801.25);
+  });
+
+  it("sends later jumps further by the stream's usual miss in 'learn', as the bar shows the place asked for", async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+    land(video, 1796);
+
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+    expect(session.get().position).toBe(2400);
+    expect(session.trustedPosition()).toBe(2400);
+    // It lands well, and no second jump follows.
+    land(video, 2400);
+    expect(video.currentTime).toBe(2400.25);
+    expect(recentLandings()[1]).toMatchObject({
+      mode: 'learn',
+      wanted: 2400,
+      aimed: 2403.75,
+      miss: 0.25,
+      corrected: false,
+    });
+
+    // Back as well: short is short whichever way.
+    session.seek(2300);
+    expect(video.currentTime).toBe(2303.625);
+    expect(lastEngine().seeks).toBe(3);
+    // Start over goes to the start: nothing lies before it to fall short of.
+    session.seek(0);
+    expect(video.currentTime).toBe(0);
+  });
+
+  it("keeps the viewer's place where they asked while the element reads back the aim in 'learn'", async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    session.pause();
+    kept.progress.mockClear();
+
+    // Paused, the element is sent past the target, and the jump's end reads that aim back.
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+    video.fire('timeupdate');
+    video.fire('seeked');
+    expect(session.trustedPosition()).toBe(2400);
+    expect(session.get().position).toBe(2400);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(recentLandings()[1]).toMatchObject({ paused: true, aimed: 2403.75, sure: false });
+    expect(session.trustedPosition()).toBe(2400);
+    expect(session.get().position).toBe(2400);
+    session.saveProgress();
+    expect(kept.progress).toHaveBeenCalled();
+    for (const [update] of kept.progress.mock.calls) expect(update.position).toBe(2400);
+
+    // Playing, the aim read back is still the place asked for, and a landing off it is where the picture is.
+    session.resume();
+    session.seek(3000);
+    expect(video.currentTime).toBe(3003.75);
+    video.fire('timeupdate');
+    expect(session.get().position).toBe(3000);
+    land(video, 2999);
+    expect(session.get().position).toBe(2999.25);
+    expect(session.trustedPosition()).toBe(2999.25);
+    session.saveProgress();
+    expect(kept.progress).toHaveBeenLastCalledWith(expect.objectContaining({ position: 2999.25 }));
+  });
+
+  it('starts each new stream with nothing learnt', async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    land(video, 1796);
+    session.seek(2400);
+    expect(video.currentTime).toBe(2403.75);
+
+    await start(session, video, second, 600);
+    session.seek(1800);
+    expect(video.currentTime).toBe(1800);
+  });
+
+  it('checks only the latest jump when the viewer jumps again before the last one landed', async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.seek(1800);
+    session.seek(2400);
+    land(video, 2396);
+    expect(video.currentTime).toBe(2403.75);
+    land(video, 2400);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({ wanted: 2400, corrected: true, secondLanded: 2400.25 }),
+    ]);
+  });
+
+  it('reads a paused jump once the TV has had a moment, with no clock moving on to say', async () => {
+    landingMode('measure');
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    session.pause();
+    session.seek(1800);
+    video.currentTime = 1797;
+    video.fire('seeked');
+    vi.advanceTimersByTime(LANDING_SETTLE_MS - 1);
+    expect(recentLandings()).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(recentLandings()).toEqual([
+      expect.objectContaining({ paused: true, landed: 1797, miss: -3, sure: true }),
+    ]);
+  });
+
+  it("leaves a jump before the first picture to the engine's own start", async () => {
+    landingMode('again');
+    const { video, session } = setup();
+    session.play(first, 2400, { chosen: true, paused: true });
+    await settle();
+    session.seek(1800);
+    land(video, 1796);
+    vi.advanceTimersByTime(LANDING_SETTLE_MS);
+    expect(video.currentTime).toBe(1796.25);
+    expect(recentLandings()).toHaveLength(0);
+  });
+
+  it('never aims past live on a broadcast, and keeps every aim to what it keeps', async () => {
+    landingMode('learn');
+    const { video, session } = setup();
+    video.duration = NaN;
+    session.play(first, 0);
+    await settle();
+    lastEngine().live = true;
+    lastEngine().window = { start: 7000, live: 7200, slack: 6 };
+    video.currentTime = 7200;
+    video.duration = Infinity;
+    video.fire('durationchange');
+    void video.play();
+    video.fire('playing');
+    video.fire('timeupdate');
+    session.seek(7100);
+    land(video, 7096);
+
+    session.seek(7198);
+    expect(video.currentTime).toBe(7200);
+    // A segment in from the oldest kept, and no allowance: nothing lies before it to fall short of.
+    session.seek(6000);
+    expect(video.currentTime).toBe(7006);
+    expect(session.get().behind).toBe(194);
+    session.destroy();
+  });
+});
+
+describe('play stage marks', () => {
+  it("marks each stream's load and metadata, and the first picture once", async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    video.fire('loadedmetadata');
+    void video.play();
+    video.fire('playing');
+    video.fire('pause');
+    void video.play();
+    video.fire('playing');
+    expect(marks.playMark.mock.calls.map(([, stage, label]) => [stage, label])).toEqual([
+      ['load', 'hls.js'],
+      ['metadata', undefined],
+      ['first-frame', undefined],
+    ]);
+    // All of them the finder's, which names the video.
+    expect(new Set(marks.playMark.mock.calls.map(([finder]) => finder)).size).toBe(1);
+    session.destroy();
+  });
+});
+
+describe('the media clock', () => {
+  const at = (position: number, duration = 7200) => ({
+    position,
+    duration,
+    liveWindow: null,
+    behind: 0,
+  });
+
+  it('renders again only for a reading that changes what shows', () => {
+    // A film: the times show whole seconds, and the bar moves under a pixel a second.
+    expect(clockShows(at(10.05), at(10.3))).toBe(false);
+    expect(clockShows(at(10.8), at(11.05))).toBe(true);
+    expect(clockShows(at(11.05), at(10.9))).toBe(true);
+    expect(clockShows(at(10.05), at(10.3, 7300))).toBe(true);
+    // A short clip: a thousandth of its bar is less than a second.
+    expect(clockShows(at(10.05, 30), at(10.3, 30))).toBe(true);
+    expect(clockShows(at(10.05, 30), at(10.06, 30))).toBe(false);
+  });
+
+  it("counts a broadcast's window and how far behind live it is", () => {
+    const window = { start: 7000, live: 7200, slack: 6 };
+    const live = (position: number, behind: number, kept = window) => ({
+      position,
+      duration: 0,
+      liveWindow: kept,
+      behind,
+    });
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.3, 99.7))).toBe(true);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window }))).toBe(false);
+    expect(clockShows(live(7100.05, 99.9), live(7100.1, 99.9, { ...window, live: 7206 }))).toBe(
+      true,
+    );
+    expect(clockShows(live(7100.05, 0), { ...live(7100.1, 0), liveWindow: null })).toBe(true);
+  });
+
+  it('tells the player about whole seconds of playback, not every reading', async () => {
+    const { video, session } = setup();
+    await start(session, video, first);
+    const heard = vi.fn();
+    session.subscribe(heard);
+    for (const time of [1, 1.25, 1.5, 1.75, 2, 2.25]) {
+      video.currentTime = time;
+      video.fire('timeupdate');
+    }
+    expect(heard).toHaveBeenCalledTimes(2);
+    expect(session.get().position).toBe(2);
+    // A pause tells it at once, and the next reading brings the clock up to date.
+    video.pause();
+    video.currentTime = 2.4;
+    video.fire('timeupdate');
+    expect(session.get()).toMatchObject({ status: 'paused', position: 2.4 });
+    session.destroy();
+  });
+});
+
+describe('a stream that says nothing of itself', () => {
+  const METADATA_MS = 12000;
+
+  beforeEach(() => {
+    tuned.metadataTimeoutMs = METADATA_MS;
+  });
+
+  it('gives way to the next once the metadataTimeoutMs switch has run out', async () => {
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS - 1);
+    expect(session.get().entry).toBe(first);
+    vi.advanceTimersByTime(1);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    expect(session.get()).toMatchObject({ entry: second, status: 'loading', failedOver: true });
+    session.destroy();
+  });
+
+  it('waits the start time as before with the switch off', async () => {
+    tuned.metadataTimeoutMs = 0;
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(START_TIMEOUT_MS - 1);
+    expect(markFailed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(session.get().entry).toBe(second);
+    session.destroy();
+  });
+
+  it('keeps a stream that told its length, by the event or on the element', async () => {
+    for (const told of ['event', 'element']) {
+      const { video, session, markFailed } = setup();
+      session.play(first, 0);
+      await settle();
+      video.readyState = 1;
+      if (told === 'event') video.fire('loadedmetadata');
+      vi.advanceTimersByTime(METADATA_MS);
+      expect(markFailed).not.toHaveBeenCalled();
+      expect(session.get().entry).toBe(first);
+      // The first picture still has the start time.
+      vi.advanceTimersByTime(START_TIMEOUT_MS - METADATA_MS);
+      expect(markFailed).toHaveBeenCalledWith(first);
+      session.destroy();
+    }
+  });
+
+  it('never gives up early on a stream the viewer picked', async () => {
+    for (const picked of [{ chosen: true }, { handPicked: true }]) {
+      const { session, markFailed } = setup();
+      session.play(first, 0, picked);
+      await settle();
+      vi.advanceTimersByTime(METADATA_MS);
+      expect(markFailed).not.toHaveBeenCalled();
+      session.destroy();
+    }
+    const { session, markFailed } = setup({ autoFailover: false });
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).not.toHaveBeenCalled();
+    session.destroy();
+  });
+
+  it('leaves the last stream the start time, with nowhere else to go', async () => {
+    const { session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(session.get().entry).toBe(second);
+    await settle();
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).toHaveBeenCalledTimes(1);
+    expect(session.get().status).toBe('loading');
+    vi.advanceTimersByTime(START_TIMEOUT_MS - METADATA_MS);
+    expect(session.get().status).toBe('failed');
+    session.destroy();
+  });
+
+  it('does not run out while the viewer has it paused before its first picture', async () => {
+    const { video, session, markFailed } = setup();
+    session.play(first, 0);
+    await settle();
+    session.pause();
+    vi.advanceTimersByTime(START_TIMEOUT_MS * 2);
+    expect(markFailed).not.toHaveBeenCalled();
+    session.resume();
+    expect(video.paused).toBe(false);
+    vi.advanceTimersByTime(METADATA_MS);
+    expect(markFailed).toHaveBeenCalledWith(first);
+    session.destroy();
   });
 });

@@ -14,6 +14,7 @@ import {
   sportsMatcher,
   sportsState,
   wantSports,
+  wantSportsMatcher,
 } from '../../data/sports';
 
 const MINUTE = 60 * 1000;
@@ -103,4 +104,12 @@ export function useViewOptions(events: readonly SportEvent[], now: number): View
     }),
     [now, replayed, matcher, follows],
   );
+}
+
+/**
+ * A screen that shows sport by team and league: the team and league data
+ * loads now if the launch held it back (tuning matcherAt `idle`).
+ */
+export function useSportsMatcher(): void {
+  useEffect(() => wantSportsMatcher(), []);
 }

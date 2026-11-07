@@ -7,6 +7,7 @@ import {
 } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import type { TFunction } from 'i18next';
+import { dateFormatter } from './date-format';
 
 /** "Movies", "Series", or the addon's own type name when it is not a known one. */
 export function typeLabel(t: TFunction, type: string): string {
@@ -32,12 +33,11 @@ export function metaFacts(t: TFunction, item: MetaPreview): string[] {
   return facts;
 }
 
+const releaseDate = dateFormatter('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** "3 May 2024", as toLocaleDateString writes it, from a formatter made once. */
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  return releaseDate(new Date(iso));
 }
 
 /** Why an addon could not be added, for the user. */

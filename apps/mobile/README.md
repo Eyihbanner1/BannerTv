@@ -22,4 +22,4 @@ pnpm --filter @bannertv/mobile e2e           # touch journeys on the web build
 pnpm --filter @bannertv/mobile start         # Expo's dev server, for a phone with a dev build
 ```
 
-The APK is built in CI only (the `Phone APK` job, artifact `bannertv-phone-apk`). It installs as "BannerTV phone test" beside the Android TV app's test build.
+The APK is built in CI only, on a full build (the root README says when one runs): the `Phone APK` job, artifact `bannertv-phone-apk`, for 64-bit Arm phones. It installs as "BannerTV phone test" beside the Android TV app's test build.

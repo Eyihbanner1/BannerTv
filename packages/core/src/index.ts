@@ -20,6 +20,17 @@ export {
   setRowHidden,
 } from './addons/layout';
 export {
+  CONTINUE_LINE,
+  type HomeLine,
+  homeLines,
+  LIVE_SPORT_LINE,
+  MY_LIST_LINE,
+  moveLine,
+  type OwnLine,
+  ownLinePlaces,
+  setLineHidden,
+} from './addons/home-lines';
+export {
   type AddonAnswer,
   type AddonClient,
   BROWSE_TIMEOUT_MS,
@@ -84,6 +95,16 @@ export {
   type PagerStatus,
 } from './addons/pager';
 export {
+  catalogsFromManyAddons,
+  type DiscoverResolved,
+  type DiscoverSelection,
+  discoverSelection,
+  genreSource,
+  moreLikeSource,
+  type MoreLikeSource,
+  resolveDiscover,
+} from './addons/browse';
+export {
   type CatalogSource,
   discoverSources,
   type DiscoverSource,
@@ -109,6 +130,20 @@ export {
   type LibrarySort,
   libraryView,
 } from './library/views';
+export {
+  CALENDAR_MAX_TITLES,
+  CALENDAR_WINDOW,
+  type CalendarDay,
+  calendarDays,
+  type CalendarEntry,
+  calendarEntries,
+  type CalendarKind,
+  calendarStart,
+  calendarView,
+  type CalendarWindow,
+  type FollowedTitle,
+  followedTitles,
+} from './library/calendar';
 export { createLimiter, type Limiter } from './limiter';
 export { createPersisted, type Persisted, type PersistedOptions } from './persisted';
 export {
@@ -123,11 +158,14 @@ export {
 } from './query';
 export { type BandwidthMemory, createBandwidthMemory } from './playback/bandwidth';
 export {
+  cardNext,
+  caughtUpSeries,
   CONTINUE_LIMIT,
   type ContinueItem,
   continueItem,
   continueWatching,
   createPlayedVideos,
+  NEW_EPISODE_MS,
   type PlayedAdoption,
   playedCard,
   type PlayedVideo,
@@ -182,6 +220,13 @@ export {
   STILL_WATCHING_QUIET_MS,
 } from './playback/still-watching';
 export {
+  BACK_TO_MIN_JUMP_S,
+  BACK_TO_MS,
+  offersBackTo,
+  SKIP_LANDS_AFTER_MS,
+  skipStep,
+} from './playback/seeking';
+export {
   readSkipSegments,
   SKIP_CARD_S,
   SKIP_REARM_S,
@@ -205,12 +250,18 @@ export {
   UP_NEXT_REARM_S,
 } from './playback/up-next';
 export {
+  AWAY_MS,
   createProgressStore,
+  isUnmarked,
   MIN_RESUME_SECONDS,
   type ProgressAdoption,
   type ProgressEntry,
+  type ProgressMark,
   type ProgressStore,
   type ProgressUpdate,
+  RESUME_LEAD_IN_AWAY_S,
+  RESUME_LEAD_IN_S,
+  resumeLeadIn,
   WATCHED_FRACTION,
 } from './playback/progress';
 export {
@@ -238,6 +289,8 @@ export {
   KIDS_GENRE,
   KIDS_TYPES,
   kidsAddons,
+  kidsDetailsAllowed,
+  type KidsRatingFacts,
   kidsTitleAllowed,
   ratingAllowed,
   ukRating,
@@ -276,6 +329,7 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './search';
 export * from './sports';
 export { createStore } from './store';
 export * from './sync';
@@ -339,6 +393,7 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export { TMDB_LOGO } from './integrations/tmdb/logo';
 export {
   createIntroDbClient,
   episodeOf,
@@ -368,6 +423,13 @@ export {
   type TraktTarget,
   traktTarget,
 } from './integrations/trakt/ids';
+export {
+  createTraktMarks,
+  historyBody,
+  pausedIds,
+  type TraktMark,
+  type TraktMarks,
+} from './integrations/trakt/marks';
 export { createScrobbler, type Scrobbler } from './integrations/trakt/scrobble';
 export {
   createTraktSync,

@@ -196,8 +196,10 @@ test('a film resumes on Android where it was left, and keeps its place', async (
   await press(page, 'Enter', 'player-surface');
   await expect
     .poll(async () => (await androidCalls(page)).player.find((command) => command.op === 'load'))
-    .toMatchObject({ op: 'load', startAt: 35 });
-  await androidOpens(page, 35, 120);
+    // A few seconds early, to pick up the line it left: 10 s, as the seeded progress is
+    // long ago, but never before 30 s, where a resume begins.
+    .toMatchObject({ op: 'load', startAt: 30 });
+  await androidOpens(page, 30, 120);
   for (const position of [36, 38, 40, 42, 44]) {
     await androidSays(page, { type: 'player', event: 'time', position, duration: 120 });
     await page.waitForTimeout(250);
@@ -291,7 +293,8 @@ test("Continue Watching reaches Android's own home screen as the app leaves the 
         title: 'Elephants Dream',
         landscape: `https://images.metahub.space/background/medium/${MOVIE}/img`,
         poster: `https://images.metahub.space/poster/small/${MOVIE}/img`,
-        position: 35,
+        // Where Continue Watching starts it: a little before 35 s, and never before 30 s.
+        position: 30,
         duration: 120,
         next: false,
         watchedAt: 1000,

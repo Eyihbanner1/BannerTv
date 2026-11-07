@@ -167,7 +167,7 @@ describe('watchNextCards', () => {
         description: 'A film.',
         landscape: 'https://images.example/tt1/wide.jpg',
         poster: 'https://images.example/tt1/poster.jpg',
-        position: app.progress.resumeAt('tt1')!,
+        position: app.progress.resumeFrom('tt1', app.time)!,
         duration: 6000,
         next: false,
         watchedAt: app.time,

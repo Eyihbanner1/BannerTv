@@ -11,7 +11,7 @@ import type { MetaPreview } from '@bannertv/protocol';
 import { addonClient, addonCollection } from '@tv/data/addons';
 import { itemSources } from '@tv/data/sports';
 import { useQuery } from '@tv/data/use-query';
-import { usePrefetch } from '@tv/player/prefetch';
+import { OPEN_PAGE_REST_MS, usePrefetch } from '@tv/player/prefetch';
 import { dayName } from '@tv/screens/sports/fixture';
 import { useReminder } from '@tv/screens/sports/use-reminder';
 import type { TFunction } from 'i18next';
@@ -129,8 +129,8 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
   const meta = useQuery(metaQuery).data;
   const { key, sources: listed, kind } = event;
   const play = useMemo(() => eventPlay({ key, sources: listed, kind }), [key, listed, kind]);
-  // Opening the page is the intent to watch: streams are looked up straight away.
-  usePrefetch(primary?.type ?? '', primary ? primary.id : null, undefined, play);
+  // Opening the page is the intent to watch: streams are looked up once it has been open a moment.
+  usePrefetch(primary?.type ?? '', primary ? primary.id : null, undefined, play, OPEN_PAGE_REST_MS);
 
   const state = eventState(event, view);
   const live = state === 'live' || state === 'live-unknown';

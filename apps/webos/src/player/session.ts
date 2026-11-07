@@ -13,9 +13,20 @@ import {
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, sourceMemory } from '../data/playback';
+import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
 import { entryKey, type StreamFinder } from './finder';
+import {
+  createLandingWatch,
+  LANDING_SETTLE_MS,
+  type LandingBounds,
+  landingStream,
+  readLandingMode,
+  showLandings,
+} from './landing';
+import { rewindWindow, shouldReturnToLive } from './live';
+import { playMark } from './play-marks';
 
 /** Waiting longer than this mid-play counts as a stall, and auto-play moves on. */
 export const STALL_MS = 20000;
@@ -23,6 +34,8 @@ export const STALL_MS = 20000;
 export const START_TIMEOUT_MS = 30000;
 /** Auto-play moves to another stream at most this many times before asking the user. */
 export const MAX_FAILOVERS = 3;
+/** HTMLMediaElement.HAVE_METADATA: the element knows the stream's length and size. */
+const HAVE_METADATA = 1;
 /** After this much playback a source counts as having worked. */
 const WORKED_AFTER_S = 30;
 /**
@@ -152,6 +165,12 @@ export interface PlaybackSession {
   /** The trusted position: never the 0 that webOS reads right after a resume. */
   trustedPosition(): number | undefined;
   /**
+   * On a broadcast, what it keeps and where live is now, read from the engine
+   * at the moment. The state's liveWindow is only refreshed as the time behind
+   * live changes, so it can be minutes old while that stays steady.
+   */
+  liveWindow(): LiveWindow | null;
+  /**
    * Where another stream of this video starts (Quality, Other streams, Try
    * again): where playback is now, or the live edge (0) of a live stream,
    * whose clock means nothing on another source's.
@@ -159,6 +178,33 @@ export interface PlaybackSession {
   carryOn(): number;
   /** Saves progress, stops the stream and frees the decoder. */
   destroy(): void;
+}
+
+/** The bar moves on at least every thousandth of its length, however short the video. */
+const BAR_STEPS = 1000;
+
+type ClockReading = Pick<SessionState, 'position' | 'duration' | 'liveWindow' | 'behind'>;
+
+function sameWindow(a: LiveWindow | null, b: LiveWindow | null): boolean {
+  if (!a || !b) return a === b;
+  return a.start === b.start && a.live === b.live && a.slack === b.slack;
+}
+
+/**
+ * Whether a reading of the media clock changes what the player shows, so it
+ * is worth a render. The times show whole seconds, and on a film the bar
+ * moves less than a pixel a second, so a reading within the same second is
+ * left out, unless a thousandth of the bar is less than a second (a short
+ * video). The length, a broadcast's window and how far behind live it is
+ * always count.
+ */
+export function clockShows(before: ClockReading, next: ClockReading): boolean {
+  if (next.duration !== before.duration || next.behind !== before.behind) return true;
+  if (!sameWindow(before.liveWindow, next.liveWindow)) return true;
+  if (Math.floor(next.position) !== Math.floor(before.position)) return true;
+  const kept = next.liveWindow;
+  const span = kept ? kept.live - kept.start : next.duration;
+  return span > 0 && Math.abs(next.position - before.position) >= span / BAR_STEPS;
 }
 
 export const INITIAL_SESSION_STATE: SessionState = {
@@ -223,6 +269,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   const special = options.type === 'series' && /:0:\d+$/.test(options.videoId);
   let stallTimer: number | undefined;
   let startTimer: number | undefined;
+  // Gives up on a stream auto-play chose that says nothing of itself (tuning metadataTimeoutMs).
+  let metadataTimer: number | undefined;
   // Judges a wait still going on, once it alone would make the stream count as struggling.
   let judgeTimer: number | undefined;
   let destroyed = false;
@@ -230,6 +278,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let live = false;
   // Whether the broadcast was last judged behind live, so a wobble at the boundary does not flicker.
   let wasBehind = false;
+  // The viewer moved back in the broadcast or paused it, so a stall does not take them to live.
+  let viewerBehind = false;
+  // When a stall last took the broadcast back to live by itself.
+  let autoLiveAt = -Infinity;
   let liveTimer: number | undefined;
   let firstTrusted: number | undefined;
   // The viewer's tracks for this stream, chosen again when another engine opens it (Try again).
@@ -237,6 +289,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let wantedText: string | null = null;
   // Shaka lets go of the video element asynchronously; the next engine waits for it.
   let releasing: Promise<void> = Promise.resolve();
+  // The status when the clock was last read into the state.
+  let tickStatus: SessionStatus | undefined;
+  // Where the viewer's jumps really land, by the tester's switch read now (landing.ts).
+  const landings = createLandingWatch(readLandingMode());
+  showLandings();
+  // Reads a paused jump's landing, once the TV has had a moment to say where it is.
+  let landingTimer: number | undefined;
 
   function release() {
     const old = engine;
@@ -251,9 +310,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     clearTimeout(stallTimer);
     clearTimeout(startTimer);
     clearTimeout(judgeTimer);
+    clearTimeout(metadataTimer);
     stallTimer = undefined;
     startTimer = undefined;
     judgeTimer = undefined;
+    metadataTimer = undefined;
   }
 
   /**
@@ -514,6 +575,59 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       () => fail(new PlaybackError('network', 'The stream did not start'), current),
       START_TIMEOUT_MS,
     );
+    armMetadata(current);
+  }
+
+  /**
+   * With the `metadataTimeoutMs` tuning switch set, a stream auto-play chose
+   * that has not said how long it is by then gives way to the next, as one
+   * that failed would: a server that takes the connection and sends nothing
+   * would otherwise hold the first picture up for the whole start time. Only
+   * when there is a next to go to, so the start time still has the last word,
+   * and never on a stream the viewer picked. Its clock stops, as the start's
+   * does, while the viewer has the stream paused before its first picture.
+   */
+  function armMetadata(current: number) {
+    clearTimeout(metadataTimer);
+    metadataTimer = undefined;
+    const limit = tuning.metadataTimeoutMs;
+    if (!(limit > 0) || !options.autoFailover || handPicked || viewerChose) return;
+    metadataTimer = window.setTimeout(() => {
+      metadataTimer = undefined;
+      if (current !== attempt || destroyed || startedPlaying) return;
+      // Read from the element too: Android's player says so without the event.
+      if (video.readyState >= HAVE_METADATA) return;
+      if (failovers >= MAX_FAILOVERS || !finder.next(tried)) return;
+      fail(new PlaybackError('network', 'The stream sent nothing'), current);
+    }, limit);
+  }
+
+  /** Where a jump may go: the video, and on a broadcast the part a rewind may land in. */
+  function jumpBounds(): LandingBounds {
+    const kept = liveWindow();
+    return {
+      duration: isFinite(video.duration) ? video.duration : Infinity,
+      window: kept ? rewindWindow(kept) : null,
+    };
+  }
+
+  function stopLandingTimer() {
+    clearTimeout(landingTimer);
+    landingTimer = undefined;
+  }
+
+  /**
+   * Reads where the watched jump landed. In 'again' a miss is jumped once
+   * more, and that second jump is not the viewer's: the engine, the tracker
+   * and the bar are not told, nothing is saved or offered, and the clock
+   * takes the bar there as it plays.
+   */
+  function readLanding(final: boolean) {
+    if (!engine) return;
+    const second = landings.read(video.currentTime, final, jumpBounds());
+    if (second === undefined) return;
+    stopLandingTimer();
+    video.currentTime = second;
   }
 
   const handlers: Array<[keyof HTMLMediaElementEventMap, () => void]> = [
@@ -535,6 +649,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       },
     ],
     [
+      'loadedmetadata',
+      () => {
+        if (!engine) return;
+        clearTimeout(metadataTimer);
+        metadataTimer = undefined;
+        playMark(finder, 'metadata');
+      },
+    ],
+    [
       'playing',
       () => {
         // From a stream let go of (its engine can still be telling, as Android's
@@ -546,10 +669,24 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         judgeLength(current);
         if (current !== attempt || !engine) return;
         clearTimers();
+        if (!startedPlaying) playMark(finder, 'first-frame');
         startedPlaying = true;
         const buffered = endBuffering();
         patch({ status: 'playing', failedOver: false, steppedDown: false, error: null });
         if (buffered) judgeBuffering(attempt);
+        // A stall left the broadcast well behind: back to live, as a TV channel would be.
+        const kept = buffered && current === attempt ? liveWindow() : null;
+        if (
+          kept &&
+          shouldReturnToLive(kept, video.currentTime, {
+            viewerBehind,
+            lastAt: autoLiveAt,
+            now: Date.now(),
+          })
+        ) {
+          autoLiveAt = Date.now();
+          session.goToLive();
+        }
       },
     ],
     [
@@ -594,6 +731,19 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       },
     ],
     [
+      'seeked',
+      () => {
+        if (!landings.seeked()) return;
+        // Playing, the next reading as the clock moves on says where it landed.
+        // Paused, no clock moves on: it is read once the TV has had a moment.
+        stopLandingTimer();
+        landingTimer = window.setTimeout(() => {
+          landingTimer = undefined;
+          if (video.paused) readLanding(true);
+        }, LANDING_SETTLE_MS);
+      },
+    ],
+    [
       'timeupdate',
       () => {
         // A stream let go of resets the element to 0, which is no place in the video.
@@ -604,7 +754,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         const kept = liveWindow();
         if (kept && noPlace(kept, position)) return;
         const duration = durationNow();
-        if (tracker?.update(position, Date.now())) save();
+        // Until a jump lands, the element can read back where it was sent,
+        // which 'learn' and 'again' put past where the viewer asked: the bar
+        // and the place saved stay where they asked.
+        const place = landings.placeOf(position);
+        if (tracker?.update(place, Date.now())) save();
         const trusted = tracker?.position();
         if (trusted !== undefined && firstTrusted === undefined) firstTrusted = trusted;
         // A live stream's clock starts wherever the broadcast is.
@@ -631,7 +785,16 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           }
         }
         // Until the clock settles (webOS reads 0 right after a resume), show the start point.
-        patch({ position: trusted ?? lastStartAt, duration, ...judge(position) });
+        const reading = { position: trusted ?? lastStartAt, duration, ...judge(place) };
+        // About four readings a second: only those that change what shows, or the first since
+        // the status changed, render the player again.
+        const shown = state.get();
+        if (shown.status !== tickStatus || clockShows(shown, reading)) {
+          tickStatus = shown.status;
+          patch(reading);
+        }
+        // Every reading, shown or not, can say where a jump landed.
+        readLanding(false);
       },
     ],
     [
@@ -728,8 +891,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       limitBefore = undefined;
       live = false;
       wasBehind = false;
+      viewerBehind = false;
+      autoLiveAt = -Infinity;
       clearInterval(liveTimer);
       firstTrusted = undefined;
+      // Another file lands its jumps its own way: nothing learnt carries over.
+      landings.reset();
+      stopLandingTimer();
       patch({
         status: 'loading',
         entry,
@@ -813,6 +981,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             firstTrusted = undefined;
             lastPosition = undefined;
           }
+          playMark(finder, 'load', created.name);
           await created.load(url, at);
         } catch (error) {
           listener.fatal(
@@ -843,9 +1012,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       stallTimer = undefined;
       if (!startedPlaying) {
         clearTimeout(startTimer);
+        clearTimeout(metadataTimer);
         startTimer = undefined;
+        metadataTimer = undefined;
       }
       pausedByViewer = true;
+      if (live) viewerBehind = true;
       video.pause();
     },
 
@@ -861,16 +1033,33 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     seek(position) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
-      const wanted = kept ? clampToWindow(kept, position) : position;
+      const wanted = kept ? clampToWindow(rewindWindow(kept), position) : position;
       // A jump forward never lands behind where it started, as one past a
       // live point read a moment late would.
       if (kept && wanted < video.currentTime && position > video.currentTime) return;
       const target = Math.max(0, Math.min(wanted, duration - 1));
+      // Back in a broadcast on purpose; forward to live again, not.
+      if (kept) viewerBehind = target < kept.live - kept.slack;
       endBuffering();
       clearTimeout(judgeTimer);
       judgeTimer = undefined;
       lastSeekAt = Date.now();
-      video.currentTime = target;
+      // In 'learn' the element is sent as much past the target as this stream's
+      // jumps usually fall short. The viewer's place stays the target.
+      const from = video.currentTime;
+      const aimed = landings.aim(target, from, jumpBounds());
+      stopLandingTimer();
+      video.currentTime = aimed;
+      // Before the first picture the engine is still finding its start, which it checks itself.
+      if (startedPlaying) {
+        landings.jumped({
+          wanted: target,
+          aimed,
+          from,
+          paused: video.paused,
+          stream: landingStream(engine?.name ?? null, state.get().entry?.facts),
+        });
+      }
       engine?.seeked?.();
       tracker?.seeked(target);
       // Back from the end it is paused there, not ended: Play goes on from it.
@@ -916,6 +1105,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
     trustedPosition: () => tracker?.position(),
 
+    liveWindow,
+
     carryOn,
 
     destroy() {
@@ -924,6 +1115,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       destroyed = true;
       clearTimers();
       clearInterval(liveTimer);
+      landings.reset();
+      stopLandingTimer();
       handlers.forEach(([event, handler]) => video.removeEventListener(event, handler));
       release();
     },

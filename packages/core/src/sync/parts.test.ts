@@ -471,6 +471,42 @@ describe('collectionPart', () => {
     expect(part.removedDefaults!()).toEqual([`a/${demo!.installId}`]);
   });
 
+  it('sees no change from a daily refresh that finds the same manifests, which still saves the time', async () => {
+    // As from the network: equal JSON, never the same objects.
+    const fetchJson = vi.fn((url: string) => {
+      const addon = DEFAULT_ADDONS.find((a) => a.transportUrl === url)!;
+      return Promise.resolve(JSON.parse(JSON.stringify(addon.manifest)) as unknown);
+    });
+    const storage = memoryKeyValueStore();
+    let time = 1000;
+    const collection = createAddonCollection({
+      storage,
+      fetchJson,
+      defaults: DEFAULT_ADDONS,
+      now: () => time,
+    });
+    const part = collectionPart(collection);
+    await collection.load();
+    const before = part.snapshot();
+    const listener = vi.fn();
+    part.subscribe(listener);
+    time = 5000;
+    await collection.refreshManifests(1000);
+
+    expect(fetchJson).toHaveBeenCalledTimes(DEFAULT_ADDONS.length);
+    expect(listener).not.toHaveBeenCalled();
+    const after = part.snapshot();
+    before.forEach((item, key) => {
+      if (key !== 'order') expect(after.get(key)).toBe(item);
+    });
+    expect(after.get('order')).toEqual(before.get('order'));
+    expect(collection.toStored().map((item) => item.fetchedAt)).toEqual(
+      DEFAULT_ADDONS.map(() => 5000),
+    );
+    const saved = (await storage.get('addons')) as StoredAddon[];
+    expect(saved.map((item) => item.fetchedAt)).toEqual(DEFAULT_ADDONS.map(() => 5000));
+  });
+
   it('counts defaults by address, whatever the given list', async () => {
     const { collection } = setup();
     await collection.load();

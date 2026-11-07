@@ -23,7 +23,7 @@ import { usePrefetch } from '../../player/prefetch';
 import { dayName } from './fixture';
 import { FIRST_FOLLOW_KEY, FollowButtons } from './FollowButtons';
 import { useReminder } from './use-reminder';
-import { useMinuteClock, useSportsFeed, useViewOptions } from './use-sports';
+import { useMinuteClock, useSportsFeed, useSportsMatcher, useViewOptions } from './use-sports';
 import styles from './EventScreen.module.css';
 
 function displayName(t: TFunction, event: SportEvent): string {
@@ -108,6 +108,7 @@ export function EventScreen({ event: opened }: { event: SportEvent }) {
   const feed = useSportsFeed();
   const now = useMinuteClock();
   const view = useViewOptions(feed.events, now);
+  useSportsMatcher();
   // The feed's copy, as matches gain sources or kick-offs while the page is open.
   const event = useMemo(
     () => feed.events.find((e) => e.key === opened.key) ?? opened,

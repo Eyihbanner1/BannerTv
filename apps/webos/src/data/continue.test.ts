@@ -153,12 +153,13 @@ describe('fillPlayedCards', () => {
   it('asks once a session, and does nothing when nothing changed', () => {
     watch('tt1', 'movie', 'tt1', 600);
     const walks = vi.spyOn(stores.progress, 'recent');
+    // A pass reads the history twice: for cards missing, and for series caught up.
     fillPlayedCards();
-    fillPlayedCards();
-    expect(walks).toHaveBeenCalledTimes(1);
-    watch('tt2', 'movie', 'tt2', 600);
     fillPlayedCards();
     expect(walks).toHaveBeenCalledTimes(2);
+    watch('tt2', 'movie', 'tt2', 600);
+    fillPlayedCards();
+    expect(walks).toHaveBeenCalledTimes(4);
     expect(metas.asked).toEqual(['tt1', 'tt2']);
   });
 
@@ -191,6 +192,45 @@ describe('fillPlayedCards', () => {
     fillPlayedCards();
     expect(metas.asked).toHaveLength(21);
     expect(metas.asked[20]).toBe('tt0');
+  });
+
+  it('looks again once a day at a series watched to its last listed episode', () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-06T12:00:00Z') });
+    try {
+      watch('tt7', 'series', 'tt7:1:2', 2990);
+      const seasonOne = meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2)]);
+      stores.played.record(playedCard(seasonOne, 'tt7:1:2', seasonOne));
+      expect(stores.played.get('tt7:1:2')?.next).toBeUndefined();
+      metas.answers.set('tt7', seasonOne);
+
+      fillPlayedCards();
+      expect(metas.asked).toEqual(['tt7']);
+      expect(stores.played.get('tt7:1:2')?.next).toBeUndefined();
+      // Nothing new the same day, however often Home shows.
+      fillPlayedCards();
+      expect(metas.asked).toEqual(['tt7']);
+
+      // A day on, season 2 is listed: the card learns of it, and is not marked filled.
+      vi.setSystemTime(Date.parse('2026-11-07T12:00:01Z'));
+      metas.answers.set('tt7', meta('tt7', 'series', [...seasonOne.videos, ep('tt7', 2, 1)]));
+      fillPlayedCards();
+      expect(metas.asked).toEqual(['tt7', 'tt7']);
+      expect(stores.played.get('tt7:1:2')).toMatchObject({
+        next: { videoId: 'tt7:2:1', season: 2, episode: 1 },
+      });
+      expect(stores.played.get('tt7:1:2')?.filled).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not look again at a series whose card it has just made', () => {
+    watch('tt7', 'series', 'tt7:1:2', 2990);
+    metas.answers.set('tt7', meta('tt7', 'series', [ep('tt7', 1, 1), ep('tt7', 1, 2)]));
+    fillPlayedCards();
+    fillPlayedCards();
+    expect(metas.asked).toEqual(['tt7']);
+    expect(stores.played.get('tt7:1:2')).toMatchObject({ episode: 2, filled: true });
   });
 
   it('waits for the fresh answer when the cached one is old', () => {

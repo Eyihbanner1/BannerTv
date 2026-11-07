@@ -2,12 +2,14 @@ import type { ContentType, MetaDetail, MetaPreview } from '@bannertv/protocol';
 import type { KeyValueStore } from '../storage';
 import type { Listener } from '../store';
 import { nextVideo } from './next';
-import { END_SECONDS, MIN_RESUME_SECONDS, type ProgressEntry } from './progress';
+import { END_SECONDS, isUnmarked, MIN_RESUME_SECONDS, type ProgressEntry } from './progress';
 
 const KEY = 'played';
 const MAX_CARDS = 200;
 /** Home shows at most this many titles to continue. */
 export const CONTINUE_LIMIT = 20;
+/** An episode that aired this recently is new: its tile says so. */
+export const NEW_EPISODE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * What Home needs to show a video that played, kept beside its progress: the
@@ -109,17 +111,26 @@ export function playedCard(
     if (video.episode !== undefined) card.episode = video.episode;
     if (video.title) card.episodeName = video.title;
   }
-  // Whether it has aired by then: a weekly show comes back to the row on its own.
-  const next = meta && video ? nextVideo(meta, videoId, Infinity) : undefined;
-  if (next) {
-    card.next = { videoId: next.id };
-    if (next.season !== undefined) card.next.season = next.season;
-    if (next.episode !== undefined) card.next.episode = next.episode;
-    if (next.title) card.next.name = next.title;
-    const released = next.released === undefined ? NaN : Date.parse(next.released);
-    if (isCount(released)) card.next.released = released;
-  }
+  const next = meta && video ? cardNext(meta, videoId) : undefined;
+  if (next) card.next = next;
   return card;
+}
+
+/**
+ * The episode after `videoId` in `meta`, as a card keeps it. Whether it has aired by then: a
+ * weekly show comes back to the row on its own once its release time passes. Undefined after
+ * the last episode the addon lists.
+ */
+export function cardNext(meta: MetaDetail, videoId: string): PlayedVideo['next'] {
+  const next = nextVideo(meta, videoId, Infinity);
+  if (!next) return undefined;
+  const result: NonNullable<PlayedVideo['next']> = { videoId: next.id };
+  if (next.season !== undefined) result.season = next.season;
+  if (next.episode !== undefined) result.episode = next.episode;
+  if (next.title) result.name = next.title;
+  const released = next.released === undefined ? NaN : Date.parse(next.released);
+  if (isCount(released)) result.released = released;
+  return result;
 }
 
 function readNext(value: unknown): PlayedVideo['next'] {
@@ -313,7 +324,7 @@ export interface ContinueItem {
   preview: MetaPreview;
   /** What Play opens: the video left part-way, or the next episode. */
   videoId: string;
-  /** Seconds to start at. */
+  /** Seconds to start at: for a resume, a few seconds before where it stopped (resumeLeadIn). */
   startAt: number;
   /** How far through, 0 to 1, when the duration is known. */
   progress?: number;
@@ -321,6 +332,8 @@ export interface ContinueItem {
   episode?: number;
   /** True when this is the episode after one that was finished. */
   upNext: boolean;
+  /** An episode up next that aired in the last week (NEW_EPISODE_MS). */
+  newEpisode?: true;
 }
 
 function previewOf(card: PlayedVideo): MetaPreview {
@@ -346,6 +359,7 @@ type ProgressReader = {
   recent(): readonly ProgressEntry[];
   get(videoId: string): ProgressEntry | undefined;
   resumeAt(videoId: string): number | undefined;
+  resumeFrom(videoId: string, now?: number): number | undefined;
 };
 
 /** How far through, 0 to 1, when the duration is known. */
@@ -357,11 +371,12 @@ function fraction(entry: ProgressEntry | undefined): number | undefined {
  * What a title's latest entry puts on the row, if anything. A video left
  * part-way resumes where it stopped. An episode stopped in its first seconds
  * starts again from the beginning. A finished episode, or one stopped in its
- * closing minute, gives way to the next one once it has aired (undated
- * episodes count as aired). Anything else is left out: a finished film, the
- * end of a series, a film barely started, a video whose length never became
- * known, such as a live broadcast, and one kept only to resume, such as a
- * sports replay (see ProgressEntry.continueRow).
+ * closing minute, or marked watched, gives way to the next one once it has
+ * aired (undated episodes count as aired). Anything else is left out: a
+ * finished film, the end of a series, a film barely started, a video whose
+ * length never became known, such as a live broadcast, and one kept off the
+ * row, such as a sports replay or a title the viewer took off it (see
+ * ProgressEntry.continueRow).
  */
 export function continueItem(
   entry: ProgressEntry,
@@ -369,14 +384,16 @@ export function continueItem(
   progress: ProgressReader,
   now: number,
 ): ContinueItem | undefined {
-  if (entry.duration <= 0 || entry.continueRow === false) return undefined;
+  // Of unknown length, as a live broadcast is: left out, unless the viewer marked it watched.
+  if ((entry.duration <= 0 && !entry.watched) || entry.continueRow === false) return undefined;
   const preview = previewOf(card);
-  const resumeAt = progress.resumeAt(entry.videoId);
-  if (resumeAt !== undefined) {
+  // A few seconds before where it stopped (resumeLeadIn), as every resume starts.
+  const resumeFrom = progress.resumeFrom(entry.videoId, now);
+  if (resumeFrom !== undefined) {
     const item: ContinueItem = {
       preview,
       videoId: entry.videoId,
-      startAt: resumeAt,
+      startAt: resumeFrom,
       upNext: false,
     };
     const done = fraction(entry);
@@ -398,7 +415,7 @@ export function continueItem(
   if (entry.watched || ending) {
     const next = card.next;
     if (!next || (next.released !== undefined && next.released > now)) return undefined;
-    const startAt = progress.resumeAt(next.videoId);
+    const startAt = progress.resumeFrom(next.videoId, now);
     const item: ContinueItem = {
       preview,
       videoId: next.videoId,
@@ -410,6 +427,7 @@ export function continueItem(
     if (done !== undefined) item.progress = done;
     if (next.season !== undefined) item.season = next.season;
     if (next.episode !== undefined) item.episode = next.episode;
+    if (next.released !== undefined && now - next.released < NEW_EPISODE_MS) item.newEpisode = true;
     return item;
   }
   return undefined;
@@ -417,7 +435,8 @@ export function continueItem(
 
 /**
  * The titles to continue, most recently watched first: for each title, what
- * its last video played puts on the row (see continueItem). Titles whose last
+ * its last video played (or marked watched) puts on the row (see
+ * continueItem). Titles whose last
  * video has no card are left out. `now` decides which next episodes have aired.
  */
 export function continueWatching(
@@ -430,11 +449,39 @@ export function continueWatching(
   const seen = new Set<string>();
   for (const entry of progress.recent()) {
     if (items.length >= limit) break;
-    if (seen.has(entry.metaId)) continue;
+    // Marked not watched is not where the viewer is up to.
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
     seen.add(entry.metaId);
     const card = played(entry.videoId);
     const item = card && continueItem(entry, card, progress, now);
     if (item) items.push(item);
   }
   return items;
+}
+
+/**
+ * The series the viewer is caught up on: the last video played of each is an episode finished
+ * (or marked watched) whose card knows of nothing after it, as when a finale played before the
+ * next season was listed. Most recent first, at most `limit`. A screen looks at their episode
+ * lists again now and then (with cardNext), so a new season brings them back to the row.
+ */
+export function caughtUpSeries(
+  progress: ProgressReader,
+  played: (videoId: string) => PlayedVideo | undefined,
+  limit = CONTINUE_LIMIT,
+): Array<{ entry: ProgressEntry; card: PlayedVideo }> {
+  const found: Array<{ entry: ProgressEntry; card: PlayedVideo }> = [];
+  const seen = new Set<string>();
+  for (const entry of progress.recent()) {
+    if (found.length >= limit) break;
+    if (isUnmarked(entry) || seen.has(entry.metaId)) continue;
+    seen.add(entry.metaId);
+    if (entry.continueRow === false || entry.type !== 'series') continue;
+    const card = played(entry.videoId);
+    if (!card || card.episode === undefined || card.next) continue;
+    if (progress.resumeAt(entry.videoId) !== undefined) continue;
+    const ending = entry.duration > 0 && entry.duration - entry.position < END_SECONDS;
+    if (entry.watched || ending) found.push({ entry, card });
+  }
+  return found;
 }

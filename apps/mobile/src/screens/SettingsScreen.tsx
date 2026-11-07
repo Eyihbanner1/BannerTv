@@ -189,6 +189,7 @@ export function SettingsScreen() {
                 : {})}
               onPress={() => router.push('/addons')}
             />
+            <ListRow title={t('homeRows.title')} onPress={() => router.push('/home-rows')} />
             {isMain && section.shown ? (
               <ListRow
                 title={t('phone.account')}

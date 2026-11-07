@@ -1,27 +1,37 @@
+// First, so it reads the clock as the bundle starts to run (a launch mark).
+import { bootInfo } from './platform/boot';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../../brand/tokens/tokens.css';
 import './styles/fonts.css';
 import './styles/base.css';
 import { App } from './app/App';
+import { startBootMarks } from './app/boot-marks';
 import { startAddons } from './data/addons';
 import { checkServiceStatus } from './data/api';
 import { startLibraryData } from './data/library';
 import { startOpenLinks } from './data/open-link';
 import { startPlaybackData } from './data/playback';
 import { askAgainOnRelaunch } from './data/profiles';
-import { startSports } from './data/sports';
+import {
+  holdSportsMatcher,
+  startSports,
+  traceSportsMatcher,
+  wantSportsMatcher,
+} from './data/sports';
 import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
 import { startWatchNext } from './data/watch-next';
 import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { androidWatchNext, initAndroid, isAndroid, takeAndroidLink } from './platform/android';
-import { bootInfo } from './platform/boot';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
 import { initInputMode } from './platform/input-mode';
-import { applyTuning, changedTuning } from './platform/tuning';
+import { afterLaunch } from './platform/launch';
+import { bootMark, mark } from './platform/marks';
+import { applyTuning, changedTuning, tuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
+import { readPlayMarks } from './player/play-marks';
 
 function fitToWindow(root: HTMLElement) {
   // The UI is drawn for 1920x1080. On the TV that is the window; on a laptop or a phone,
@@ -51,6 +61,8 @@ function start() {
     document.documentElement.classList.add('low-power');
   }
   applyTuning(document.documentElement);
+  // The stages of the latest Play, read from the web inspector.
+  if (tuning.marks) window.__bannertvPlay = readPlayMarks;
   if (!isWebOS()) {
     fitToWindow(root);
     window.addEventListener('resize', () => fitToWindow(root));
@@ -68,10 +80,17 @@ function start() {
   startLibraryData();
   checkServiceStatus();
   startTrakt();
+  if (tuning.matcherAt === 'idle') {
+    holdSportsMatcher();
+    afterLaunch(wantSportsMatcher);
+  }
   void startSports();
   startSync();
   const publishWatchNext = androidWatchNext();
   if (publishWatchNext) startWatchNext(publishWatchNext);
+  // After the reads above have started, so watching them changes no order.
+  startBootMarks();
+  if (tuning.marks) traceSportsMatcher(mark);
 
   createRoot(root).render(
     <StrictMode>
@@ -79,6 +98,7 @@ function start() {
     </StrictMode>,
   );
   console.info('[BannerTV] started', bootInfo, 'tuning', changedTuning());
+  bootMark('boot:start-end');
 }
 
 start();
