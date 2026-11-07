@@ -50,6 +50,8 @@ export interface TracksPanelProps {
    * the stream has no audio to choose from.
    */
   audioRows: ReactNode;
+  /** Opens the subtitle style, from the foot of the Subtitles tab. */
+  onStyle?: () => void;
 }
 
 /**
@@ -98,6 +100,7 @@ export function TracksPanel(props: TracksPanelProps) {
             open={open}
             onOpen={setOpen}
             onChoose={props.onChoose}
+            {...(props.onStyle ? { onStyle: props.onStyle } : {})}
           />
         ) : tab === 'audio' ? (
           <AudioChoices rows={props.audioRows} />
@@ -118,6 +121,7 @@ function SubtitleChoices({
   open,
   onOpen,
   onChoose,
+  onStyle,
 }: {
   subtitles: Subtitles;
   entry: StreamEntry | null;
@@ -126,6 +130,7 @@ function SubtitleChoices({
   open: string | null;
   onOpen: (language: string) => void;
   onChoose: (choice: SubtitleChoice) => void;
+  onStyle?: () => void;
 }) {
   const { t } = useTranslation();
   const { choice } = subtitles;
@@ -203,6 +208,9 @@ function SubtitleChoices({
         <Text style={styles.note}>{t('player.stillAsking', { count: subtitles.pending })}</Text>
       ) : groups.length === 0 ? (
         <Text style={styles.note}>{t('player.noSubtitles')}</Text>
+      ) : null}
+      {onStyle ? (
+        <PanelOption label={t('player.style')} detail={t('phone.styleFor')} onPress={onStyle} />
       ) : null}
     </ScrollView>
   );

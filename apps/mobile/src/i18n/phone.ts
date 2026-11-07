@@ -14,6 +14,8 @@ const PHONE = {
   },
   play: 'Play',
   findingStream: 'Finding the best stream',
+  streamReady: 'Best stream ready',
+  noStreamYet: 'No stream found yet. All streams has the full list.',
   opening: 'Opening {{title}}',
   seasonPicker: 'Choose a season',
   more: 'More',
@@ -22,6 +24,8 @@ const PHONE = {
   audio: 'Audio',
   subtitles: 'Subtitles',
   subtitlesOff: 'Off',
+  styleFor: 'Size, colour, background and position of subtitles',
+  subtitleStyle: 'Subtitle style',
   sources: 'Streams',
   nextEpisode: 'Next episode',
   nextIn: 'Next episode in {{seconds}}',
@@ -51,6 +55,12 @@ const PHONE = {
   libraryAndAccounts: 'Library and accounts',
   addonsCount: '{{count}} installed',
   moreOptions: 'More options',
+  trakt: 'Trakt',
+  traktSteps: 'Open the Trakt page, sign in there, and enter this code:',
+  traktOpen: 'Copy code and open {{url}}',
+  traktCopied:
+    'The code is copied, so you can paste it. Come back here when Trakt says you’re done.',
+  pictureInPicture: 'Picture-in-picture',
   whoIsWatching: "Who's watching?",
   pinFor: 'Enter the PIN for {{name}}',
   addons: 'Addons',
@@ -90,6 +100,7 @@ const PHONE = {
   welcomeJoinLead: 'Already use BannerTV on your TV? Join its account to bring your profiles here.',
   episodes: 'Episodes',
   upNext: 'Up next',
+  moreFrom: 'More {{genre}} from {{addon}}',
   close: 'Close',
   // Settings, Languages and picture (the TV's words where they fit a phone).
   picture: {
@@ -153,6 +164,11 @@ const OVERRIDES = {
   },
   library: { emptyList: PHONE.emptyList },
   details: { trailerFailed: 'The trailer didn’t open.' },
+  trakt: {
+    failed: { network: 'BannerTV couldn’t reach Trakt. Check the phone is online and try again.' },
+    signOutMessage:
+      'BannerTV stops syncing with Trakt on this profile. My List and where you stopped stay on this phone.',
+  },
   welcome: {
     lead: PHONE.welcomeLead,
     ready:

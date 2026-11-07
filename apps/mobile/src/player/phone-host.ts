@@ -51,6 +51,16 @@ const PHONE_CAPABILITIES = {
 /** Whether a stream is open, so the player screen draws Android's picture. */
 export const pictureShown = createStore(false);
 
+/** Whether the film plays in a small window over other apps (picture-in-picture). */
+export const pictureInPicture = createStore(false);
+
+/**
+ * How long a move to the background waits before it pauses. Android may report the app going to
+ * the background just before it says the film went to picture-in-picture, and that film must
+ * keep playing.
+ */
+export const BACKGROUND_PAUSE_DELAY_MS = 600;
+
 let player: VideoPlayer | null = null;
 let loadId = 0;
 let hasMedia = false;
@@ -240,11 +250,22 @@ interface CuesModule {
 let cuesModule: CuesModule | null = null;
 /** The subtitle track whose lines the page draws, and the stream it was chosen for. */
 let drawnText: { id: string; load: number } | null = null;
+/** Whether the page draws the chosen text track's lines, as the last subtitle choice said. */
+let pageDrawsText = false;
+
+/**
+ * The page's lines can't show in picture-in-picture's small window, which shows only the picture,
+ * so Media3 draws the file's own lines there, in its own look, until the window closes.
+ */
+function sendDraw(): void {
+  cuesModule?.draw(pageDrawsText && !pictureInPicture.get());
+}
 
 function watchCues(created: VideoPlayer): void {
   cuesModule = requireOptionalNativeModule<CuesModule>('BannerCues');
   if (!cuesModule) return;
   cuesModule.watch(created);
+  pictureInPicture.subscribe(sendDraw);
   cuesModule.addListener('cues', ({ at, cues }) => {
     // Only lines of the track the page chose, for the stream open now.
     if (!hasMedia || !drawnText || drawnText.load !== loadId) return;
@@ -255,7 +276,8 @@ function watchCues(created: VideoPlayer): void {
 /** The page chose subtitle track `id` (or none), and whether it draws the lines itself. */
 function drawText(id: string | null, pageDraws: boolean): void {
   drawnText = id !== null && pageDraws ? { id, load: loadId } : null;
-  cuesModule?.draw(pageDraws);
+  pageDrawsText = pageDraws;
+  sendDraw();
 }
 
 function ensurePlayer(): VideoPlayer {
@@ -485,12 +507,17 @@ export function installPhoneHost(): void {
     emit({ type: 'relaunch' }),
   );
   AppState.addEventListener('change', (next) => {
-    // Nothing plays in the background (the TV app does the same). The player screen pauses the
-    // session too; the state news follows its pause command, so the session knows the viewer
-    // paused. Sent from here first, it would leave a stream still opening stuck as loading.
-    if (next === 'background' && hasMedia && player) {
-      wantPlay = false;
-      player.pause();
-    }
+    // Nothing plays in the background (the TV app does the same), except in picture-in-picture.
+    // The player screen pauses the session too; the state news follows its pause command, so
+    // the session knows the viewer paused. Sent from here first, it would leave a stream still
+    // opening stuck as loading.
+    if (next !== 'background') return;
+    setTimeout(() => {
+      if (AppState.currentState === 'active' || pictureInPicture.get()) return;
+      if (hasMedia && player) {
+        wantPlay = false;
+        player.pause();
+      }
+    }, BACKGROUND_PAUSE_DELAY_MS);
   });
 }

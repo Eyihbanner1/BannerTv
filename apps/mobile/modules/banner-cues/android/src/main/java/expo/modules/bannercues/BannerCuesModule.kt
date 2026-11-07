@@ -53,7 +53,13 @@ class BannerCuesModule : Module() {
     Function("draw") { on: Boolean ->
       appContext.mainQueue.launch {
         pageDraws = on
-        if (!on) subtitleView()?.visibility = View.VISIBLE
+        if (!on) {
+          subtitleView()?.visibility = View.VISIBLE
+        } else {
+          // The lines on screen now, so the page shows them at once and Media3's view, which
+          // drew them while the page didn't (picture-in-picture), hides them again.
+          watched?.get()?.let { send(it.player.currentCues) }
+        }
       }
     }
 
