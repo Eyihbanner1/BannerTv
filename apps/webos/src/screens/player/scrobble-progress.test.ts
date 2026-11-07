@@ -1369,6 +1369,62 @@ describe('onStatus and onClose', () => {
     ).toEqual(['start(0)', 'pause(21)', 'stop(22)']);
   });
 
+  it('keeps a skip the player takes once a film has failed, for the file opened after it', () => {
+    // The skip was pressed as the film played; the problem box came before
+    // it landed, and the player takes it there. Try another opens a 60 s
+    // clip where the skip put the film.
+    const clip = (at: number): Parameters<typeof trakt>[0] => [
+      [played(at, 0, 'loading', false, CLIP), known, at, 0],
+      [played(0, 60, 'playing', true), known, at, 0],
+      [played(1, 60, 'paused', true), known, at, 0],
+    ];
+    // A film that gives no length: by the running time.
+    expect(
+      trakt([
+        [played(2160, 0, 'loading'), known, 2160, 0],
+        [played(2160, 0, 'playing'), known, 2160, 0],
+        [played(2220, 0, 'playing'), known, 2220, 0],
+        [played(2220, 0, 'failed'), known, 2220, 0],
+        [played(2200, 0, 'failed'), known, 2200, 1],
+        ...clip(2200),
+      ]),
+    ).toEqual(['start(77)', 'pause(78)', 'stop(78)']);
+    // A reading as it fails that no move the player took put there is none.
+    expect(
+      trakt([
+        [played(2160, 0, 'loading'), known, 2160, 0],
+        [played(2160, 0, 'playing'), known, 2160, 0],
+        [played(2220, 0, 'playing'), known, 2220, 0],
+        [played(2220, 0, 'failed'), known, 2220, 0],
+        [played(2160, 0, 'failed'), known, 2220, 0],
+        ...clip(2220),
+      ]),
+    ).toEqual(['start(77)', 'pause(79)', 'stop(79)']);
+    // A film that showed its own length, which goes as it fails: by that
+    // length, never where it was before the viewer took it back.
+    expect(
+      trakt([
+        [played(1640, 2000, 'loading'), known, 1640, 0],
+        [played(1640, 2000, 'playing'), known, 1640, 0],
+        [played(1700, 2000, 'playing'), known, 1700, 0],
+        [played(1700, 2000, 'failed'), known, 1700, 0],
+        [played(1700, 0, 'failed'), known, 1700, 0],
+        [played(1000, 0, 'failed'), known, 1000, 1],
+        ...clip(1000),
+      ]),
+    ).toEqual(['start(82)', 'pause(50)', 'stop(50)']);
+    // Before the film played, a skip it takes as it fails is a move as ever.
+    expect(
+      trakt([
+        [played(600, 0, 'loading'), known, 600, 0],
+        [played(600, 0, 'failed'), known, 600, 0],
+        [played(1200, 0, 'failed'), known, 1200, 1],
+        [played(1200, 0, 'loading', false, OTHER), known, 1200, 0],
+        [played(1200, 0, 'playing', false, OTHER), known, 1200, 0],
+      ]),
+    ).toEqual(['start(43)', 'stop(43)']);
+  });
+
   it('keeps a film’s place through a Try again that fails as soon as it plays, for a clip after it', () => {
     // The film gives no length and plays to 600 s, then fails. Try again
     // opens it there; it plays a second, or stops to buffer, and fails. Try

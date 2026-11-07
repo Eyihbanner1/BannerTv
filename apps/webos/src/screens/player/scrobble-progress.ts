@@ -359,7 +359,23 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         forgetUnmeasured(state.entry, clipLength(linkLength));
         return;
       }
-      if ((!underWay && !moved) || wasClip) return;
+      if (wasClip) return;
+      if (!underWay && !moved) {
+        // A skip the player takes once the file played and failed (one
+        // pressed before the problem box lands behind it): the next file
+        // opens there. It is this opening's place, by the length it showed.
+        if (took && played && state.status === 'failed') {
+          reached = {
+            position: state.position,
+            duration: reached?.duration ?? 0,
+            entry: state.entry,
+            moved: false,
+            ran,
+            ranTo,
+          };
+        }
+        return;
+      }
       if (played && Math.abs(state.position - (origin ?? state.position)) > SAME_PLACE_S) {
         ran = true;
       }
