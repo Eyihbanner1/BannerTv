@@ -153,6 +153,10 @@ test('with the controls up, Skip intro waits above the bar: Up from the bar reac
   await expect(skip).toHaveCount(0);
   await expect(card).toHaveCount(0);
   await expectFocus(page, 'player-surface');
+  // And it stays there: nothing moves it on to the hidden Pause a moment later,
+  // as the focus library's own restore did on a busy TV (300 ms after a focused control goes).
+  await page.waitForTimeout(500);
+  await expectFocus(page, 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 });
 

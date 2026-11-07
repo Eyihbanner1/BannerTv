@@ -424,7 +424,7 @@ test("a profile with a PIN keeps its history off Android's home screen", async (
   expect((await androidCalls(page)).watchNext).toEqual([[]]);
 });
 
-test('a Watch Next card opens its title on Details, ready to resume, cold or while the app runs', async ({
+test('a Watch Next card opens its title on Details, ready to resume or on its episode, cold or while the app runs', async ({
   page,
 }) => {
   const errors = watchErrors(page);
@@ -443,6 +443,8 @@ test('a Watch Next card opens its title on Details, ready to resume, cold or whi
   // Pressed while the app runs, with one profile nobody is asked: the title opens at once.
   await cardPressed(page, { type: 'series', meta: SERIES, video: `${SERIES}:1:2` });
   await expect(page.getByRole('region', { name: 'Morevna Project' })).toBeVisible();
+  // A card for the next episode opens the series' episodes on that episode.
+  await expectFocus(page, 'details-episodes-1');
   expect(await linkWaiting(page)).toBe(false);
   await androidSays(page, { type: 'key', key: 'Back' });
   await expectFocus(page, 'home-continue-tile-0');
