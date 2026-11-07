@@ -29,7 +29,8 @@ export const TMDB_POLICY: CachePolicy = {
 // version: a build that reads them differently does not get the old shape.
 const KEY = 'tmdb:2';
 
-export type TmdbImageSize = 'w92' | 'w185' | 'w300' | 'w500' | 'w780' | 'w1280' | 'original';
+export type TmdbImageSize =
+  'w92' | 'w185' | 'w300' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original';
 
 /** The address of a TMDB image at a size, or undefined when there is no usable path. */
 export function tmdbImageUrl(path: string | undefined, size: TmdbImageSize): string | undefined {

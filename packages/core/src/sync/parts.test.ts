@@ -252,6 +252,48 @@ describe('watchPart', () => {
     expect(played.get('tt1')).toBeUndefined();
   });
 
+  it('sends when a video was last marked not watched, compares it, and hands it on', async () => {
+    const { progress, played } = stores();
+    const unwatched = {
+      metaId: 'tt5',
+      type: 'movie' as const,
+      videoId: 'tt5',
+      position: 0,
+      duration: 6000,
+      updatedAt: 4000,
+      watched: false,
+      unmarkedAt: 4000,
+    };
+    // The progress store keeps the field once the Mark as unwatched work lands; here it is shown one.
+    const shown = { ...progress, recent: () => [unwatched], get: () => unwatched };
+    const part = watchPart('main', shown, played);
+    expect(part.snapshot().get('tt5')!.v).toEqual({
+      metaId: 'tt5',
+      type: 'movie',
+      position: 0,
+      duration: 6000,
+      watched: false,
+      unmarkedAt: 4000,
+    });
+    const base = { metaId: 'tt5', type: 'movie', position: 0, duration: 6000, watched: false };
+    expect(part.compare!('tt5', { ...base, unmarkedAt: 4000 })).not.toEqual(
+      part.compare!('tt5', base),
+    );
+
+    const adopt = vi.spyOn(progress, 'adopt');
+    const plain = watchPart('main', progress, played);
+    await plain.load();
+    await plain.adopt(
+      change({
+        tt5: { t: 4000, v: { ...base, unmarkedAt: 4000 } },
+        tt6: { t: 4100, v: { ...base, metaId: 'tt6', unmarkedAt: 'soon' } },
+      }),
+    );
+    const handed = adopt.mock.calls[0]![0].set!;
+    expect(handed.find((entry) => entry.videoId === 'tt5')!.unmarkedAt).toBe(4000);
+    expect('unmarkedAt' in handed.find((entry) => entry.videoId === 'tt6')!).toBe(false);
+  });
+
   it("marks Trakt's progress and leaves it out of the person's own data", async () => {
     const { progress, played, setTime } = stores(3000);
     const part = watchPart('main', progress, played);

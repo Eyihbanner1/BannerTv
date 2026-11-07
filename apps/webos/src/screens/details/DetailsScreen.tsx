@@ -1,4 +1,4 @@
-import { kidsTitleAllowed, ratingAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
+import { kidsDetailsAllowed, type TmdbDetails, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { FocusContext, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import type { TFunction } from 'i18next';
@@ -266,25 +266,15 @@ export function DetailsScreen({ type, id, preview, video, visit }: DetailsScreen
   const failed = state.status === 'error';
   const tmdb = useTmdbDetails(type, id);
   const extra = tmdb.details;
-  // A kids profile plays a title only once its full details are in. With a
-  // UK rating from TMDB, the rating decides, within the profile's (the
-  // strictest of that country's ratings, so a 15 on disc outranks a PG at the
-  // cinema); without one, the details must list it as Family. Either way no genre that is not
-  // for children (Cinemeta's Family rows hold PG films its details tag only
-  // Animation or Adventure).
+  // A kids profile plays a title only once its full details are in, by the
+  // rule the phone uses too (kidsDetailsAllowed): TMDB's strictest UK rating
+  // within the profile's and no genre not for children, or without a rating,
+  // a Family listing.
   const kids = isKidsProfile();
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
-  const kidsRating = extra?.strictestCertificate ?? extra?.certificate;
   const kidsAllowed =
-    !kids ||
-    (kidsDecided &&
-      meta !== undefined &&
-      (kidsRating === undefined
-        ? kidsTitleAllowed(meta)
-        : kidsMax !== undefined &&
-          ratingAllowed(kidsRating, kidsMax) &&
-          kidsTitleAllowed(meta, true)));
+    !kids || (kidsDecided && meta !== undefined && kidsDetailsAllowed(meta, extra, kidsMax));
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;
   // Titles without episodes get Watch, which plays the addon's default video.
   const canWatch = kidsAllowed && (isMovie || (meta !== undefined && !hasEpisodes));

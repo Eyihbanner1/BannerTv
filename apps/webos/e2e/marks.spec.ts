@@ -88,6 +88,38 @@ test('Details opens a series at the episode after the one finished, with Next on
   expect(errors).toEqual([]);
 });
 
+test('Back from the episode Details opened on, far down the season, returns to it', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, {
+    progress: [
+      {
+        metaId: SERIES,
+        type: 'series',
+        videoId: `${SERIES}:1:7`,
+        position: 1500,
+        duration: 1500,
+        watched: true,
+      },
+    ],
+  });
+  await mockPlayback(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${CONTINUE_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  // The last of season 1's eight, below the five in view at the top.
+  await press(page, 'Enter', 'details-episodes-7');
+  // Played straight away, without moving in the list first.
+  await press(page, 'Enter', 'player-surface');
+  await pressBack(page);
+  await expectFocus(page, 'details-episodes-7');
+  await expect(page.getByText('8. Season 1 episode 8')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('OK on an episode not out yet says when it is out, and opens nothing', async ({ page }) => {
   await mockAddons(page, { upcoming: [`${SERIES}:1:2`] });
   const mock = await mockPlayback(page);

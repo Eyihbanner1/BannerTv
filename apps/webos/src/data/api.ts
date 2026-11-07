@@ -11,16 +11,18 @@ export interface ServiceStatus {
   trakt: boolean;
   /** The service has TMDB's key, so Details asks TMDB. */
   tmdb: boolean;
+  /** The service has Search's TMDB routes, so Search asks TMDB too. */
+  search: boolean;
 }
 
-const OFF: ServiceStatus = { trakt: false, tmdb: false };
+const OFF: ServiceStatus = { trakt: false, tmdb: false, search: false };
 // The last answer, so Trakt and TMDB show at once on the next launch.
 const KEY = 'bannertv.apiStatus';
 
 function readStatus(value: unknown): ServiceStatus | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { trakt, tmdb } = value as Record<string, unknown>;
-  return { trakt: trakt === true, tmdb: tmdb === true };
+  const { trakt, tmdb, search } = value as Record<string, unknown>;
+  return { trakt: trakt === true, tmdb: tmdb === true, search: search === true };
 }
 
 function readSaved(): ServiceStatus {
@@ -52,6 +54,7 @@ function post(path: string, body: string, timeoutMs: number): Promise<Response> 
 /**
  * Asks the service what it can do. A service that answers without the keys,
  * or is not there, turns Trakt and TMDB off; no answer at all keeps the last one.
+ * A service from before Search's routes says nothing of them, so Search leaves TMDB alone.
  */
 export function checkServiceStatus(): void {
   if (!API_SERVICE) return;
@@ -67,7 +70,13 @@ export function checkServiceStatus(): void {
     .then((status) => {
       if (!status) return;
       const current = serviceStatus.get();
-      if (current.trakt !== status.trakt || current.tmdb !== status.tmdb) serviceStatus.set(status);
+      if (
+        current.trakt !== status.trakt ||
+        current.tmdb !== status.tmdb ||
+        current.search !== status.search
+      ) {
+        serviceStatus.set(status);
+      }
       try {
         localStorage.setItem(KEY, JSON.stringify(status));
       } catch {

@@ -1,4 +1,5 @@
 import {
+  type FollowSet,
   replayedKeys,
   type SportEvent,
   type SportsDay,
@@ -9,6 +10,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useScreenSlot } from '../../app/screen-slot';
 import {
   sportsFeed,
+  sportsFollows,
   sportsMatcher,
   sportsState,
   wantSports,
@@ -79,9 +81,18 @@ export function useWantSports(day: SportsDay | null, light = false): void {
   }, [day, light, slot]);
 }
 
-/** What states and rows are worked out with, new each minute or when events change. */
+/** The teams and competitions the profile follows: a new object only when they change. */
+export function useFollows(): FollowSet {
+  return useSyncExternalStore(sportsFollows.subscribe, sportsFollows.set);
+}
+
+/**
+ * What states and rows are worked out with, new each minute, when events
+ * change or when the profile follows or unfollows something.
+ */
 export function useViewOptions(events: readonly SportEvent[], now: number): ViewOptions {
   const matcher = useSyncExternalStore(sportsMatcher.subscribe, sportsMatcher.get);
+  const follows = useFollows();
   const replayed = useMemo(() => replayedKeys(events), [events]);
   return useMemo(
     () => ({
@@ -89,8 +100,9 @@ export function useViewOptions(events: readonly SportEvent[], now: number): View
       firstSeen: (event: SportEvent) => sportsFeed.firstSeen(event),
       replayed,
       matcher,
+      follows,
     }),
-    [now, replayed, matcher],
+    [now, replayed, matcher, follows],
   );
 }
 

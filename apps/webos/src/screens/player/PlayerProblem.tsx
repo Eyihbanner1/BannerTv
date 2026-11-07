@@ -1,6 +1,8 @@
+import type { InstalledAddon } from '@bannertv/core';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
 import { Overlay } from '../../components/Overlay';
+import { addonsDidntAnswer } from '../../data/describe';
 import type { PlaybackError } from '../../player/engines/types';
 import styles from './PlayerScreen.module.css';
 
@@ -15,6 +17,8 @@ interface PlayerProblemProps {
   onAllStreams: () => void;
   onRetry: () => void;
   onBack: () => void;
+  /** Those addons, so the message can name them. */
+  failedNames: readonly InstalledAddon[];
 }
 
 /**
@@ -42,9 +46,7 @@ export function PlayerProblem(props: PlayerProblemProps) {
       <h2 className={styles.problemTitle}>{title}</h2>
       <p className={styles.problemMessage}>{message}</p>
       {failedAddons > 0 && (
-        <p className={styles.problemMessage}>
-          {t('player.problem.addonsFailed', { count: failedAddons })}
-        </p>
+        <p className={styles.problemMessage}>{addonsDidntAnswer(t, props.failedNames)}</p>
       )}
       <div className={styles.problemActions}>
         {canTryAnother && (

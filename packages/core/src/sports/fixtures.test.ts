@@ -228,6 +228,60 @@ describe('the public sports addons, as captured', () => {
   });
 });
 
+describe('rows for rugby, cricket, motor racing and fight sports, as captured', () => {
+  const competitionOf = (text: string) => find(text).competition;
+
+  it('gives each rugby competition the dictionary names its own row', () => {
+    // Sports Streams names them "English Prem Rugby", "United Rugby Championship", "French Top 14".
+    expect(competitionOf('Bristol Bears vs Leicester Tigers').key).toBe('rugby.premiership');
+    expect(competitionOf('Connacht vs Leinster').key).toBe('rugby.urc');
+    expect(competitionOf('ASM Clermont Auvergne vs Racing').key).toBe('rugby.top14');
+    // Rugby league's World Cup is not rugby union's.
+    expect(competitionOf('England Rugby League vs Papua New Guinea').key).toBe(
+      'rugby-league.world-cup',
+    );
+    expect(find('Connacht vs Leinster').note).toBeUndefined();
+  });
+
+  it('reads the cricket format from the stage when the item names no competition', () => {
+    expect(competitionOf('Bangladesh vs West Indies - 1st Test Day 1')).toMatchObject({
+      key: 'cricket.test',
+      round: '1st Test Day 1',
+    });
+    expect(competitionOf('New Zealand vs India - 4th T20I').key).toBe('cricket.t20i');
+    expect(competitionOf('New Zealand vs India - 1st ODI').key).toBe('cricket.odi');
+    // Named by its second genre, "T20I Series".
+    expect(competitionOf('New Zealand Cricket vs India Cricket').key).toBe('cricket.t20i');
+    // A tri-series the dictionary does not know stays in the cricket row.
+    expect(competitionOf('Sri Lanka vs England').name).toBe('Cricket');
+  });
+
+  it('gives Formula 1 and MotoGP their rows, sessions included', () => {
+    expect(competitionOf('Mexico City Grand Prix Practice 1').key).toBe('f1');
+    expect(competitionOf('Malaysia Sprint Race').key).toBe('motogp');
+  });
+
+  it('puts MMA promotions in their rows, and the rest of a Fight catalog by sport', () => {
+    expect(find('UFC Fight Night 292').competition.key).toBe('ufc');
+    expect(find('Oktagon 96').competition.key).toBe('oktagon');
+    // "ONE Championship" in a catalog called Fight is MMA, not boxing.
+    const one = find('ONE Friday Fights 176');
+    expect(one.sport).toBe('mma');
+    expect(one.competition.key).toBe('one');
+    // No competition named: the boxing row.
+    expect(competitionOf('Canelo Álvarez vs Christian Mbilli').name).toBe('Boxing');
+  });
+
+  it('orders the rows: competitions first, then each sport’s own row', () => {
+    const friday = buildDay(events, '2026-10-30', { now: NOW, matcher }).map(
+      (group) => group.competition.key,
+    );
+    expect(friday.indexOf('rugby.premiership')).toBeGreaterThan(-1);
+    expect(friday.indexOf('rugby.premiership')).toBeLessThan(friday.indexOf('rugby.urc'));
+    expect(friday.indexOf('cricket.t20i')).toBeLessThan(friday.indexOf('sport:boxing'));
+  });
+});
+
 describe('names the captures do not have, with the bundled dictionary', () => {
   let counter = 0;
   function listing(fields: Record<string, unknown>, addonIndex: number): Listing {
@@ -260,6 +314,66 @@ describe('names the captures do not have, with the bundled dictionary', () => {
     expect(built[0]!.home).toBe('Paris Saint-Germain');
     expect(built[0]!.competition).toMatchObject({ key: 'fra.1', source: 'name-prefix' });
     expect(built[0]!.sources).toHaveLength(2);
+  });
+
+  it('gives rugby internationals, rugby league and fight cards their competition rows', () => {
+    const released = '2026-11-07T15:10:00.000Z';
+    const [sixNations, superLeague, footballSuperLeague, bellator, title, f1, club] = buildEvents(
+      [
+        listing({ name: 'England v Wales', genres: ['Rugby Union', 'Six Nations'], released }, 0),
+        listing(
+          { name: 'Wigan Warriors vs St Helens', genres: ['Rugby League', 'Super League'] },
+          0,
+        ),
+        // Football has Super Leagues too: the sport decides.
+        listing({ name: 'Olympiacos vs PAOK', genres: ['Football', 'Super League'] }, 0),
+        listing({ name: 'Bellator Champions Series: Paris', genres: ['MMA'] }, 0),
+        listing({ name: 'Usyk vs Dubois - World Title Fight', genres: ['Boxing'] }, 0),
+        listing({ name: 'Formula 1: Brazilian Grand Prix', genres: ['Motorsport'] }, 0),
+        listing({ name: 'Leinster vs Munster', genres: ['Rugby', 'Interprovincial'] }, 0),
+      ],
+      { matcher },
+    );
+    expect(sixNations!.competition).toMatchObject({
+      key: 'rugby.six-nations',
+      name: 'Six Nations',
+    });
+    expect(superLeague!.competition.key).toBe('rugby-league.super-league');
+    expect(footballSuperLeague!.competition.key).not.toBe('rugby-league.super-league');
+    expect(bellator!.competition.key).toBe('bellator');
+    expect(title!.competition).toMatchObject({ key: 'boxing.world-title', sport: 'boxing' });
+    expect(f1!.competition.key).toBe('f1');
+    // What the dictionary does not know keeps the rugby row, the addon's name on the tile.
+    expect(club!.competition.name).toBe('Rugby');
+    expect(club!.note).toBe('Interprovincial');
+  });
+
+  it('gives a numbered fight card its promotion’s row, in a Fight catalog too', () => {
+    const [ufc, fight, prelims, pfl, wrestling] = buildEvents(
+      [
+        listing({ name: 'UFC 320: Jones vs Aspinall', genres: ['MMA'] }, 0),
+        listing({ name: 'UFC 321: Pereira vs Ankalaev', genres: ['Fight'] }, 0),
+        listing({ name: 'UFC 322: Prelims', genres: ['Fight'] }, 0),
+        listing({ name: 'PFL 10: Nurmagomedov vs Eblen', genres: ['MMA'] }, 0),
+        // Not a promotion the dictionary knows: the number is no reason to move it.
+        listing({ name: 'RAW #1745', genres: ['Fight', 'WWE'] }, 0),
+      ],
+      { matcher },
+    );
+    expect(ufc!.competition).toMatchObject({ key: 'ufc', name: 'UFC' });
+    expect(ufc!.note).toBeUndefined();
+    expect(fight).toMatchObject({ sport: 'mma', competition: { key: 'ufc' } });
+    expect(prelims).toMatchObject({ sport: 'mma', competition: { key: 'ufc' } });
+    expect(pfl!.competition.key).toBe('pfl');
+    expect(wrestling!.competition.name).toBe('Boxing');
+  });
+
+  it('keeps the cricket stage of a women’s match out of the men’s competitions', () => {
+    const [women] = buildEvents(
+      [listing({ name: 'England Women vs India Women - 2nd ODI', genres: ['Cricket'] }, 0)],
+      { matcher },
+    );
+    expect(women!.competition.key).not.toBe('cricket.odi');
   });
 
   it('takes a stage in front of the teams as the round, not a competition', () => {

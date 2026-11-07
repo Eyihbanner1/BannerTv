@@ -135,10 +135,23 @@ describe('grouping', () => {
     expect(trophy!.competition.key).toBe('eng.trophy');
   });
 
-  it('groups every sport but football and the US leagues by sport, keeping the name as a note', () => {
-    const [ipl, f1, euro, college] = events([
+  it('gives cricket and motor racing rows of the competitions the dictionary names', () => {
+    const [ipl, f1, hundred] = events([
       [{ name: 'Mumbai Indians vs Chennai Super Kings', genres: ['Cricket', 'IPL'] }],
       [{ name: 'Formula 1: Mexican Grand Prix', genres: ['Motor Sports'] }],
+      [{ name: 'Oval Invincibles vs Welsh Fire', genres: ['Cricket', 'The Hundred'] }],
+    ]);
+    expect(ipl!.competition).toMatchObject({ key: 'ipl', name: 'Indian Premier League' });
+    expect(ipl!.note).toBeUndefined();
+    // The race's name starts with its competition.
+    expect(f1!.competition).toMatchObject({ key: 'f1', name: 'Formula 1' });
+    // Not in this dictionary: the sport's row, with the addon's name as a note.
+    expect(hundred!.competition.name).toBe('Cricket');
+    expect(hundred!.note).toBe('The Hundred');
+  });
+
+  it('groups other sports by sport, keeping the name as a note', () => {
+    const [euro, college, race] = events([
       [{ name: 'Olympiacos BC vs Real Madrid', genres: ['Basketball', 'EuroLeague'] }],
       [
         {
@@ -146,13 +159,14 @@ describe('grouping', () => {
           genres: ['American Football', 'College Football'],
         },
       ],
+      // A name in front that the dictionary does not know names no row.
+      [{ name: 'Lucas Oil Series: Night 2', genres: ['Motor Sports'] }],
     ]);
-    expect(ipl!.competition.name).toBe('Cricket');
-    expect(ipl!.note).toBe('Indian Premier League');
-    expect(f1!.competition.name).toBe('Motor sport');
     expect(euro!.competition.name).toBe('Other basketball');
     expect(euro!.note).toBe('EuroLeague');
     expect(college!.competition.name).toBe('Other American football');
+    expect(race!.competition.name).toBe('Motor sport');
+    expect(race!.note).toBeUndefined();
   });
 });
 

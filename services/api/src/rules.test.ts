@@ -34,6 +34,8 @@ describe('readTraktCall', () => {
       ['POST', '/sync/watchlist/remove'],
       ['POST', '/sync/history'],
       ['POST', '/sync/history/remove'],
+      ['DELETE', '/sync/playback/123'],
+      ['DELETE', '/sync/playback/123456789012'],
     ]) {
       expect(readTraktCall({ method, path }), `${method} ${path}`).toMatchObject({ method, path });
     }
@@ -54,7 +56,18 @@ describe('readTraktCall', () => {
   it('refuses methods and paths off the list', () => {
     for (const [method, path] of [
       ['GET', '/oauth/device/code'],
-      ['DELETE', '/sync/playback/123'],
+      ['GET', '/sync/playback/123'],
+      ['POST', '/sync/playback/123'],
+      ['DELETE', '/sync/playback'],
+      ['DELETE', '/sync/playback/'],
+      ['DELETE', '/sync/playback/abc'],
+      ['DELETE', '/sync/playback/12a'],
+      ['DELETE', '/sync/playback/1234567890123'],
+      ['DELETE', '/sync/playback/123/456'],
+      ['DELETE', '/sync/playback/../history'],
+      ['DELETE', '/sync/playback/123?limit=1'],
+      ['DELETE', '/sync/history/123'],
+      ['DELETE', '/sync/watchlist'],
       ['POST', '/sync/watched/movies'],
       ['GET', '/sync/history'],
       ['GET', '/users/me'],
@@ -124,6 +137,24 @@ describe('readTraktCall', () => {
     for (const token of ['', 'a b', 'a\r\nX-Other: 1', 'é', 'a'.repeat(MAX_TOKEN_LENGTH + 1), 42]) {
       expect(readTraktCall({ method: 'GET', path, token }), String(token)).toBeUndefined();
     }
+  });
+
+  it('sends a DELETE of one paused item with no body, even if one comes', () => {
+    const path = '/sync/playback/42';
+    expect(readTraktCall({ method: 'DELETE', path, token: 'a1b2', body: { x: 1 } })).toEqual({
+      method: 'DELETE',
+      path,
+      query: '',
+      token: 'a1b2',
+    });
+    const call = readTraktCall({ method: 'DELETE', path, token: 'a1b2' });
+    const request = call && traktRequest(call, SECRETS, AGENT);
+    expect(request).toMatchObject({
+      method: 'DELETE',
+      url: 'https://api.trakt.tv/sync/playback/42',
+    });
+    expect(request?.body).toBeUndefined();
+    expect(request?.headers.Authorization).toBe('Bearer a1b2');
   });
 
   it('passes on a POST body as sent, and none for a GET', () => {

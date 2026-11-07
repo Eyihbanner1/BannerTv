@@ -59,8 +59,28 @@ export {
   type InstallErrorKind,
   type InstalledAddon,
   installIdOf,
+  MANIFEST_TIMEOUT_MS,
   type StoredAddon,
 } from './addons/collection';
+export {
+  type AddonHealth,
+  type AddonHealthMap,
+  type AddonHealthState,
+  type AddonHealthStore,
+  answerState,
+  createAddonHealth,
+  installForUrl,
+  installIdForUrl,
+  observeAnswers,
+  SLOW_SHARE,
+} from './addons/health';
+export {
+  type AddonSwitches,
+  addonSwitchesPart,
+  createAddonSwitches,
+  switchedOnOnly,
+  type SwitchesState,
+} from './addons/switches';
 export {
   BANNERTV_DEMO_ID,
   BANNERTV_DEMO_URL,
@@ -269,6 +289,8 @@ export {
   KIDS_GENRE,
   KIDS_TYPES,
   kidsAddons,
+  kidsDetailsAllowed,
+  type KidsRatingFacts,
   kidsTitleAllowed,
   ratingAllowed,
   ukRating,
@@ -307,6 +329,7 @@ export {
   memoryCacheStore,
   memoryKeyValueStore,
 } from './storage';
+export * from './search';
 export * from './sports';
 export { createStore } from './store';
 export * from './sync';
@@ -370,6 +393,7 @@ export {
   tmdbImageUrl,
   type TmdbPerson,
 } from './integrations/tmdb/client';
+export { TMDB_LOGO } from './integrations/tmdb/logo';
 export {
   createIntroDbClient,
   episodeOf,
