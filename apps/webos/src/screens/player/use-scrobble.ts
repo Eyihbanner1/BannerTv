@@ -6,6 +6,7 @@ import type { PlaybackSession, SessionState } from '../../player/session';
 import {
   createScrobblePlace,
   onClose,
+  onSeen,
   onStatus,
   type Runtimes,
   type Sent,
@@ -53,9 +54,18 @@ export function useScrobble(
 
   const sent = useRef<Sent>('none');
   const latest = useRef(state);
+  /** Whether the file was taken for a clip when last seen. */
+  const wasClip = useRef(false);
   useEffect(() => {
     latest.current = state;
-    place.see(state, runtimesOf(runtime, knownRuntime), session?.carryOn());
+    const runtimes = runtimesOf(runtime, knownRuntime);
+    place.see(state, runtimes, session?.carryOn());
+    // A file found to be the title as it plays starts now, its status unchanged.
+    const seen = onSeen(sent.current, wasClip.current, state, place, runtimes);
+    wasClip.current = seen.clip;
+    if (!scrobbler) return;
+    sent.current = seen.sent;
+    if (seen.call) void scrobbler[seen.call.action](seen.call.percent);
   });
 
   const { status, live } = state;

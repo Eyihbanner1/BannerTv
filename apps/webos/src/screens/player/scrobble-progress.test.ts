@@ -5,6 +5,7 @@ import {
   isClip,
   isSpecial,
   onClose,
+  onSeen,
   onStatus,
   percent,
   type ScrobbleCall,
@@ -305,9 +306,14 @@ describe('onStatus and onClose', () => {
     const calls: ScrobbleCall[] = [];
     let sent: Sent = 'none';
     let last: { state: Played; runtimes: typeof known | typeof guessed } | undefined;
+    let wasClip = false;
     for (const [state, runtimes, carryOn = state.position] of steps) {
+      // As the hook: on every state, then when the status changes, never of a broadcast.
       scrobble.see(state, runtimes, carryOn);
-      // The hook asks only when the status changes, and never of a broadcast.
+      const seen = onSeen(sent, wasClip, state, scrobble, runtimes);
+      wasClip = seen.clip;
+      sent = seen.sent;
+      if (seen.call) calls.push(seen.call);
       if (!state.live && (last?.state.status !== state.status || last.state.live !== state.live)) {
         const next = onStatus(sent, state, scrobble, runtimes);
         sent = next.sent;
@@ -486,9 +492,10 @@ describe('onStatus and onClose', () => {
     expect(trakt([...reopened, [played(230, 0, 'paused', false, CLIP), known, 200]])).toEqual([
       'start(0)',
     ]);
-    // One it takes is where the player now is, as it saves it.
+    // One it takes is where the player now is, as it saves it: paused there.
     expect(trakt([...reopened, [played(230, 0, 'paused', false, CLIP), known]])).toEqual([
       'start(0)',
+      'pause(8)',
       'stop(8)',
     ]);
   });
@@ -808,6 +815,197 @@ describe('onStatus and onClose', () => {
         [played(1510, 40, 'paused', true, OTHER), known],
       ]),
     ).toEqual(['start(21)', 'pause(22)', 'stop(53)']);
+  });
+
+  it('keeps nothing of a link taken for a clip only once the running time comes', () => {
+    // A 240 s file plays as the title while the page gives no running time;
+    // Try again opens it with no length, and the page's 47 minutes come while
+    // it plays: it was a clip, and its clock is no place in the episode.
+    expect(
+      trakt([
+        [played(0, 240, 'playing', false, CLIP), guessed],
+        [played(100, 240, 'playing', false, CLIP), guessed],
+        [played(100, 240, 'failed', false, CLIP), guessed],
+        [played(100, 0, 'loading', false, CLIP), guessed],
+        [played(101, 0, 'playing', false, CLIP), guessed],
+        [played(160, 0, 'playing', false, CLIP), guessed],
+        [played(160, 0, 'failed', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+    expect(
+      trakt([
+        [played(0, 240, 'playing', false, CLIP), guessed],
+        [played(100, 240, 'failed', false, CLIP), guessed],
+        [played(100, 0, 'loading', false, CLIP), guessed],
+        [played(160, 0, 'playing', false, CLIP), guessed],
+        [played(200, 0, 'playing', false, CLIP), known],
+        [played(200, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+  });
+
+  it('starts the title once a link taken for a clip shows the title’s length as it plays', () => {
+    // A 60 s clip picked by hand ends; Try again brings the episode, whose
+    // length the player reads only after its first picture.
+    const steps: Parameters<typeof trakt>[0] = [
+      [played(0, 60, 'loading', true), known],
+      [played(0, 60, 'playing', true), known],
+      [played(60, 60, 'failed', true), known],
+      [played(0, 0, 'loading', false, CLIP), known],
+      [played(0, 0, 'playing', false, CLIP), known],
+      [played(21, 0, 'playing', false, CLIP), known],
+      [played(28, 2820, 'playing', false, CLIP), known],
+    ];
+    expect(trakt([...steps, [played(2820, 2820, 'ended', false, CLIP), known]])).toEqual([
+      'start(1)',
+      'stop(100)',
+    ]);
+    expect(trakt([...steps, [played(2541, 2820, 'playing', false, CLIP), known]])).toEqual([
+      'start(1)',
+      'stop(90)',
+    ]);
+  });
+
+  it('holds a move through Play before the first picture, for the next file to keep', () => {
+    // The episode, paused at 300 s; Quality opens another release paused,
+    // with no length, and the viewer moves it to 1200 s, which the player
+    // takes. Play; it plays, then its length shows it a clip, and in the same
+    // moment the player moves on to a clip it opens at 300 s.
+    const steps: Parameters<typeof trakt>[0] = [
+      [played(0, 2820, 'playing'), known],
+      [played(300, 2820, 'paused'), known],
+      [played(300, 0, 'loading', false, OTHER), known],
+      [played(300, 0, 'paused', false, OTHER), known],
+      [played(1200, 0, 'paused', false, OTHER), known],
+      [played(1200, 0, 'loading', false, OTHER), known],
+      [played(1200, 0, 'playing', false, OTHER), known],
+      [played(1210, 0, 'playing', false, OTHER), known],
+    ];
+    expect(
+      trakt([
+        ...steps,
+        [played(300, 0, 'loading', false, CLIP), known, 300],
+        [played(300, 40, 'failed', true), known, 300],
+      ]),
+    ).toEqual(['start(0)', 'pause(11)', 'start(43)', 'stop(11)']);
+    // Another release opening where it got to keeps that place.
+    expect(
+      trakt([
+        ...steps,
+        [played(1210, 0, 'loading', false, REAL), known],
+        [played(1210, 0, 'paused', false, REAL), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(11)', 'start(43)', 'pause(43)', 'stop(43)']);
+  });
+
+  it('forgets, once the running time shows a link a clip, what it reached with no length before', () => {
+    // A file of unknown length plays to 50 s and another release opens
+    // there, then fails; the first is picked again, shows 240 s, fails, and
+    // Try again opens it with no length. The page's 47 minutes then come.
+    expect(
+      trakt([
+        [played(0, 0, 'loading', false, CLIP), guessed],
+        [played(0, 0, 'playing', false, CLIP), guessed],
+        [played(50, 0, 'playing', false, CLIP), guessed],
+        [played(50, 0, 'loading', false, OTHER), guessed],
+        [played(50, 0, 'failed', false, OTHER), guessed],
+        [played(50, 0, 'loading', false, CLIP), guessed],
+        [played(50, 240, 'loading', false, CLIP), guessed],
+        [played(50, 240, 'failed', false, CLIP), guessed],
+        [played(50, 0, 'loading', false, CLIP), guessed],
+        [played(50, 0, 'playing', false, CLIP), guessed],
+        [played(80, 0, 'playing', false, CLIP), known],
+        [played(80, 0, 'paused', false, CLIP), known],
+      ]),
+    ).toEqual(['start(0)']);
+    // Nor holds such a place for the next file, while Try again opens it.
+    expect(
+      trakt([
+        [played(0, 240, 'playing', false, CLIP), guessed],
+        [played(100, 240, 'failed', false, CLIP), guessed],
+        [played(100, 0, 'loading', false, CLIP), guessed],
+        [played(160, 0, 'playing', false, CLIP), guessed],
+        [played(160, 0, 'failed', false, CLIP), guessed],
+        [played(160, 0, 'loading', false, CLIP), guessed],
+        [played(160, 0, 'loading', false, CLIP), known],
+        [played(160, 0, 'loading', false, OTHER), known],
+        [played(160, 40, 'loading', true, OTHER), known],
+      ]),
+    ).toEqual(['start(0)']);
+  });
+
+  it('carries a move held through Play to the next file, when that one opens there', () => {
+    // As above, but Sources opens a clip at the move before the release plays.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(300, 2820, 'paused'), known],
+        [played(300, 0, 'loading', false, OTHER), known],
+        [played(300, 0, 'paused', false, OTHER), known],
+        [played(1200, 0, 'paused', false, OTHER), known],
+        [played(1200, 0, 'loading', false, OTHER), known],
+        [played(1200, 0, 'loading', false, CLIP), known],
+        [played(1200, 40, 'loading', true), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(11)', 'stop(43)']);
+  });
+
+  it('keeps a move the player takes while the next file still opens', () => {
+    // Paused at 602 s, Quality opens another release paused, with no length;
+    // Play, and a skip the player takes lands while it still opens. It fails,
+    // and the player moves on to a clip it opens at 1202 s.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(602, 2820, 'paused'), known],
+        [played(602, 0, 'loading', false, OTHER), known],
+        [played(602, 0, 'paused', false, OTHER), known],
+        [played(602, 0, 'loading', false, OTHER), known],
+        [played(1202, 0, 'loading', false, OTHER), known],
+        [played(1202, 0, 'failed', false, OTHER), known],
+        [played(1202, 0, 'loading', false, CLIP), known],
+        [played(1202, 40, 'failed', true), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(43)']);
+    // One it does not take is not kept.
+    expect(
+      trakt([
+        [played(0, 2820, 'playing'), known],
+        [played(602, 2820, 'paused'), known],
+        [played(602, 0, 'loading', false, OTHER), known],
+        [played(1202, 0, 'loading', false, OTHER), known, 602],
+        [played(1202, 0, 'failed', false, OTHER), known, 602],
+        [played(602, 0, 'loading', false, CLIP), known],
+        [played(602, 40, 'failed', true), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+  });
+
+  it('sends the next real place as a pause, after a pause in a clip with nothing to send', () => {
+    // A 120 s file plays as the title until the page's 47 minutes come; the
+    // viewer pauses it and plays on, then picks the episode in Sources and
+    // pauses it before its first picture.
+    expect(
+      trakt([
+        [played(0, 120, 'playing', false, CLIP), guessed],
+        [played(30, 120, 'playing', false, CLIP), known],
+        [played(32, 120, 'paused', false, CLIP), known],
+        [played(32, 120, 'playing', false, CLIP), known],
+        [played(0, 0, 'loading', false, REAL), known],
+        [played(0, 0, 'paused', false, REAL), known],
+      ]),
+    ).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
+    // Or once it plays, a fresh start.
+    expect(
+      trakt([
+        [played(0, 120, 'playing', false, CLIP), guessed],
+        [played(30, 120, 'playing', false, CLIP), known],
+        [played(32, 120, 'paused', false, CLIP), known],
+        [played(0, 0, 'loading', false, REAL), known],
+        [played(0, 2820, 'playing', false, REAL), known],
+        [played(60, 2820, 'playing', false, REAL), known],
+      ]),
+    ).toEqual(['start(0)', 'start(0)', 'stop(2)']);
   });
 
   it('never stops a clip that ends at 100%', () => {

@@ -106,7 +106,10 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let begun = false;
   /** Where this opening started, to tell when the viewer moves it. */
   let openedAt: number | undefined;
-  /** A place the last opening was only moved to: kept if the next opens there. */
+  /**
+   * A place with no length an earlier opening reached: kept once another file
+   * opens there. The same link opened again only holds it on.
+   */
   let movedTo: Reached | undefined;
   let wasClip = false;
   /**
@@ -167,17 +170,20 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         earlier.splice(index, 1);
       }
     }
+    if (movedTo?.entry === entry) movedTo = undefined;
   };
   // What the file reached is kept, if it was the title, and it starts over.
-  // A place with no length to judge it by counts once the next opening starts
+  // A place with no length to judge it by counts once another file opens
   // there: the session opens it where a real file got to, or a move it took
-  // leads, but where a clip's clock is never.
+  // leads, but where a clip's clock is never. Until then a place held from
+  // before stands, unless this opening reached a newer one.
   const startOver = () => {
+    const held = movedTo;
     movedTo = undefined;
     if (reached && !wasClip) {
       if (reached.duration === 0) movedTo = reached;
       else keep(reached);
-    }
+    } else if (!wasClip) movedTo = held;
     reached = undefined;
     played = false;
     begun = false;
@@ -187,6 +193,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   const place: ScrobblePlace = {
     see(state, runtimes, carryOn) {
       const opening = state.status === 'loading' || state.status === 'idle';
+      let again = false;
       if (state.entry !== file) {
         startOver();
         file = state.entry;
@@ -194,15 +201,21 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         linkWasLive = false;
         linkLength = 0;
       } else if (opening && begun) {
-        // The same link opened again (Try again, or a broadcast's live edge):
-        // like another file, but a clip stays one while it opens.
+        // The same link opened again (Try again, a broadcast's live edge, or
+        // Play before its first picture): like another file, but a clip stays
+        // one while it opens, and a place with no length is only held on.
         if (wasClip) linkWasClip = true;
         startOver();
+        again = true;
       }
       if (openedAt === undefined) {
         openedAt = state.position;
-        if (movedTo && Math.abs(movedTo.position - state.position) <= SAME_PLACE_S) keep(movedTo);
-        movedTo = undefined;
+        if (!again) {
+          if (movedTo && Math.abs(movedTo.position - state.position) <= SAME_PLACE_S) {
+            keep(movedTo);
+          }
+          movedTo = undefined;
+        }
       }
       if (!opening) begun = true;
       if (state.status === 'playing') played = true;
@@ -237,9 +250,11 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         state.status === 'paused' ||
         state.status === 'buffering' ||
         (state.duration > 0 && (state.status === 'loading' || state.status === 'failed'));
-      if (!underWay || wasClip) return;
-      const inside = state.duration === 0 || played || state.position <= state.duration;
+      // A move the player took counts whatever the status, even while the
+      // file still opens.
       const moved =
+        state.status !== 'idle' &&
+        !wasClip &&
         state.duration === 0 &&
         !played &&
         !linkWasLive &&
@@ -251,8 +266,15 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         linkWasClip = false;
         linkLength = 0;
       }
-      // Still a clip by what its link was: nothing it reaches counts.
-      if (remembered(state, runtimes)) return;
+      if (remembered(state, runtimes)) {
+        // Still a clip by what its link was, maybe only now its running time
+        // came: nothing it reached with no length counts.
+        reached = undefined;
+        forgetUnmeasured(state.entry);
+        return;
+      }
+      if ((!underWay && !moved) || wasClip) return;
+      const inside = state.duration === 0 || played || state.position <= state.duration;
       if (inside && (played || state.duration > 0 || moved)) {
         reached = {
           position: state.position,
@@ -286,8 +308,12 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   return place;
 }
 
-/** What this player has told Trakt of the video so far. */
-export type Sent = 'none' | 'playing' | 'paused' | 'stopped';
+/**
+ * What this player has told Trakt of the video so far. 'unsent' is a pause
+ * with no real place to send: Trakt still has the last start, so the next
+ * real place is sent as a pause, and the next real file starts afresh.
+ */
+export type Sent = 'none' | 'playing' | 'unsent' | 'paused' | 'stopped';
 
 /** A call to make to Trakt. */
 export interface ScrobbleCall {
@@ -307,7 +333,7 @@ function told(sent: Sent, action: ScrobbleCall['action'], percent: number | unde
 /**
  * What a change of status tells Trakt: start when a real file plays, pause
  * when it is paused, stop at its end. A clip starts nothing; a pause with no
- * real place to send still counts as one, so the next real file starts.
+ * real place to send waits for one, and the next real file starts.
  */
 export function onStatus(
   sent: Sent,
@@ -320,13 +346,36 @@ export function onStatus(
     if (place.clip(state, runtimes)) return { sent };
     return told('playing', 'start', place.now(state, runtimes) ?? 0);
   }
-  if (state.status === 'paused' && sent === 'playing') {
-    return told('paused', 'pause', place.now(state, runtimes));
+  if (state.status === 'paused' && (sent === 'playing' || sent === 'unsent')) {
+    const percent = place.now(state, runtimes);
+    return percent === undefined ? { sent: 'unsent' } : told('paused', 'pause', percent);
   }
   if (state.status === 'ended' && sent !== 'none') {
     return told('stopped', 'stop', place.end(state, runtimes));
   }
   return { sent };
+}
+
+/** What seeing a state tells Trakt, and whether the file is now taken for a clip. */
+export interface Seen extends Told {
+  clip: boolean;
+}
+
+/**
+ * What seeing a state tells Trakt besides a change of status: a file found to
+ * be the title while it plays (its length came), or found to be a clip, is
+ * told as a change of status would tell it. Never of a broadcast.
+ */
+export function onSeen(
+  sent: Sent,
+  wasClip: boolean,
+  state: Played,
+  place: ScrobblePlace,
+  runtimes: Runtimes,
+): Seen {
+  const clip = place.clip(state, runtimes);
+  if (clip === wasClip || state.live) return { sent, clip };
+  return { ...onStatus(sent, state, place, runtimes), clip };
 }
 
 /** What closing the player, or another episode replacing it, tells Trakt. */
