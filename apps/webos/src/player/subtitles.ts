@@ -126,6 +126,14 @@ export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Pro
 }
 
 /**
+ * Forgets the files read so far, as the player screen closes: those read
+ * only for their checks would otherwise stay in memory after it.
+ */
+export function clearSubtitleCache(): void {
+  cache.clear();
+}
+
+/**
  * An addon's id for a file, fit for a key: a file sent with no id has its
  * link as its id, which never goes into a key (they reach focus keys), so
  * anything but a short plain id is hashed.

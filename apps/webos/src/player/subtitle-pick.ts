@@ -1,9 +1,11 @@
 import {
   clearlyBetter,
+  fitTier,
   judgeSubtitleFits,
   languageKey,
   rankReason,
   rankSubtitles,
+  releaseMatch,
   type SubtitleFit,
   type SubtitleProfile,
   type VideoLength,
@@ -84,15 +86,21 @@ export function pickSubtitleFile<T extends PickableSubtitle>(
 
 /**
  * When nothing better is left in a language: a file that failed its checks
- * (signs only is better than nothing), then one that could not be read.
+ * but is in the language's script (signs only is better than nothing), then
+ * one in another script, then one that could not be read.
  */
 export function lastResort<T extends PickableSubtitle>(
   offered: readonly T[],
   language: string,
-  context: Pick<PickContext, 'broken'>,
+  context: Pick<PickContext, 'broken' | 'fit'>,
 ): T | undefined {
   const files = filesIn(offered, language);
-  return files.find((option) => !context.broken(option.url)) ?? files[0];
+  const readable = files.filter((option) => !context.broken(option.url));
+  return (
+    readable.find((option) => context.fit(option.url)?.script !== 'wrong') ??
+    readable[0] ??
+    files[0]
+  );
 }
 
 /**
@@ -116,10 +124,14 @@ export function fitsIn(
   return judgeSubtitleFits(files, video, language);
 }
 
-/** Files read for their checks, besides the one showing, in each language of a video. */
+/** Files read for their checks, besides the one showing, in each language of a stream. */
 export const MAX_EXTRA_CHECKS = 3;
-/** The files looked at before the first is shown: the best placed few. */
-const CANDIDATES = 1 + MAX_EXTRA_CHECKS;
+/**
+ * Files read at once, and the first files in the list always read, even
+ * where files read for another stream of the video fit: the stream's own
+ * file and the one the addon lists first (which may match the video's hash).
+ */
+const FIRST_READS = 2;
 
 /** Where the automatic choice stands, for planning it again as files are read. */
 export interface PlanInput<T extends PickableSubtitle> extends PickContext {
@@ -188,14 +200,18 @@ function keepOrSwitch<T extends PickableSubtitle>(
  * and whether to hold the lines back meanwhile.
  *
  * - A version picked by hand for this release, or one whose release name
- *   matches the video, is chosen at once, and no other is read. Another
- *   made for the release as well (two addons' copies, or CD1 and CD2) takes
- *   over from it only as below: read, clearly better, and while switches
- *   are left. So two such files are not swapped back and forth as each is
- *   read.
- * - Otherwise the best placed few are read, and the lines held back until
- *   they have been and the video's length is known (or `timeUp`); then the
- *   best of those read is chosen.
+ *   matches the video, is chosen at once, and no other is read while it
+ *   reads whole and plain (or for the hard of hearing, as wanted). Another
+ *   made for the release as well (two addons' copies, CD1 and CD2, or a
+ *   plain copy beside one for the hard of hearing) takes over from it only
+ *   as below: read, clearly better, and while switches are left. So two
+ *   such files are not swapped back and forth as each is read. A file whose
+ *   name matches but which reads as drifting, part of the video or another
+ *   cut is judged like any other.
+ * - Otherwise files are read in the list's order, two at a time: the first
+ *   two always, more only while none read fits as it is (nothing would beat
+ *   it), and the lines held back until they have been read and the video's
+ *   length is known (or `timeUp`); then the best of those read is chosen.
  * - Once lines show, a file read later takes over only when it fits clearly
  *   better and switches are left; a choice that failed, or failed its
  *   checks badly, gives way to the next best.
@@ -211,34 +227,51 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
     };
   }
   const isRead = (option: T) => input.fit(option.url) !== undefined;
+  const unread = (option: T) => !isRead(option) && !input.reading(option.url);
+  const tierOf = (option: T) => fitTier(input.fit(option.url), input.hearing);
   const reasonOf = (option: T) =>
-    rankReason(option, { video: input.video, remembered: (o) => o.key === input.remembered });
+    rankReason(option, {
+      video: input.video,
+      remembered: (o) => o.key === input.remembered,
+      fit: (o) => input.fit(o.url),
+      hearing: input.hearing,
+    });
   const top = ranked[0]!;
   const current = ranked.find((option) => option.key === input.current);
   const reason = reasonOf(top);
   if (reason < 2) {
-    if (!current || reasonOf(current) !== reason) {
+    // Made for the release by its name, whatever reading it found.
+    const peerOf = (option: T) =>
+      reasonOf(option) === reason || (reason === 1 && releaseMatch(option.label, input.video));
+    if (!current || !peerOf(current)) {
       return { pick: top, read: [], hold: false, switched: false };
     }
-    // Others of the same standing, best first; those placed above the one showing may be read.
-    const peers = ranked.filter((option) => reasonOf(option) === reason);
-    const above = peers.slice(0, peers.indexOf(current));
-    const toRead = above
-      .filter((option) => !isRead(option) && !input.reading(option.url))
-      .slice(0, Math.max(0, input.readsLeft));
+    // Others of the same standing, best first. Those placed above the one showing may be read;
+    // all of them once it has read as less than whole and plain (or as wanted for the hard of
+    // hearing), as a copy placed below it, not read yet, may be.
+    const peers = ranked.filter(peerOf);
+    const pool =
+      isRead(current) && tierOf(current) > 0
+        ? peers.filter((option) => option !== current)
+        : peers.slice(0, peers.indexOf(current));
+    const toRead = pool.filter(unread).slice(0, Math.max(0, input.readsLeft));
     return keepOrSwitch(peers, current, toRead, input);
   }
-  const candidates = ranked.slice(0, CANDIDATES);
-  const toRead = candidates
-    .filter((option) => !isRead(option) && !input.reading(option.url))
-    .slice(0, Math.max(0, input.readsLeft));
+  // Read in the list's order, not by what reading others found: files read for another stream
+  // of the video must not keep this stream's own file and the addon's first from being read.
+  const placed = new Set<T>(ranked);
+  const inOrder = filesIn(input.offered, input.language).filter((option) => placed.has(option));
+  const first = inOrder.slice(0, FIRST_READS);
+  // A file read that fits as it is ranks first: nothing beyond the first two could beat it.
+  const enough = isRead(top) && tierOf(top) === 0;
+  const readingNow = inOrder.filter((option) => input.reading(option.url)).length;
+  const toRead = inOrder
+    .filter((option) => unread(option) && (!enough || first.indexOf(option) !== -1))
+    .slice(0, Math.max(0, Math.min(input.readsLeft, FIRST_READS - readingNow)));
   const known = ranked.filter(isRead);
 
   if (input.holding) {
-    const busy =
-      toRead.length > 0 ||
-      candidates.some((option) => input.reading(option.url)) ||
-      !!input.lengthPending;
+    const busy = toRead.length > 0 || readingNow > 0 || !!input.lengthPending;
     if (busy && !input.timeUp) {
       return { pick: current ?? top, read: toRead, hold: true, switched: false };
     }

@@ -1,6 +1,7 @@
 import type { Cue, SubtitleFit } from '@bannertv/core';
 import { profileSubtitles } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
+import { driftInUse } from './drift';
 import {
   fitsIn,
   lastResort,
@@ -37,6 +38,7 @@ const FITS: SubtitleFit = {
 const SDH: SubtitleFit = { ...FITS, hearing: true };
 const BEHIND: SubtitleFit = { ...FITS, drift: 'behind' };
 const SIGNS: SubtitleFit = { ...FITS, signs: true, unfit: true };
+const LONG: SubtitleFit = { ...FITS, length: 'long' };
 const OTHER_SCRIPT: SubtitleFit = { ...FITS, script: 'wrong', unfit: true };
 
 /** A context where these files were read with these checks, and these could not be read. */
@@ -104,6 +106,14 @@ describe('lastResort', () => {
     expect(lastResort(offered, 'en', context({}, ['gone', 'signs']))?.key).toBe('gone');
     expect(lastResort(offered, 'de', context())).toBeUndefined();
   });
+
+  it('takes signs only in the language before a file in another script', () => {
+    const offered = [file('other'), file('signs'), file('gone')];
+    const fits = { other: OTHER_SCRIPT, signs: SIGNS };
+    expect(lastResort(offered, 'en', context(fits, ['gone']))?.key).toBe('signs');
+    // Another script is still better than a file that could not be read.
+    expect(lastResort(offered, 'en', context(fits, ['signs', 'gone']))?.key).toBe('other');
+  });
 });
 
 function plan(
@@ -128,15 +138,50 @@ function plan(
 describe('planSubtitlePick', () => {
   const offered = [file('signs'), file('past'), file('full'), file('more'), file('fifth')];
 
-  it('reads the first few files and holds the lines back, on the first meanwhile', () => {
+  it('reads the first two files and holds the lines back, on the first meanwhile', () => {
     expect(plan(offered, {})).toEqual({
       pick: 'signs',
-      read: ['signs', 'past', 'full', 'more'],
+      read: ['signs', 'past'],
       hold: true,
       switched: false,
     });
     // At most as many as are left to read in the language.
     expect(plan(offered, {}, { readsLeft: 1 }).read).toEqual(['signs']);
+  });
+
+  it('reads no more once a file read fits as it is, and two at a time while none does', () => {
+    // The first fits as it is, whole and plain: nothing can beat it, so the rest are not read.
+    expect(plan(offered, { signs: FITS, past: SDH }, { current: 'signs', readsLeft: 2 })).toEqual({
+      pick: 'signs',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Neither of the first two does: the next two in the list are read, the lines held back.
+    expect(plan(offered, { signs: SIGNS, past: SDH }, { current: 'past', readsLeft: 2 })).toEqual({
+      pick: 'past',
+      read: ['full', 'more'],
+      hold: true,
+      switched: false,
+    });
+    // One still being read leaves room for one more.
+    const reading = (url: string) => url.endsWith('/full.srt');
+    expect(
+      plan(offered, { signs: SIGNS, past: SDH }, { current: 'past', readsLeft: 1, reading }).read,
+    ).toEqual(['more']);
+  });
+
+  it('reads the files listed first for another stream of the video, though others were read', () => {
+    // The stream's own file, listed first, is new; the others were read for the stream before.
+    const listed = [file('own'), file('a'), file('b'), file('c'), file('d')];
+    const before = { a: FITS, b: FITS, c: FITS, d: SDH };
+    expect(plan(listed, before)).toEqual({ pick: 'a', read: ['own'], hold: true, switched: false });
+    expect(plan(listed, { ...before, own: FITS }, { current: 'a', readsLeft: 3 })).toEqual({
+      pick: 'own',
+      read: [],
+      hold: false,
+      switched: false,
+    });
   });
 
   it('passes over signs only and a drift for the full file once the few are read', () => {
@@ -242,6 +287,67 @@ describe('planSubtitlePick', () => {
     });
   });
 
+  it('reads a plain copy made for the release below the one showing for the hard of hearing', () => {
+    const label = 'Some.Film.2021.1080p.BluRay-GROUP';
+    const two = [file('sdh', 'eng', label), file('plain', 'eng', label)];
+    const showing = { holding: false, current: 'sdh' };
+    const settled = { hold: false, switched: false };
+    expect(plan(two, { sdh: SDH }, showing)).toEqual({ pick: 'sdh', read: ['plain'], ...settled });
+    // Plain, it takes over, counted as a switch; not when none is left.
+    expect(plan(two, { sdh: SDH, plain: FITS }, showing)).toEqual({
+      pick: 'plain',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    expect(plan(two, { sdh: SDH }, { ...showing, switchesLeft: 0 })).toEqual({
+      pick: 'sdh',
+      read: [],
+      ...settled,
+    });
+    // Once on the plain copy, the other never takes back over.
+    expect(plan(two, { sdh: SDH, plain: FITS }, { ...showing, current: 'plain' })).toEqual({
+      pick: 'plain',
+      read: [],
+      ...settled,
+    });
+    // Unread, the one showing waits for its own reading before the other is read.
+    expect(plan(two, {}, showing)).toEqual({ pick: 'sdh', read: [], ...settled });
+    // Lines for the hard of hearing wanted: the other way round.
+    expect(plan(two, { sdh: SDH }, { ...showing, hearing: true })).toEqual({
+      pick: 'sdh',
+      read: [],
+      ...settled,
+    });
+  });
+
+  it('judges a file made for the release like any other once it reads as another cut', () => {
+    const offered = [
+      file('cut', 'eng', 'Some.Film.2021.EXTENDED.1080p.BluRay-GROUP'),
+      file('a'),
+      file('b'),
+    ];
+    const showing = { holding: false, current: 'cut' };
+    expect(plan(offered, { cut: LONG }, showing)).toEqual({
+      pick: 'cut',
+      read: ['a', 'b'],
+      hold: false,
+      switched: false,
+    });
+    // It fits as it is: no more is read.
+    expect(plan(offered, { cut: LONG, a: FITS }, showing)).toEqual({
+      pick: 'a',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    // Once switched, it does not come back.
+    expect(plan(offered, { cut: LONG, a: FITS }, { ...showing, current: 'a' })).toMatchObject({
+      pick: 'a',
+      switched: false,
+    });
+  });
+
   it('once lines show, switches to a file read later only when it fits clearly better', () => {
     const showing = { holding: false, current: 'past', readsLeft: 0 };
     expect(plan(offered, { signs: SIGNS, past: BEHIND, full: FITS }, showing)).toEqual({
@@ -299,5 +405,38 @@ describe('fitsIn', () => {
     ]);
     expect(fits.get(file('signs').url)!.unfit).toBe(true);
     expect(fits.get(file('full').url)!.unfit).toBe(false);
+  });
+
+  it('fixes the drift of the version picked by hand by its own length when it plays again', () => {
+    // Timed for film speed on a PAL video: it runs on about 4% past the video's end.
+    const behind = file('behind');
+    const offered = [behind, file('other')];
+    const profiles: Record<string, ReturnType<typeof profileSubtitles>> = {
+      behind: profileSubtitles(lines(1300, 7450)),
+    };
+    const fits = fitsIn(offered, 'en', (url) => profiles[/\/([^/]+)\.srt$/.exec(url)![1]!], {
+      seconds: 7200,
+      exact: true,
+    });
+    const result = planSubtitlePick<File>({
+      ...context(),
+      fit: (url) => fits.get(url),
+      remembered: 'behind',
+      offered,
+      language: 'en',
+      reading: () => false,
+      current: 'behind',
+      holding: false,
+      timeUp: false,
+      readsLeft: 4,
+      switchesLeft: 0,
+    });
+    expect(result.pick?.key).toBe('behind');
+    expect(result.read).toEqual([]);
+    const evidence = fits.get(behind.url)?.drift ?? null;
+    expect(driftInUse({ canFix: true, evidence, kept: null, offset: 0 })).toEqual({
+      drift: 'behind',
+      auto: true,
+    });
   });
 });

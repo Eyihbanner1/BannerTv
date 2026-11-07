@@ -45,9 +45,11 @@ export interface DriftInUse {
 
 /**
  * The drift fix for the file showing: the viewer's own when they chose one
- * for it ('none' is no fix); else the one its length gives away (`evidence`),
- * made by the player, unless the viewer set a timing on the file before
- * (theirs stands). None where a drift fix does not apply (`canFix`).
+ * for it ('none' is no fix); the one the stream playing gives away when the
+ * player's own fix was kept with their timing ('auto'); else the one its
+ * length gives away (`evidence`), made by the player, unless the viewer set
+ * a timing on the file before (theirs stands). None where a drift fix does
+ * not apply (`canFix`).
  */
 export function driftInUse(file: {
   canFix: boolean;
@@ -56,16 +58,20 @@ export function driftInUse(file: {
   offset: number;
 }): DriftInUse {
   if (!file.canFix) return { drift: null, auto: false };
+  // Worked out from this stream: a drift belongs to the file and the release together.
+  if (file.kept === 'auto') return { drift: file.evidence, auto: file.evidence !== null };
   if (file.kept !== null) return { drift: file.kept === 'none' ? null : file.kept, auto: false };
   if (file.evidence !== null && file.offset === 0) return { drift: file.evidence, auto: true };
   return { drift: null, auto: false };
 }
 
 /**
- * The drift fix to keep as the viewer's own as they move the timing to
- * `offset`: the one the player made, so the lines they move stay stretched
- * as they see them, now and next time. Null when there is none to keep.
+ * What to keep as the viewer moves the timing to `offset`: 'auto' while the
+ * player's own fix is on, so the lines they move stay stretched as they see
+ * them, now and next time, as this stream's evidence says. Not a fixed drift:
+ * on another release of the video, which the file may fit as it is, it is
+ * worked out again. Null when there is none to keep.
  */
-export function driftKeptWithTiming(inUse: DriftInUse, offset: number): SubtitleDrift | null {
-  return inUse.auto && offset !== 0 ? inUse.drift : null;
+export function driftKeptWithTiming(inUse: DriftInUse, offset: number): 'auto' | null {
+  return inUse.auto && offset !== 0 ? 'auto' : null;
 }

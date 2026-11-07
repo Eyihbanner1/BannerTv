@@ -67,18 +67,31 @@ describe('driftInUse and driftKeptWithTiming', () => {
     });
   });
 
-  it('keeps the fix the player made as the viewer’s once they move the timing, so it stays on', () => {
+  it('keeps the player’s own fix with the timing once the viewer moves it, so it stays on', () => {
     const auto = driftInUse(file);
-    expect(driftKeptWithTiming(auto, 0.5)).toBe('behind');
-    expect(driftKeptWithTiming(auto, -0.1)).toBe('behind');
-    // With the fix kept and the timing moved, the fix is still on, now as the viewer's.
-    expect(driftInUse({ ...file, kept: 'behind', offset: 0.5 })).toEqual({
+    expect(driftKeptWithTiming(auto, 0.5)).toBe('auto');
+    expect(driftKeptWithTiming(auto, -0.1)).toBe('auto');
+    // With 'auto' kept and the timing moved, the fix is still on, still the player's.
+    expect(driftInUse({ ...file, kept: 'auto', offset: 0.5 })).toEqual({
       drift: 'behind',
-      auto: false,
+      auto: true,
     });
     // Reset on a file at 0 keeps nothing; neither does a fix the viewer chose, already kept.
     expect(driftKeptWithTiming(auto, 0)).toBeNull();
     expect(driftKeptWithTiming(driftInUse({ ...file, kept: 'ahead' }), 0.5)).toBeNull();
     expect(driftKeptWithTiming(driftInUse({ ...file, evidence: null }), 0.5)).toBeNull();
+  });
+
+  it('works the kept fix out again on another release, where the file fits as it is', () => {
+    // The same file and timing, on a release its length shows it fits: no stretch.
+    expect(driftInUse({ ...file, evidence: null, kept: 'auto', offset: 0.5 })).toEqual({
+      drift: null,
+      auto: false,
+    });
+    // Not where no drift fix applies.
+    expect(driftInUse({ ...file, canFix: false, kept: 'auto', offset: 0.5 })).toEqual({
+      drift: null,
+      auto: false,
+    });
   });
 });
