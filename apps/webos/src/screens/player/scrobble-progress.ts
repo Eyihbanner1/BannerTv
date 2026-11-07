@@ -128,8 +128,9 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let played = false;
   let begun = false;
   /**
-   * Where this opening started, and where the player would then have opened
-   * the next file: a move it takes changes the latter.
+   * Where this opening started (or, further back, where a skip the player
+   * made before its first picture put it), and where the player would then
+   * have opened the next file: a move it takes changes the latter.
    */
   let openedAt: number | undefined;
   let openedCarry: number | undefined;
@@ -290,6 +291,10 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
           }
           movedTo = undefined;
         }
+      } else if (!played && state.status !== 'playing') {
+        // A skip the player made before the first picture, which it may
+        // start from.
+        openedAt = Math.min(openedAt, state.position);
       }
       // A move the player took since this opening last saw it.
       const took = moves !== undefined && movesSeen !== undefined && moves !== movesSeen;

@@ -1521,6 +1521,25 @@ describe('onStatus and onClose', () => {
     expect(
       clipFromZero(held, 3, undefined, [[played(600, 129, 'loading', false, CLIP), known, 600, 0]]),
     ).toEqual(['start(44)', 'pause(0)', 'stop(44)']);
+    // Or it waits for data a moment after its first picture, then plays on
+    // from 0; Try again finds the length as it opens.
+    expect(
+      trakt([
+        [played(1245, 2820, 'playing'), known, 1245, 0],
+        [played(1249.5, 2820, 'playing'), known, 1249.5, 0],
+        [played(1250, 0, 'loading', false, CLIP), known, 1250, 0],
+        [played(1250, 0, 'playing', false, CLIP), known, 1250, 0],
+        [played(0.5, 0, 'buffering', false, CLIP), known, 0.5, 0],
+        [played(1, 0, 'playing', false, CLIP), known, 1, 0],
+        [played(3, 0, 'playing', false, CLIP), known, 3, 0],
+        [played(3, 0, 'paused', false, CLIP), known, 3, 0],
+        [played(0, 0, 'paused', false, CLIP), known, 0, 1],
+        [played(600, 0, 'paused', false, CLIP), known, 600, 2],
+        [played(600, 0, 'failed', false, CLIP), known, 600, 2],
+        [played(600, 0, 'loading', false, CLIP), known, 600, 0],
+        [played(600, 129, 'loading', false, CLIP), known, 600, 0],
+      ]),
+    ).toEqual(['start(44)', 'pause(0)', 'stop(44)']);
     // Four skips held, to 2400 s: never 85%, which Trakt would take for watched.
     expect(
       clipFromZero([
@@ -1599,6 +1618,22 @@ describe('onStatus and onClose', () => {
         [played(30, 0, 'loading'), known, 30, 0],
         [played(30, 0, 'paused'), known, 30, 0],
         [played(10, 0, 'paused'), known, 30, 0],
+        [played(10, 0, 'loading'), known, 30, 0],
+        [played(10, 0, 'playing'), known, 10, 0],
+        [played(11, 0, 'playing'), known, 11, 0],
+        [played(40, 0, 'playing'), known, 40, 0],
+        [played(640, 0, 'playing'), known, 640, 1],
+        [played(640, 0, 'failed'), known, 640, 1],
+        [played(640, 0, 'loading'), known, 640, 0],
+        [played(640, 60, 'loading'), known, 640, 0],
+      ]),
+    ).toEqual(['start(0)', 'stop(23)']);
+    // Or that skip lands only after Play, as the file still opens.
+    expect(
+      trakt([
+        [played(30, 0, 'loading'), known, 30, 0],
+        [played(30, 0, 'paused'), known, 30, 0],
+        [played(30, 0, 'loading'), known, 30, 0],
         [played(10, 0, 'loading'), known, 30, 0],
         [played(10, 0, 'playing'), known, 10, 0],
         [played(11, 0, 'playing'), known, 11, 0],
