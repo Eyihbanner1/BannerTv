@@ -140,6 +140,8 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let ranTo = -Infinity;
   /** Where this opening's clock last read as it played, until it stops playing. */
   let lastPlaying: number | undefined;
+  /** Whether origin is a move the player took once this opening had played. */
+  let movedOnce = false;
   /** The player's count of moves taken, as this opening last saw it. */
   let movesSeen: number | undefined;
   /**
@@ -158,10 +160,10 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let linkWasLive = false;
   let linkLength = 0;
   /**
-   * This link has shown it cannot seek: as it played, its clock read further
-   * behind where the player opened it, or a move it took, than a keyframe
-   * would put it (a file that cannot seek plays from 0). The player may then
-   * hold a move in it that the file never makes.
+   * This link has shown it cannot seek: its clock stood or ran further behind
+   * where the player opened it, or a move it took, than a keyframe would put
+   * it (a file that cannot seek plays from 0, and goes back there at a move).
+   * The player may then hold a move in it that the file never makes.
    */
   let linkCannotSeek = false;
   /** A clip by what the player shows of it now. */
@@ -255,6 +257,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
     ran = false;
     ranTo = -Infinity;
     lastPlaying = undefined;
+    movedOnce = false;
     movesSeen = undefined;
     wasClip = false;
   };
@@ -342,6 +345,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         linkWasClip = false;
         linkLength = 0;
         origin = carryOn ?? state.position;
+        movedOnce = took && played;
       }
       if (remembered(state, runtimes)) {
         // Still a clip by what its link was, maybe only now its running time
@@ -354,12 +358,20 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
       if (played && Math.abs(state.position - (origin ?? state.position)) > SAME_PLACE_S) {
         ran = true;
       }
+      // A file that cannot seek: far behind a move the player took once it
+      // had played (it goes back to 0); or, past its first reading as it
+      // plays (webOS reads 0 for a moment at the first picture), far behind
+      // where this opening showed it and where a move it took put it.
+      const behind = (from: number) => state.position < from - ARRIVED_S;
+      if (movedOnce && behind(origin ?? state.position)) linkCannotSeek = true;
       if (state.status === 'playing') {
-        if (!took && lastPlaying !== undefined && state.position > lastPlaying) {
-          ranTo = Math.max(ranTo, state.position);
+        if (!took && lastPlaying !== undefined) {
+          if (state.position > lastPlaying) ranTo = Math.max(ranTo, state.position);
+          if (behind(Math.min(origin ?? state.position, openedAt ?? state.position))) {
+            linkCannotSeek = true;
+          }
         }
         lastPlaying = state.position;
-        if (state.position < (origin ?? state.position) - ARRIVED_S) linkCannotSeek = true;
       } else lastPlaying = undefined;
       const inside = state.duration === 0 || played || state.position <= state.duration;
       // A place it reached by its own length stands when the length goes

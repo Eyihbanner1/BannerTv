@@ -1563,6 +1563,21 @@ describe('onStatus and onClose', () => {
         ],
       ),
     ).toEqual(['start(0)', 'pause(1)', 'stop(23)']);
+    // Or on webOS, where Try again's clip reads 0 for a moment at its first
+    // picture, and shows its length as it plays on.
+    expect(
+      trakt([
+        [played(0, 0, 'loading'), known, 0, 0],
+        [played(0, 0, 'playing'), known, 0, 0],
+        [played(20, 0, 'playing'), known, 20, 0],
+        [played(40, 0, 'playing'), known, 40, 0],
+        [played(640, 0, 'playing'), known, 640, 1],
+        [played(640, 0, 'failed'), known, 640, 1],
+        [played(640, 0, 'loading'), known, 640, 0],
+        [played(0, 0, 'playing'), known, 0, 0],
+        [played(0.25, 60, 'playing'), known, 640, 0],
+      ]),
+    ).toEqual(['start(0)', 'stop(23)']);
     // Or picked in Sources after another link that could not seek, which
     // played from 0 though the player opened it at 1250 s.
     expect(
@@ -1576,16 +1591,96 @@ describe('onStatus and onClose', () => {
         5,
       ),
     ).toEqual(['start(0)', 'stop(23)']);
+    // Or opened at 30 s, paused before its first picture and skipped back to
+    // 10 s, a move the player cannot take with no length known; Play, and it
+    // plays from there.
+    expect(
+      trakt([
+        [played(30, 0, 'loading'), known, 30, 0],
+        [played(30, 0, 'paused'), known, 30, 0],
+        [played(10, 0, 'paused'), known, 30, 0],
+        [played(10, 0, 'loading'), known, 30, 0],
+        [played(10, 0, 'playing'), known, 10, 0],
+        [played(11, 0, 'playing'), known, 11, 0],
+        [played(40, 0, 'playing'), known, 40, 0],
+        [played(640, 0, 'playing'), known, 640, 1],
+        [played(640, 0, 'failed'), known, 640, 1],
+        [played(640, 0, 'loading'), known, 640, 0],
+        [played(640, 60, 'loading'), known, 640, 0],
+      ]),
+    ).toEqual(['start(0)', 'stop(23)']);
+    // Or on webOS, opened paused at 30 s and skipped to 40 s, which the player
+    // takes: at its first picture it reads 0 for a moment, then 40 s; and the
+    // clip Try again finds is 240 s long.
+    expect(
+      trakt([
+        [played(30, 0, 'loading'), known, 30, 0],
+        [played(30, 0, 'paused'), known, 30, 0],
+        [played(40, 0, 'paused'), known, 40, 1],
+        [played(40, 0, 'loading'), known, 40, 1],
+        [played(0, 0, 'playing'), known, 0, 1],
+        [played(40, 0, 'playing'), known, 40, 1],
+        [played(70, 0, 'playing'), known, 70, 1],
+        [played(670, 0, 'playing'), known, 670, 2],
+        [played(670, 0, 'failed'), known, 670, 2],
+        [played(670, 0, 'loading'), known, 670, 0],
+        [played(670, 240, 'loading'), known, 670, 0],
+      ]),
+    ).toEqual(['start(0)', 'stop(24)']);
+    // Or skipped to 40 s as it opens, without a pause.
+    expect(
+      trakt([
+        [played(30, 0, 'loading'), known, 30, 0],
+        [played(40, 0, 'loading'), known, 40, 1],
+        [played(0, 0, 'playing'), known, 0, 1],
+        [played(40, 0, 'playing'), known, 40, 1],
+        [played(70, 0, 'playing'), known, 70, 1],
+        [played(670, 0, 'playing'), known, 670, 2],
+        [played(670, 0, 'failed'), known, 670, 2],
+        [played(670, 0, 'loading'), known, 670, 0],
+        [played(670, 240, 'loading'), known, 670, 0],
+      ]),
+    ).toEqual(['start(0)', 'stop(24)']);
+    // Or resumed at 1250 s and started over from 0 at once, a move the player
+    // takes.
+    expect(
+      trakt([
+        [played(1250, 0, 'loading'), known, 1250, 0],
+        [played(1250, 0, 'playing'), known, 1250, 0],
+        [played(0, 0, 'playing'), known, 0, 1],
+        [played(20, 0, 'playing'), known, 20, 1],
+        [played(40, 0, 'playing'), known, 40, 1],
+        [played(640, 0, 'playing'), known, 640, 2],
+        [played(640, 0, 'failed'), known, 640, 2],
+        [played(640, 0, 'loading'), known, 640, 0],
+        [played(640, 60, 'loading'), known, 640, 0],
+      ]),
+    ).toEqual(['start(44)', 'stop(23)']);
     // Or resumed at 100 s, starting 8 s before it at a keyframe.
     expect(
       trakt([
         [played(100, 0, 'loading'), known, 100, 0],
         [played(92, 0, 'playing'), known, 92, 0],
+        [played(93, 0, 'playing'), known, 93, 0],
         [played(130, 0, 'playing'), known, 130, 0],
         [played(730, 0, 'playing'), known, 730, 1],
         [played(730, 0, 'failed'), known, 730, 1],
         [played(730, 0, 'loading'), known, 730, 0],
         [played(730, 240, 'loading'), known, 730, 0],
+      ]),
+    ).toEqual(['start(3)', 'stop(26)']);
+    // Or a skip the player takes lands at a keyframe 8 s before it.
+    expect(
+      trakt([
+        [played(100, 0, 'loading'), known, 100, 0],
+        [played(92, 0, 'playing'), known, 92, 0],
+        [played(93, 0, 'playing'), known, 93, 0],
+        [played(130, 0, 'playing'), known, 130, 0],
+        [played(730, 0, 'playing'), known, 730, 1],
+        [played(722, 0, 'playing'), known, 722, 1],
+        [played(722, 0, 'failed'), known, 722, 1],
+        [played(722, 0, 'loading'), known, 722, 0],
+        [played(722, 240, 'loading'), known, 722, 0],
       ]),
     ).toEqual(['start(3)', 'stop(26)']);
   });
@@ -1599,6 +1694,7 @@ describe('onStatus and onClose', () => {
       trakt([
         [played(openedAt, 0, 'loading', false, CLIP), known, openedAt, 0],
         [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(5, 0, 'playing', false, CLIP), known, 5, 0],
         [played(40, 0, 'playing', false, CLIP), known, 40, 0],
         [played(40, 0, 'paused', false, CLIP), known, 40, 0],
         [played(0, 0, 'paused', false, CLIP), known, 0, 1],
@@ -1705,6 +1801,57 @@ describe('onStatus and onClose', () => {
         [played(110, 0, 'playing', false, OTHER), known, 110, 1],
       ]),
     ).toEqual(['start(44)', 'stop(35)']);
+  });
+
+  it('forgets moves held in a clip that goes back to 0 at a skip, once Try again finds it a clip again', () => {
+    // Android: the episode plays to 600 s. Sources gets a 40 s clip, which
+    // shows its length, plays from 0 and ends. Try again opens the link at
+    // 600 s with no length this time; it cannot seek, so it plays from 0.
+    // Paused, a skip to 2400 s goes back to 0, and a second one, from 0, the
+    // player holds. A network error; Try again there, paused as it opens, and
+    // its 40 s length shows as it fails: never 85%, which Trakt would take
+    // for watched.
+    type Step = [Played, typeof known, number, number];
+    const clip = (
+      position: number,
+      duration: number,
+      status: SessionStatus,
+      carryOn = position,
+      moves = 0,
+    ): Step => [played(position, duration, status, false, CLIP), known, carryOn, moves];
+    const held = (at: number, first: Step[]) =>
+      trakt([
+        [played(0, 2820, 'loading'), known, 0, 0],
+        [played(0, 2820, 'playing'), known, 0, 0],
+        [played(at, 2820, 'playing'), known, at, 0],
+        ...first,
+        clip(at, 0, 'loading'),
+        clip(at, 0, 'playing'),
+        clip(0.25, 0, 'playing'),
+        clip(1, 0, 'playing'),
+        clip(3, 0, 'playing'),
+        clip(3, 0, 'paused'),
+        clip(2400, 0, 'paused', 2400, 1),
+        clip(0, 0, 'paused', 0, 1),
+        clip(2400, 0, 'paused', 2400, 2),
+        clip(2400, 0, 'failed', 2400, 2),
+        clip(2400, 0, 'loading'),
+        clip(2400, 0, 'paused'),
+        clip(2400, 40, 'failed'),
+      ]);
+    const first = (at: number): Step[] => [
+      clip(at, 0, 'loading'),
+      clip(at, 40, 'playing', at),
+      clip(0.25, 40, 'playing', at),
+      clip(20, 40, 'playing', at),
+      clip(40, 40, 'failed', at),
+    ];
+    expect(held(600, first(600))).toEqual(['start(0)', 'pause(21)', 'stop(21)']);
+    // Or the episode played only 10 s, so the clip, opened there, plays from
+    // 0 as close as a keyframe would put it.
+    expect(held(10, first(10))).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
+    // Or the clip showed no length the first time, nor shows one now.
+    expect(held(10, [])).toEqual(['start(0)', 'pause(0)', 'stop(0)']);
   });
 
   it('never stops a clip that ends at 100%', () => {
