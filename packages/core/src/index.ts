@@ -218,6 +218,13 @@ export {
   type SubtitleOffsets,
   subtitleFileKey,
 } from './playback/offsets';
+export {
+  createSubtitlePickMemory,
+  MAX_SUBTITLE_PICKS,
+  type SubtitlePick,
+  type SubtitlePickMemory,
+  subtitleRelease,
+} from './playback/subtitle-picks';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
 export {
@@ -322,6 +329,7 @@ export type {
   TvCapabilities,
   VideoCodec,
 } from './streams/types';
+export { isAdCue, stripAdCues } from './subtitles/ads';
 export { createCueIndex, type CueIndex } from './subtitles/cues';
 export { detectEncoding } from './subtitles/encoding';
 export {
@@ -330,7 +338,26 @@ export {
   languageKey,
   languageName,
 } from './subtitles/languages';
+export {
+  FRAME_RATE_RATIO,
+  judgeScript,
+  judgeSubtitleFit,
+  judgeSubtitleFits,
+  profileSubtitles,
+  type Script,
+  type SubtitleFit,
+  type SubtitleProfile,
+  type VideoLength,
+} from './subtitles/fit';
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
+export {
+  clearlyBetter,
+  fitTier,
+  rankReason,
+  type RankOptions,
+  rankSubtitles,
+  UNREAD_TIER,
+} from './subtitles/rank';
 export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
