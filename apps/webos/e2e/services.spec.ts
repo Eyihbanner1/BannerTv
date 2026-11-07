@@ -179,13 +179,17 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await openSection(page, 'settings');
   await expectFocus(page, 'settings-stream-choice');
-  await expect(page.getByText(/not endorsed or certified by TMDB/)).toBeVisible();
+  await expect(
+    page.getByText(/not endorsed, certified, or otherwise approved by TMDB/),
+  ).toBeVisible();
   await expect(page.locator('[data-focus-key="settings-trakt"]')).toHaveCount(0);
   await openServices(page, 'settings-tmdb');
   await expectFocusLabel(page, 'Extra details from TMDB: On');
   await page.keyboard.press('Enter');
   await expectFocusLabel(page, 'Extra details from TMDB: Off');
-  await expect(page.getByText(/not endorsed or certified by TMDB/)).toHaveCount(0);
+  await expect(
+    page.getByText(/not endorsed, certified, or otherwise approved by TMDB/),
+  ).toHaveCount(0);
 
   await press(page, 'ArrowLeft', 'settings-still-watching');
   await press(page, 'ArrowLeft', 'rail-settings');

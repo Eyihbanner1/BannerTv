@@ -21,11 +21,15 @@ export interface FakeTrakt {
 export interface FakeTmdb {
   /** Every TMDB path asked for, without the query. */
   paths: string[];
+  /** Every Search route asked for, with its query: "discover?type=movie&keywords=9716". */
+  searches: string[];
 }
 
 export interface ServicesOptions {
   trakt?: boolean;
   tmdb?: boolean;
+  /** The service has Search's TMDB routes too. Needs `tmdb`. */
+  search?: boolean;
   /** The UK rating TMDB gives every film. Default U. */
   certificate?: string;
   /** When TMDB says every film comes out to watch at home in the UK. None by default. */
@@ -185,9 +189,124 @@ function tmdbMovie(id: number, certificate: string, homeRelease?: string) {
   };
 }
 
+const title = (id: string, type: 'movie' | 'series', name: string, extra = {}) => ({
+  id,
+  type,
+  name,
+  year: '2023',
+  poster: `/${id}.jpg`,
+  genres: [],
+  ...extra,
+});
+
+/** Search's routes as the service answers them: titles by IMDb id, with UK ratings when asked. */
+function searchAnswer(route: string): { status: number; data: unknown } {
+  const url = new URL(`https://service.test/${route}`);
+  const query = url.searchParams;
+  switch (url.pathname.slice(1)) {
+    case 'discover': {
+      const type = query.get('type') === 'series' ? 'series' : 'movie';
+      if (query.get('keywords') === '9716,356038,362573') {
+        return {
+          status: 200,
+          data: {
+            titles:
+              type === 'movie'
+                ? [
+                    title('tt9100001', 'movie', 'Laugh Out Loud: Live', { genres: ['Comedy'] }),
+                    title('tt9100002', 'movie', 'One Mic Night', { genres: ['Comedy'] }),
+                  ]
+                : [title('tt9100003', 'series', 'Open Mic Tuesdays', { genres: ['Comedy'] })],
+          },
+        };
+      }
+      if (query.get('certification')) {
+        // A kids profile's row: TMDB says each title's UK rating.
+        return {
+          status: 200,
+          data: {
+            titles: [
+              title('tt9300001', type, 'Puddle Jumpers', {
+                genres: ['Family', 'Comedy'],
+                certificates: { GB: ['U'] },
+              }),
+              title('tt9300002', type, 'Too Old For This', {
+                genres: ['Family', 'Comedy'],
+                certificates: { GB: ['15'] },
+              }),
+            ],
+          },
+        };
+      }
+      return { status: 200, data: { titles: [] } };
+    }
+    case 'multi': {
+      const words = query.get('query') ?? '';
+      if (words === 'something like summer') {
+        const titles = [{ name: 'Something Like Summer', type: 'movie', year: '2017' }];
+        return { status: 200, data: { people: [], titles } };
+      }
+      if (words.indexOf('tom') !== 0) return { status: 200, data: { people: [], titles: [] } };
+      return {
+        status: 200,
+        data: {
+          people: [
+            { id: 31, name: 'Tom Hanks', department: 'Acting', knownFor: ['Big'] },
+            { id: 2524, name: 'Tom Hardy', department: 'Acting', knownFor: [] },
+          ],
+          titles: [{ name: 'Tomb Raider', type: 'movie', year: '2018' }],
+        },
+      };
+    }
+    case 'person':
+      return {
+        status: 200,
+        data:
+          query.get('id') === '31'
+            ? {
+                titles: [
+                  title('tt9200001', 'movie', 'The Long Flight Home'),
+                  title('tt9200002', 'series', 'Band of Neighbours', { year: '2001' }),
+                ],
+              }
+            : { titles: [] },
+      };
+    case 'like':
+      return {
+        status: 200,
+        data: {
+          like: { name: 'The Matrix', type: 'movie', year: '1999' },
+          titles: [
+            title('tt9400001', 'movie', 'Wired Reality'),
+            title('tt9400002', 'movie', 'Neon Code'),
+          ],
+        },
+      };
+    case 'titles':
+      return {
+        status: 200,
+        data: {
+          titles: [
+            title('tt9500001', 'movie', 'Snow Friends', {
+              genres: ['Family', 'Animation'],
+              certificates: { GB: ['U'] },
+            }),
+            title('tt9500002', 'movie', 'Snow Fight Night', {
+              genres: ['Family', 'Animation'],
+              certificates: { GB: ['12A', '15'] },
+            }),
+          ],
+        },
+      };
+    default:
+      return { status: 404, data: { error: 'not found' } };
+  }
+}
+
 /**
- * BannerTV's own service: /status, a fake Trakt account behind /trakt, and
- * TMDB behind /tmdb, with TMDB's images. Call after mockAddons.
+ * BannerTV's own service: /status, a fake Trakt account behind /trakt,
+ * TMDB behind /tmdb with TMDB's images, and Search's routes behind
+ * /search. Call after mockAddons.
  */
 export async function mockServices(
   page: Page,
@@ -199,11 +318,25 @@ export async function mockServices(
     approve: () => void (approved = true),
     callsTo: (path) => trakt.calls.filter((call) => call.path.replace(/\?.*$/, '') === path),
   };
-  const tmdb: FakeTmdb = { paths: [] };
+  const tmdb: FakeTmdb = { paths: [], searches: [] };
+  const search = options.tmdb === true && options.search === true;
 
   await page.route(`${API_SERVICE}/status`, (route) =>
-    json(route, { trakt: options.trakt === true, tmdb: options.tmdb === true }),
+    json(route, {
+      trakt: options.trakt === true,
+      tmdb: options.tmdb === true,
+      // A service from before Search's routes says nothing of them.
+      ...(options.search === undefined ? {} : { search }),
+    }),
   );
+  await page.route(`${API_SERVICE}/search/**`, (route) => {
+    if (!search) return json(route, { error: 'not found' }, 404);
+    const url = new URL(route.request().url());
+    const asked = url.pathname.replace(/^\/search\//, '') + url.search;
+    tmdb.searches.push(decodeURIComponent(asked));
+    const answer = searchAnswer(asked);
+    return json(route, answer.data, answer.status);
+  });
   await page.route(`${API_SERVICE}/trakt`, (route) => {
     if (!options.trakt) return json(route, { error: 'unconfigured' }, 503);
     const call = JSON.parse(route.request().postData() ?? '{}') as TraktCall;
