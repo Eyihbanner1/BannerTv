@@ -6,6 +6,7 @@ import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { QrCode } from '../../components/QrCode';
+import { dateFormatter } from '../../data/date-format';
 import { lastSync, syncTrakt, traktAccount, traktDevice } from '../../data/trakt';
 import screen from '../Screen.module.css';
 import styles from './TraktScreen.module.css';
@@ -15,8 +16,10 @@ function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
+const clockTime = dateFormatter('en-GB', { hour: '2-digit', minute: '2-digit' });
+
 function clock(at: number): string {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return clockTime(new Date(at));
 }
 
 /** How long the code on show has left, counting down. */

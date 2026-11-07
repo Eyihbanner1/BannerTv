@@ -1,0 +1,102 @@
+.list {
+  position: relative;
+  height: 860px;
+  margin: 0 var(--bt-safe-x) 0 var(--bt-content-inset);
+  overflow: hidden;
+}
+
+.track {
+  position: relative;
+  transition: transform var(--bt-motion) ease-out;
+}
+
+.row {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 152px;
+  padding: 8px 16px 8px 8px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.focused {
+  background: var(--bt-surface-3);
+  box-shadow: var(--bt-focus-ring);
+}
+
+/* The day's name, on its first row only, so each day reads as a block. */
+.day {
+  flex: none;
+  width: 220px;
+  padding-left: 16px;
+}
+
+.dayName,
+.today {
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  white-space: nowrap;
+}
+
+.today {
+  color: var(--bt-accent);
+}
+
+.date {
+  margin-top: 2px;
+  font: 500 24px/1.3 var(--bt-font);
+  color: var(--bt-text-subtle);
+}
+
+.thumb {
+  position: relative;
+  flex: none;
+  width: 240px;
+  height: 135px;
+  margin-right: 24px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line {
+  margin-top: 2px;
+  font: 500 24px/1.3 var(--bt-font);
+  color: var(--bt-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 2px 14px;
+  border-radius: 999px;
+  font: 700 20px/1.4 var(--bt-font);
+  color: var(--bt-accent);
+  background: var(--bt-surface-2, rgba(255, 255, 255, 0.08));
+}

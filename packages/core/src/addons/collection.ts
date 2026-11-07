@@ -11,7 +11,12 @@ export interface InstalledAddon {
   transportUrl: string;
   manifest: Manifest;
   official: boolean;
-  /** When the manifest was fetched, in ms since 1970. 0 for a copy bundled with the app. */
+  /**
+   * When the manifest was fetched, in ms since 1970. 0 for a copy bundled with
+   * the app. A refresh that brings back the same manifest keeps this object as
+   * it is, so screens do not draw again: the collection saves the newer time
+   * (see toStored) and goes by it.
+   */
   fetchedAt: number;
   /**
    * Names this install while its settings change, for when the same addon is
@@ -152,6 +157,10 @@ export function createAddonCollection(options: {
   const state = createStore<CollectionState>({ ready: false, addons: [] });
   // Raw manifests, kept so storage holds exactly what the addon sent.
   const raw = new Map<string, unknown>();
+  // When a refresh last found an addon's manifest unchanged. The addon keeps its
+  // object, so this time is saved and checked in place of its own fetchedAt.
+  const checkedAt = new WeakMap<InstalledAddon, number>();
+  const fetchedAtOf = (addon: InstalledAddon) => checkedAt.get(addon) ?? addon.fetchedAt;
 
   function readAll(list: readonly StoredAddon[]): InstalledAddon[] {
     const addons: InstalledAddon[] = [];
@@ -172,7 +181,7 @@ export function createAddonCollection(options: {
       transportUrl: addon.transportUrl,
       manifest: raw.get(addon.transportUrl),
       official: addon.official,
-      fetchedAt: addon.fetchedAt,
+      fetchedAt: fetchedAtOf(addon),
       installId: installIdOf(addon),
     }));
   }
@@ -183,7 +192,7 @@ export function createAddonCollection(options: {
         transportUrl: addon.transportUrl,
         manifest: raw.get(addon.transportUrl),
         official: addon.official,
-        fetchedAt: addon.fetchedAt,
+        fetchedAt: fetchedAtOf(addon),
       };
       // Only an install whose address changed needs its name kept.
       const id = installIdOf(addon);
@@ -301,7 +310,7 @@ export function createAddonCollection(options: {
     },
 
     async refreshManifests(maxAgeMs) {
-      const due = state.get().addons.filter((a) => now() - a.fetchedAt >= maxAgeMs);
+      const due = state.get().addons.filter((a) => now() - fetchedAtOf(a) >= maxAgeMs);
       const fetched = await Promise.all(
         due.map((addon) =>
           fetchManifest(addon.transportUrl).then(
@@ -311,20 +320,32 @@ export function createAddonCollection(options: {
         ),
       );
       const fresh = new Map<string, Manifest>();
+      const same = new Set<string>();
       for (const result of fetched) {
         if (!result) continue;
+        // Most days nothing changed. Keeping the addon and its raw manifest then means
+        // Home, sports and sync see the same objects and have nothing to do again.
+        if (JSON.stringify(result.json) === JSON.stringify(raw.get(result.url))) {
+          same.add(result.url);
+          continue;
+        }
         raw.set(result.url, result.json);
         fresh.set(result.url, result.manifest);
       }
-      if (fresh.size === 0) return;
+      if (fresh.size === 0 && same.size === 0) return;
       // The user may have changed the collection while the manifests were loading.
       const fetchedAt = now();
-      update(
-        state.get().addons.map((addon) => {
-          const manifest = fresh.get(addon.transportUrl);
-          return manifest ? { ...addon, manifest, fetchedAt } : addon;
-        }),
-      );
+      let changed = false;
+      const addons = state.get().addons.map((addon) => {
+        if (same.has(addon.transportUrl)) checkedAt.set(addon, fetchedAt);
+        const manifest = fresh.get(addon.transportUrl);
+        if (!manifest) return addon;
+        changed = true;
+        return { ...addon, manifest, fetchedAt };
+      });
+      // When only the times changed they are saved, but no screen reads them.
+      if (changed) update(addons);
+      else save(addons);
     },
 
     toStored: () => stored(state.get().addons),

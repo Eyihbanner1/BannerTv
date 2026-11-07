@@ -1,11 +1,13 @@
 import {
+  catalogsFromManyAddons,
   createCatalogPager,
-  type DiscoverSource,
+  type DiscoverSelection,
+  discoverSelection,
   discoverSources,
   kidsDiscoverSources,
   kidsTitleAllowed,
-  orderedTypes,
   type PagerState,
+  resolveDiscover,
 } from '@bannertv/core';
 import type { ExtraArg, MetaPreview } from '@bannertv/protocol';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
@@ -22,13 +24,7 @@ import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
 import styles from './DiscoverScreen.module.css';
 
-/** What Discover shows. Kept by addon URL and catalog id, which survive reordering. */
-export interface DiscoverSelection {
-  type: string;
-  transportUrl: string;
-  catalogId: string;
-  genre?: string;
-}
+export type { DiscoverSelection };
 
 interface Memory {
   selection?: DiscoverSelection;
@@ -51,43 +47,6 @@ function memoryFor(key: string): Memory {
 const IDLE: PagerState = { items: [], status: 'loading' };
 const noSubscription = () => () => undefined;
 
-interface Resolved {
-  types: string[];
-  ofType: DiscoverSource[];
-  source: DiscoverSource;
-  genre: string | undefined;
-}
-
-/** Turns a wish into what the addons can do now: an unknown catalog falls back to the first of its type. */
-function resolve(
-  sources: readonly DiscoverSource[],
-  wanted: DiscoverSelection | undefined,
-): Resolved | null {
-  const types = orderedTypes(sources);
-  if (types.length === 0) return null;
-  const type = wanted && types.indexOf(wanted.type) !== -1 ? wanted.type : types[0]!;
-  const ofType = sources.filter((s) => s.catalog.type === type);
-  const source =
-    (wanted &&
-      ofType.find(
-        (s) => s.addon.transportUrl === wanted.transportUrl && s.catalog.id === wanted.catalogId,
-      )) ||
-    ofType[0]!;
-  let genre = wanted?.genre;
-  if (genre !== undefined && source.genres.indexOf(genre) === -1) genre = undefined;
-  if (genre === undefined && source.genreRequired) genre = source.genres[0];
-  return { types, ofType, source, genre };
-}
-
-function selectionOf(source: DiscoverSource, genre: string | undefined): DiscoverSelection {
-  return {
-    type: source.catalog.type,
-    transportUrl: source.addon.transportUrl,
-    catalogId: source.catalog.id,
-    genre,
-  };
-}
-
 /**
  * Browse one catalog at a time, with pickers for type, catalog and genre, as
  * a poster grid that loads more as the user moves down. "See all" on a Home
@@ -109,7 +68,7 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
     return kidsDiscoverSources(all).filter((s) => !leaveOut?.(s.addon, s.catalog));
   }, [collection.addons, sports.homeLeaveOut]);
   const [wanted, setWanted] = useState(() => memoryFor(memoryKey).selection ?? preset);
-  const resolved = useMemo(() => resolve(sources, wanted), [sources, wanted]);
+  const resolved = useMemo(() => resolveDiscover(sources, wanted), [sources, wanted]);
   const source = resolved?.source;
   const genre = resolved?.genre;
 
@@ -210,9 +169,7 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
   const typeOptions: MenuOption[] = resolved
     ? resolved.types.map((type) => ({ value: type, label: typeLabel(t, type) }))
     : [];
-  const manyAddons = resolved
-    ? resolved.ofType.some((s) => s.addon !== resolved.ofType[0]!.addon)
-    : false;
+  const manyAddons = resolved ? catalogsFromManyAddons(resolved) : false;
   const catalogOptions: MenuOption[] = resolved
     ? resolved.ofType.map((s) => ({
         value: s.key,
@@ -246,7 +203,7 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
               value={source.key}
               onChange={(key) => {
                 const next = resolved.ofType.find((s) => s.key === key);
-                if (next) choose(selectionOf(next, genre));
+                if (next) choose(discoverSelection(next, genre));
               }}
             />
             {genreOptions.length > 0 && (
@@ -255,7 +212,9 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
                 label={t('discover.genre')}
                 options={genreOptions}
                 value={genre ?? ''}
-                onChange={(value) => choose(selectionOf(source, value === '' ? undefined : value))}
+                onChange={(value) =>
+                  choose(discoverSelection(source, value === '' ? undefined : value))
+                }
               />
             )}
           </div>

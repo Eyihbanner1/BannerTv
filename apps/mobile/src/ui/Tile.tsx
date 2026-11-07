@@ -1,9 +1,10 @@
 import { metahubAtSize } from '@bannertv/core';
 import type { MetaPreview } from '@bannertv/protocol';
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Artwork } from './Artwork';
 import { phone } from '@brand/tokens/design';
+import { posterArtSize } from './poster-size';
 import { colors, radius, space, type } from './theme';
 
 export const POSTER = { width: phone.tilePosterW, height: phone.tilePosterH } as const;
@@ -22,6 +23,7 @@ export const Tile = memo(function Tile({
   note,
   progress,
   onPress,
+  onLongPress,
   width,
 }: {
   item: MetaPreview;
@@ -29,6 +31,8 @@ export const Tile = memo(function Tile({
   note?: string;
   progress?: number;
   onPress: (item: MetaPreview) => void;
+  /** A long press: what else can be done with the title. */
+  onLongPress?: (item: MetaPreview) => void;
   /** Overrides the shape's width (grids); the height keeps the shape's proportions. */
   width?: number;
 }) {
@@ -36,17 +40,20 @@ export const Tile = memo(function Tile({
   const tileWidth = width ?? box.width;
   const height = (tileWidth * box.height) / box.width;
   const src = shape === 'poster' ? item.poster : (item.background ?? item.poster);
+  // A poster tile takes the small poster when its pixels are enough; wide tiles keep medium.
+  const size = shape === 'poster' ? posterArtSize(tileWidth, PixelRatio.get()) : 'medium';
   const label = [item.name, note ?? item.releaseInfo].filter(Boolean).join(', ');
   return (
     <Pressable
       onPress={() => onPress(item)}
+      {...(onLongPress ? { onLongPress: () => onLongPress(item) } : {})}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => [{ width: tileWidth }, pressed && styles.pressed]}
     >
       <View>
         <Artwork
-          src={phoneArt(src)}
+          src={phoneArt(src, size)}
           retrySrc={src}
           seed={item.id}
           style={{
