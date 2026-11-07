@@ -27,6 +27,7 @@ import { initI18n } from './i18n';
 import { initNavigation } from './navigation/spatial';
 import { androidWatchNext, initAndroid, isAndroid, takeAndroidLink } from './platform/android';
 import { parseChromiumMajor, webOSReleaseForChromium } from './platform/engine';
+import { startFrameMeter } from './platform/frame-meter';
 import { initInputMode } from './platform/input-mode';
 import { afterLaunch } from './platform/launch';
 import { bootMark, mark } from './platform/marks';
@@ -62,6 +63,7 @@ function start() {
     document.documentElement.classList.add('low-power');
   }
   applyTuning(document.documentElement);
+  startFrameMeter();
   // The stages of the latest Play, read from the web inspector.
   if (tuning.marks) window.__bannertvPlay = readPlayMarks;
   if (!isWebOS()) {
