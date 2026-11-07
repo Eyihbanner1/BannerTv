@@ -56,10 +56,16 @@ export function useScrobble(
   const latest = useRef(state);
   /** Whether the file was taken for a clip when last seen. */
   const wasClip = useRef(false);
+  // Where the player would open the next file, and the moves it has taken,
+  // as they were when this state rendered: an effect may run later (after a
+  // slow render, a move can come first), and must not pair this state with a
+  // move made after it.
+  const carryOn = session?.carryOn();
+  const moves = session?.moves();
   useEffect(() => {
     latest.current = state;
     const runtimes = runtimesOf(runtime, knownRuntime);
-    place.see(state, runtimes, session?.carryOn(), session?.moves());
+    place.see(state, runtimes, carryOn, moves);
     // A file found to be the title as it plays starts now, its status unchanged.
     const seen = onSeen(sent.current, wasClip.current, state, place, runtimes);
     wasClip.current = seen.clip;

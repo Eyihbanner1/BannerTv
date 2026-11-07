@@ -108,6 +108,13 @@ const KEPT = 8;
  */
 const SAME_PLACE_S = 2;
 
+/**
+ * How far behind where it was opened a clock may start and still have got
+ * there, as the progress tracker allows (a keyframe before it): further
+ * behind, the file did not seek there.
+ */
+const ARRIVED_S = 15;
+
 /** The longest a clip can be (isMuchShorter's rule): its clock never passes it. */
 const CLIP_AT_MOST_S = 5 * 60;
 
@@ -150,6 +157,13 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   let linkWasClip = false;
   let linkWasLive = false;
   let linkLength = 0;
+  /**
+   * This link has shown it cannot seek: as it played, its clock read further
+   * behind where the player opened it, or a move it took, than a keyframe
+   * would put it (a file that cannot seek plays from 0). The player may then
+   * hold a move in it that the file never makes.
+   */
+  let linkCannotSeek = false;
   /** A clip by what the player shows of it now. */
   const judged = (state: Played, runtimes: Runtimes) =>
     isClip(state, runtimes.knownRuntimeSeconds, videoId);
@@ -197,14 +211,17 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
   };
   // Places this link reached before it showed a length, now that it shows it
   // is a clip `upTo` long: they may be its own clock, which never passes it,
-  // or, unless that clock ran on by itself, and on past it, show only where
-  // it started from (where the player opened it, or a move the viewer took
-  // in it). A broadcast's clock may be anywhere.
+  // or, unless that clock ran on by itself, show only where it started from
+  // (where the player opened it, or a move the viewer took in it). In a link
+  // that cannot seek, a move is only held, so the clock must have run on past
+  // the clip's length. A broadcast's clock may be anywhere.
   const forgetUnmeasured = (entry: SessionState['entry'], upTo = Infinity) => {
     const clock = (place: Reached) =>
       place.duration === 0 &&
       place.entry === entry &&
-      (place.position <= upTo + SAME_PLACE_S || !place.ran || place.ranTo <= upTo + SAME_PLACE_S);
+      (place.position <= upTo + SAME_PLACE_S ||
+        !place.ran ||
+        (linkCannotSeek && place.ranTo <= upTo + SAME_PLACE_S));
     for (let index = earlier.length - 1; index >= 0; index--) {
       if (clock(earlier[index]!)) earlier.splice(index, 1);
     }
@@ -251,6 +268,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
         linkWasClip = false;
         linkWasLive = false;
         linkLength = 0;
+        linkCannotSeek = false;
       } else if (opening && begun) {
         // The same link opened again (Try again, a broadcast's live edge, or
         // Play before its first picture): like another file, but a clip stays
@@ -341,6 +359,7 @@ export function createScrobblePlace(videoId: string): ScrobblePlace {
           ranTo = Math.max(ranTo, state.position);
         }
         lastPlaying = state.position;
+        if (state.position < (origin ?? state.position) - ARRIVED_S) linkCannotSeek = true;
       } else lastPlaying = undefined;
       const inside = state.duration === 0 || played || state.position <= state.duration;
       // A place it reached by its own length stands when the length goes

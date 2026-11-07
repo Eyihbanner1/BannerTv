@@ -1456,7 +1456,17 @@ describe('onStatus and onClose', () => {
     // to 0, and a second one, from 0, the player holds. It fails; Try again
     // opens it there, it plays from 0 again and its 129 s length comes.
     type Step = [Played, typeof known, number, number];
-    const clipFromZero = (skips: [number, number][], ranTo = 3, play?: Step) => {
+    const clipFromZero = (
+      skips: [number, number][],
+      ranTo = 3,
+      play?: Step,
+      reopen: Step[] = [
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(80, 0, 'playing', false, CLIP), known, 80, 0],
+        [played(80, 129, 'playing', false, CLIP), known, 80, 0],
+        [played(80, 129, 'paused', false, CLIP), known, 80, 0],
+      ],
+    ) => {
       const at = skips[skips.length - 1]![0];
       return trakt([
         [played(1245, 2820, 'playing'), known, 1245, 0],
@@ -1477,10 +1487,7 @@ describe('onStatus and onClose', () => {
         [played(at, 0, 'buffering', false, CLIP), known, at, 0],
         [played(at, 0, 'failed', false, CLIP), known, at, 0],
         [played(at, 0, 'loading', false, CLIP), known, at, 0],
-        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
-        [played(80, 0, 'playing', false, CLIP), known, 80, 0],
-        [played(80, 129, 'playing', false, CLIP), known, 80, 0],
-        [played(80, 129, 'paused', false, CLIP), known, 80, 0],
+        ...reopen,
       ]);
     };
     const held: [number, number][] = [
@@ -1510,6 +1517,10 @@ describe('onStatus and onClose', () => {
       'pause(44)',
       'stop(44)',
     ]);
+    // Or Try again finds its length as it opens, before it plays.
+    expect(
+      clipFromZero(held, 3, undefined, [[played(600, 129, 'loading', false, CLIP), known, 600, 0]]),
+    ).toEqual(['start(44)', 'pause(0)', 'stop(44)']);
     // Four skips held, to 2400 s: never 85%, which Trakt would take for watched.
     expect(
       clipFromZero([
@@ -1520,6 +1531,111 @@ describe('onStatus and onClose', () => {
         [2400, 5],
       ]),
     ).toEqual(['start(44)', 'pause(0)', 'start(0)', 'pause(44)', 'stop(44)']);
+  });
+
+  it('keeps a film’s place when a skip comes before it ran a clip’s length and Try again finds a clip', () => {
+    // A film whose file gives no length but takes seeks plays 40 s from the
+    // start; a skip the player takes moves it to 640 s, and it fails at once.
+    // Try again gets a 60 s clip from the link.
+    type Step = [Played, typeof known, number, number];
+    const filmThenClip = (before: Step[], skip: Step[], from = 0) =>
+      trakt([
+        ...before,
+        [played(from, 0, 'loading'), known, from, 0],
+        [played(from, 0, 'playing'), known, from, 0],
+        [played(20, 0, 'playing'), known, 20, 0],
+        [played(40, 0, 'playing'), known, 40, 0],
+        ...skip,
+        [played(640, 0, 'buffering'), known, 640, 1],
+        [played(640, 0, 'failed'), known, 640, 1],
+        [played(640, 0, 'loading'), known, 640, 0],
+        [played(640, 60, 'loading'), known, 640, 0],
+      ]);
+    const asItPlays: Step[] = [[played(640, 0, 'playing'), known, 640, 1]];
+    expect(filmThenClip([], asItPlays)).toEqual(['start(0)', 'stop(23)']);
+    // Or paused first.
+    expect(
+      filmThenClip(
+        [],
+        [
+          [played(40, 0, 'paused'), known, 40, 0],
+          [played(640, 0, 'paused'), known, 640, 1],
+        ],
+      ),
+    ).toEqual(['start(0)', 'pause(1)', 'stop(23)']);
+    // Or picked in Sources after another link that could not seek, which
+    // played from 0 though the player opened it at 1250 s.
+    expect(
+      filmThenClip(
+        [
+          [played(1250, 0, 'loading', false, OTHER), known, 1250, 0],
+          [played(0, 0, 'playing', false, OTHER), known, 0, 0],
+          [played(5, 0, 'playing', false, OTHER), known, 5, 0],
+        ],
+        asItPlays,
+        5,
+      ),
+    ).toEqual(['start(0)', 'stop(23)']);
+    // Or resumed at 100 s, starting 8 s before it at a keyframe.
+    expect(
+      trakt([
+        [played(100, 0, 'loading'), known, 100, 0],
+        [played(92, 0, 'playing'), known, 92, 0],
+        [played(130, 0, 'playing'), known, 130, 0],
+        [played(730, 0, 'playing'), known, 730, 1],
+        [played(730, 0, 'failed'), known, 730, 1],
+        [played(730, 0, 'loading'), known, 730, 0],
+        [played(730, 240, 'loading'), known, 730, 0],
+      ]),
+    ).toEqual(['start(3)', 'stop(26)']);
+  });
+
+  it('takes a link that plays from 0 where it was moved to for one that cannot seek', () => {
+    // Android: the first stream is a clip with no length yet. It plays 40 s
+    // from the start and is paused; the viewer goes back to 0:00, and a skip
+    // from there the player holds, as a file that cannot seek does, at 600 s.
+    type Step = [Played, typeof known, number, number];
+    const heldInClip = (after: Step[], reopen: Step[], openedAt = 0) =>
+      trakt([
+        [played(openedAt, 0, 'loading', false, CLIP), known, openedAt, 0],
+        [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+        [played(40, 0, 'playing', false, CLIP), known, 40, 0],
+        [played(40, 0, 'paused', false, CLIP), known, 40, 0],
+        [played(0, 0, 'paused', false, CLIP), known, 0, 1],
+        [played(600, 0, 'paused', false, CLIP), known, 600, 2],
+        ...after,
+        [played(600, 0, 'failed', false, CLIP), known, 600, 2],
+        [played(600, 0, 'loading', false, CLIP), known, 600, 0],
+        ...reopen,
+      ]);
+    // It fails; Try again plays it from 0 again, and its 129 s length comes.
+    expect(
+      heldInClip(
+        [],
+        [
+          [played(0, 0, 'playing', false, CLIP), known, 0, 0],
+          [played(80, 0, 'playing', false, CLIP), known, 80, 0],
+          [played(80, 129, 'playing', false, CLIP), known, 80, 0],
+        ],
+      ),
+    ).toEqual(['start(0)', 'pause(1)', 'start(0)']);
+    // Or Play plays it from 0 before it fails, and Try again finds the length
+    // as it opens.
+    expect(
+      heldInClip(
+        [
+          [played(600, 0, 'playing', false, CLIP), known, 600, 2],
+          [played(0, 0, 'playing', false, CLIP), known, 0, 2],
+          [played(5, 0, 'playing', false, CLIP), known, 5, 2],
+        ],
+        [[played(600, 129, 'loading', false, CLIP), known, 600, 0]],
+      ),
+    ).toEqual(['start(0)', 'pause(1)', 'start(21)']);
+    // Or a resume opened it at 50 s and it played from 0, which tells as much:
+    // Try again then finds its length as it opens.
+    expect(heldInClip([], [[played(600, 129, 'loading', false, CLIP), known, 600, 0]], 50)).toEqual(
+      ['start(0)', 'pause(1)'],
+    );
   });
 
   it('takes no clock that ran 2 s or less after a move in a clip for its own', () => {
