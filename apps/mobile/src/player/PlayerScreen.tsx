@@ -585,7 +585,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const wantsPinch = (event: GestureResponderEvent) =>
     pinchAllowed && touchSpread(event.nativeEvent.touches) !== null;
   // On the whole screen, so a pinch takes over from whatever the first finger was on: a tap, a
-  // swipe or a button, none of which then goes ahead.
+  // swipe or a button, none of which then goes ahead. The seek bar alone keeps its finger.
   const pinchHandlers = {
     onStartShouldSetResponderCapture: wantsPinch,
     onMoveShouldSetResponderCapture: wantsPinch,
@@ -598,7 +598,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     onResponderMove: (event: GestureResponderEvent) => {
       const from = pinchFrom.current;
       const spread = touchSpread(event.nativeEvent.touches);
-      // Decided already, or one finger lifted.
+      // Decided already, ended by a lifted finger, or down to one finger.
       if (from === null || spread === null) return;
       const wanted = pinchFit(from, spread);
       if (!wanted) return;
@@ -606,6 +606,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       if (wanted === pictureFit.get()) return;
       changeFit(wanted);
       Haptics.selectionAsync().catch(() => undefined);
+    },
+    // A finger lifting ends the pinch, decided or not: one set down again, or the next two of
+    // three, would otherwise be measured against fingers no longer there.
+    onResponderEnd: () => {
+      pinchFrom.current = null;
     },
     onResponderRelease: () => {
       pinchFrom.current = null;

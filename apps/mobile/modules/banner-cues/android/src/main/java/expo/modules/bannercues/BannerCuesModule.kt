@@ -16,6 +16,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.video.player.VideoPlayer
 import java.lang.ref.WeakReference
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -23,7 +24,8 @@ import kotlinx.coroutines.launch
  * app's PlayerController does ({ "event": "cues" }, ADR 0005 decision 6), so the page draws them
  * in the profile's subtitle style. expo-video plays through Media3 but tells JS nothing of its
  * cues, so this listens on the ExoPlayer inside expo-video's VideoPlayer, and hides Media3's own
- * subtitle view while the page draws the lines. Picture subtitles (PGS, DVB) stay with Media3.
+ * subtitle view while the page draws the lines. Picture subtitles (PGS, DVB) stay with Media3,
+ * kept inside the screen when the picture is zoomed to fill it.
  */
 @OptIn(markerClass = [UnstableApi::class])
 class BannerCuesModule : Module() {
@@ -35,9 +37,22 @@ class BannerCuesModule : Module() {
 
   private val listener = object : Player.Listener {
     override fun onCues(cueGroup: CueGroup) {
+      keepOnScreen()
       send(cueGroup)
     }
   }
+
+  /** The subtitle view keepOnScreen listens on. */
+  private var fitted: WeakReference<View>? = null
+
+  // Zoomed to fill the screen (the player's contentFit "cover"), Media3's content frame, and
+  // the subtitle view inside it, is larger than the screen, so a picture subtitle near the
+  // frame's edge would be cut off. Padding the subtitle view down to the whole frame fitted in
+  // the screen draws Media3's subtitles where they are with the picture fitted: on the screen,
+  // and never stretched. With the picture fitted the padding is none. Measured again whenever
+  // the view is laid out, as it is when the fit changes; after that layout, not during it.
+  private val fitOnLayout =
+    View.OnLayoutChangeListener { view, _, _, _, _, _, _, _, _ -> view.post { fitInScreen(view) } }
 
   override fun definition() = ModuleDefinition {
     Name("BannerCues")
@@ -53,6 +68,7 @@ class BannerCuesModule : Module() {
     Function("draw") { on: Boolean ->
       appContext.mainQueue.launch {
         pageDraws = on
+        keepOnScreen()
         if (!on) {
           subtitleView()?.visibility = View.VISIBLE
         } else {
@@ -82,6 +98,32 @@ class BannerCuesModule : Module() {
 
   /** Media3's subtitle view on the screen that shows the player, if one does. */
   private fun subtitleView() = watched?.get()?.currentVideoView?.playerView?.subtitleView
+
+  private fun keepOnScreen() {
+    val view: View = subtitleView() ?: return
+    if (fitted?.get() !== view) {
+      fitted?.get()?.removeOnLayoutChangeListener(fitOnLayout)
+      view.addOnLayoutChangeListener(fitOnLayout)
+      fitted = WeakReference(view)
+    }
+    fitInScreen(view)
+  }
+
+  private fun fitInScreen(view: View) {
+    // The subtitle view fills the content frame, which sits centred in the player view.
+    val screen = (view.parent as? View)?.parent as? View ?: return
+    val width = view.width
+    val height = view.height
+    if (width <= 0 || height <= 0 || screen.width <= 0 || screen.height <= 0) return
+    val scale = minOf(1f, screen.width.toFloat() / width, screen.height.toFloat() / height)
+    val x = (width * (1f - scale) / 2f).roundToInt()
+    val y = (height * (1f - scale) / 2f).roundToInt()
+    if (view.paddingLeft != x || view.paddingTop != y ||
+      view.paddingRight != x || view.paddingBottom != y
+    ) {
+      view.setPadding(x, y, x, y)
+    }
+  }
 
   private fun send(cueGroup: CueGroup) {
     val video = watched?.get() ?: return

@@ -133,27 +133,33 @@ test.describe('with touch', () => {
     const cdp = await page.context().newCDPSession(page);
     const touch = (type: string, touchPoints: { x: number; y: number; id: number }[]) =>
       cdp.send('Input.dispatchTouchEvent', { type, touchPoints } as never);
-    const pinch = async (from: [number, number], to: [number, number]) => {
+    /** Two fingers from `from` to `to`, then on to each of `then`, before they lift. */
+    const pinch = async (from: [number, number], ...to: [number, number][]) => {
       await touch('touchStart', [{ x: from[0], y: 450, id: 0 }]);
       await touch('touchStart', [
         { x: from[0], y: 450, id: 0 },
         { x: from[1], y: 450, id: 1 },
       ]);
-      for (let step = 1; step <= 6; step++) {
-        const at = (start: number, end: number) => start + ((end - start) * step) / 6;
-        await touch('touchMove', [
-          { x: at(from[0], to[0]), y: 450, id: 0 },
-          { x: at(from[1], to[1]), y: 450, id: 1 },
-        ]);
+      let at = from;
+      for (const next of to) {
+        for (let step = 1; step <= 6; step++) {
+          const x = (index: 0 | 1) => at[index] + ((next[index] - at[index]) * step) / 6;
+          await touch('touchMove', [
+            { x: x(0), y: 450, id: 0 },
+            { x: x(1), y: 450, id: 1 },
+          ]);
+        }
+        at = next;
       }
       await touch('touchEnd', []);
     };
 
     // Spreading fills the screen, says so, and the phone keeps it. No tap shows the controls,
     // and the film goes on from where it was.
+    // The fingers easing back in before they lift change nothing: one change a pinch.
     expect(await fit()).toBe('contain');
     const before = await time();
-    await pinch([160, 260], [90, 330]);
+    await pinch([160, 260], [90, 330], [140, 280]);
     await expect.poll(fit).toBe('cover');
     await expect(page.getByText('Zoomed to fill')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
@@ -162,6 +168,67 @@ test.describe('with touch', () => {
     await page.waitForTimeout(600);
     await expect(more).toBeHidden();
     expect(Math.abs((await time()) - before)).toBeLessThan(3);
+
+    // Two fingers resting, one lifting and coming down again near the other, are no pinch.
+    // DevTools lifts only every finger at once, so these touches are the page's own.
+    const fingers = (
+      type: string,
+      touches: [number, number][],
+      changed: [number, number][] = touches,
+    ) =>
+      page.evaluate(
+        ({ type, touches, changed }) => {
+          const target = document.elementFromPoint(200, 450) ?? document.body;
+          const make = ([identifier, x]: [number, number]) =>
+            new Touch({ identifier, target, clientX: x, clientY: 450, pageX: x, pageY: 450 });
+          target.dispatchEvent(
+            new TouchEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              touches: touches.map(make),
+              targetTouches: touches.map(make),
+              changedTouches: changed.map(make),
+            }),
+          );
+        },
+        { type, touches, changed },
+      );
+    await fingers('touchstart', [[0, 100]]);
+    await fingers(
+      'touchstart',
+      [
+        [0, 100],
+        [1, 300],
+      ],
+      [[1, 300]],
+    );
+    await fingers('touchend', [[0, 100]], [[1, 300]]);
+    await fingers(
+      'touchstart',
+      [
+        [0, 100],
+        [2, 140],
+      ],
+      [[2, 140]],
+    );
+    await fingers(
+      'touchmove',
+      [
+        [0, 100],
+        [2, 135],
+      ],
+      [[2, 135]],
+    );
+    await fingers(
+      'touchend',
+      [],
+      [
+        [0, 100],
+        [2, 135],
+      ],
+    );
+    await page.waitForTimeout(300);
+    expect(await fit()).toBe('cover');
 
     // Closing the fingers fits the whole picture again.
     await pinch([100, 320], [190, 230]);
