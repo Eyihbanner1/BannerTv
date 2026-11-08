@@ -63,6 +63,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/routes';
+import { localStorage } from '../runtime/web-globals';
 import { reportScreen } from '../runtime/whereabouts';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
@@ -79,6 +80,13 @@ import {
 } from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
+import {
+  contentFitFor,
+  type PictureFit,
+  pictureFitStore,
+  pinchFit,
+  touchSpread,
+} from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SkipRipple } from './SkipRipple';
 import { SubtitleStyleChoices } from './SubtitleStyle';
@@ -106,7 +114,12 @@ const SKIP_PILL_H = 40;
 const SKIP_RAISED = 112;
 /** The Back to pill sits just under the title row: its padding, its buttons and a small gap. */
 const BACK_TO_TOP = space.m + touch.min + space.s;
+/** How long the note a change of picture fit shows. */
+const FIT_NOTE_MS = 1500;
 const noop = () => () => undefined;
+
+/** Whole picture or filling the screen: this phone's choice, kept for every film (picture-fit.ts). */
+const pictureFit = pictureFitStore(localStorage);
 
 type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
 
@@ -140,6 +153,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
   const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
+  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
   // event's page comes from the addon that listed it, never another one.
@@ -542,6 +556,69 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     },
     onResponderRelease: (event: GestureResponderEvent) => endSwipe(event.nativeEvent.pageX),
     onResponderTerminate: () => endSwipe(null),
+    // A second finger makes it a pinch (below), and the swipe goes nowhere.
+    onResponderTerminationRequest: (event: GestureResponderEvent) =>
+      touchSpread(event.nativeEvent.touches) !== null,
+  };
+
+  // Zoom to fill: the whole frame (fit), or the picture covering the screen with what overhangs
+  // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
+  // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
+  // other phone players do; More has the same switch. The phone keeps the choice for every film.
+  const [fitNote, setFitNote] = useState<PictureFit | null>(null);
+  useEffect(() => {
+    if (!fitNote) return;
+    const timer = setTimeout(() => setFitNote(null), FIT_NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [fitNote]);
+  const changeFit = (next: PictureFit) => {
+    if (next === pictureFit.get()) return;
+    pictureFit.set(next);
+    setFitNote(next);
+  };
+  const zoomValue = t(fit === 'fill' ? 'common.on' : 'common.off');
+  // How far apart the fingers were as the pinch began; null once it has decided. One change a
+  // pinch, so fingers settling or lifting at the end never undo it.
+  const pinchFrom = useRef<number | null>(null);
+  // Not while a stream opens or fails, a panel is open or the film is in its small window.
+  const pinchAllowed = shown && !waiting && !problem && !pip && panel === null;
+  const wantsPinch = (event: GestureResponderEvent) =>
+    pinchAllowed && touchSpread(event.nativeEvent.touches) !== null;
+  // On the whole screen, so a pinch takes over from whatever the first finger was on: a tap, a
+  // swipe or a button, none of which then goes ahead. The seek bar alone keeps its finger.
+  const pinchHandlers = {
+    onStartShouldSetResponderCapture: wantsPinch,
+    onMoveShouldSetResponderCapture: wantsPinch,
+    onResponderGrant: (event: GestureResponderEvent) => {
+      noteInput();
+      clearTimeout(tapTimer.current);
+      lastTap.current = null;
+      pinchFrom.current = touchSpread(event.nativeEvent.touches);
+    },
+    onResponderMove: (event: GestureResponderEvent) => {
+      const from = pinchFrom.current;
+      const spread = touchSpread(event.nativeEvent.touches);
+      // Decided already, ended by a lifted finger, or down to one finger.
+      if (from === null || spread === null) return;
+      const wanted = pinchFit(from, spread);
+      if (!wanted) return;
+      pinchFrom.current = null;
+      if (wanted === pictureFit.get()) return;
+      changeFit(wanted);
+      Haptics.selectionAsync().catch(() => undefined);
+    },
+    // A finger lifting ends the pinch, decided or not: one set down again, or the next two of
+    // three, would otherwise be measured against fingers no longer there.
+    onResponderEnd: () => {
+      pinchFrom.current = null;
+    },
+    onResponderRelease: () => {
+      pinchFrom.current = null;
+    },
+    onResponderTerminate: () => {
+      pinchFrom.current = null;
+    },
+    // The fingers left on the glass after a pinch never become a swipe or a tap.
     onResponderTerminationRequest: () => false,
   };
   // Frames for the scene preview come from the stream playing; another stream starts over.
@@ -671,6 +748,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
   const toast = (() => {
+    // Just chosen, so first; never over what the screen says while a stream opens.
+    if (fitNote && !waiting) {
+      return t(fitNote === 'fill' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
+    }
     if (switching && waiting && state.entry === switching.entry) {
       return switching.label
         ? t('player.switchingTo', { quality: switching.label })
@@ -723,6 +804,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       onLayout={(event) => {
         surfaceWidth.current = event.nativeEvent.layout.width;
       }}
+      {...pinchHandlers}
     >
       <StatusBar hidden />
       {shown ? (
@@ -730,7 +812,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           ref={videoView}
           player={phonePlayer()}
           style={styles.video}
-          contentFit="contain"
+          contentFit={contentFitFor(fit)}
           nativeControls={false}
           allowsPictureInPicture
           // Home or a swipe away while a film plays keeps it going in a small window.
@@ -1138,6 +1220,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               onPress={() => setPanel('quality')}
             />
             <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
+            {shown ? (
+              <PanelOption
+                label={t('phone.zoomToFill')}
+                detail={zoomValue}
+                accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
+                onPress={() => {
+                  setPanel(null);
+                  changeFit(fit === 'fill' ? 'fit' : 'fill');
+                }}
+              />
+            ) : null}
             {shown ? <PanelOption label={t('phone.pictureInPicture')} onPress={startPip} /> : null}
           </PanelColumn>
         )}

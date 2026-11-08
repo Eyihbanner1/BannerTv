@@ -61,6 +61,9 @@ const PHONE = {
   traktCopied:
     'The code is copied, so you can paste it. Come back here when Trakt says you’re done.',
   pictureInPicture: 'Picture-in-picture',
+  zoomToFill: 'Zoom to fill',
+  zoomedToFill: 'Zoomed to fill',
+  fitToScreen: 'Fit to screen',
   whoIsWatching: "Who's watching?",
   pinFor: 'Enter the PIN for {{name}}',
   addons: 'Addons',
