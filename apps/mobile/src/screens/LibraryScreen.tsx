@@ -151,6 +151,6 @@ const styles = StyleSheet.create({
   header: { paddingBottom: space.m, gap: space.m },
   title: { ...type.display, color: colors.text, paddingHorizontal: gutter },
   chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: gutter },
-  kinds: { flexGrow: 0 },
+  kinds: { flexGrow: 0, flexShrink: 0 },
   lead: { ...type.meta, color: colors.textMuted, paddingHorizontal: gutter },
 });

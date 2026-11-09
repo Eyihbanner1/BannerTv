@@ -686,7 +686,7 @@ const styles = StyleSheet.create({
   tileLabel: { ...type.meta, fontWeight: '700', color: colors.text },
   failed: { gap: space.s, alignItems: 'flex-start' },
   description: { ...type.body, lineHeight: 23, color: colors.textSoft, marginTop: space.xs },
-  seasons: { marginTop: space.l, flexGrow: 0 },
+  seasons: { marginTop: space.l, flexGrow: 0, flexShrink: 0 },
   chip: {
     minHeight: touch.chip,
     justifyContent: 'center',

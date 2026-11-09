@@ -868,8 +868,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chips: { flexGrow: 0, marginTop: 14, marginBottom: space.s },
-  suggestions: { flexGrow: 0, paddingTop: space.s },
+  // Sideways strips never give up height to the list below them (React Native lets a horizontal
+  // ScrollView shrink by default, which cut the pills in half once results came in).
+  chips: { flexGrow: 0, flexShrink: 0, marginTop: 14, marginBottom: space.s },
+  suggestions: { flexGrow: 0, flexShrink: 0, paddingTop: space.s },
   chipsContent: { gap: space.s, paddingHorizontal: gutter },
   section: { paddingHorizontal: gutter, paddingTop: space.m, gap: space.m },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: space.s },
