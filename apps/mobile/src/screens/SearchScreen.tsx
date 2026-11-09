@@ -32,7 +32,7 @@ import { sportsState } from '@tv/data/sports';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MetaPreview } from '@bannertv/protocol';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openCatalog, openTitle } from '../nav/routes';
 import { reportTyping } from '../runtime/whereabouts';
@@ -42,6 +42,7 @@ import { SportsResults } from './sports/SportsResults';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
+import { ChipRow } from '../ui/ChipRow';
 import { Icon, OutlineIcon } from '../ui/icons';
 import { Message } from '../ui/Message';
 import { Row, type RowItem } from '../ui/Row';
@@ -250,18 +251,15 @@ function Suggestions({
   const { t } = useTranslation();
   if (items.length === 0) return null;
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
+    <ChipRow
       style={styles.suggestions}
-      contentContainerStyle={styles.chipsContent}
       keyboardShouldPersistTaps="handled"
       accessibilityLabel={t('search.suggestions')}
     >
       {items.map((item) => (
         <Chip key={item.key} label={item.label} on={false} onPress={() => onPick(item.query)} />
       ))}
-    </ScrollView>
+    </ChipRow>
   );
 }
 
@@ -788,11 +786,9 @@ export function SearchScreen() {
           </Pressable>
         ) : null}
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      <ChipRow
         style={styles.chips}
-        contentContainerStyle={styles.chipsContent}
+        selected={KINDS.indexOf(kind)}
         keyboardShouldPersistTaps="handled"
       >
         {KINDS.map((value) => (
@@ -803,7 +799,7 @@ export function SearchScreen() {
             onPress={() => setKind(value)}
           />
         ))}
-      </ScrollView>
+      </ChipRow>
       {!ready ? null : sources.length === 0 && !sportsSources ? (
         <Message lead={t('search.noAddons')} />
       ) : term ? (
@@ -868,11 +864,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Sideways strips never give up height to the list below them (React Native lets a horizontal
-  // ScrollView shrink by default, which cut the pills in half once results came in).
-  chips: { flexGrow: 0, flexShrink: 0, marginTop: 14, marginBottom: space.s },
-  suggestions: { flexGrow: 0, flexShrink: 0, paddingTop: space.s },
-  chipsContent: { gap: space.s, paddingHorizontal: gutter },
+  // ChipRow keeps both strips from giving up height to the list below them.
+  chips: { marginTop: 14, marginBottom: space.s },
+  suggestions: { marginTop: space.s },
   section: { paddingHorizontal: gutter, paddingTop: space.m, gap: space.m },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: space.s },
   sectionTitle: { ...type.heading, color: colors.text, flexShrink: 1 },
