@@ -7,10 +7,12 @@ import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { Menu } from '../components/Menu';
 import { serviceStatus } from '../data/api';
+import { homebrewUpdatesShown } from '../data/homebrew';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
 import { activeProfileId, isKidsProfile } from '../data/profiles';
 import { accountSection, checkAccountSection } from '../data/sync';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
+import { HomebrewUpdates } from './settings/HomebrewUpdates';
 import styles from './Screen.module.css';
 import settings from './SettingsScreen.module.css';
 
@@ -166,6 +168,7 @@ function FullSettings() {
             onPress={() => setPreference('tmdb', !prefs.tmdb)}
           />
         )}
+        {homebrewUpdatesShown() && <HomebrewUpdates />}
       </div>
       <p className={styles.muted}>
         {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}

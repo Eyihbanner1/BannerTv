@@ -973,6 +973,18 @@
       "unreachable": "Can't reach the helper at that address. Check it's on and on the same Wi-Fi."
     }
   },
+  "updates": {
+    "title": "Updates",
+    "installed": "BannerTV {{version}} is on this TV.",
+    "ready": "BannerTV {{version}} is ready in Homebrew Channel.",
+    "latest": "You have the latest build.",
+    "older": "This build is newer than Homebrew Channel's {{version}}.",
+    "get": "Get updates in Homebrew Channel",
+    "menuTitle": "Homebrew Channel",
+    "open": "Open Homebrew Channel",
+    "addAgain": "Add BannerTV's repository again",
+    "didNotOpen": "Homebrew Channel didn't open. Is it installed?"
+  },
   "browsing": {
     "play": "Play",
     "playEpisode": "Play S{{season}}:E{{episode}}",
