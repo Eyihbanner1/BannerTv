@@ -7,6 +7,7 @@ import {
   createProfileStores,
   createStore,
   createSyncEngine,
+  DEFAULT_PULL_MINUTES,
   deriveAccountKeys,
   followsPart,
   isRemoval,
@@ -439,7 +440,7 @@ async function settleLaunch(): Promise<boolean> {
  */
 export function startSync(): void {
   if (SYNC_SERVICE) {
-    // Hidden: everything waiting is pushed and pulls stop. Back after two minutes or more: a pull.
+    // Hidden: everything waiting is pushed and pulls stop. Back after 15 seconds or more: a pull.
     document.addEventListener('visibilitychange', () => {
       if (!engine) return;
       if (document.hidden) engine.hide();
@@ -519,6 +520,15 @@ export async function syncAccountNow(): Promise<void> {
 }
 
 /**
+ * Sends what waits in a few seconds rather than once progress saves go quiet: the player paused
+ * or stopped, so Continue Watching on other screens soon shows where. Unlike Sync now it waits
+ * while failures back off. Nothing happens on a screen without an account.
+ */
+export function pushAccountSoon(): void {
+  engine?.pushSoon();
+}
+
+/**
  * Brings in what the account changed since the last sync, for a screen that
  * shows the account's profiles (item A8): "Who's watching?" from the rail
  * and Settings > Profiles. Respects the engine's backing off, unlike Sync
@@ -528,6 +538,14 @@ export async function refreshAccount(): Promise<void> {
   if (!syncOn()) return;
   const made = await openEngine();
   if (made) await made.pullNow();
+}
+
+/**
+ * How often the account's service asks screens to pull, in minutes: for a screen that pulls more
+ * often by itself, such as the phone's Home, to slow down when the service asks.
+ */
+export function accountPullMinutes(): number {
+  return engine?.pullMinutes() ?? DEFAULT_PULL_MINUTES;
 }
 
 /** Whether this screen has profiles or data of its own, which makes joining ask Bring or Use. */

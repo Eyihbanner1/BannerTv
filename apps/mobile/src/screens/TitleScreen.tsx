@@ -35,7 +35,6 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -45,6 +44,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openCatalog, openPlayer, openStreams, openTitle } from '../nav/routes';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
+import { Chip } from '../ui/Chip';
+import { ChipRow } from '../ui/ChipRow';
 import { Icon, type IconName, OutlineIcon } from '../ui/icons';
 import { Sheet, SheetOption } from '../ui/Sheet';
 import { CastList, GenreLinks } from './TitleLinks';
@@ -72,7 +73,8 @@ function ActionTile({
       style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
     >
       <Icon name={icon} size={20} color={colors.text} />
-      <Text style={styles.tileLabel} numberOfLines={1}>
+      {/* Two lines for large text: "All streams" and "On My List" never lose their ends. */}
+      <Text style={styles.tileLabel} numberOfLines={2}>
         {label}
       </Text>
     </Pressable>
@@ -119,7 +121,8 @@ function StreamReady({ type: titleType, videoId }: { type: string; videoId: stri
           kind === 'nothing' && styles.readyDotOff,
         ]}
       />
-      <Text style={styles.readyText} numberOfLines={1}>
+      {/* Two lines, so "All streams has the full list" still shows with large text. */}
+      <Text style={styles.readyText} numberOfLines={2}>
         {text}
       </Text>
     </View>
@@ -540,24 +543,20 @@ export function TitleScreen({
         ) : null}
 
         {hasEpisodes && kidsAllowed && seasons.length > 1 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.seasons}>
+          // Out to the screen's edges, and opening on the season the viewer is up to.
+          <ChipRow bleed selected={shownIndex} style={styles.seasons}>
             {seasons.map((option, index) => (
-              <Pressable
+              <Chip
                 key={`${option.number}`}
+                label={seasonLabel(t, option)}
+                on={index === shownIndex}
                 onPress={() => {
                   shownSeason.set(id, index);
                   setSeasonIndex(index);
                 }}
-                accessibilityRole="button"
-                accessibilityState={{ selected: index === shownIndex }}
-                style={[styles.chip, index === shownIndex && styles.chipOn]}
-              >
-                <Text style={[styles.chipText, index === shownIndex && styles.chipTextOn]}>
-                  {seasonLabel(t, option)}
-                </Text>
-              </Pressable>
+              />
             ))}
-          </ScrollView>
+          </ChipRow>
         ) : hasEpisodes && kidsAllowed && season ? (
           <Text style={styles.sectionTitle}>{seasonLabel(t, season)}</Text>
         ) : null}
@@ -674,7 +673,8 @@ const styles = StyleSheet.create({
   tile: {
     flexBasis: '31%',
     flexGrow: 1,
-    height: 64,
+    minHeight: 64,
+    paddingVertical: space.s,
     borderRadius: 12,
     backgroundColor: colors.surface2,
     alignItems: 'center',
@@ -683,21 +683,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   tilePressed: { backgroundColor: colors.raised },
-  tileLabel: { ...type.meta, fontWeight: '700', color: colors.text },
+  tileLabel: { ...type.meta, fontWeight: '700', color: colors.text, textAlign: 'center' },
   failed: { gap: space.s, alignItems: 'flex-start' },
   description: { ...type.body, lineHeight: 23, color: colors.textSoft, marginTop: space.xs },
-  seasons: { marginTop: space.l, flexGrow: 0 },
-  chip: {
-    minHeight: touch.chip,
-    justifyContent: 'center',
-    paddingHorizontal: space.l,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface2,
-    marginRight: space.s,
-  },
-  chipOn: { backgroundColor: colors.playFill },
-  chipText: { ...type.meta, fontWeight: '700', color: colors.textSoft },
-  chipTextOn: { color: colors.onPlay, fontWeight: '800' },
+  seasons: { marginTop: space.l },
   sectionTitle: { ...type.heading, color: colors.text, marginTop: space.l },
   episode: {
     flexDirection: 'row',

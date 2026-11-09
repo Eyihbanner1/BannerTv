@@ -4,13 +4,14 @@ import { fixtureText, groupTitle, stripLabel } from '@tv/screens/sports/fixture'
 import { router } from 'expo-router';
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openEvent } from '../../nav/routes';
 import { Button } from '../../ui/Button';
+import { ChipRow } from '../../ui/ChipRow';
 import { FixtureRow } from '../../ui/FixtureRow';
 import { Message } from '../../ui/Message';
-import { colors, radius, space, type } from '../../ui/theme';
+import { colors, radius, space, touch, type } from '../../ui/theme';
 import { usePullRefresh } from '../../ui/use-pull-refresh';
 import {
   useMinuteClock,
@@ -114,12 +115,8 @@ export function SportsScreen() {
       <Text style={styles.title} accessibilityRole="header">
         {t('rail.sports')}
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.days}
-        accessibilityRole="tablist"
-      >
+      {/* In line with the title, and opening on the day picked last time. */}
+      <ChipRow inset={space.l} selected={days.indexOf(day)} accessibilityRole="tablist">
         {days.map((item) => {
           const selected = item === day;
           return (
@@ -136,7 +133,7 @@ export function SportsScreen() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </ChipRow>
       {feed.failed.length > 0 ? (
         <View style={styles.problem}>
           <Text style={styles.problemText}>
@@ -175,8 +172,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { gap: space.m },
   title: { ...type.display, color: colors.text, paddingHorizontal: space.l },
-  days: { paddingHorizontal: space.l, gap: space.s },
   chip: {
+    minHeight: touch.chip,
+    justifyContent: 'center',
     paddingHorizontal: space.l,
     paddingVertical: space.s,
     borderRadius: radius.pill,

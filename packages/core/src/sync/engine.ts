@@ -88,6 +88,12 @@ export interface SyncStatus {
   reason?: PauseReason;
   /** This screen's clock when a sync last finished, for "In sync 2 minutes ago". */
   lastSync?: number;
+  /**
+   * This screen's clock when a sync that pulled last finished, for "Synced 3 min ago": unlike
+   * lastSync, a sync that only pushed, or found nothing to send as the app was hidden, leaves
+   * it. Kept for this launch only.
+   */
+  lastPull?: number;
 }
 
 /**
@@ -200,7 +206,10 @@ export interface SyncEngine {
   start(profile: ActiveProfile): Promise<void>;
   /** The app went off screen: everything pending is pushed and pulls stop. */
   hide(): void;
-  /** Back on screen: pulls when it was away two minutes or more. */
+  /**
+   * Back on screen: pulls when it was away fifteen seconds or more, longer in the same proportion
+   * while the service asks for pulls further apart than every 30 minutes.
+   */
   show(): void;
   /**
    * Pushes what waits, a document the full account refused included, then
@@ -210,12 +219,27 @@ export interface SyncEngine {
   /** Pushes what waits at once. */
   flush(): Promise<void>;
   /**
+   * Pushes what waits in three seconds, as after an edit other than progress: the player paused
+   * or stopped, so other screens need not wait for the saves to go quiet. Unlike flush(), a
+   * failure backing off and a hold on pushes still wait. Nothing happens on a screen without an
+   * account.
+   */
+  pushSoon(): void;
+  /**
    * Pulls at once, as when the app comes back on screen, unless failures are
    * backing off or the service asked for quiet: for a screen that shows
    * what the account holds, such as "Who's watching?". Pushes keep their
-   * own schedule. Resolves when done, whatever the outcome.
+   * own schedule. Before the first sync of the launch it is that sync,
+   * pushes included, which then does not run again two seconds after the
+   * start. Resolves when done, whatever the outcome.
    */
   pullNow(): Promise<void>;
+  /**
+   * How often the service asks screens to pull, in minutes (`pullMinutes`, ADR 0006 decision 10):
+   * 30 until the first sync of this launch has asked it. For a screen that pulls more often by
+   * itself, such as the phone's Home, to slow down with the rest.
+   */
+  pullMinutes(): number;
   /** Whether this screen has data of its own, which makes Join ask Bring or Use. */
   hasLocalData(): Promise<boolean>;
   /**
@@ -278,8 +302,18 @@ export interface SyncEngine {
 const PUSH_DELAY_MS = 3 * 1000;
 /** Playback saves progress every 10 seconds, so this follows a pause or a stop. */
 const WATCH_PUSH_DELAY_MS = 15 * 1000;
+/**
+ * While playback goes on saving, progress still goes this long after the first save not yet
+ * sent: other screens see where it is about once a minute, which keeps a whole day of watching
+ * well inside the service's 2,000 writes.
+ */
+const WATCH_PUSH_LATEST_MS = 60 * 1000;
 const FIRST_PULL_MS = 2 * 1000;
-const AWAY_MS = 2 * 60 * 1000;
+/**
+ * Back on screen after this long, it pulls: a moment in another app asks nothing, and a phone
+ * picked up again shows what the TV did meanwhile. Longer as the service slows pulls down.
+ */
+const AWAY_MS = 15 * 1000;
 const BACKOFF_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
 /** Pushes again after a conflict at most this many times. */
 const CONFLICT_ROUNDS = 3;
@@ -312,7 +346,7 @@ class Stop extends Error {
   }
 }
 
-type TimerName = 'push' | 'watch' | 'pull' | 'first' | 'retry' | 'hold' | 'resume';
+type TimerName = 'push' | 'watch' | 'latest' | 'pull' | 'first' | 'retry' | 'hold' | 'resume';
 
 /** Why a document was not sent as it stands. */
 type Refusal = 'too-big' | 'full';
@@ -361,7 +395,12 @@ const wholeSecond = (time: number) => time % 1000 === 0;
 const usableProfileId = (id: string) => documentKind(`p/${id}/list`) !== undefined;
 
 function sameStatus(a: SyncStatus, b: SyncStatus): boolean {
-  return a.state === b.state && a.reason === b.reason && a.lastSync === b.lastSync;
+  return (
+    a.state === b.state &&
+    a.reason === b.reason &&
+    a.lastSync === b.lastSync &&
+    a.lastPull === b.lastPull
+  );
 }
 
 /**
@@ -388,6 +427,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   let watching = false;
 
   let lastSync = options.lastSync;
+  let lastPull: number | undefined;
   let syncing = false;
   /** Why the last sync failed as a whole, until one gets through. */
   let paused: PauseReason | undefined;
@@ -1116,6 +1156,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       await applyActive(unapplied);
       let held: HeldPushes | undefined;
       if (pushing && !holding) {
+        // Progress saved so far goes with this push: one saved from now on waits afresh.
+        cancel('watch');
+        cancel('latest');
         try {
           await push();
           pushFailures = 0;
@@ -1137,6 +1180,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       failures = 0;
       paused = undefined;
       lastSync = clock.local();
+      if (pullNow) lastPull = lastSync;
       cancel('retry');
       if (!timersOn.has('pull')) startPulls();
       if (held) holdPushes(held);
@@ -1224,11 +1268,27 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   /** While backing off, the retry carries everything. */
   const backingOff = () => timersOn.has('retry');
 
-  /** Three seconds after the last edit, or fifteen after the last progress save. */
+  /**
+   * How many times further apart than the default the service asks pulls to be, never below 1:
+   * what this screen asks besides its regular pulls slows down in the same proportion.
+   */
+  const pullsSlowed = () => Math.max(1, pullMinutes / DEFAULT_PULL_MINUTES);
+
+  /**
+   * Three seconds after the last edit, or fifteen after the last progress save, and a minute at
+   * most after the first progress save not yet sent: saves every 10 seconds would otherwise put
+   * it off for as long as playback goes on.
+   */
   function schedulePush(watchEdit: boolean): void {
-    after(watchEdit ? 'watch' : 'push', watchEdit ? WATCH_PUSH_DELAY_MS : PUSH_DELAY_MS, () => {
+    const go = () => {
       if (!backingOff()) void request(true, false);
-    });
+    };
+    if (!watchEdit) {
+      after('push', PUSH_DELAY_MS, go);
+      return;
+    }
+    after('watch', WATCH_PUSH_DELAY_MS, go);
+    if (!timersOn.has('latest')) after('latest', WATCH_PUSH_LATEST_MS, go);
   }
 
   function startPulls(): void {
@@ -1269,6 +1329,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
             : { state: 'idle' };
     }
     if (lastSync !== undefined) next.lastSync = lastSync;
+    if (lastPull !== undefined) next.lastPull = lastPull;
     if (!sameStatus(status.get(), next)) status.set(next);
   }
 
@@ -1301,7 +1362,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     watches = [];
     watching = false;
     holding = undefined;
-    (['push', 'watch', 'pull', 'first', 'retry', 'hold'] as const).forEach(cancel);
+    (['push', 'watch', 'latest', 'pull', 'first', 'retry', 'hold'] as const).forEach(cancel);
   }
 
   function scheduleFirstPull(): void {
@@ -1338,6 +1399,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       pushFailures = 0;
       appliedOnce = false;
       serviceChecked = false;
+      // What it said of the account it left says nothing of the next one.
+      lastPull = undefined;
       // Signed out, the stores go back to this screen's own clock.
       clock.reset();
       updateStatus();
@@ -1806,6 +1869,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     releasePushes();
     cancel('push');
     cancel('watch');
+    cancel('latest');
     return backingOff() ? Promise.resolve() : request(true, false);
   }
 
@@ -1879,7 +1943,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       const away = hiddenAt === undefined ? 0 : clock.local() - hiddenAt;
       hiddenAt = undefined;
       startPulls();
-      if (away >= AWAY_MS && !backingOff()) void request(false, true);
+      if (away >= AWAY_MS * pullsSlowed() && !backingOff()) void request(false, true);
     },
 
     syncNow() {
@@ -1888,16 +1952,32 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       releasePushes();
       cancel('push');
       cancel('watch');
+      cancel('latest');
       retryFull();
       return request(true, true);
     },
 
     flush,
 
+    pushSoon() {
+      if (!canRun()) return;
+      // As an edit's push: a failure backing off, or the service asking for quiet, still waits.
+      after('push', PUSH_DELAY_MS, () => {
+        if (!backingOff() && pushable().length > 0) void request(true, false);
+      });
+    },
+
     pullNow() {
       if (resuming || backingOff()) return Promise.resolve();
+      // A screen that asks as the app opens, as the phone's Home does, would otherwise pull twice.
+      if (timersOn.has('first')) {
+        cancel('first');
+        return request(true, true);
+      }
       return request(false, true);
     },
+
+    pullMinutes: () => pullMinutes,
 
     async hasLocalData() {
       // Not alongside a create, confirm, join, leave or delete: they change what the screen holds.

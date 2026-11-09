@@ -25,3 +25,12 @@ export const CustomEvent = real.CustomEvent;
 export const KeyboardEvent = real.KeyboardEvent;
 export const HTMLMediaElement = real.HTMLMediaElement;
 export const TextDecoder = real.TextDecoder;
+
+/** Starts the page again; a page keeps its session across a reload by itself. */
+export function startAgain(
+  restart: () => Promise<void> = async () => real.window.location.reload(),
+): Promise<void> {
+  return restart().catch((error: unknown) => {
+    console.warn('[BannerTV] could not start again:', String(error));
+  });
+}

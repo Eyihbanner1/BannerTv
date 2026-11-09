@@ -32,16 +32,17 @@ import { sportsState } from '@tv/data/sports';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MetaPreview } from '@bannertv/protocol';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { openCatalog, openTitle } from '../nav/routes';
 import { reportTyping } from '../runtime/whereabouts';
 import { takeSearchRequests } from '../data/search-request';
 import { phone } from '@brand/tokens/design';
-import { SportsResults } from './sports/SportsResults';
+import { AskSportsAddons, SportsResults } from './sports/SportsResults';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
+import { ChipRow } from '../ui/ChipRow';
 import { Icon, OutlineIcon } from '../ui/icons';
 import { Message } from '../ui/Message';
 import { Row, type RowItem } from '../ui/Row';
@@ -250,18 +251,15 @@ function Suggestions({
   const { t } = useTranslation();
   if (items.length === 0) return null;
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
+    <ChipRow
       style={styles.suggestions}
-      contentContainerStyle={styles.chipsContent}
       keyboardShouldPersistTaps="handled"
       accessibilityLabel={t('search.suggestions')}
     >
       {items.map((item) => (
         <Chip key={item.key} label={item.label} on={false} onPress={() => onPick(item.query)} />
       ))}
-    </ScrollView>
+    </ChipRow>
   );
 }
 
@@ -384,13 +382,21 @@ type Section =
   | { key: string; kind: 'remote'; index: number }
   | { key: string; kind: 'planned'; index: number }
   | { key: string; kind: 'fold' }
-  | { key: string; kind: 'addon'; index: number };
+  | { key: string; kind: 'addon'; index: number }
+  | { key: string; kind: 'sports' };
+
+/** What the Sports group has said: undefined until it has looked through BannerTV's lists. */
+type SportsContent = { found: boolean; listed: boolean | undefined };
+const NO_SPORTS: SportsContent = { found: false, listed: undefined };
 
 /**
- * The results for a term, top to bottom: suggestions, Sports, TMDB's rows for who or what the
- * words name ("With Tom Hanks"), Top results, rows for what the words mean ("Stand-up comedy
+ * The results for a term, top to bottom: suggestions, TMDB's rows for who or what the words name
+ * ("With Tom Hanks"), Top results, Sports, rows for what the words mean ("Stand-up comedy
  * films", "Comedy films"), then each addon's own results, folded under Top results. When the
  * words were read only by forgiving a typo, the addons' results come before the understood rows.
+ * Sports comes after Top results (or the addons' own results, when they stand in for it), so a
+ * film's results lead; with no titles found it may lead itself. When nothing in BannerTV's copy
+ * of the sports lists matches, it waits at the end, by a quiet "Search sports addons".
  * The kind chip narrows what is asked: `sources` holds only its type's catalogs, and only the
  * understood rows of its type are asked.
  */
@@ -445,7 +451,15 @@ function Results({
     () => searchSuggestions(text, smart.multi, MAX_SUGGESTIONS),
     [text, smart.multi],
   );
-  const [sportsFound, setSportsFound] = useState(false);
+  const [sports, setSports] = useState<SportsContent>(NO_SPORTS);
+  const onSportsContent = useCallback(
+    (found: boolean, listed: boolean) =>
+      setSports((was) => (was.found === found && was.listed === listed ? was : { found, listed })),
+    [],
+  );
+  // The sports addons' own searches, asked from either place "Search sports addons" shows.
+  const [sportsAsked, setSportsAsked] = useState(false);
+  const askSports = useCallback(() => setSportsAsked(true), []);
   const [unfolded, setUnfolded] = useState(false);
 
   // Two catalogs of one addon and type need the catalog name to tell them apart.
@@ -509,7 +523,7 @@ function Results({
     plannedItems.some((items) => (items?.length ?? 0) > 0) ||
     remoteItems.some((items) => (items?.length ?? 0) > 0);
   // Only while the group is there: it says nothing as it goes.
-  const found = searchFound || plannedFound || (sportsSources !== null && sportsFound);
+  const found = searchFound || plannedFound || (sportsSources !== null && sports.found);
   const done =
     smart.settled &&
     results.every((items) => items != null) &&
@@ -562,6 +576,7 @@ function Results({
     sections.push({ key: 'waiting', kind: 'waiting' });
   }
   if (topItems.length > 0) sections.push({ key: 'top', kind: 'top', items: topItems });
+  const afterTop = sections.length;
   const understood: Section[] = [];
   for (let index = namedCount; index < remote.length; index++) {
     if (fromTmdb(index)) {
@@ -589,6 +604,17 @@ function Results({
   if (addons.length > 0 && behindFold) folded.push({ key: 'fold', kind: 'fold' });
   if (!behindFold || unfolded) folded.push(...addons);
   sections.push(...(plannedLast ? folded.concat(understood) : understood.concat(folded)));
+  if (sportsSources) {
+    // Sports follows the titles the words found, so "Ava" leads with the film, not a night's
+    // fixtures: after Top results (or its place while it is decided), or after the addons' own
+    // results where they stand in for it (one catalog asked, as with Films). With no titles it
+    // leads. With no match in the lists it comes at the end, by "Search sports addons", and
+    // shows what they find once asked. One key wherever it goes, so moving keeps what it has.
+    const sportsSection: Section = { key: 'sports', kind: 'sports' };
+    const last = sports.listed === false || (!behindFold && addons.length > 0);
+    if (last) sections.push(sportsSection);
+    else sections.splice(afterTop, 0, sportsSection);
+  }
 
   const renderItem = ({ item: section }: { item: Section }) => {
     switch (section.kind) {
@@ -633,6 +659,16 @@ function Results({
             onPress={open}
           />
         );
+      case 'sports':
+        return sportsSources ? (
+          <SportsResults
+            term={term}
+            sources={sportsSources}
+            asked={sportsAsked}
+            onAsk={askSports}
+            onContent={onSportsContent}
+          />
+        ) : null;
     }
   };
 
@@ -663,21 +699,26 @@ function Results({
       />
     );
   }
+  // The lists hold no match: the sports addons can still be asked, quietly, after the rest.
+  const askAtEnd =
+    sportsSources !== null && sportsSources.length > 0 && sports.listed === false && !sportsAsked;
 
   return (
     <FlatList
       data={sections}
       keyExtractor={(section) => section.key}
       renderItem={renderItem}
-      ListHeaderComponent={
-        <>
-          <Suggestions items={suggestions} onPick={onPick} />
-          {sportsSources ? (
-            <SportsResults term={term} sources={sportsSources} onContent={setSportsFound} />
-          ) : null}
-        </>
+      ListHeaderComponent={<Suggestions items={suggestions} onPick={onPick} />}
+      ListFooterComponent={
+        askAtEnd ? (
+          <>
+            {footer}
+            <AskSportsAddons onPress={askSports} />
+          </>
+        ) : (
+          footer
+        )
       }
-      ListFooterComponent={footer}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: space.xxl }}
     />
@@ -788,11 +829,9 @@ export function SearchScreen() {
           </Pressable>
         ) : null}
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      <ChipRow
         style={styles.chips}
-        contentContainerStyle={styles.chipsContent}
+        selected={KINDS.indexOf(kind)}
         keyboardShouldPersistTaps="handled"
       >
         {KINDS.map((value) => (
@@ -803,7 +842,7 @@ export function SearchScreen() {
             onPress={() => setKind(value)}
           />
         ))}
-      </ScrollView>
+      </ChipRow>
       {!ready ? null : sources.length === 0 && !sportsSources ? (
         <Message lead={t('search.noAddons')} />
       ) : term ? (
@@ -868,9 +907,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chips: { flexGrow: 0, marginTop: 14, marginBottom: space.s },
-  suggestions: { flexGrow: 0, paddingTop: space.s },
-  chipsContent: { gap: space.s, paddingHorizontal: gutter },
+  // ChipRow keeps both strips from giving up height to the list below them.
+  chips: { marginTop: 14, marginBottom: space.s },
+  suggestions: { marginTop: space.s },
   section: { paddingHorizontal: gutter, paddingTop: space.m, gap: space.m },
   sectionHeader: { flexDirection: 'row', alignItems: 'baseline', gap: space.s },
   sectionTitle: { ...type.heading, color: colors.text, flexShrink: 1 },

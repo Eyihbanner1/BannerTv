@@ -106,6 +106,24 @@ test('Settings, Profiles adds a kids profile, offers to lock the grown-ups, and 
   expect(errors).toEqual([]);
 });
 
+test("a kids profile's Settings has no app version or update check", async ({ page }) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedProfiles(page, {
+    profiles: [main(), { id: GUEST, name: 'Ada', colour: 2, kids: 'U' }],
+    lastId: GUEST,
+    askAtLaunch: false,
+  });
+  await openApp(page);
+  await page.getByRole('tab', { name: 'Settings' }).click();
+  await expect(
+    page.getByText('Grown-ups can change the settings from their own profile.'),
+  ).toBeVisible();
+  await expect(page.getByText('App version', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Check for updates', { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('Forgot PIN? for Main on a phone with no account offers to reset it', async ({ page }) => {
   const errors = watchErrors(page);
   await mockAddons(page);

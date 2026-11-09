@@ -11,6 +11,7 @@ import { startTrakt } from '@tv/data/trakt';
 import { initI18n } from '@tv/i18n';
 import { initAndroid } from '@tv/platform/android';
 import { addPhoneStrings } from './i18n/phone';
+import { startAppUpdates } from './runtime/app-updates';
 
 let booted = false;
 
@@ -29,4 +30,6 @@ export function boot(): void {
   // The phone has no Sports screen yet, but Home and Search wait for the sports state.
   void startSports();
   startSync();
+  // Over-the-air updates, after the stores that say when a restart would interrupt nothing.
+  startAppUpdates();
 }

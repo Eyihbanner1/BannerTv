@@ -273,6 +273,11 @@ test('a later launch opens on Home, and Settings shows playback and the build', 
   await page.getByRole('tab', { name: 'Settings' }).click();
   await expect(page.getByText('Auto-play picks')).toBeVisible();
   await expect(page.getByText(/BannerTV for phones/)).toBeVisible();
+  // The web build takes no over-the-air updates: it runs its built-in code and has no check.
+  await expect(page.getByText('App version', { exact: true })).toBeVisible();
+  await expect(page.getByText('Built in', { exact: true })).toBeVisible();
+  await expect(page.getByText(/This build doesn’t take updates/)).toBeVisible();
+  await expect(page.getByText('Check for updates', { exact: true })).toHaveCount(0);
   // The stream helper runs in the phone build's native module, which the web build has not.
   await expect(page.getByText('Stream helper', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Your TV', { exact: true })).toHaveCount(0);

@@ -11,6 +11,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +22,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { statusLine } from '../data/account-text';
+import { appUpdates, checkForUpdates, offerShown, restartNow } from '../runtime/app-updates';
+import type { CheckPhase } from '../runtime/app-updates-plan';
 import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { LanguagesSection } from './LanguagesSection';
@@ -72,6 +75,68 @@ function Toggle({
         />
       }
     />
+  );
+}
+
+const CHECK_WORDS: { [P in CheckPhase]?: string } = {
+  checking: 'phone.updateChecking',
+  downloading: 'phone.updateDownloading',
+  none: 'phone.updateNone',
+  failed: 'phone.updateFailed',
+  ready: 'phone.updateReady',
+};
+
+/**
+ * What the app runs, the code it was installed with or an over-the-air update, and Check for
+ * updates, which checks, downloads and then offers to restart (runtime/app-updates.ts). For
+ * grown-ups only: an update the person did not ask for starts by itself at a safe moment.
+ */
+function ThisAppSection({ version }: { version: string }) {
+  const { t } = useTranslation();
+  const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.get);
+  const { running } = updates;
+
+  // The person's own check has downloaded an update: ask once whether to start it now. Put off,
+  // it starts the next time the app is off screen from Home, Settings or the account screen.
+  useEffect(() => {
+    if (!updates.offer) return;
+    offerShown();
+    Alert.alert(t('phone.updateReadyTitle'), t('phone.updateReadyMessage'), [
+      { text: t('phone.updateLater'), style: 'cancel' },
+      { text: t('phone.restartNow'), onPress: restartNow },
+    ]);
+  }, [updates.offer, t]);
+
+  const detail = !updates.on
+    ? t('phone.appVersionNoUpdates', { version })
+    : running.kind === 'builtIn'
+      ? t('phone.appVersionBuiltInDetail', { version })
+      : running.published
+        ? t('phone.appVersionUpdateDetail', { version, published: running.published })
+        : t('phone.appVersionUpdateUndated', { version });
+  const checkWords = CHECK_WORDS[updates.phase];
+  const working = updates.phase === 'checking' || updates.phase === 'downloading';
+
+  return (
+    <Section title={t('phone.thisApp')}>
+      <ListRow
+        title={t('phone.appVersion')}
+        detail={detail}
+        value={
+          running.kind === 'builtIn'
+            ? t('phone.appVersionBuiltIn')
+            : t('phone.appVersionUpdate', { id: running.id })
+        }
+      />
+      {updates.on ? (
+        <ListRow
+          title={t('phone.checkForUpdates')}
+          {...(checkWords ? { value: t(checkWords) } : {})}
+          onPress={checkForUpdates}
+          disabled={working}
+        />
+      ) : null}
+    </Section>
   );
 }
 
@@ -250,6 +315,8 @@ export function SettingsScreen() {
               {prefs.tmdb ? <Text style={styles.credit}>{t('settings.tmdbCredit')}</Text> : null}
             </Section>
           ) : null}
+
+          <ThisAppSection version={version} />
         </>
       )}
 

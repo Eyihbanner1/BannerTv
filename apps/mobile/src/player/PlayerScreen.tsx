@@ -1284,6 +1284,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             finder={finder}
             {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
             onPick={pickStream}
+            background={colors.sheet}
           />
         )}
       </SidePanel>

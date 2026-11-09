@@ -99,7 +99,7 @@ export function ListRow({
         {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
       </View>
       {value ? (
-        <Text style={styles.rowValue} numberOfLines={1}>
+        <Text style={styles.rowValue} numberOfLines={2}>
           {value}
         </Text>
       ) : null}
@@ -137,8 +137,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface2,
   },
   rowPressed: { backgroundColor: colors.raised },
-  rowText: { flex: 1, gap: 2 },
+  // The title keeps close to half the row, and a long value ("As high as the phone shows")
+  // takes two lines beside it: with large text it squeezed the title to a letter a line.
+  rowText: { flex: 1, minWidth: '45%', gap: 2 },
   rowTitle: { ...type.body, color: colors.text },
   rowDetail: { ...type.meta, color: colors.textMuted },
-  rowValue: { ...type.label, fontWeight: '500', color: colors.textMuted, flexShrink: 1 },
+  rowValue: {
+    ...type.label,
+    fontWeight: '500',
+    color: colors.textMuted,
+    flexShrink: 1,
+    maxWidth: '50%',
+    textAlign: 'right',
+  },
 });
