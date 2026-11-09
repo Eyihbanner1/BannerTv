@@ -98,7 +98,7 @@ export function LibraryScreen() {
       <Text style={styles.title} accessibilityRole="header">
         {t('phone.tabs.library')}
       </Text>
-      <View style={styles.chips}>
+      <View style={styles.shows}>
         <Chip label={t('library.myList')} on={show === 'list'} onPress={() => setShow('list')} />
         <Chip
           label={t('library.history')}
@@ -147,6 +147,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { paddingBottom: space.m, gap: space.m },
   title: { ...type.display, color: colors.text, paddingHorizontal: gutter },
-  chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: gutter },
+  // With large text the three go onto a second line rather than off the screen.
+  shows: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s, paddingHorizontal: gutter },
   lead: { ...type.meta, color: colors.textMuted, paddingHorizontal: gutter },
 });

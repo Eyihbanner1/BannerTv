@@ -73,7 +73,8 @@ function ActionTile({
       style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
     >
       <Icon name={icon} size={20} color={colors.text} />
-      <Text style={styles.tileLabel} numberOfLines={1}>
+      {/* Two lines for large text: "All streams" and "On My List" never lose their ends. */}
+      <Text style={styles.tileLabel} numberOfLines={2}>
         {label}
       </Text>
     </Pressable>
@@ -120,7 +121,8 @@ function StreamReady({ type: titleType, videoId }: { type: string; videoId: stri
           kind === 'nothing' && styles.readyDotOff,
         ]}
       />
-      <Text style={styles.readyText} numberOfLines={1}>
+      {/* Two lines, so "All streams has the full list" still shows with large text. */}
+      <Text style={styles.readyText} numberOfLines={2}>
         {text}
       </Text>
     </View>
@@ -671,7 +673,8 @@ const styles = StyleSheet.create({
   tile: {
     flexBasis: '31%',
     flexGrow: 1,
-    height: 64,
+    minHeight: 64,
+    paddingVertical: space.s,
     borderRadius: 12,
     backgroundColor: colors.surface2,
     alignItems: 'center',
@@ -680,7 +683,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   tilePressed: { backgroundColor: colors.raised },
-  tileLabel: { ...type.meta, fontWeight: '700', color: colors.text },
+  tileLabel: { ...type.meta, fontWeight: '700', color: colors.text, textAlign: 'center' },
   failed: { gap: space.s, alignItems: 'flex-start' },
   description: { ...type.body, lineHeight: 23, color: colors.textSoft, marginTop: space.xs },
   seasons: { marginTop: space.l },
