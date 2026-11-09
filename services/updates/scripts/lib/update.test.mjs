@@ -825,4 +825,22 @@ describe('the command', () => {
         .equals(createPublicKey(pair.privateKeyPem).export({ type: 'spki', format: 'der' })),
     ).toBe(true);
   });
+
+  it('makes a certificate Node reads, whatever its random serial number starts with', () => {
+    // The serial number is 8 random bytes. When they start with a 0 before a byte below 0x80, DER
+    // wants that 0 left out, and Node refuses the certificate if it is kept, so about 1 run in 512
+    // failed a test above for no reason of its own.
+    for (const bytes of [
+      [0x00, 0x12, 1, 2, 3, 4, 5, 6],
+      [0x00, 0x00, 0x12, 1, 2, 3, 4, 5],
+      [0x00, 0x92, 1, 2, 3, 4, 5, 6],
+      [0x92, 0x12, 1, 2, 3, 4, 5, 6],
+      [0x12, 0x92, 1, 2, 3, 4, 5, 6],
+    ]) {
+      const serial = Buffer.from(bytes);
+      const cert = new X509Certificate(makeCodeSigningPair({ serial }).certificatePem);
+      expect(BigInt(`0x${cert.serialNumber}`)).toBe(BigInt(`0x${serial.toString('hex')}`));
+      expect(cert.verify(cert.publicKey)).toBe(true);
+    }
+  });
 });
