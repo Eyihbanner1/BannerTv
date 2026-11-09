@@ -461,6 +461,76 @@ describe('a signed-in screen', () => {
     expect(pulls()).toBe(before + 3);
   });
 
+  it('takes a pull asked for as it starts as the first sync, rather than pulling twice', async () => {
+    const w = world();
+    const storage = memoryKeyValueStore();
+    const { a, code } = await created(w);
+    await a.stores.library.add(preview('tt1'));
+    await a.engine.flush();
+    const keys = await deriveAccountKeys(crypto, code);
+    await storage.set('sync/state', { v: 1, code, accountId: keys.accountId, phase: 'ready' });
+    const b = screen(w, { storage });
+    await b.start();
+    const pulls = () => w.service.count('/v1/pull');
+    const before = pulls();
+    await b.engine.pullNow();
+    expect(pulls()).toBe(before + 1);
+    expect(titles(b)).toEqual(['tt1']);
+    await w.time.advance(29 * 60 * 1000);
+    expect(pulls()).toBe(before + 1);
+    // The regular pulls go on from there.
+    await w.time.advance(60 * 1000);
+    await settled(b.engine);
+    expect(pulls()).toBe(before + 2);
+  });
+
+  it('comes back to a pull only after longer away while the service asks for rarer pulls', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    expect(a.engine.pullMinutes()).toBe(30);
+    const keys = await deriveAccountKeys(crypto, code);
+    /** Another screen of the account, started. */
+    const another = async () => {
+      const storage = memoryKeyValueStore();
+      await storage.set('sync/state', { v: 1, code, accountId: keys.accountId, phase: 'ready' });
+      const made = screen(w, { storage });
+      await made.start();
+      return made;
+    };
+
+    // Pulls four hours apart, eight times the usual: the 15 seconds away become 2 minutes.
+    w.service.pullEvery(240);
+    const b = await another();
+    await w.time.advance(2000);
+    await settled(b.engine);
+    expect(b.engine.pullMinutes()).toBe(240);
+    const pulls = () => w.service.count('/v1/pull');
+    const before = pulls();
+    b.engine.hide();
+    await settled(b.engine);
+    await w.time.advance(2 * 60 * 1000 - 1);
+    b.engine.show();
+    expect(pulls()).toBe(before);
+    b.engine.hide();
+    await w.time.advance(2 * 60 * 1000);
+    b.engine.show();
+    await settled(b.engine);
+    expect(pulls()).toBe(before + 1);
+
+    // Pulls asked more often than the usual do not make the return pull come sooner.
+    w.service.pullEvery(15);
+    const c = await another();
+    await w.time.advance(2000);
+    await settled(c.engine);
+    expect(c.engine.pullMinutes()).toBe(15);
+    const now = pulls();
+    c.engine.hide();
+    await settled(c.engine);
+    await w.time.advance(14 * 1000);
+    c.engine.show();
+    expect(pulls()).toBe(now);
+  });
+
   it('pushes progress within a minute while playback goes on saving, then about once a minute', async () => {
     const w = world();
     const { a, code } = await created(w);

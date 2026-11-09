@@ -7,6 +7,7 @@ import {
   createProfileStores,
   createStore,
   createSyncEngine,
+  DEFAULT_PULL_MINUTES,
   deriveAccountKeys,
   followsPart,
   isRemoval,
@@ -537,6 +538,14 @@ export async function refreshAccount(): Promise<void> {
   if (!syncOn()) return;
   const made = await openEngine();
   if (made) await made.pullNow();
+}
+
+/**
+ * How often the account's service asks screens to pull, in minutes: for a screen that pulls more
+ * often by itself, such as the phone's Home, to slow down when the service asks.
+ */
+export function accountPullMinutes(): number {
+  return engine?.pullMinutes() ?? DEFAULT_PULL_MINUTES;
 }
 
 /** Whether this screen has profiles or data of its own, which makes joining ask Bring or Use. */

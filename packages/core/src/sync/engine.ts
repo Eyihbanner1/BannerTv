@@ -206,7 +206,10 @@ export interface SyncEngine {
   start(profile: ActiveProfile): Promise<void>;
   /** The app went off screen: everything pending is pushed and pulls stop. */
   hide(): void;
-  /** Back on screen: pulls when it was away fifteen seconds or more. */
+  /**
+   * Back on screen: pulls when it was away fifteen seconds or more, longer in the same proportion
+   * while the service asks for pulls further apart than every 30 minutes.
+   */
   show(): void;
   /**
    * Pushes what waits, a document the full account refused included, then
@@ -226,9 +229,17 @@ export interface SyncEngine {
    * Pulls at once, as when the app comes back on screen, unless failures are
    * backing off or the service asked for quiet: for a screen that shows
    * what the account holds, such as "Who's watching?". Pushes keep their
-   * own schedule. Resolves when done, whatever the outcome.
+   * own schedule. Before the first sync of the launch it is that sync,
+   * pushes included, which then does not run again two seconds after the
+   * start. Resolves when done, whatever the outcome.
    */
   pullNow(): Promise<void>;
+  /**
+   * How often the service asks screens to pull, in minutes (`pullMinutes`, ADR 0006 decision 10):
+   * 30 until the first sync of this launch has asked it. For a screen that pulls more often by
+   * itself, such as the phone's Home, to slow down with the rest.
+   */
+  pullMinutes(): number;
   /** Whether this screen has data of its own, which makes Join ask Bring or Use. */
   hasLocalData(): Promise<boolean>;
   /**
@@ -300,7 +311,7 @@ const WATCH_PUSH_LATEST_MS = 60 * 1000;
 const FIRST_PULL_MS = 2 * 1000;
 /**
  * Back on screen after this long, it pulls: a moment in another app asks nothing, and a phone
- * picked up again shows what the TV did meanwhile.
+ * picked up again shows what the TV did meanwhile. Longer as the service slows pulls down.
  */
 const AWAY_MS = 15 * 1000;
 const BACKOFF_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
@@ -1258,6 +1269,12 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   const backingOff = () => timersOn.has('retry');
 
   /**
+   * How many times further apart than the default the service asks pulls to be, never below 1:
+   * what this screen asks besides its regular pulls slows down in the same proportion.
+   */
+  const pullsSlowed = () => Math.max(1, pullMinutes / DEFAULT_PULL_MINUTES);
+
+  /**
    * Three seconds after the last edit, or fifteen after the last progress save, and a minute at
    * most after the first progress save not yet sent: saves every 10 seconds would otherwise put
    * it off for as long as playback goes on.
@@ -1926,7 +1943,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       const away = hiddenAt === undefined ? 0 : clock.local() - hiddenAt;
       hiddenAt = undefined;
       startPulls();
-      if (away >= AWAY_MS && !backingOff()) void request(false, true);
+      if (away >= AWAY_MS * pullsSlowed() && !backingOff()) void request(false, true);
     },
 
     syncNow() {
@@ -1952,8 +1969,15 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
 
     pullNow() {
       if (resuming || backingOff()) return Promise.resolve();
+      // A screen that asks as the app opens, as the phone's Home does, would otherwise pull twice.
+      if (timersOn.has('first')) {
+        cancel('first');
+        return request(true, true);
+      }
       return request(false, true);
     },
+
+    pullMinutes: () => pullMinutes,
 
     async hasLocalData() {
       // Not alongside a create, confirm, join, leave or delete: they change what the screen holds.

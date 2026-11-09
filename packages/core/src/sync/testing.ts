@@ -168,6 +168,7 @@ export function fakeSyncService(options: {
   let pageChars = Infinity;
   let conflictAlways = false;
   let maxDocuments = Infinity;
+  let pullMinutes = 30;
 
   const answer = (status: number, body: Fields) => ({
     status,
@@ -193,7 +194,7 @@ export function fakeSyncService(options: {
         v: 1,
         create: accounts.size < maxAccounts,
         key: createKey !== undefined,
-        pullMinutes: 30,
+        pullMinutes,
       });
     }
     if (path === '/v1/account/create') {
@@ -318,6 +319,10 @@ export function fakeSyncService(options: {
     /** An account holds at most this many documents: a push of another is refused as `full`. */
     limitDocuments(count: number) {
       maxDocuments = count;
+    },
+    /** The status asks screens to pull every `minutes`, as the Worker's PULL_MINUTES does. */
+    pullEvery(minutes: number) {
+      pullMinutes = minutes;
     },
   };
 }
