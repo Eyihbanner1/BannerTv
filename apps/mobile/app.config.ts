@@ -1,6 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
 import appInfo from '../webos/webos-meta/appinfo.json';
-import { hasUpdatesCertificate, UPDATES_CERTIFICATE } from './build/updates-certificate';
+import { hasUpdatesCertificate, UPDATES_CERTIFICATE, updatesChannel } from './build/updates';
 
 /**
  * The phone app (ADR 0007). Its version is the LG app's, from appinfo.json, so the three apps
@@ -22,19 +22,23 @@ function versionCode(version: string): number {
  * next one, even if it breaks the app's own checks (src/runtime/app-updates.ts). It never waits
  * for the network at launch: what it downloads starts when the app starts again.
  *
+ * Only an APK of main's own code takes updates, from main's channel: one from a run of CI started
+ * by hand on main. A pull request's or the combined test build's APK keeps the JavaScript it was
+ * built with, the code being tested, and takes none (build/updates.js says how it knows).
+ *
  * Fail closed: with no certificate to check signatures against, expo-updates would take an
  * update nobody signed. So a build without certs/certificate.pem takes no updates at all and
- * runs only the JavaScript inside its APK. Updates begin with the first APK built after the
- * certificate is committed.
+ * runs only the JavaScript inside its APK. Updates begin with the first APK of main built after
+ * the certificate is committed.
  */
+const CHANNEL = updatesChannel();
 const UPDATES: NonNullable<ExpoConfig['updates']> = {
   url: 'https://updates.bannertv.workers.dev/expo/manifest',
-  // Builds from main take the main channel's updates.
-  requestHeaders: { 'expo-channel-name': 'main' },
   checkAutomatically: 'ON_LOAD',
   fallbackToCacheTimeout: 0,
-  ...(hasUpdatesCertificate()
+  ...(CHANNEL && hasUpdatesCertificate()
     ? {
+        requestHeaders: { 'expo-channel-name': CHANNEL },
         codeSigningCertificate: UPDATES_CERTIFICATE,
         codeSigningMetadata: { keyid: 'main', alg: 'rsa-v1_5-sha256' },
       }

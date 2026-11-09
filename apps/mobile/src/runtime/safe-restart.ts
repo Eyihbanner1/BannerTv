@@ -20,10 +20,15 @@ export interface Whereabouts {
  * Whose restart it is:
  * - `join`: a join that carried on by itself finished, as on the TV: off screen, or Home,
  *   Settings or the account screen with nothing being typed;
- * - `update`: a downloaded app update, which nobody asked for at that moment: the same, except
- *   that the player is never left, even off screen, so the person comes back to their film;
- * - `offScreen`: an update the person put off: only once the app is off screen, not from the
- *   player either.
+ * - `update`: a downloaded app update, which nobody asked for at that moment: only on Home,
+ *   Settings or the account screen with nothing being typed, on screen or off;
+ * - `offScreen`: an update the person put off: the same, and only once the app is off screen.
+ *
+ * Off screen is not enough for an update. Android counts the app as in the background whenever
+ * something covers it, not only when the person has put it away: a permission prompt, or the
+ * browser opened to sign in to Trakt or to set an addon up. Those flows wait in this JavaScript
+ * for the person to come back, so starting it again there loses them, and a text box loses what
+ * was typed. The player is never left either, so the person comes back to their film.
  */
 export type RestartRule = 'join' | 'update' | 'offScreen';
 
@@ -32,10 +37,15 @@ export const SAFE_SCREENS: readonly string[] = ['home', 'settings', 'account'];
 
 /** Whether starting the app again now loses the person nothing, by `rule`. */
 export function safeMoment(where: Whereabouts, rule: RestartRule): boolean {
-  const screen = where.screen();
-  if (where.hidden()) return rule === 'join' || screen !== 'player';
-  if (rule === 'offScreen') return false;
-  return !where.busy() && SAFE_SCREENS.indexOf(screen) !== -1;
+  const settled = !where.busy() && SAFE_SCREENS.indexOf(where.screen()) !== -1;
+  switch (rule) {
+    case 'join':
+      return where.hidden() || settled;
+    case 'update':
+      return settled;
+    case 'offScreen':
+      return settled && where.hidden();
+  }
 }
 
 /**

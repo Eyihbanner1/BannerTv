@@ -64,10 +64,37 @@ describe('starting a downloaded app update', () => {
     expect(restarts()).toBe(1);
   });
 
-  it('goes off screen from anywhere but the player', () => {
-    const { move, restarts } = counted('update', 'details');
+  it('goes off screen from Home, Settings or the account screen, as on screen', () => {
+    for (const screen of ['home', 'settings', 'account']) {
+      expect(counted('update', screen, { hidden: true }).restarts()).toBe(1);
+    }
+  });
+
+  it('waits off screen everywhere else, since a prompt or the browser can cover the app', () => {
+    // Trakt waits for the person to come back from trakt.tv, the stream helper for Android's
+    // notifications prompt, and Addons for an addon's settings page in the browser.
+    for (const screen of ['trakt', 'stream-helper', 'addons', 'details']) {
+      const { move, restarts } = counted('update', screen);
+      move({ hidden: true });
+      expect(restarts()).toBe(0);
+      move({ hidden: false });
+      expect(restarts()).toBe(0);
+    }
+  });
+
+  it('goes once the person is back on a safe screen from the flow that covered the app', () => {
+    const { move, restarts } = counted('update', 'trakt', { hidden: true });
+    move({ hidden: false });
     expect(restarts()).toBe(0);
+    move({ screen: 'settings' });
+    expect(restarts()).toBe(1);
+  });
+
+  it('waits off screen while something is typed, even on a safe screen', () => {
+    const { move, restarts } = counted('update', 'account', { busy: true });
     move({ hidden: true });
+    expect(restarts()).toBe(0);
+    move({ hidden: false, busy: false });
     expect(restarts()).toBe(1);
   });
 
@@ -102,6 +129,16 @@ describe('starting an update the person put off', () => {
     expect(restarts()).toBe(0);
     move({ hidden: false, screen: 'home' });
     move({ hidden: true });
+    expect(restarts()).toBe(1);
+  });
+
+  it('does not go off screen from a flow that covers the app, or while something is typed', () => {
+    for (const screen of ['trakt', 'stream-helper', 'addons']) {
+      expect(counted('offScreen', screen, { hidden: true }).restarts()).toBe(0);
+    }
+    const { move, restarts } = counted('offScreen', 'settings', { busy: true, hidden: true });
+    expect(restarts()).toBe(0);
+    move({ busy: false });
     expect(restarts()).toBe(1);
   });
 });

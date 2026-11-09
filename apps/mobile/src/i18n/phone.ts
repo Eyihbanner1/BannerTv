@@ -113,7 +113,7 @@ const PHONE = {
   updateReady: 'Ready',
   updateReadyTitle: 'Update ready',
   updateReadyMessage:
-    'BannerTV starts again to use it. If you wait, it starts the next time you leave the app.',
+    'BannerTV starts again to use it. If you wait, it starts the next time you leave the app from Home or Settings.',
   updateLater: 'Later',
   restartNow: 'Restart now',
   appName: 'BannerTV',

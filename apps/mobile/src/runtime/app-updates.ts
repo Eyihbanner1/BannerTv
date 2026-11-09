@@ -23,11 +23,14 @@ import { whereabouts } from './whereabouts';
  * background, taking only signed updates for this APK's runtime version. This module checks
  * again each time the app comes back to the foreground, at most every 15 minutes, and starts the
  * app again on a downloaded update at a moment that loses the person nothing
- * (runtime/safe-restart.ts): off screen, or Home, Settings or the account screen with nothing
- * being typed, never from the player or while "Who's watching?" is up. Without that restart
- * the update starts at the next launch. Settings shows what runs and has Check for updates.
+ * (runtime/safe-restart.ts): on Home, Settings or the account screen with nothing being typed
+ * and "Who's watching?" closed. Never from another screen, even off screen, where a prompt or the
+ * browser may cover a sign-in that waits for the person, and never from the player. Without that
+ * restart the update starts at the next launch. Settings shows what runs and has Check for
+ * updates.
  *
- * Nothing here runs in the web build, a development build or an APK without the certificate.
+ * Nothing here runs in the web build, a development build, or an APK with updates off (one
+ * without the certificate, or not of main: app.config.ts).
  * Errors stay quiet: a failed check is tried again later, and only the person's own check says so.
  */
 
@@ -143,7 +146,7 @@ function wish(who: Asker): void {
     case 'offer':
       asker = who;
       set({ offer: true });
-      // While the person decides, and if they put it off, only off screen.
+      // While the person decides, and if they put it off, only off screen from a safe screen.
       cancelRestart?.();
       cancelRestart = restartWhenSafe(restart, restartRuleFor(who));
       return;

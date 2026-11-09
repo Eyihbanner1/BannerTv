@@ -99,10 +99,11 @@ describe('what Settings says the app runs', () => {
 
   it('an update, by the start of its id and when it was published', () => {
     const running = runningFrom(true, update);
+    // In the phone's own time zone, so 14:05 UTC on 9 November is the 10th from UTC+10.
     expect(running).toEqual({
       kind: 'update',
       id: '1a2b3c4d',
-      published: expect.stringMatching(/^9 Nov 2026, \d\d:\d\d$/),
+      published: expect.stringMatching(/^(9|10) Nov 2026, \d\d:\d\d$/),
     });
   });
 

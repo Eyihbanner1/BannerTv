@@ -97,7 +97,7 @@ function ThisAppSection({ version }: { version: string }) {
   const { running } = updates;
 
   // The person's own check has downloaded an update: ask once whether to start it now. Put off,
-  // it starts the next time the app is off screen.
+  // it starts the next time the app is off screen from Home, Settings or the account screen.
   useEffect(() => {
     if (!updates.offer) return;
     offerShown();

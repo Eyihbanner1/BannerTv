@@ -15,14 +15,14 @@ export interface UpdatesBuild {
   platform: string;
   /** A development build (__DEV__), whose JavaScript comes from Expo's dev server. */
   development: boolean;
-  /** expo-updates is on in the APK: it is off without the signing certificate (app.config.ts). */
+  /** expo-updates is on in the APK: only an APK of main with the certificate (app.config.ts). */
   enabled: boolean;
 }
 
 /**
  * Whether this build takes over-the-air updates at all: not the web build (the journeys' and
  * development's, where expo-updates' stand-in says it is enabled), not a development build, and
- * not an APK built without the certificate.
+ * not an APK built with updates off: without the certificate, or of code main does not have.
  */
 export function takesUpdates(build: UpdatesBuild): boolean {
   return build.platform !== 'web' && !build.development && build.enabled;
@@ -65,8 +65,9 @@ export function nextStep(
 
 /**
  * When a downloaded update starts. One the person asked for is offered to them, and otherwise
- * starts only once the app is off screen, so it never restarts under them while they decide.
- * One the app found by itself starts at the next safe moment (runtime/safe-restart.ts).
+ * starts only once the app is off screen from a safe screen, so it never restarts under them
+ * while they decide. One the app found by itself starts at the next safe moment
+ * (runtime/safe-restart.ts).
  */
 export function restartRuleFor(asker: Asker): 'update' | 'offScreen' {
   return asker === 'person' ? 'offScreen' : 'update';
