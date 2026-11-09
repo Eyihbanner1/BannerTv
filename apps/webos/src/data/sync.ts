@@ -519,6 +519,15 @@ export async function syncAccountNow(): Promise<void> {
 }
 
 /**
+ * Sends what waits in a few seconds rather than once progress saves go quiet: the player paused
+ * or stopped, so Continue Watching on other screens soon shows where. Unlike Sync now it waits
+ * while failures back off. Nothing happens on a screen without an account.
+ */
+export function pushAccountSoon(): void {
+  engine?.pushSoon();
+}
+
+/**
  * Brings in what the account changed since the last sync, for a screen that
  * shows the account's profiles (item A8): "Who's watching?" from the rail
  * and Settings > Profiles. Respects the engine's backing off, unlike Sync

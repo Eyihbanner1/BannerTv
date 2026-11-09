@@ -141,6 +141,8 @@ describe('createSyncEngine without an account', () => {
     await w.time.advance(DAY);
     a.engine.hide();
     a.engine.show();
+    a.engine.pushSoon();
+    await w.time.advance(DAY);
     await a.engine.syncNow();
     expect(a.engine.status()).toEqual({ state: 'off' });
     expect(w.service.requests).toEqual([]);
@@ -486,6 +488,54 @@ describe('a signed-in screen', () => {
     // The saves stopped with the last of them sent: nothing more goes.
     await w.time.advance(5 * 60 * 1000);
     expect(pushes()).toBe(before + 5);
+  });
+
+  it('pushes three seconds after the player pauses, unless failures are backing off', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    const pushes = () => w.service.count('/v1/push');
+    const before = pushes();
+    const save = (position: number) =>
+      a.stores.progress.record({
+        metaId: 'tt2',
+        type: 'movie',
+        videoId: 'tt2',
+        position,
+        duration: 6000,
+      });
+
+    save(60);
+    a.engine.pushSoon();
+    await w.time.advance(2999);
+    expect(pushes()).toBe(before);
+    await w.time.advance(1);
+    await settled(a.engine);
+    expect(pushes()).toBe(before + 1);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 60 },
+    });
+    // Nothing waits: nothing is sent, and the progress save's own wait has gone with the push.
+    a.engine.pushSoon();
+    await w.time.advance(60 * 1000);
+    expect(pushes()).toBe(before + 1);
+    expect(a.engine.status().state).toBe('idle');
+
+    // The service out of reach: the retry, not the pause, sends it.
+    w.service.failNext({ path: '/v1/push', network: true });
+    save(120);
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'offline' });
+    const failed = pushes();
+    save(180);
+    a.engine.pushSoon();
+    await w.time.advance(29 * 1000);
+    expect(pushes()).toBe(failed);
+    await w.time.advance(1000);
+    await settled(a.engine);
+    expect(pushes()).toBe(failed + 1);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 180 },
+    });
   });
 
   it("does not take the account's changes for edits", async () => {

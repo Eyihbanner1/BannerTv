@@ -210,6 +210,13 @@ export interface SyncEngine {
   /** Pushes what waits at once. */
   flush(): Promise<void>;
   /**
+   * Pushes what waits in three seconds, as after an edit other than progress: the player paused
+   * or stopped, so other screens need not wait for the saves to go quiet. Unlike flush(), a
+   * failure backing off and a hold on pushes still wait. Nothing happens on a screen without an
+   * account.
+   */
+  pushSoon(): void;
+  /**
    * Pulls at once, as when the app comes back on screen, unless failures are
    * backing off or the service asked for quiet: for a screen that shows
    * what the account holds, such as "Who's watching?". Pushes keep their
@@ -1914,6 +1921,14 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     },
 
     flush,
+
+    pushSoon() {
+      if (!canRun()) return;
+      // As an edit's push: a failure backing off, or the service asking for quiet, still waits.
+      after('push', PUSH_DELAY_MS, () => {
+        if (!backingOff() && pushable().length > 0) void request(true, false);
+      });
+    },
 
     pullNow() {
       if (resuming || backingOff()) return Promise.resolve();

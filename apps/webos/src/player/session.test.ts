@@ -77,6 +77,11 @@ vi.mock('../data/playback', () => ({
   bandwidth: kept.bandwidth,
 }));
 
+// The BannerTV account, asked to send what was saved soon once playback stops.
+const account = vi.hoisted(() => ({ pushSoon: vi.fn() }));
+
+vi.mock('../data/sync', () => ({ pushAccountSoon: account.pushSoon }));
+
 // Engines that load at once and hold whatever tracks the test gives them.
 vi.mock('./engines/choose', () => ({
   chooseEngine: () => Promise.resolve('hls.js'),
@@ -277,6 +282,7 @@ beforeEach(() => {
   kept.releases.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
+  account.pushSoon.mockClear();
   marks.playMark.mockClear();
   Object.assign(tuned, TUNING_DEFAULTS);
   // Each landing read is printed for the TV round; here the log is read instead.
@@ -1449,6 +1455,27 @@ describe('a stream with an end', () => {
     expect(session.carryOn()).toBe(630);
     session.destroy();
     expect(kept.progress).not.toHaveBeenCalled();
+  });
+});
+
+describe('the BannerTV account', () => {
+  it('is asked to send the place soon when the viewer pauses, when it ends and on leaving', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    // The saves every 10 seconds keep their own schedule.
+    playFor(video, 30);
+    expect(kept.progress).toHaveBeenCalled();
+    expect(account.pushSoon).not.toHaveBeenCalled();
+    session.pause();
+    expect(kept.progress).toHaveBeenLastCalledWith(expect.objectContaining({ position: 630 }));
+    expect(account.pushSoon).toHaveBeenCalledTimes(1);
+    session.resume();
+    video.currentTime = 7200;
+    video.fire('ended');
+    expect(kept.progress).toHaveBeenLastCalledWith(expect.objectContaining({ position: 7200 }));
+    expect(account.pushSoon).toHaveBeenCalledTimes(2);
+    session.destroy();
+    expect(account.pushSoon).toHaveBeenCalledTimes(3);
   });
 });
 
