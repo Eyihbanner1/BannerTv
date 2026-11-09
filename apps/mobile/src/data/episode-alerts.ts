@@ -17,6 +17,7 @@ import {
   alertChanges,
   alertTitle,
   type EpisodeAlert,
+  episodeSeen,
   followedSeries,
   frontPassDue,
   noteOf,
@@ -90,7 +91,7 @@ export async function episodeAlertsPermitted(): Promise<boolean> {
 const translate = (key: string, options?: Record<string, unknown>) => i18next.t(key, options);
 
 function seen(videoId: string): boolean {
-  return watchedSet.has(videoId) || progress.get(videoId) !== undefined;
+  return episodeSeen(progress.get(videoId), watchedSet.has(videoId));
 }
 
 /** Resolves once the query has an answer, or as it stands after READY_MS. */

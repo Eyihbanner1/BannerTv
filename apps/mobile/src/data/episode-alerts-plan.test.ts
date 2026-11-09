@@ -12,6 +12,7 @@ import {
   alertTitle,
   DUE_GRACE_MS,
   type EpisodeAlert,
+  episodeSeen,
   followedSeries,
   FRONT_PASS_EVERY_MS,
   frontPassDue,
@@ -498,5 +499,33 @@ describe('frontPassDue', () => {
     expect(frontPassDue(1000, 1000 + FRONT_PASS_EVERY_MS)).toBe(true);
     // The clock was set back.
     expect(frontPassDue(1000, 500)).toBe(true);
+  });
+});
+
+describe('episodeSeen', () => {
+  const own = (extra: Partial<ProgressEntry>) =>
+    ({
+      metaId: 'tt1',
+      type: 'series',
+      videoId: 'tt1:1:1',
+      position: 0,
+      duration: 0,
+      updatedAt: 100,
+      watched: false,
+      ...extra,
+    }) as ProgressEntry;
+
+  it('counts an episode played, started or marked watched here, or ticked on Trakt', () => {
+    expect(episodeSeen(own({ watched: true }), false)).toBe(true);
+    expect(episodeSeen(own({ position: 300, duration: 2400 }), false)).toBe(true);
+    expect(episodeSeen(undefined, true)).toBe(true);
+    expect(episodeSeen(undefined, false)).toBe(false);
+  });
+
+  it('counts none marked not watched since, whatever Trakt ticked', () => {
+    expect(episodeSeen(own({ unmarkedAt: 100 }), false)).toBe(false);
+    expect(episodeSeen(own({ unmarkedAt: 100 }), true)).toBe(false);
+    // Played again after it was marked not watched: seen once more.
+    expect(episodeSeen(own({ unmarkedAt: 50, position: 300, duration: 2400 }), false)).toBe(true);
   });
 });

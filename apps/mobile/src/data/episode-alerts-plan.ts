@@ -1,6 +1,7 @@
 import {
   CALENDAR_MAX_TITLES,
   followedTitles,
+  isUnmarked,
   type LibraryItem,
   type ProgressEntry,
 } from '@bannertv/core';
@@ -91,6 +92,17 @@ export function followedSeries(
   return followedTitles(items, watching, limit)
     .filter((title) => title.type === 'series')
     .map((title) => title.id);
+}
+
+/**
+ * Whether the profile has watched or started an episode, which then gets no alert: played or
+ * marked watched here (`own`, its saved progress), or ticked on Trakt (`ticked`). One marked not
+ * watched since counts as neither, as on Details (the TV's isWatched in data/marks.ts), so
+ * Mark as unwatched never costs the episode its alert.
+ */
+export function episodeSeen(own: ProgressEntry | undefined, ticked: boolean): boolean {
+  if (own !== undefined) return !isUnmarked(own);
+  return ticked;
 }
 
 /** A calendar day; the month counts from 0, as Date's does. */
