@@ -88,6 +88,12 @@ export interface SyncStatus {
   reason?: PauseReason;
   /** This screen's clock when a sync last finished, for "In sync 2 minutes ago". */
   lastSync?: number;
+  /**
+   * This screen's clock when a sync that pulled last finished, for "Synced 3 min ago": unlike
+   * lastSync, a sync that only pushed, or found nothing to send as the app was hidden, leaves
+   * it. Kept for this launch only.
+   */
+  lastPull?: number;
 }
 
 /**
@@ -378,7 +384,12 @@ const wholeSecond = (time: number) => time % 1000 === 0;
 const usableProfileId = (id: string) => documentKind(`p/${id}/list`) !== undefined;
 
 function sameStatus(a: SyncStatus, b: SyncStatus): boolean {
-  return a.state === b.state && a.reason === b.reason && a.lastSync === b.lastSync;
+  return (
+    a.state === b.state &&
+    a.reason === b.reason &&
+    a.lastSync === b.lastSync &&
+    a.lastPull === b.lastPull
+  );
 }
 
 /**
@@ -405,6 +416,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   let watching = false;
 
   let lastSync = options.lastSync;
+  let lastPull: number | undefined;
   let syncing = false;
   /** Why the last sync failed as a whole, until one gets through. */
   let paused: PauseReason | undefined;
@@ -1157,6 +1169,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       failures = 0;
       paused = undefined;
       lastSync = clock.local();
+      if (pullNow) lastPull = lastSync;
       cancel('retry');
       if (!timersOn.has('pull')) startPulls();
       if (held) holdPushes(held);
@@ -1299,6 +1312,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
             : { state: 'idle' };
     }
     if (lastSync !== undefined) next.lastSync = lastSync;
+    if (lastPull !== undefined) next.lastPull = lastPull;
     if (!sameStatus(status.get(), next)) status.set(next);
   }
 
@@ -1368,6 +1382,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       pushFailures = 0;
       appliedOnce = false;
       serviceChecked = false;
+      // What it said of the account it left says nothing of the next one.
+      lastPull = undefined;
       // Signed out, the stores go back to this screen's own clock.
       clock.reset();
       updateStatus();

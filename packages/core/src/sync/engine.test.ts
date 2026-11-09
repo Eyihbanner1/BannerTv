@@ -538,6 +538,35 @@ describe('a signed-in screen', () => {
     });
   });
 
+  it('says when it last pulled, which pushes alone and hiding leave', async () => {
+    const w = world();
+    const { a } = await created(w);
+    expect(a.engine.status().lastPull).toBeUndefined();
+    await a.engine.pullNow();
+    const pulled = w.now();
+    expect(a.engine.status()).toMatchObject({ state: 'idle', lastPull: pulled });
+
+    await w.time.advance(10 * 1000);
+    await a.stores.library.add(preview('tt1'));
+    await a.engine.flush();
+    expect(a.engine.status().lastSync).toBe(pulled + 10 * 1000);
+    expect(a.engine.status().lastPull).toBe(pulled);
+    await w.time.advance(10 * 1000);
+    a.engine.hide();
+    await settled(a.engine);
+    expect(a.engine.status().lastSync).toBe(pulled + 20 * 1000);
+    expect(a.engine.status().lastPull).toBe(pulled);
+
+    // A pull that does not get through leaves it too.
+    await w.time.advance(20 * 1000);
+    w.service.failNext({ path: '/v1/pull', network: true });
+    a.engine.show();
+    await settled(a.engine);
+    expect(a.engine.status()).toMatchObject({ state: 'paused', lastPull: pulled });
+    await a.engine.syncNow();
+    expect(a.engine.status()).toMatchObject({ state: 'idle', lastPull: pulled + 40 * 1000 });
+  });
+
   it("does not take the account's changes for edits", async () => {
     const w = world();
     const { a, code } = await created(w);
