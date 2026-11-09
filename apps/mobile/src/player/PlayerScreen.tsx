@@ -118,8 +118,8 @@ const BACK_TO_TOP = space.m + touch.min + space.s;
 const FIT_NOTE_MS = 1500;
 const noop = () => () => undefined;
 
-/** Whole picture or filling the screen: this phone's choice, kept for every film (picture-fit.ts). */
-const pictureFit = pictureFitStore(localStorage);
+/** Whole picture or filling the screen: this phone's choice for each title (picture-fit.ts). */
+const pictureFits = pictureFitStore(localStorage);
 
 type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
 
@@ -153,6 +153,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
   const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
+  // A series' episodes share the show's choice: the route's metaId is the show's for each.
+  const pictureFit = useMemo(() => pictureFits.title(metaId), [metaId]);
   const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
@@ -564,7 +566,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Zoom to fill: the whole frame (fit), or the picture covering the screen with what overhangs
   // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
   // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
-  // other phone players do; More has the same switch. The phone keeps the choice for every film.
+  // other phone players do; More has the same switch. The phone keeps the choice for the title.
   const [fitNote, setFitNote] = useState<PictureFit | null>(null);
   useEffect(() => {
     if (!fitNote) return;
