@@ -1,0 +1,346 @@
+name: Publish LG update
+
+# Sends the LG webOS app from main to the rooted test TV over the air, through Homebrew Channel and
+# the update service (services/updates, updates.bannertv.workers.dev), or rolls the last one back.
+# It runs only when started by hand (Actions, Publish LG update, Run workflow), on main. Homebrew
+# Channel never looks for updates by itself: after a run, open it on the TV, choose BannerTV and
+# press Update (services/updates/README.md, "LG TV updates through Homebrew Channel").
+#
+# Actions:
+# - publish: builds the LG app from this commit with a version of its own, one patch above
+#   anything published before (stamped in this run's checkout only, never committed), runs the TV
+#   bundle's checks, and uploads the .ipk and the repository index that offers it;
+# - rollback-previous: offers the build before the current one again, without building; run it
+#   again to go back further.
+#
+# Three jobs, so that the Cloudflare token is never in a job that also runs code from npm: a step
+# can read the memory of the runner it runs on, which holds the secrets its job uses, and can
+# change the files and environment of every later step in that job, so keeping a secret out of a
+# step's env is not enough.
+# - Read the store has the token, and runs wrangler (pinned below) and services/updates/scripts,
+#   from its own checkout with Node alone. It chooses the version, before anything is built.
+# - Build uses no secret. It is the only job that installs the app's dependencies and runs them
+#   (Vite, the unit tests, ares-package), and hands on only files: the .ipk and what it says it
+#   is, which Upload reads as data and checks again.
+# - Upload has the token again, and runs wrangler, the same scripts and the check of the Worker.
+#
+# It needs the repository secret CLOUDFLARE_API_TOKEN (as for the Workers) and the updates Worker
+# deployed with its LG routes (Deploy updates Worker). No signing key: Homebrew Channel installs
+# the .ipk only when its SHA-256 is the one the index gives.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [publish, rollback-previous]
+        default: publish
+
+permissions:
+  contents: read
+
+# One at a time, and never cancelled halfway: two runs would each choose a version from the same
+# history. Upload also stops if the history changed after Read the store read it.
+concurrency:
+  group: publish-lg-update
+  cancel-in-progress: false
+
+# The one channel is main for now: the scripts write webos/history/main and webos/repo/main, and
+# the Worker serves that index at /webos/repo.json.
+env:
+  NAMESPACE_TITLE: bannertv-updates
+  # An exact version, so a new wrangler release never meets the token before someone has chosen
+  # it. The same as in deploy-updates.yml and publish-phone-update.yml; move them on together.
+  WRANGLER: wrangler@4.152.0
+
+jobs:
+  # What the store holds now, read from Cloudflare's API rather than through the Worker, which can
+  # be a minute behind: everything under webos/ in one listing (the index, the history, the .ipks
+  # and icons) and the history itself. From those it chooses the version a publish stamps, or
+  # checks that a roll back has a build to go back to, before anything is built.
+  store:
+    name: Read the store
+    # Production takes main only, whichever branch the run was started from.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ACTION: ${{ inputs.action }}
+    outputs:
+      namespace: ${{ steps.store.outputs.namespace }}
+      version: ${{ steps.store.outputs.version }}
+    steps:
+      - name: Check the token is there
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Add the repository secret CLOUDFLARE_API_TOKEN (Settings, Secrets and variables, Actions) first."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      # Node alone, for wrangler and our scripts: no install and no cache.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Read the store
+        id: store
+        working-directory: services/updates
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          namespace=$(npx --yes "$WRANGLER" kv namespace list |
+            node -e '
+              const list = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              process.stdout.write(list.find((ns) => ns.title === process.argv[1])?.id ?? "");' \
+              "$NAMESPACE_TITLE")
+          if [ -z "$namespace" ]; then
+            echo "::error::There is no KV namespace $NAMESPACE_TITLE yet: run Deploy updates Worker first."
+            exit 1
+          fi
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+          kv() { npx --yes "$WRANGLER" kv "$@" --remote --namespace-id "$namespace"; }
+          store="$RUNNER_TEMP/store"
+          mkdir -p "$store"
+          kv key list --prefix webos/ > "$store/keys.json"
+          if node scripts/webos.mjs has-key --keys "$store/keys.json" --key webos/history/main; then
+            kv key get webos/history/main > "$store/history.json"
+          fi
+          # Both refuse here, with the reason, what the store cannot take: a patch that would
+          # reach 1000, appinfo.json below what was published, or nothing to roll back to.
+          if [ "$ACTION" = publish ]; then
+            version=$(node scripts/webos.mjs next-version \
+              --appinfo ../../apps/webos/webos-meta/appinfo.json \
+              --history "$store/history.json" --keys "$store/keys.json")
+            echo "This publish stamps version $version."
+          else
+            version=$(node scripts/webos.mjs check-rollback \
+              --history "$store/history.json" --keys "$store/keys.json")
+            echo "This roll back offers version $version again."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the store to Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lg-update-store
+          path: ${{ runner.temp }}/store/
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    name: Build
+    needs: store
+    if: github.ref == 'refs/heads/main' && inputs.action == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.store.outputs.version }}
+    steps:
+      - name: Check the version
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Read the store chose no version."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter '@bannertv/webos...'
+
+      # In this checkout only, before anything reads it: the app shows it in Settings, and webOS,
+      # and so Homebrew Channel, reports it as the version installed. check-version.mjs then holds
+      # it to the same rules as a committed version.
+      - name: Stamp the version
+        run: |
+          node services/updates/scripts/webos.mjs stamp --version "$VERSION" \
+            --appinfo apps/webos/webos-meta/appinfo.json --package apps/webos/package.json
+          pnpm check:version
+
+      # The checks that matter for the TV's bundle, on this exact commit. The journeys ran on the
+      # pull request's full build before it merged (ci.yml), and take 20 minutes.
+      - name: Typecheck
+        run: pnpm --filter @bannertv/webos typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @bannertv/webos test
+
+      - name: Build
+        run: pnpm --filter @bannertv/webos build
+
+      - name: Check the build for webOS 5.0
+        run: pnpm check:bundle
+
+      - name: Package .ipk
+        run: pnpm package
+
+      # The .ipk's SHA-256, and its 130 px icon's, which the index gives. Upload works both out
+      # again from the file and stops if they differ.
+      - name: Describe the build
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          ipk="com.bannertv.app_${VERSION}_all.ipk"
+          if [ ! -f "out/$ipk" ]; then
+            echo "::error::ares-package made no out/$ipk."
+            ls -l out
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/build"
+          cp "out/$ipk" "$RUNNER_TEMP/build/"
+          node services/updates/scripts/webos.mjs describe-build --ipk "$RUNNER_TEMP/build/$ipk" \
+            --version "$VERSION" --commit "$COMMIT" --out "$RUNNER_TEMP/build/build.json"
+
+      # Files only, read as data by Upload: it never runs anything from here.
+      - name: Hand the build to Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lg-update-build
+          path: ${{ runner.temp }}/build/
+          retention-days: 1
+          if-no-files-found: error
+
+  upload:
+    name: Upload
+    needs: [store, build]
+    # After Build for a publish. A roll back builds nothing, so its Build is skipped.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && needs.store.result == 'success'
+      && (needs.build.result == 'success'
+      || (inputs.action == 'rollback-previous' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ACTION: ${{ inputs.action }}
+      VERSION: ${{ needs.store.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Fetch what the store held
+        uses: actions/download-artifact@v4
+        with:
+          name: lg-update-store
+          path: ${{ runner.temp }}/store
+
+      - name: Fetch the build
+        if: inputs.action == 'publish'
+        uses: actions/download-artifact@v4
+        with:
+          name: lg-update-build
+          path: ${{ runner.temp }}/build
+
+      # The history is read again just before anything is written, and the upload stops if it
+      # changed since Read the store: another run in between, or this job started again later,
+      # could otherwise use a version twice or undo a newer publish. Then the script checks the
+      # .ipk (its SHA-256, and that it says it is BannerTV at this version) and writes the files.
+      - name: Plan the upload
+        working-directory: services/updates
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NAMESPACE: ${{ needs.store.outputs.namespace }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          if ! [[ "$NAMESPACE" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "::error::Read the store gave no KV namespace id."
+            exit 1
+          fi
+          kv() { npx --yes "$WRANGLER" kv "$@" --remote --namespace-id "$NAMESPACE"; }
+          now="$RUNNER_TEMP/now"
+          mkdir -p "$now"
+          kv key list --prefix webos/history/ > "$now/keys.json"
+          if node scripts/webos.mjs has-key --keys "$now/keys.json" --key webos/history/main; then
+            kv key get webos/history/main > "$now/history.json"
+          fi
+          given=(--history "$RUNNER_TEMP/store/history.json" --history-now "$now/history.json"
+            --keys "$RUNNER_TEMP/store/keys.json" --out "$RUNNER_TEMP/upload")
+          if [ "$ACTION" = publish ]; then
+            node scripts/webos.mjs publish "${given[@]}" \
+              --ipk "$RUNNER_TEMP/build/com.bannertv.app_${VERSION}_all.ipk" \
+              --build "$RUNNER_TEMP/build/build.json" --version "$VERSION" --commit "$COMMIT"
+          else
+            node scripts/webos.mjs rollback-previous "${given[@]}"
+          fi
+
+      # The .ipk and icon first, then the history, and the index last, so the TV is never offered
+      # a build before its files are stored, and a version is never used twice.
+      - name: Upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NAMESPACE: ${{ needs.store.outputs.namespace }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          put() { npx --yes "$WRANGLER" kv bulk put "$1" --remote --namespace-id "$NAMESPACE"; }
+          part=1
+          while [ -f "$RUNNER_TEMP/upload/content-$part.json" ]; do
+            put "$RUNNER_TEMP/upload/content-$part.json"
+            part=$((part + 1))
+          done
+          put "$RUNNER_TEMP/upload/history.json"
+          put "$RUNNER_TEMP/upload/repo.json"
+
+      # Workers KV can take a minute or so to reach every location, so this waits up to three for
+      # the Worker's index to offer the build, then downloads the .ipk as Homebrew Channel will and
+      # checks its SHA-256.
+      - name: Check the Worker serves it
+        working-directory: services/updates
+        run: |
+          summary="$RUNNER_TEMP/upload/summary.json"
+          read -r url sha < <(node -e '
+            const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            console.log(s.ipkUrl + " " + s.sha256);' "$summary")
+          for attempt in $(seq 1 18); do
+            if curl -fsS --max-time 10 -o "$RUNNER_TEMP/served.json" \
+              https://updates.bannertv.workers.dev/webos/repo.json &&
+              node scripts/webos.mjs offers --index "$RUNNER_TEMP/served.json" --summary "$summary"; then
+              for try in 1 2 3 4 5 6; do
+                if curl -fsS --max-time 60 -o "$RUNNER_TEMP/served.ipk" "$url" &&
+                  echo "$sha  $RUNNER_TEMP/served.ipk" | sha256sum --check --quiet; then
+                  echo "The Worker offers $VERSION, and its .ipk has SHA-256 $sha."
+                  exit 0
+                fi
+                sleep 10
+              done
+              echo "::error::The index offers $VERSION, but $url does not give the .ipk with SHA-256 $sha."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::https://updates.bannertv.workers.dev/webos/repo.json does not offer $VERSION after three minutes. The upload itself succeeded if the Upload step did; KV may be slow to reach the runner's location."
+          exit 1
+
+      # Also after a failed upload or check, so the run says what it was uploading.
+      - name: Summary
+        if: always()
+        working-directory: services/updates
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          if [ -f "$RUNNER_TEMP/upload/summary.json" ]; then
+            node scripts/webos.mjs summary --summary "$RUNNER_TEMP/upload/summary.json" \
+              --result "$RESULT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nothing was uploaded for $ACTION $VERSION: see the steps above." >> "$GITHUB_STEP_SUMMARY"
+          fi

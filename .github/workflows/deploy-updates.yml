@@ -1,16 +1,16 @@
 name: Deploy updates Worker
 
-# Deploys services/updates, the phone app's update service at updates.bannertv.workers.dev, from
-# main. It runs only when started by hand (Actions, Deploy updates Worker, Run workflow), like
-# Deploy api Worker. It needs the repository secret CLOUDFLARE_API_TOKEN (the "Edit Cloudflare
-# Workers" template, which includes Workers KV Storage) and, only if that token reaches more than
-# one Cloudflare account, the repository variable CLOUDFLARE_ACCOUNT_ID.
+# Deploys services/updates, the update service at updates.bannertv.workers.dev for the phone app
+# and the LG TV, from main. It runs only when started by hand (Actions, Deploy updates Worker, Run
+# workflow), like Deploy api Worker. It needs the repository secret CLOUDFLARE_API_TOKEN (the
+# "Edit Cloudflare Workers" template, which includes Workers KV Storage) and, only if that token
+# reaches more than one Cloudflare account, the repository variable CLOUDFLARE_ACCOUNT_ID.
 #
 # The updates live in a Workers KV namespace titled bannertv-updates. This finds it by its title,
 # makes it the first time, and binds it as UPDATES by adding its id to wrangler.toml in this run's
 # checkout only. Wrangler 4 could make one by itself for a binding without an id, but it would
 # name it updates-updates and find it again only through the deployed Worker's own binding, while
-# the publish workflow needs the id for every upload; one lookup by title serves both.
+# the publish workflows need the id for every upload; one lookup by title serves them all.
 #
 # Two jobs, so the token is never in the job that installs and runs the tests' packages: a step
 # can read the memory of the runner it runs on, which holds the secrets its job uses. The Deploy
@@ -30,7 +30,7 @@ concurrency:
 env:
   NAMESPACE_TITLE: bannertv-updates
   # An exact version, so a new wrangler release never meets the token before someone has chosen
-  # it. The same as in publish-phone-update.yml; move both on together.
+  # it. The same as in publish-phone-update.yml and publish-lg-update.yml; move them on together.
   WRANGLER: wrangler@4.152.0
 
 jobs:

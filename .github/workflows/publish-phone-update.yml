@@ -65,7 +65,8 @@ concurrency:
 env:
   NAMESPACE_TITLE: bannertv-updates
   # An exact version, so a new wrangler release never meets the token before someone has chosen
-  # it. Move it on by hand, to a release at least a couple of weeks old.
+  # it. Move it on by hand, to a release at least a couple of weeks old, together with the one in
+  # deploy-updates.yml and publish-lg-update.yml.
   WRANGLER: wrangler@4.152.0
 
 jobs:
