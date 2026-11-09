@@ -15,6 +15,7 @@ import {
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
 import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { type ClockReading, readClock, STOPPED_CLOCK } from './player-clock';
 import { toAndroidTrack, trackId } from './tracks';
 import { videoSource } from './video-source';
 
@@ -83,6 +84,10 @@ let textChosen = false;
 let startChecked = false;
 let audioTracks: AudioTrack[] = [];
 let textTracks: SubtitleTrack[] = [];
+/** The speed the page asked for. Media3 keeps it from one stream to the next. */
+let rate = 1;
+/** The player's clock as last read, for the page's own subtitles (player-clock.ts). */
+let clock: ClockReading = STOPPED_CLOCK;
 
 function emit(event: AndroidEvent): void {
   const sink = window.__bannerAndroid as { event(event: AndroidEvent): void } | undefined;
@@ -100,8 +105,23 @@ function position(current: VideoPlayer): number {
   return isFinite(time) && time > 0 ? time : 0;
 }
 
+/** Notes where the player is, as each report goes to the page. */
+function noteClock(current: VideoPlayer, at: number, duration: number | null): void {
+  clock = {
+    position: at,
+    at: Date.now(),
+    rate,
+    // A pause asked for stops it at once, before Media3 says it has stopped.
+    running: current.playing && wantPlay && !ended,
+    duration: duration !== null && duration > 0 ? duration : 0,
+  };
+}
+
 function emitState(): void {
   if (!player || !hasMedia) return;
+  const at = position(player);
+  const duration = durationValue(player);
+  noteClock(player, at, duration);
   emit({
     type: 'player',
     event: 'state',
@@ -111,21 +131,18 @@ function emitState(): void {
     buffering: player.status === 'loading',
     ready: readyOnce,
     ended,
-    position: position(player),
-    duration: durationValue(player),
+    position: at,
+    duration,
     live: player.isLive,
   });
 }
 
 function emitTime(): void {
   if (!player || !hasMedia) return;
-  emit({
-    type: 'player',
-    event: 'time',
-    load: loadId,
-    position: position(player),
-    duration: durationValue(player),
-  });
+  const at = position(player);
+  const duration = durationValue(player);
+  noteClock(player, at, duration);
+  emit({ type: 'player', event: 'time', load: loadId, position: at, duration });
 }
 
 function emitTracks(): void {
@@ -307,6 +324,29 @@ export function phonePlayer(): VideoPlayer {
   return ensurePlayer();
 }
 
+/**
+ * Plays at this speed: the session's setRate, and its Normal for each stream it opens, through
+ * the screen's PhoneVideoElement. The shared Android engine has no speed command, so it comes
+ * here straight from the page.
+ */
+export function setPlayerRate(next: number): void {
+  if (!(next > 0) || !isFinite(next)) return;
+  // The clock ran at the old speed until now, and at the new one from here.
+  const now = Date.now();
+  clock = { ...clock, position: readClock(clock, now), at: now, rate: next };
+  rate = next;
+  ensurePlayer().playbackRate = next;
+}
+
+/**
+ * Where the video is now, moved on at the speed playing since the player last said (twice a
+ * second), so the page's own subtitles follow the player's time at any speed. Null with no
+ * stream open.
+ */
+export function playerClock(): number | null {
+  return hasMedia ? readClock(clock, Date.now()) : null;
+}
+
 function open(url: string, startAt: number, type: ContentType): void {
   const current = ensurePlayer();
   openedType = type;
@@ -337,6 +377,8 @@ function load(command: Extract<AndroidPlayerCommand, { op: 'load' }>): void {
   textChosen = false;
   ended = false;
   wantPlay = true;
+  // Still until the player says it plays: nothing of the last stream's clock.
+  clock = { ...STOPPED_CLOCK, position: command.startAt, rate };
   open(command.url, command.startAt, contentTypeFor(command.mime));
   pictureShown.set(true);
 }
@@ -351,6 +393,7 @@ function release(): void {
   openedHeaders = undefined;
   audioTracks = [];
   textTracks = [];
+  clock = STOPPED_CLOCK;
   if (player) {
     player.pause();
     player.replace(null, true);

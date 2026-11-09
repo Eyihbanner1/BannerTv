@@ -61,6 +61,10 @@ const PHONE = {
   traktCopied:
     'The code is copied, so you can paste it. Come back here when Trakt says you’re done.',
   pictureInPicture: 'Picture-in-picture',
+  // The player's More: what the sleep timer has left, and what speed the next stream plays at.
+  sleepLeft_one: '{{count}} min left',
+  sleepLeft_other: '{{count}} min left',
+  speedNote: 'Another stream, or the next episode, starts at Normal.',
   zoomToFill: 'Zoom to fill',
   zoomedToFill: 'Zoomed to fill',
   fitToScreen: 'Fit to screen',
@@ -235,6 +239,7 @@ const OVERRIDES = {
       'Cinemeta and BannerTV Demo are already added, so Home is ready to browse, with a few free films to play. You can add more addons at any time in Settings, Addons.',
   },
   player: {
+    sleep: { offNote: 'Off: the phone plays on.' },
     problem: {
       nothing:
         'None of your addons offered a stream this phone can play. Try Streams, or add a stream addon in Settings, Addons.',

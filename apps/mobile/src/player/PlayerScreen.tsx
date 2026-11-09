@@ -71,12 +71,16 @@ import { Icon, OutlineIcon } from '../ui/icons';
 import { StreamList } from '../ui/StreamList';
 import { colors, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
+import { EpisodesPanel, EpisodesRow } from './EpisodesPanel';
+import { InfoPanel } from './InfoPanel';
 import { holdLandscape } from './orientation';
 import {
   BACKGROUND_PAUSE_DELAY_MS,
   phonePlayer,
   pictureInPicture,
   pictureShown,
+  playerClock,
+  setPlayerRate,
 } from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
@@ -89,6 +93,8 @@ import {
 } from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SkipRipple } from './SkipRipple';
+import { SleepPanel, SleepRow, SleepScreen, SleepWarning } from './SleepTimer';
+import { SpeedPanel, SpeedRow } from './SpeedPanel';
 import { SubtitleStyleChoices } from './SubtitleStyle';
 import { SubtitleText } from './SubtitleText';
 import { isSwipe, startsAtEdge, swipeMoves, swipeTarget } from './swipe-seek';
@@ -102,6 +108,7 @@ import {
   tapSide,
 } from './tap-skip';
 import { TracksPanel } from './TracksPanel';
+import { useSleepTimer } from './use-sleep-timer';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
 const CONTROLS_HIDE_MS = motion.controlsHide;
@@ -121,7 +128,17 @@ const noop = () => () => undefined;
 /** Whole picture or filling the screen: this phone's choice for each title (picture-fit.ts). */
 const pictureFits = pictureFitStore(localStorage);
 
-type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
+type Panel =
+  | 'tracks'
+  | 'style'
+  | 'more'
+  | 'streams'
+  | 'quality'
+  | 'episodes'
+  | 'info'
+  | 'speed'
+  | 'sleep'
+  | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -134,7 +151,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const sportsEvent = route.event;
   const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
-  const element = useMemo(() => new PhoneVideoElement(), []);
+  // The speed the session sets goes on to Android's player.
+  const element = useMemo(() => new PhoneVideoElement(setPlayerRate), []);
   const finder = useMemo(
     () => streamFinder(titleType, videoId, sportsEvent),
     [titleType, videoId, sportsEvent],
@@ -324,6 +342,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   );
   const current = meta?.videos.find((video) => video.id === videoId);
   const offersNext = !!next && !state.live && !state.clip;
+  // The sleep timer, as on the TV: as it runs out it closes what is open and pauses.
+  const sleep = useSleepTimer(metaId, session, state, offersNext, () => {
+    setPanel(null);
+    setControls(false);
+  });
+  const keepSleep = sleep.carryOn;
   useEffect(() => {
     if (!next) return;
     if (ended || (state.duration > 0 && state.duration - state.position <= PREFETCH_NEXT_S)) {
@@ -334,6 +358,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const playEpisode = useCallback(
     (target: Video) => {
       session?.saveProgress();
+      keepSleep();
       const binge = bingeHint(state.entry);
       const stream =
         binge && bingeEntry(streamFinder(titleType, target.id).get().candidates, binge);
@@ -349,7 +374,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         'replace',
       );
     },
-    [session, state.entry, titleType, metaId, item],
+    [session, state.entry, titleType, metaId, item, keepSleep],
   );
 
   // Up Next and the end of a video, decided by core's endAction as on the TV.
@@ -357,9 +382,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [askAtEnd, setAskAtEnd] = useState<boolean | null>(null);
   const [afterEnd, setAfterEnd] = useState<number | null>(null);
   const [countSeen, setCountSeen] = useState(false);
-  const held = panel !== null || waiting || problem || scrubbing;
+  const held = panel !== null || waiting || problem || scrubbing || sleep.asleep;
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
-  const counting = inStretch && !dismissed && !held;
+  // Not when the sleep timer stops at this end.
+  const counting = inStretch && !dismissed && !held && !sleep.sleepsHere;
   const count = ended
     ? (afterEnd ?? UP_NEXT_AFTER_END_S)
     : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
@@ -389,12 +415,26 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         dismissed,
         held,
         countedOnScreen: seen || afterEnd === 0,
-        sleepsHere: false,
+        sleepsHere: sleep.sleepsHere,
         stillWatching: askAtEnd === true,
       })
     : null;
   // An end nobody saw counted down gets a short count of its own.
   if (decision === 'hold' && !held && afterEnd === null) setAfterEnd(UP_NEXT_AFTER_END_S);
+  if (decision === 'sleep') sleep.fallAsleep();
+  // The sleep timer's last minute, in Up Next's corner, over the picture alone.
+  const warningUp = sleep.warning && !held && !controls && !problem && !pip;
+  // Carry on watching plays on from where the timer paused, with the controls up to say where;
+  // Back leaves it paused. At an end it stopped, Up Next counts instead, with the controls down
+  // so its card shows.
+  const wake = (carryOn: boolean) => {
+    sleep.wake();
+    if (ended) setAskAtEnd(false);
+    else {
+      if (carryOn) session?.resume();
+      poke();
+    }
+  };
   useEffect(() => {
     if (decision === 'leave') goBack();
     else if (decision === 'play' && next) {
@@ -409,6 +449,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   }, [afterEnd, held]);
 
   // Back closes a sheet first, then leaves.
+  const dismissSleepWarning = sleep.dismissWarning;
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (panel !== null) {
@@ -419,10 +460,14 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         setDismissed(true);
         return true;
       }
+      if (warningUp) {
+        dismissSleepWarning();
+        return true;
+      }
       return false;
     });
     return () => subscription.remove();
-  }, [panel, counting, ended, decision]);
+  }, [panel, counting, ended, decision, warningUp, dismissSleepWarning]);
 
   // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
   // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
@@ -746,7 +791,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setSwitching({ entry });
   };
 
-  const clock = useCallback(() => element.currentTime, [element]);
+  // The player's own time, at the speed playing, so drawn subtitles keep pace at any speed.
+  const clock = useCallback(() => playerClock() ?? element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
   const toast = (() => {
@@ -1110,6 +1156,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       {!controls &&
       !problem &&
       !pip &&
+      !sleep.asleep &&
       ((counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
@@ -1126,6 +1173,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             <Button label={t('phone.keepWatching')} onPress={() => setDismissed(true)} />
           </View>
         </View>
+      ) : null}
+
+      {warningUp ? (
+        <SleepWarning
+          timer={sleep.timer}
+          episode={!!current}
+          right={Math.max(insets.right, space.xl)}
+          onAdd={sleep.add}
+          onOff={() => sleep.choose('off')}
+        />
       ) : null}
 
       {ended && decision === 'ask' && next && !pip ? (
@@ -1153,6 +1210,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <Text style={styles.toastText}>{toast}</Text>
         </View>
       ) : null}
+
+      <SleepScreen visible={sleep.asleep && !pip} onWake={wake} />
 
       <SidePanel
         visible={panel === 'tracks'}
@@ -1212,29 +1271,116 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
+        {/* Rows wrap at large text, and the list scrolls once they no longer fit. */}
         {() => (
-          <PanelColumn>
-            <PanelOption
-              label={t('player.quality')}
-              detail={qualityValue}
-              accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
-              disabled={!state.entry}
-              onPress={() => setPanel('quality')}
-            />
-            <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
-            {shown ? (
+          <ScrollView>
+            <PanelColumn>
               <PanelOption
-                label={t('phone.zoomToFill')}
-                detail={zoomValue}
-                accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
-                onPress={() => {
-                  setPanel(null);
-                  changeFit(fit === 'fill' ? 'fit' : 'fill');
-                }}
+                label={t('player.quality')}
+                detail={qualityValue}
+                accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+                disabled={!state.entry}
+                wrap
+                onPress={() => setPanel('quality')}
               />
-            ) : null}
-            {shown ? <PanelOption label={t('phone.pictureInPicture')} onPress={startPip} /> : null}
-          </PanelColumn>
+              <PanelOption label={t('phone.sources')} wrap onPress={() => setPanel('streams')} />
+              {metaQuery ? (
+                <EpisodesRow
+                  listed={!!meta && meta.videos.length > 0}
+                  onPress={() => setPanel('episodes')}
+                />
+              ) : null}
+              <PanelOption label={t('player.info')} wrap onPress={() => setPanel('info')} />
+              {!state.live ? (
+                <SpeedRow
+                  rate={state.rate}
+                  disabled={!state.entry}
+                  onPress={() => setPanel('speed')}
+                />
+              ) : null}
+              <SleepRow timer={sleep.timer} episode={!!current} onPress={() => setPanel('sleep')} />
+              {shown ? (
+                <PanelOption
+                  label={t('phone.zoomToFill')}
+                  detail={zoomValue}
+                  accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
+                  wrap
+                  onPress={() => {
+                    setPanel(null);
+                    changeFit(fit === 'fill' ? 'fit' : 'fill');
+                  }}
+                />
+              ) : null}
+              {shown ? (
+                <PanelOption label={t('phone.pictureInPicture')} wrap onPress={startPip} />
+              ) : null}
+            </PanelColumn>
+          </ScrollView>
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'episodes'}
+        title={t('player.episodes')}
+        onClose={() => setPanel(null)}
+      >
+        {() =>
+          meta ? (
+            <EpisodesPanel
+              meta={meta}
+              videoId={videoId}
+              onPlay={playEpisode}
+              onClose={() => setPanel(null)}
+            />
+          ) : null
+        }
+      </SidePanel>
+
+      <SidePanel visible={panel === 'info'} title={t('player.info')} onClose={() => setPanel(null)}>
+        {() => (
+          <InfoPanel
+            title={title}
+            episode={current}
+            item={item}
+            position={state.position}
+            duration={state.duration}
+            rate={state.rate}
+            live={state.live}
+          />
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'speed'}
+        title={t('player.speed.title')}
+        onClose={() => setPanel(null)}
+      >
+        {() => (
+          <SpeedPanel
+            rate={state.rate}
+            onChoose={(rate) => {
+              setPanel(null);
+              session?.setRate(rate);
+            }}
+          />
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'sleep'}
+        title={t('player.sleep.title')}
+        onClose={() => setPanel(null)}
+      >
+        {() => (
+          <SleepPanel
+            timer={sleep.timer}
+            episode={!!current}
+            live={state.live}
+            onChoose={(choice) => {
+              setPanel(null);
+              sleep.choose(choice);
+            }}
+          />
         )}
       </SidePanel>
 
