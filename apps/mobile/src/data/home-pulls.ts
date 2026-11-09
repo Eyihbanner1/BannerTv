@@ -1,4 +1,4 @@
-import type { Timers } from '@bannertv/core';
+import { DEFAULT_PULL_MINUTES, type Timers } from '@bannertv/core';
 
 /** Home coming back into focus asks the account again at most this often. */
 export const FOCUS_PULL_GAP_MS = 30_000;
@@ -15,6 +15,11 @@ export interface HomePullsOptions {
    * asks nothing.
    */
   lastPull?: () => number | undefined;
+  /**
+   * How often the service asks screens to pull, in minutes (30 unless it says otherwise). Asked
+   * for pulls further apart than that, Home's own come further apart in the same proportion.
+   */
+  pullMinutes?: () => number;
   /** Whether the app is in the foreground now. */
   active: boolean;
 }
@@ -32,14 +37,19 @@ export interface HomePulls {
  * When Home asks the account what other screens changed: as it comes into focus, and every
  * 2 minutes while it stays there with the app open. The account's own pulls go on as well:
  * every half hour, and when the app comes back after 15 seconds or more away, which this leaves
- * to them rather than pulling twice.
+ * to them rather than pulling twice. When the service asks for pulls further apart than every
+ * 30 minutes, as it can to cut its load without a release (ADR 0006, decision 10), the 30 seconds
+ * and the 2 minutes grow in the same proportion; asked for them closer, they stay as they are.
  */
 export function createHomePulls(options: HomePullsOptions): HomePulls {
   const { pull, now, timers } = options;
   let focused = false;
   let active = options.active;
   let asked: number | undefined;
-  let stopEvery: (() => void) | undefined;
+  let stopNext: (() => void) | undefined;
+
+  const slowed = () =>
+    Math.max(1, (options.pullMinutes?.() ?? DEFAULT_PULL_MINUTES) / DEFAULT_PULL_MINUTES);
 
   function ask(): void {
     asked = now();
@@ -48,15 +58,23 @@ export function createHomePulls(options: HomePullsOptions): HomePulls {
 
   function recently(): boolean {
     const last = Math.max(asked ?? -Infinity, options.lastPull?.() ?? -Infinity);
-    return now() - last < FOCUS_PULL_GAP_MS;
+    return now() - last < FOCUS_PULL_GAP_MS * slowed();
+  }
+
+  // One at a time rather than a timer that repeats, so what the service says applies from the next.
+  function askLater(): void {
+    stopNext = timers.after(HOME_PULL_EVERY_MS * slowed(), () => {
+      ask();
+      askLater();
+    });
   }
 
   function follow(): void {
     const on = focused && active;
-    if (on && !stopEvery) stopEvery = timers.every(HOME_PULL_EVERY_MS, ask);
-    else if (!on && stopEvery) {
-      stopEvery();
-      stopEvery = undefined;
+    if (on && !stopNext) askLater();
+    else if (!on && stopNext) {
+      stopNext();
+      stopNext = undefined;
     }
   }
 

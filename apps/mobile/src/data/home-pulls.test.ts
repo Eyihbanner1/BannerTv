@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { createHomePulls, FOCUS_PULL_GAP_MS, HOME_PULL_EVERY_MS } from './home-pulls';
 
 /** A clock and timers moved by hand, and the pulls asked for. */
-function setUp(options: { active?: boolean; lastPull?: () => number | undefined } = {}) {
+function setUp(
+  options: {
+    active?: boolean;
+    lastPull?: () => number | undefined;
+    pullMinutes?: () => number;
+  } = {},
+) {
   let clock = 0;
   let timers: Array<{ due: number; every: number; run: () => void }> = [];
   const fake: Timers = {
@@ -29,6 +35,7 @@ function setUp(options: { active?: boolean; lastPull?: () => number | undefined 
     timers: fake,
     active: options.active ?? true,
     ...(options.lastPull ? { lastPull: options.lastPull } : {}),
+    ...(options.pullMinutes ? { pullMinutes: options.pullMinutes } : {}),
   });
   function advance(ms: number) {
     const until = clock + ms;
@@ -112,5 +119,43 @@ describe("Home's pulls", () => {
     advance(FOCUS_PULL_GAP_MS);
     home.focus();
     expect(pulls).toHaveLength(2);
+  });
+
+  it('slows down as the service asks for pulls further apart, never speeding up', () => {
+    // Every 4 hours, eight times the usual 30 minutes: 4 minutes between focus pulls, and 16
+    // minutes between the pulls while Home stays.
+    let minutes = 240;
+    const { home, pulls, advance } = setUp({ pullMinutes: () => minutes });
+    home.focus();
+    advance(8 * HOME_PULL_EVERY_MS - 1);
+    expect(pulls).toEqual([0]);
+    advance(1);
+    expect(pulls).toEqual([0, 8 * HOME_PULL_EVERY_MS]);
+    home.blur();
+    advance(8 * FOCUS_PULL_GAP_MS - 1);
+    home.focus();
+    expect(pulls).toHaveLength(2);
+    home.blur();
+    advance(1);
+    home.focus();
+    expect(pulls).toHaveLength(3);
+    const at = pulls[2]!;
+
+    // Back to every 30 minutes: from the next pull on, every 2 minutes again.
+    minutes = 30;
+    advance(8 * HOME_PULL_EVERY_MS);
+    advance(HOME_PULL_EVERY_MS);
+    expect(pulls.slice(3)).toEqual([at + 8 * HOME_PULL_EVERY_MS, at + 9 * HOME_PULL_EVERY_MS]);
+
+    // Asked for pulls closer together than usual, Home keeps its own pace.
+    minutes = 15;
+    home.blur();
+    advance(FOCUS_PULL_GAP_MS - 1);
+    home.focus();
+    expect(pulls).toHaveLength(5);
+    advance(HOME_PULL_EVERY_MS - 1);
+    expect(pulls).toHaveLength(5);
+    advance(1);
+    expect(pulls).toHaveLength(6);
   });
 });

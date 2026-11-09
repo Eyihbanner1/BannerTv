@@ -1,5 +1,5 @@
 import { browserTimers } from '@tv/data/sports';
-import { accountState, refreshAccount } from '@tv/data/sync';
+import { accountPullMinutes, accountState, refreshAccount } from '@tv/data/sync';
 import { useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import { AppState } from 'react-native';
@@ -14,6 +14,7 @@ const homePulls = createHomePulls({
   now: Date.now,
   timers: browserTimers,
   lastPull: () => accountState.get().status.lastPull,
+  pullMinutes: accountPullMinutes,
   active: foreground(AppState.currentState),
 });
 
