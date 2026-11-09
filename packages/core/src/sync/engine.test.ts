@@ -428,7 +428,7 @@ describe('a signed-in screen', () => {
     expect(pushes()).toBe(before + 3);
   });
 
-  it('pulls two seconds after start, when back after two minutes away, and on Sync now', async () => {
+  it('pulls two seconds after start, when back after fifteen seconds away, and on Sync now', async () => {
     const w = world();
     const storage = memoryKeyValueStore();
     const { code } = await created(w, async () => undefined);
@@ -449,11 +449,11 @@ describe('a signed-in screen', () => {
 
     b.engine.hide();
     await settled(b.engine);
-    await w.time.advance(60 * 1000);
+    await w.time.advance(14 * 1000);
     b.engine.show();
     expect(pulls()).toBe(before + 1);
     b.engine.hide();
-    await w.time.advance(2 * 60 * 1000);
+    await w.time.advance(20 * 1000);
     b.engine.show();
     await settled(b.engine);
     expect(pulls()).toBe(before + 2);

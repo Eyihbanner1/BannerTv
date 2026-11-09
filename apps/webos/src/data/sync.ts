@@ -439,7 +439,7 @@ async function settleLaunch(): Promise<boolean> {
  */
 export function startSync(): void {
   if (SYNC_SERVICE) {
-    // Hidden: everything waiting is pushed and pulls stop. Back after two minutes or more: a pull.
+    // Hidden: everything waiting is pushed and pulls stop. Back after 15 seconds or more: a pull.
     document.addEventListener('visibilitychange', () => {
       if (!engine) return;
       if (document.hidden) engine.hide();

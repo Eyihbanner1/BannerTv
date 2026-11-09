@@ -200,7 +200,7 @@ export interface SyncEngine {
   start(profile: ActiveProfile): Promise<void>;
   /** The app went off screen: everything pending is pushed and pulls stop. */
   hide(): void;
-  /** Back on screen: pulls when it was away two minutes or more. */
+  /** Back on screen: pulls when it was away fifteen seconds or more. */
   show(): void;
   /**
    * Pushes what waits, a document the full account refused included, then
@@ -292,7 +292,11 @@ const WATCH_PUSH_DELAY_MS = 15 * 1000;
  */
 const WATCH_PUSH_LATEST_MS = 60 * 1000;
 const FIRST_PULL_MS = 2 * 1000;
-const AWAY_MS = 2 * 60 * 1000;
+/**
+ * Back on screen after this long, it pulls: a moment in another app asks nothing, and a phone
+ * picked up again shows what the TV did meanwhile.
+ */
+const AWAY_MS = 15 * 1000;
 const BACKOFF_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
 /** Pushes again after a conflict at most this many times. */
 const CONFLICT_ROUNDS = 3;
