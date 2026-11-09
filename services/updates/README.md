@@ -90,7 +90,7 @@ The key pair is made once, on the laptop, by expo-updates' own command. The **ce
 
 3. Keep a copy of `private-key.pem` somewhere safe (a password manager), then delete the folder. Losing the key means a new pair, and a new APK on every phone, since the certificate is part of the app.
 
-4. Commit `apps/mobile/certs/certificate.pem`. An APK built before it has updates turned off, so install one APK built after it (the phone-apk label); publishes reach the phone from then on.
+4. Commit `apps/mobile/certs/certificate.pem`. An APK built before it has updates turned off, and so does any pull request's APK (the phone-apk or full-ci label), so install one APK from a CI run started by hand on main after the certificate is there (Actions, CI, Run workflow, on main); publishes reach the phone from then on.
 
 The certificate is valid for the years given. Phones refuse updates once it has expired, so make a new pair and APK before then. Every publish checks that the secret belongs to the committed certificate, that the certificate is for code signing and that it is in date, and stops if not.
 
