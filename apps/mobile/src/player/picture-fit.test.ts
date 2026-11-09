@@ -24,9 +24,6 @@ function memory(initial: Record<string, string> = {}) {
     setItem: (key, value) => {
       items.set(key, value);
     },
-    removeItem: (key) => {
-      items.delete(key);
-    },
   };
   return { items, storage };
 }
@@ -277,11 +274,22 @@ describe('pictureFitStore', () => {
     const { items, storage } = memory({ [EARLIER_FIT_KEY]: 'fill' });
     const memoryOf = pictureFitStore(storage);
     expect(memoryOf.title('tt1').get()).toBe('fill');
-    expect(items.has(EARLIER_FIT_KEY)).toBe(false);
     expect(stored(items)).toEqual({ last: 'fill', titles: [] });
     memoryOf.title('tt1').set('fit');
     expect(pictureFitStore(storage).title('tt1').get()).toBe('fit');
     expect(pictureFitStore(storage).title('tt2').get()).toBe('fit');
+  });
+
+  it('leaves the earlier choice for an earlier update to read, and reads it no more', () => {
+    const { items, storage } = memory({ [EARLIER_FIT_KEY]: 'fill' });
+    pictureFitStore(storage).title('tt1').set('fit');
+    // A phone put back on the earlier update still opens films filled, as it had them.
+    expect(items.get(EARLIER_FIT_KEY)).toBe('fill');
+    // Once this update is back, the choices it kept count, not that one.
+    const back = pictureFitStore(storage);
+    expect(back.title('tt1').get()).toBe('fit');
+    expect(back.title('tt2').get()).toBe('fit');
+    expect(stored(items)).toEqual({ last: 'fit', titles: [['tt1', 'fit']] });
   });
 
   it('reads the earlier choice no more once choices are kept', () => {
@@ -325,9 +333,6 @@ describe('pictureFitStore', () => {
         throw new Error('no storage');
       },
       setItem: () => {
-        throw new Error('no storage');
-      },
-      removeItem: () => {
         throw new Error('no storage');
       },
     };

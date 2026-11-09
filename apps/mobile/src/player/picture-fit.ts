@@ -118,7 +118,6 @@ export function pinchFit(from: number, to: number): PictureFit | null {
 export interface FitStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
-  removeItem(key: string): void;
 }
 
 /** The phone's choices, read from `storage` and saved there whenever one changes. */
@@ -133,11 +132,10 @@ export function pictureFitStore(storage: FitStorage): PictureFitMemory {
     const raw = storage.getItem(PICTURE_FITS_KEY);
     const earlier = raw === null ? storage.getItem(EARLIER_FIT_KEY) : null;
     initial = readPictureFits(raw, earlier);
-    // The one choice moves over once; from then on each title's choice is what counts.
-    if (earlier !== null) {
-      storage.setItem(PICTURE_FITS_KEY, writePictureFits(initial));
-      storage.removeItem(EARLIER_FIT_KEY);
-    }
+    // The one choice moves over once; from then on each title's choice is what counts. The
+    // earlier key stays as it was, so a phone put back on an earlier update (as expo-updates
+    // does when an update fails to start) still opens films the way they were left.
+    if (earlier !== null) storage.setItem(PICTURE_FITS_KEY, writePictureFits(initial));
   } catch {
     // Without storage the picture starts whole.
   }

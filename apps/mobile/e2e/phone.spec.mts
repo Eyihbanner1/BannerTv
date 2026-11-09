@@ -321,7 +321,10 @@ test.describe('with touch', () => {
     await page.getByRole('button', { name: /^1\. Season 1 episode 1,/ }).click();
     await playing();
     await expect.poll(fit).toBe('cover');
-    expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBeNull();
+    // The earlier key stays, for a phone put back on an earlier update.
+    expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
+      'fill',
+    );
     await pinch([100, 320], [190, 230]);
     await expect.poll(fit).toBe('contain');
     await leaveAndRelaunch();
