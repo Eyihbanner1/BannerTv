@@ -305,7 +305,7 @@ Every screen is designed for a 5-way remote first and a pointer second, viewed f
 | Player | Watch | Minimal overlay, seek bar with thumbnails when available, audio and subtitle menus, Up Next card at the end | 2 |
 | Library | Saved titles and history | Tabs for Movies, Series and History, sort by recently watched or added | 3 |
 | Addons | Manage addons | Installed list with reorder, configure, remove; install by URL, QR or addon catalog | 1, catalog in 3 |
-| Settings | Preferences | Playback, Subtitles, Appearance, Integrations, Profiles, About and licenses | 1 to 4 |
+| Settings | Preferences | Playback, Subtitles, Appearance, Integrations, Profiles, Updates (LG sideload builds), About and licenses | 1 to 4 |
 | Profile picker | Multi-user households | Avatars, optional PIN, kids profile | 3 |
 
 **Spatial navigation rules**
@@ -639,7 +639,7 @@ BannerTV has no content of its own, so a tester who opens it needs something leg
 
 - Every tagged release attaches the .ipk to GitHub Releases.
 - Testers install through Developer Mode with webOS Dev Manager or `ares-install`. Developer Mode installs disappear after 1000 hours unless the timer is reset.
-- The rooted test TV takes main's builds through a Homebrew Channel repository that the updates Worker serves (`https://updates.bannertv.workers.dev/webos/repo.json`) and the Publish LG update workflow, started by hand on main, fills. Homebrew Channel never updates by itself: after a publish, Update is pressed on BannerTV's page in Homebrew Channel. It installs a build only when its SHA-256 matches the repository's; nothing is signed, so it is for the test TV only until BannerTV's own signed updates (ADR 0001, decision 10).
+- The rooted test TV takes main's builds through a Homebrew Channel repository that the updates Worker serves (`https://updates.bannertv.workers.dev/webos/repo.json`) and the Publish LG update workflow, started by hand on main, fills. Homebrew Channel never updates by itself, so the app's Settings says when a newer build is there and opens Homebrew Channel ([TV setup](TV_SETUP.md#updates-through-homebrew-channel)); Update is then pressed on BannerTV's page there. It installs a build only when its SHA-256 matches the repository's; nothing is signed, so it is for the test TV only until BannerTV's own signed updates (ADR 0001, decision 10).
 
 **Release train**
 
