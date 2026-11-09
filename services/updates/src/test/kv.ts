@@ -46,9 +46,11 @@ export function testKV(): TestKV {
     return store.get(key);
   }
 
-  function shaped(stored: Stored | undefined, type: 'text' | 'stream') {
+  function shaped(stored: Stored | undefined, type: 'text' | 'stream' | 'arrayBuffer') {
     if (!stored) return null;
     if (type === 'text') return new TextDecoder().decode(stored.bytes);
+    // A copy, as KV hands each read its own buffer.
+    if (type === 'arrayBuffer') return stored.bytes.slice().buffer;
     return new Response(stored.bytes).body;
   }
 
@@ -56,8 +58,9 @@ export function testKV(): TestKV {
     reads,
     writes,
     down: false,
-    async get(key: string, type: 'text') {
-      return shaped(read(key), type) as string | null;
+    async get(key: string, type: 'text' | 'arrayBuffer') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- one stub for both overloads
+      return shaped(read(key), type) as any;
     },
     async getWithMetadata(key: string, type: 'text' | 'stream') {
       const stored = read(key);

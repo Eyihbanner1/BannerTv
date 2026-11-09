@@ -9,6 +9,7 @@ import {
 } from './protocol';
 import { testKV, type TestKV } from './test/kv';
 import { boundaryOf, partName, readDictionary, readMultipart } from './test/multipart';
+import * as webos from './webos';
 import worker, { type Env } from './worker';
 
 const ORIGIN = 'https://updates.example.workers.dev';
@@ -437,6 +438,225 @@ describe('GET /status', () => {
   });
 });
 
+describe('the LG TV’s Homebrew Channel repository', () => {
+  const SHA = 'ef9ec4ad015859d4b48ca7760f42299b09b2e00681cf7bb63399b9965317c38a';
+  const ICON_SHA = '81a179f14fc8c9543040f8088633daaba0b559af90fdb6588cfb2f4cf045ea34';
+  const IPK = new Uint8Array([0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a, 0, 255, 13, 10, 7]);
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+
+  /** An index as the publish workflow writes it (scripts/lib/webos.mjs), with a line not ASCII. */
+  function indexText(version = '0.1.4') {
+    const iconUri = `https://updates.bannertv.workers.dev/webos/icon/${ICON_SHA}.png`;
+    return `${JSON.stringify(
+      {
+        packages: [
+          {
+            id: 'com.bannertv.app',
+            title: 'BannerTV',
+            iconUri,
+            shortDescription: `BannerTV from main — version ${version}`,
+            manifest: {
+              id: 'com.bannertv.app',
+              version,
+              type: 'web',
+              title: 'BannerTV',
+              iconUri,
+              ipkUrl: `https://updates.bannertv.workers.dev/webos/ipk/${SHA}.ipk`,
+              ipkHash: { sha256: SHA },
+              ipkSize: IPK.length,
+              rootRequired: false,
+            },
+            channel: 'main',
+            commit: 'ed387a1228288492187ba32540e721775a2f3292',
+            publishedAt: CREATED,
+            restoredAt: null,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`;
+  }
+
+  function stored(): { kv: TestKV; env: Env; text: string } {
+    const { kv, env } = setUp();
+    const text = indexText();
+    kv.put(webos.ipkKey(SHA), IPK, { metadata: { version: '0.1.4' } });
+    kv.put(webos.iconKey(ICON_SHA), PNG);
+    kv.put(webos.repoKey('main'), text);
+    return { kv, env, text };
+  }
+
+  function expectWebosHeaders(response: Response) {
+    expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  }
+
+  describe('GET /webos/repo.json', () => {
+    it('serves the stored index byte for byte, never cached stale, to any origin', async () => {
+      const { env, text } = stored();
+      const response = await worker.fetch(ask('/webos/repo.json'), env);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expectWebosHeaders(response);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new TextEncoder().encode(text));
+    });
+
+    it('serves a repository with no package before the first publish', async () => {
+      const { env } = setUp();
+      const response = await worker.fetch(ask('/webos/repo.json'), env);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expectWebosHeaders(response);
+      expect(await response.text()).toBe('{"packages":[]}');
+    });
+
+    it('answers 503, to any origin, when storage fails or is not bound', async () => {
+      const { kv, env } = stored();
+      kv.down = true;
+      const down = await worker.fetch(ask('/webos/repo.json'), env);
+      expect(down.status).toBe(503);
+      expect(down.headers.get('cache-control')).toBe('no-store');
+      expectWebosHeaders(down);
+      expect(await down.json()).toEqual({ error: 'storage' });
+      const unbound = await worker.fetch(ask('/webos/repo.json'), {});
+      expect(unbound.status).toBe(503);
+      expect(await unbound.json()).toEqual({ error: 'unconfigured' });
+    });
+  });
+
+  describe('GET /webos/ipk/<sha256>.ipk and /webos/icon/<sha256>.png', () => {
+    it('serves the .ipk whole, with its length, cached for good', async () => {
+      const { env } = stored();
+      const response = await worker.fetch(ask(`/webos/ipk/${SHA}.ipk`), env);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('application/octet-stream');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(response.headers.get('content-length')).toBe(String(IPK.length));
+      expectWebosHeaders(response);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(IPK);
+    });
+
+    it('serves the icon as a PNG, cached for good', async () => {
+      const { env } = stored();
+      const response = await worker.fetch(ask(`/webos/icon/${ICON_SHA}.png`), env);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expectWebosHeaders(response);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG);
+    });
+
+    it('answers 404, not cached, for a file it does not have', async () => {
+      const { env } = setUp();
+      for (const path of [`/webos/ipk/${SHA}.ipk`, `/webos/icon/${ICON_SHA}.png`]) {
+        const response = await worker.fetch(ask(path), env);
+        expect(response.status).toBe(404);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expectWebosHeaders(response);
+      }
+    });
+
+    it.each([
+      `/webos/ipk/${SHA.toUpperCase()}.ipk`,
+      `/webos/ipk/${SHA.slice(1)}.ipk`,
+      `/webos/ipk/${SHA}`,
+      `/webos/ipk/${SHA}.png`,
+      `/webos/icon/${ICON_SHA}.ipk`,
+      `/webos/ipk/x/${SHA}.ipk`,
+      '/webos/repo/main',
+      '/webos/history/main',
+      `/webos/ipk/${SHA}.ipk/`,
+    ])('answers 404 for %s without reading storage', async (path) => {
+      const { kv, env } = stored();
+      const reads = kv.reads.length;
+      const response = await worker.fetch(ask(path), env);
+      expect(response.status).toBe(404);
+      expect(kv.reads).toHaveLength(reads);
+    });
+
+    it('answers 503 when storage fails or is not bound', async () => {
+      const { kv, env } = stored();
+      kv.down = true;
+      expect((await worker.fetch(ask(`/webos/ipk/${SHA}.ipk`), env)).status).toBe(503);
+      expect((await worker.fetch(ask(`/webos/icon/${ICON_SHA}.png`), {})).status).toBe(503);
+    });
+  });
+
+  describe('GET /status?channel=main&platform=webos', () => {
+    const query = '/status?channel=main&platform=webos';
+
+    it('says what the repository offers', async () => {
+      const { env } = setUp();
+      expect(await (await worker.fetch(ask(query), env)).json()).toEqual({
+        storage: true,
+        protocol: 1,
+        update: null,
+        serving: 'none',
+      });
+      const full = stored();
+      const response = await worker.fetch(ask(query), full.env);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({
+        storage: true,
+        protocol: 1,
+        update: {
+          version: '0.1.4',
+          sha256: SHA,
+          ipkSize: IPK.length,
+          commit: 'ed387a1228288492187ba32540e721775a2f3292',
+          publishedAt: CREATED,
+          restoredAt: null,
+        },
+        serving: 'update',
+      });
+    });
+
+    it.each([
+      '/status?platform=webos',
+      '/status?channel=Main&platform=webos',
+      `/status?channel=main&platform=webos&runtimeVersion=${RUNTIME}`,
+    ])('refuses %s', async (path) => {
+      const { kv, env } = stored();
+      const reads = kv.reads.length;
+      expect((await worker.fetch(ask(path), env)).status).toBe(400);
+      expect(kv.reads).toHaveLength(reads);
+    });
+
+    it('answers 503 when storage fails or is not bound', async () => {
+      const { kv, env } = stored();
+      kv.down = true;
+      expect((await worker.fetch(ask(query), env)).status).toBe(503);
+      const unbound = await worker.fetch(ask(query), {});
+      expect(unbound.status).toBe(503);
+      expect(await unbound.json()).toEqual({ storage: false, protocol: 1 });
+    });
+  });
+
+  it('reads no request header, writes nothing and logs nothing', async () => {
+    const { kv, env } = stored();
+    const writes = kv.writes.length;
+    const read: string[] = [];
+    const get = Headers.prototype.get;
+    vi.spyOn(Headers.prototype, 'get').mockImplementation(function (this: Headers, name: string) {
+      read.push(name.toLowerCase());
+      return get.call(this, name);
+    });
+    const logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) =>
+      vi.spyOn(console, level),
+    );
+    await worker.fetch(ask('/webos/repo.json'), env);
+    await worker.fetch(ask(`/webos/ipk/${SHA}.ipk`), env);
+    await worker.fetch(ask(`/webos/icon/${ICON_SHA}.png`), env);
+    await worker.fetch(ask('/status?channel=main&platform=webos'), env);
+    vi.mocked(Headers.prototype.get).mockRestore();
+    expect(read).toEqual([]);
+    expect(kv.writes).toHaveLength(writes);
+    for (const log of logs) expect(log).not.toHaveBeenCalled();
+  });
+});
+
 describe('everything else', () => {
   it.each([
     ['GET', '/'],
@@ -446,6 +666,11 @@ describe('everything else', () => {
     ['PUT', `/expo/assets/${HASH}`],
     ['DELETE', '/status'],
     ['HEAD', '/status'],
+    ['GET', '/webos'],
+    ['GET', '/webos/repo'],
+    ['HEAD', '/webos/repo.json'],
+    ['POST', '/webos/repo.json'],
+    ['PUT', `/webos/ipk/${'a'.repeat(64)}.ipk`],
   ])('%s %s is 404', async (method, path) => {
     const { kv, env } = setUp();
     const response = await worker.fetch(ask(path, {}, method), env);

@@ -2,7 +2,7 @@
   "name": "@bannertv/updates",
   "version": "0.1.0",
   "private": true,
-  "description": "BannerTV's update service for the phone app: a Cloudflare Worker that serves expo-updates the signed updates CI publishes to Workers KV",
+  "description": "BannerTV's update service: a Cloudflare Worker that serves the phone app's expo-updates the signed updates CI publishes to Workers KV, and the LG TV's Homebrew Channel the .ipk and index CI publishes there",
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
