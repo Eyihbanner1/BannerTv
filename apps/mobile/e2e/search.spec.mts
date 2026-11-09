@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, type Locator, test, type Page, type Route } from '@playwright/test';
 import { mockAddons } from '../../webos/e2e/addons.ts';
 import { mockServices } from '../../webos/e2e/services.ts';
 import { mockSports, seedSports, SPORTS_NOW } from '../../webos/e2e/sports.ts';
@@ -165,6 +165,80 @@ test.describe('with sport', () => {
       .last()
       .click();
     await expect(page.getByText('Listed by Test Sports')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('Search: a film leads and Sports follows it, and a film alone gets only a quiet Search sports addons', async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    await page.clock.install({ time: SPORTS_NOW });
+    // A made-up film and series named like the team, so one search finds them and sport.
+    const named = (type: string, id: string, name: string) => (route: Route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        headers: { 'access-control-allow-origin': '*' },
+        body: JSON.stringify({
+          metas: [
+            {
+              id,
+              type,
+              name,
+              releaseInfo: '2024',
+              poster: `https://images.metahub.space/poster/small/${id}/img`,
+            },
+          ],
+        }),
+      });
+    await mockAddons(page, {
+      catalogs: {
+        'movie/top/search=arsenal': named('movie', 'tt9900001', 'Arsenal Nights'),
+        'series/top/search=arsenal': named('series', 'tt9900002', 'Arsenal Diaries'),
+      },
+    });
+    await seedSports(page);
+    const sports = await mockSports(page);
+    await page.route(/^http:\/\/localhost:8765\//, (route) => route.continue());
+    await page.goto('/');
+    await expect(page.getByText('Live sport', { exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Search' }).click();
+    const field = page.getByPlaceholder('Search for a film or series');
+    const below = async (upper: Locator, lower: Locator) => {
+      const [a, b] = [await upper.boundingBox(), await lower.boundingBox()];
+      expect(a && b && a.y < b.y).toBe(true);
+    };
+
+    // The film's Top results come first, the fixtures after.
+    await field.fill('arsenal');
+    const top = page.getByRole('heading', { name: 'Top results', exact: true });
+    const sport = page.getByRole('heading', { name: 'Sports', exact: true });
+    await expect(page.getByRole('button', { name: 'Arsenal Nights, 2024' })).toBeVisible();
+    await expect(top).toBeVisible();
+    await expect(sport).toBeVisible();
+    await below(top, sport);
+    // With Films alone there is no Top results: the films' own section leads instead.
+    await page.getByRole('button', { name: 'Films', exact: true }).click();
+    await expect(top).toHaveCount(0);
+    const films = page.getByRole('heading', { name: 'Movies', exact: true });
+    await expect(films).toBeVisible();
+    await below(films, sport);
+    await page.getByRole('button', { name: 'Films and series', exact: true }).click();
+
+    // Nothing in the sports lists: no note over the film, only the button after it.
+    await field.fill('sintel');
+    const sintel = page.getByRole('button', { name: 'Sintel, 2010' });
+    const ask = page.getByRole('button', { name: 'Search sports addons' });
+    await expect(sintel).toBeVisible();
+    await expect(ask).toBeVisible();
+    await expect(sport).toHaveCount(0);
+    await expect(page.getByText(/^Nothing in your sports addons/)).toHaveCount(0);
+    await below(sintel, ask);
+    await ask.click();
+    await expect
+      .poll(() => sports.all.filter((request) => request.includes('/catalog/sport/search')))
+      .toEqual(['sports /bannertv/catalog/sport/search/search=sintel.json']);
+    await expect(ask).toHaveCount(0);
+    await expect(sintel).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

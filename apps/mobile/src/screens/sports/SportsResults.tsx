@@ -113,18 +113,27 @@ const AddonSearchRow = memo(function AddonSearchRow({
  * Search's Sports group, as the TV's: matches from BannerTV's own copy of the sports
  * catalogs, by team name and alias (Man Utd, Spurs), live first. It asks nothing itself: the
  * copy is what Sports and Home's Live sport row have fetched. The addons' own searches are
- * asked only from "Search sports addons".
+ * asked only from "Search sports addons": under the matches here, or at the end of Search's
+ * results (AskSportsAddons) when the copy matched nothing.
  */
 export function SportsResults({
   term,
   sources,
+  asked,
+  onAsk,
   onContent,
 }: {
   term: string;
   /** The sports addons' own searches, asked only when the viewer asks. */
   sources: readonly CatalogSource[];
-  /** Whether the group found any match, so Search knows when nothing at all was found. */
-  onContent: (found: boolean) => void;
+  /** The viewer has asked the addons' own searches. */
+  asked: boolean;
+  onAsk: () => void;
+  /**
+   * Whether the group found any match, so Search knows when nothing at all was found, and
+   * whether BannerTV's copy did, which decides where Search puts the group.
+   */
+  onContent: (found: boolean, listed: boolean) => void;
 }) {
   const { t } = useTranslation();
   const feed = useSportsFeed();
@@ -135,7 +144,6 @@ export function SportsResults({
     () => searchEvents(feed.events, term, view).slice(0, MAX_RESULTS),
     [feed.events, term, view],
   );
-  const [asked, setAsked] = useState(false);
   const [counts, setCounts] = useState<Readonly<Record<string, number>>>({});
   const onFound = useCallback((key: string, count: number) => {
     setCounts((current) => (current[key] === count ? current : { ...current, [key]: count }));
@@ -143,16 +151,16 @@ export function SportsResults({
   // Only the addons asked now: a count left from one that went says nothing.
   const fromAddons =
     asked && sources.some((source) => counts[source.key] !== undefined && counts[source.key] !== 0);
-  const has = found.length > 0 || fromAddons;
-  useEffect(() => onContent(has), [onContent, has]);
+  const listed = found.length > 0;
+  const has = listed || fromAddons;
+  useEffect(() => onContent(has, listed), [onContent, has, listed]);
 
   return (
     <View>
-      {found.length > 0 ? <EventRow title={t('sports.title')} events={found} view={view} /> : null}
-      {sources.length > 0 && !asked ? (
+      {listed ? <EventRow title={t('sports.title')} events={found} view={view} /> : null}
+      {listed && sources.length > 0 && !asked ? (
         <View style={styles.ask}>
-          {found.length === 0 ? <Text style={styles.muted}>{t('sports.notInLists')}</Text> : null}
-          <Button label={t('sports.searchAddons')} onPress={() => setAsked(true)} />
+          <Button label={t('sports.searchAddons')} onPress={onAsk} />
         </View>
       ) : null}
       {asked
@@ -170,8 +178,29 @@ export function SportsResults({
   );
 }
 
+/**
+ * "Search sports addons" after Search's results, when BannerTV's copy of the sports lists
+ * matched nothing: quiet, so a film's results are not led by a note about sport.
+ */
+export function AskSportsAddons({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.askAtEnd}>
+      <Button
+        kind="quiet"
+        icon="search"
+        label={t('sports.searchAddons')}
+        onPress={onPress}
+        style={styles.quiet}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   ask: { paddingHorizontal: gutter, paddingTop: space.l, gap: space.s, alignItems: 'flex-start' },
+  askAtEnd: { paddingHorizontal: gutter, paddingTop: space.l, alignItems: 'flex-start' },
+  quiet: { paddingHorizontal: 0 },
   error: { paddingHorizontal: space.l, gap: space.s, alignItems: 'flex-start' },
   muted: { ...type.body, color: colors.textMuted },
 });
