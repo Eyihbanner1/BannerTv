@@ -35,7 +35,10 @@ export function InfoPanel({
 }) {
   const { t } = useTranslation();
   const now = useNow(INFO_TICK_MS);
-  const ends = endsAt(now, position, duration, rate, live);
+  // From the clock now, as the TV's controls read it: playing draws this twice a second as the
+  // time left goes down, and against a tick up to 15 s old the end would go back and forth.
+  // eslint-disable-next-line react-hooks/purity
+  const ends = endsAt(Math.max(now, Date.now()), position, duration, rate, live);
   const number =
     episode?.season !== undefined && episode.episode !== undefined
       ? t('player.episodeNumber', { season: episode.season, episode: episode.episode })

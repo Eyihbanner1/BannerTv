@@ -10,6 +10,7 @@ import {
 import type { PlaybackSession, SessionState } from '@tv/player/session';
 import { keepSleepTimer, leaveSleepTimer, SLEEP_OFF, sleepTimerFor } from '@tv/player/sleep';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { sleepHold } from './sleep-hold';
 
 /** A minutes timer is read again at least this often, as on the TV. */
 const SLEEP_TICK_MS = 30 * 1000;
@@ -48,6 +49,8 @@ export function useSleepTimer(
   session: PlaybackSession | null,
   state: SessionState,
   offersNext: boolean,
+  /** The dark screen can't be seen: picture-in-picture. */
+  unseen: boolean,
   onAsleep: () => void,
 ): PlayerSleep {
   const [timer, setTimer] = useState(() => sleepTimerFor(metaId));
@@ -89,11 +92,20 @@ export function useSleepTimer(
     const tick = setTimeout(() => setNow(Date.now()), Math.min(wait, SLEEP_TICK_MS));
     return () => clearTimeout(tick);
   }, [timer, now]);
-  // Again if a stream starts playing under the dark screen.
+  // Again if a stream starts playing under the dark screen, except where it can't be seen
+  // (sleep-hold.ts).
   const playingNow = state.status === 'playing';
+  const stopped = useRef(false);
   useEffect(() => {
-    if (asleep) session?.pause();
-  }, [asleep, session, playingNow]);
+    if (!asleep) {
+      stopped.current = false;
+      return;
+    }
+    const hold = sleepHold({ playing: playingNow, stopped: stopped.current, unseen });
+    if (hold === 'wait') stopped.current = true;
+    else if (hold === 'wake') setAsleep(false);
+    else session?.pause();
+  }, [asleep, session, playingNow, unseen]);
 
   const choose = useCallback((choice: SleepChoice) => {
     const at = Date.now();

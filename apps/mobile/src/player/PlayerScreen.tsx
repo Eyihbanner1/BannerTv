@@ -343,7 +343,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const current = meta?.videos.find((video) => video.id === videoId);
   const offersNext = !!next && !state.live && !state.clip;
   // The sleep timer, as on the TV: as it runs out it closes what is open and pauses.
-  const sleep = useSleepTimer(metaId, session, state, offersNext, () => {
+  const sleep = useSleepTimer(metaId, session, state, offersNext, pip, () => {
     setPanel(null);
     setControls(false);
   });
