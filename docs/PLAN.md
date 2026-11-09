@@ -494,7 +494,8 @@ bannertv/
 | Workflow | Trigger | Steps |
 | --- | --- | --- |
 | `ci.yml` | Every pull request | Install, typecheck, lint, unit tests, build, Playwright journeys at 1920x1080 with arrow keys, `ares-package`, upload the .ipk as an artifact |
-| `release.yml` | Tag `v*` | Build, package, attach the .ipk to a GitHub Release, publish a Homebrew Channel repository manifest for sideload users |
+| `release.yml` | Tag `v*` | Build, package, attach the .ipk to a GitHub Release |
+| `publish-lg-update.yml` | Started by hand, on main | Build main's LG app with a version of its own and publish it to the rooted test TV's Homebrew Channel repository on the updates Worker, or roll it back (`services/updates/README.md`) |
 | `services.yml` | Changes under `services/` | Test and deploy the pairing relay, later the sync API |
 
 The phone pairing feature needs the small `pair` relay because a webOS web app cannot listen for connections: the TV shows a QR code with a short code, the phone page posts the addon URL to the relay, and the TV polls for it. Entries expire after 10 minutes and nothing else is stored.
@@ -638,7 +639,7 @@ BannerTV has no content of its own, so a tester who opens it needs something leg
 
 - Every tagged release attaches the .ipk to GitHub Releases.
 - Testers install through Developer Mode with webOS Dev Manager or `ares-install`. Developer Mode installs disappear after 1000 hours unless the timer is reset.
-- Rooted TVs can install and auto-update through a Homebrew Channel repository manifest published by the release workflow.
+- The rooted test TV takes main's builds through a Homebrew Channel repository that the updates Worker serves (`https://updates.bannertv.workers.dev/webos/repo.json`) and the Publish LG update workflow, started by hand on main, fills. Homebrew Channel never updates by itself: after a publish, Update is pressed on BannerTV's page in Homebrew Channel. It installs a build only when its SHA-256 matches the repository's; nothing is signed, so it is for the test TV only until BannerTV's own signed updates (ADR 0001, decision 10).
 
 **Release train**
 
