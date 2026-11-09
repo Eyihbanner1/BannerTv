@@ -77,6 +77,23 @@ describe('redact: addresses', () => {
     expect(redact('stream `http://h.example/a b`')).toBe('stream `http://h.example/…`');
   });
 
+  it('cuts a stream link whose title has spaces and no quotes, up to its file ending', () => {
+    check(
+      'Source error: https://cdn.debrid.example/d/AbC/Big Buck Bunny (2008) 1080p.mkv not found',
+      ['Big Buck', 'Bunny', '1080p', 'mkv', 'AbC'],
+      ['Source error: https://cdn.debrid.example/… not found'],
+    );
+    check(
+      'tried http://h.example/a b.m3u8?x=1, then /sub/Big Buck Bunny.en.srt',
+      ['Bunny', 'srt', 'm3u8'],
+      ['tried http://h.example/…'],
+    );
+    // A cut address followed by ordinary words keeps them.
+    expect(redact('Could not reach https://addon.example/x in time')).toBe(
+      'Could not reach https://addon.example/… in time',
+    );
+  });
+
   it('keeps a stack frame line and column after its address, and nothing in between', () => {
     expect(
       redact(
@@ -155,8 +172,13 @@ describe('redact: addresses', () => {
       ['data/user', 'expo-internal', 'a1b2c3'],
       ['(address at /…:1:2345)'],
     );
+    // In quotes or brackets, as JSON and messages write a request's path.
+    check("Failed '/realdebrid=XYZ/manifest.json'", ['XYZ', 'manifest'], ["Failed '/…'"]);
+    check('{"path":"/sportsid-abc/live.json"}', ['sportsid', 'live.json'], ['{"path":"/…"}']);
+    check('path [/sportsid-abc/live.json]', ['sportsid'], ['path [/…]']);
     // A screen's path stays.
     expect(redact('Opened /settings from /')).toBe('Opened /settings from /');
+    expect(redact('{"screen":"/settings"}')).toBe('{"screen":"/settings"}');
   });
 });
 
@@ -182,6 +204,23 @@ describe('redact: secrets', () => {
       ),
     ).toBe(`HTTP 401 from https://api.trakt.tv/… (Authorization: Bearer ${HIDDEN})`);
     check('Authorization: Basic dXNlcjpwYXNz', ['dXNlcjpwYXNz']);
+    // Whatever the kind, and in small letters, which no other step would take for a key.
+    check('Authorization: Token lowercaseonlysecret', ['lowercaseonlysecret'], ['Authorization']);
+    check('{"authorization":"Token lowercaseonlysecret"}', ['lowercaseonlysecret']);
+    check('Cookie: session=abc; rdprefs=lowercasevalue', ['abc', 'lowercasevalue'], ['Cookie: ']);
+  });
+
+  it('hides secrets in JSON written inside a JSON string, with its quotes escaped', () => {
+    // A rejected object holding a response's body, as messageOf() writes it out.
+    const blob = JSON.stringify({
+      status: 400,
+      body: JSON.stringify({ access_token: 'abc def', pin: '4821', apiKey: 'shortkey', ok: 1 }),
+    });
+    const out = check(blob, ['abc def', '4821', 'shortkey']);
+    expect(out).toContain('"status":400');
+    expect(out).toContain(String.raw`\"ok\":1`);
+    check(String.raw`{\"pin\":4821,\"name\":\"Ada\"}`, ['4821'], ['Ada']);
+    check(String.raw`"{\\\"token\\\":\\\"abc\\\"}"`, ['abc']);
   });
 
   it('hides secrets in JSON blobs, quoted values with spaces included', () => {
@@ -225,6 +264,10 @@ describe('redact: secrets', () => {
     check('Code K7QM 3XTP W9RD HE4A 6BNC failed', ['K7QM', '6BNC'], ['Code ', ' failed']);
     check('join K7QM-3XTP-W9RD-HE4A-6BNC', ['K7QM', '6BNC']);
     check('join ABCDEFGHJKMNPQRSTUVW', ['ABCDEFGHJKMNPQRSTUVW']);
+    // As typed on the keyboard, in small letters.
+    check('join k7qm 3xtp w9rd he4a 6bnc', ['k7qm', '6bnc'], ['join ']);
+    // Five plain four-letter words are words.
+    expect(redact('when that went back here')).toBe('when that went back here');
   });
 
   it('hides tokens, keys and ids with no name beside them', () => {

@@ -6,11 +6,13 @@
  *
  * - every address keeps only its scheme and host, with `/…` where its path or query was, and a
  *   path without a host keeps nothing but the `/…`;
+ * - a stream link with spaces and no quotes loses everything up to its file's ending;
  * - magnet links and data: addresses keep only their scheme;
  * - email addresses become [email];
  * - the value after a name such as token, apiKey, password, pin or code becomes [hidden], in
- *   JSON, in query strings and in headers;
- * - JSON web tokens, UUIDs, the account code, and long runs of letters and digits (keys,
+ *   JSON (escaped JSON inside a string too), in query strings and in headers, and so do an
+ *   Authorization header's credentials and a cookie header's value;
+ * - JSON web tokens, UUIDs, the account code (in capitals or as typed), and long runs of letters and digits (keys,
  *   hashes, base64) become [hidden].
  *
  * It errs towards hiding: a report that hides a little too much still says where the problem
@@ -133,9 +135,9 @@ function redactBarePath(_match: string, host: string, path: string): string {
 /**
  * A path on its own, as an error may quote the request it made
  * (`/realdebrid=…/stream/movie/tt1.json`), or a file's place on the phone. One part alone, as a
- * screen's `/settings`, stays.
+ * screen's `/settings`, stays. It may open a quote or a bracket, as in JSON (`"path":"/a/b"`).
  */
-const RELATIVE_PATH = /(^|[\s(,=:])(\/[^\s/"'<>\x60()]+(?:\/[^\s/"'<>\x60()]*)+)/g;
+const RELATIVE_PATH = /(^|[\s(,=:"'\x60[{<“‘])(\/[^\s/"'<>\x60()]+(?:\/[^\s/"'<>\x60()]*)+)/g;
 
 function redactRelative(_match: string, before: string, path: string): string {
   return `${before}${cutPath(path, tailOf(path))}`;
@@ -160,6 +162,15 @@ const BARE_SECRET = new RegExp(
   'gi',
 );
 
+/**
+ * `\"token\":\"abc\"`: JSON inside a JSON string, as when an object holding a response's body
+ * is written out, whose quotes are escaped. The quoted value runs to the next escaped quote.
+ */
+const ESCAPED_SECRET = new RegExp(
+  String.raw`(\\+["'])(\b${SECRET_NAME})\1(\s*[:=]\s*)(?:(\\+["'])((?:(?!\\+["'])[^\n])*?)\4|([^\s"'\\&,;(){}[\]]+))`,
+  'gi',
+);
+
 /** "PIN 1234", "code is 482913": the name, then digits, with no colon between. */
 const SPOKEN_PIN = /\b(pin|passcode|code)(\s+(?:is\s+)?)\d{4,}\b/gi;
 
@@ -173,6 +184,25 @@ function keepsValue(value: string): boolean {
 
 function redactSecrets(text: string): string {
   return text
+    .replace(
+      ESCAPED_SECRET,
+      (
+        match,
+        quote: string,
+        name: string,
+        separator: string,
+        open: string | undefined,
+        quoted: string | undefined,
+        bare: string | undefined,
+      ) => {
+        if (open !== undefined) {
+          return quoted === '' || quoted === HIDDEN
+            ? match
+            : `${quote}${name}${quote}${separator}${open}${HIDDEN}${open}`;
+        }
+        return keepsValue(bare ?? '') ? match : `${quote}${name}${quote}${separator}${HIDDEN}`;
+      },
+    )
     .replace(
       QUOTED_SECRET,
       (match, quote: string, name: string, separator: string, open: string, value: string) =>
@@ -199,8 +229,15 @@ function looksLikeKey(run: string): boolean {
   );
 }
 
-/** The account code as shown: five groups of four, `K7QM 3XTP W9RD HE4A 6BNC`. */
-const ACCOUNT_CODE = /\b[A-HJKMNP-Z2-9]{4}(?:[ -][A-HJKMNP-Z2-9]{4}){4}\b/g;
+/**
+ * The account code as shown, five groups of four (`K7QM 3XTP W9RD HE4A 6BNC`), or as typed in
+ * small letters. Five four-letter words in small letters with no digit are left as words.
+ */
+const ACCOUNT_CODE = /\b[A-HJKMNP-Z2-9]{4}(?:[ -][A-HJKMNP-Z2-9]{4}){4}\b/gi;
+
+function hideAccountCode(code: string): string {
+  return /^[a-z -]+$/.test(code) ? code : HIDDEN;
+}
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
@@ -210,9 +247,27 @@ const JWT = /\beyJ[A-Za-z0-9_\-+/=%]{6,}(?:\.[A-Za-z0-9_\-+/=%]*){0,2}/g;
 const EMAIL_ADDRESS =
   /[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/gi;
 
+/**
+ * An Authorization header's credentials after its kind, whatever the kind (`Token abc`), and a
+ * cookie header's whole value.
+ */
+const AUTHORIZATION =
+  /\b((?:Proxy-)?Authorization["']?\s*[:=]\s*["']?)([A-Za-z][\w-]*)(\s+)[^\s"',;()[\]{}<>]+/gi;
+const COOKIE = /\b((?:Set-)?Cookie["']?\s*[:=]\s*["']?)[^\n"']+/gi;
+
 /** `Bearer abc` and `Basic dXNlcjpwYXNz`, as an Authorization header carries them. */
 const BEARER = /\b(Bearer)(\s+)[^\s"',;()[\]{}<>]+/gi;
 const BASIC = /\b(Basic)(\s+)(?=[A-Za-z0-9+/]*(?:[0-9+/=]|[a-z][A-Z]))[A-Za-z0-9+/]{6,}=*/g;
+
+/**
+ * The rest of a stream link whose title had spaces in it and no quotes around it, as
+ * `https://cdn.example/d/AbC/Big Buck Bunny 2008.mkv`: the address stopped at the first space,
+ * so after a cut path everything on the line up to a video or subtitle file's ending goes too.
+ */
+const STREAM_REST = new RegExp(
+  String.raw`(${CUT})[^\n"'<>\x60]*\.(?:mkv|mp4|m4v|avi|mov|webm|wmv|flv|m3u8|mpd|iso|srt|vtt)\b[^\s"'<>\x60]*`,
+  'gi',
+);
 
 /** The text with every address cut to its scheme and host and every secret hidden. */
 export function redact(text: string): string {
@@ -223,12 +278,15 @@ export function redact(text: string): string {
   const cut = redactQuotedAddresses(links)
     .replace(ADDRESS, redactAddress)
     .replace(EMAIL_ADDRESS, EMAIL)
+    .replace(AUTHORIZATION, `$1$2$3${HIDDEN}`)
+    .replace(COOKIE, `$1${HIDDEN}`)
     .replace(BEARER, `$1$2${HIDDEN}`)
     .replace(BASIC, `$1$2${HIDDEN}`)
     .replace(BARE_PATH, redactBarePath)
     .replace(RELATIVE_PATH, redactRelative)
+    .replace(STREAM_REST, '$1')
     .replace(UUID, HIDDEN)
-    .replace(ACCOUNT_CODE, HIDDEN)
+    .replace(ACCOUNT_CODE, hideAccountCode)
     .replace(RUN, (run) => (looksLikeKey(run) ? HIDDEN : run))
     .replace(/\b\d{9,}\b/g, HIDDEN);
   // Last, so a secret's name hides its value whatever the steps above left of it.
