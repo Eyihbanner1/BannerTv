@@ -85,6 +85,20 @@ function asked(page: Page, path: string): () => number {
   return () => count;
 }
 
+/** When the account's last sync finished, as the page keeps it for the next launch. */
+async function lastSync(page: Page): Promise<number | undefined> {
+  return page.evaluate(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('bannertv.syncStatus') ?? '{}') as {
+        lastSync?: unknown;
+      };
+      return typeof saved.lastSync === 'number' ? saved.lastSync : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
 /** The phone goes to the background (true) or comes back (false), as the browser tells it. */
 async function background(page: Page, away: boolean): Promise<void> {
   await page.evaluate((hidden) => {
@@ -336,12 +350,18 @@ test("a film paused on one phone reaches the other's Home without pulling to ref
   const code = await shownCode(page);
   await confirmCode(page, code);
   expect(pulls()).toBe(0);
-  // Making the account only pushed: Home, back in focus over half a minute later, pulls.
+  // Making the account only pushed. Settings, back in focus, pulls once for its profiles: that
+  // pull has to land before the clock moves on, or Home would count it as just now and rightly
+  // not pull again. The time it landed is the account's last sync, which the page keeps.
+  const created = await lastSync(page);
   await page.getByRole('button', { name: 'Back' }).first().click();
+  await expect.poll(pulls).toBe(1);
+  await expect.poll(() => lastSync(page)).not.toBe(created);
+  // Home, in focus over half a minute later, pulls.
   await page.clock.fastForward('00:31');
   await page.getByRole('tab', { name: 'Home' }).click();
   await expect(page.getByText('Synced just now')).toBeVisible();
-  expect(pulls()).toBe(1);
+  await expect.poll(pulls).toBe(2);
 
   // The other phone joins, plays the film and pauses it.
   const other = await secondPhone(browser, sync);
