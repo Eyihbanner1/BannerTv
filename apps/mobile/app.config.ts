@@ -1,5 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
 import appInfo from '../webos/webos-meta/appinfo.json';
+import { hasUpdatesCertificate, UPDATES_CERTIFICATE } from './build/updates-certificate';
 
 /**
  * The phone app (ADR 0007). Its version is the LG app's, from appinfo.json, so the three apps
@@ -14,6 +15,32 @@ function versionCode(version: string): number {
   return major * 1_000_000 + minor * 1_000 + patch;
 }
 
+/**
+ * Over-the-air updates (ADR 0007): Expo's own client, expo-updates, asks BannerTV's updates
+ * Worker for new JavaScript and images, and takes only what the publish workflow signed. Expo
+ * checks by itself at each launch (ON_LOAD), so a broken update can always be replaced by the
+ * next one, even if it breaks the app's own checks (src/runtime/app-updates.ts). It never waits
+ * for the network at launch: what it downloads starts when the app starts again.
+ *
+ * Fail closed: with no certificate to check signatures against, expo-updates would take an
+ * update nobody signed. So a build without certs/certificate.pem takes no updates at all and
+ * runs only the JavaScript inside its APK. Updates begin with the first APK built after the
+ * certificate is committed.
+ */
+const UPDATES: NonNullable<ExpoConfig['updates']> = {
+  url: 'https://updates.bannertv.workers.dev/expo/manifest',
+  // Builds from main take the main channel's updates.
+  requestHeaders: { 'expo-channel-name': 'main' },
+  checkAutomatically: 'ON_LOAD',
+  fallbackToCacheTimeout: 0,
+  ...(hasUpdatesCertificate()
+    ? {
+        codeSigningCertificate: UPDATES_CERTIFICATE,
+        codeSigningMetadata: { keyid: 'main', alg: 'rsa-v1_5-sha256' },
+      }
+    : { enabled: false }),
+};
+
 const config: ExpoConfig = {
   name: 'BannerTV phone test',
   slug: 'bannertv-phone',
@@ -23,6 +50,11 @@ const config: ExpoConfig = {
   scheme: 'bannertv',
   userInterfaceStyle: 'dark',
   backgroundColor: BACKGROUND,
+  // An update reaches only the APKs it fits: those with the same native fingerprint, worked out
+  // with fingerprint.config.js as CI's decision to build an APK is. So new JavaScript never lands
+  // on an APK that lacks the native code it needs.
+  runtimeVersion: { policy: 'fingerprint' },
+  updates: UPDATES,
   android: {
     package: PACKAGE,
     versionCode: versionCode(appInfo.version),

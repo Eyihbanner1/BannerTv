@@ -1,51 +1,31 @@
 import { profileSwitcher } from '@tv/data/profiles';
 import { AppState } from 'react-native';
+import { pictureInPicture } from '../player/phone-host';
+import { whenSafe, type RestartRule, type Whereabouts } from '../runtime/safe-restart';
 import { whereabouts } from '../runtime/whereabouts';
 
 /**
  * The phone's stand-in for the LG app's data/sync-reload.ts (Metro swaps it in): the same rule,
- * read from the phone's screens instead of the TV's router and focus.
+ * read from the phone's screens instead of the TV's router and focus (runtime/safe-restart.ts).
+ * App updates (runtime/app-updates.ts) restart through it too, by their own stricter rule.
  */
 
-/** Where the app is, as far as starting it again is concerned. */
-export interface Whereabouts {
-  screen(): string;
-  hidden(): boolean;
-  busy(): boolean;
-  subscribe(listener: () => void): () => void;
-}
-
-/** Where the app may start again under the person: Home, Settings and the account screen. */
-const SAFE_SCREENS: readonly string[] = ['home', 'settings', 'account'];
-
-/** Runs `run` once starting the app again loses the person nothing. At once when it already is. */
-export function whenSafe(where: Whereabouts, run: () => void): void {
-  const safe = () =>
-    where.hidden() || (!where.busy() && SAFE_SCREENS.indexOf(where.screen()) !== -1);
-  if (safe()) {
-    run();
-    return;
-  }
-  let done = false;
-  const off = where.subscribe(() => {
-    if (done || !safe()) return;
-    done = true;
-    off();
-    run();
-  });
-}
+export { whenSafe, type Whereabouts };
 
 const app: Whereabouts = {
   screen: () => whereabouts.get().screen,
-  hidden: () => AppState.currentState === 'background',
+  // A film playing in a small window over other apps is still on screen.
+  hidden: () => AppState.currentState === 'background' && !pictureInPicture.get(),
   busy: () => profileSwitcher.get() || whereabouts.get().typing,
   subscribe(listener) {
     const offWhere = whereabouts.subscribe(listener);
     const offSwitcher = profileSwitcher.subscribe(listener);
+    const offPicture = pictureInPicture.subscribe(listener);
     const appState = AppState.addEventListener('change', listener);
     return () => {
       offWhere();
       offSwitcher();
+      offPicture();
       appState.remove();
     };
   },
@@ -54,4 +34,17 @@ const app: Whereabouts = {
 /** A join that carried on by itself has finished: start again, once that interrupts nothing. */
 export function reloadWhenSafe(run: () => void): void {
   whenSafe(app, run);
+}
+
+/**
+ * A downloaded app update is ready: runs `restart`, which starts it, once that interrupts
+ * nothing by `rule`. A join's reload would not do: Expo's reloadAppAsync runs the same
+ * JavaScript again, and only expo-updates' own reloadAsync starts a downloaded update. Returns a
+ * function that calls the restart off.
+ */
+export function restartWhenSafe(
+  restart: () => void,
+  rule: Exclude<RestartRule, 'join'> = 'update',
+): () => void {
+  return whenSafe(app, restart, rule);
 }

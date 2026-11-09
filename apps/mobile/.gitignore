@@ -6,3 +6,6 @@ expo-env.d.ts
 /android/
 /ios/
 .metro-health-check*
+# Where `expo-updates codesigning:generate` is told to put the update signing keys: only the
+# certificate, in certs/, is committed (app.config.ts).
+/keys/
