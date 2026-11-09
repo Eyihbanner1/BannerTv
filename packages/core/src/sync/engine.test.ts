@@ -459,6 +459,35 @@ describe('a signed-in screen', () => {
     expect(pulls()).toBe(before + 3);
   });
 
+  it('pushes progress within a minute while playback goes on saving, then about once a minute', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    const pushes = () => w.service.count('/v1/push');
+    const before = pushes();
+    // Seconds after the first save at which each push went out.
+    const sent: number[] = [];
+    for (let save = 0; save < 30; save++) {
+      a.stores.progress.record({
+        metaId: 'tt2',
+        type: 'movie',
+        videoId: 'tt2',
+        position: 60 + save * 10,
+        duration: 6000,
+      });
+      const had = pushes();
+      await w.time.advance(10 * 1000);
+      await settled(a.engine);
+      if (pushes() > had) sent.push((save + 1) * 10);
+    }
+    expect(sent).toEqual([60, 120, 180, 240, 300]);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 350 },
+    });
+    // The saves stopped with the last of them sent: nothing more goes.
+    await w.time.advance(5 * 60 * 1000);
+    expect(pushes()).toBe(before + 5);
+  });
+
   it("does not take the account's changes for edits", async () => {
     const w = world();
     const { a, code } = await created(w);

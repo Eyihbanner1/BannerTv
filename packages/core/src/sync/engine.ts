@@ -278,6 +278,12 @@ export interface SyncEngine {
 const PUSH_DELAY_MS = 3 * 1000;
 /** Playback saves progress every 10 seconds, so this follows a pause or a stop. */
 const WATCH_PUSH_DELAY_MS = 15 * 1000;
+/**
+ * While playback goes on saving, progress still goes this long after the first save not yet
+ * sent: other screens see where it is about once a minute, which keeps a whole day of watching
+ * well inside the service's 2,000 writes.
+ */
+const WATCH_PUSH_LATEST_MS = 60 * 1000;
 const FIRST_PULL_MS = 2 * 1000;
 const AWAY_MS = 2 * 60 * 1000;
 const BACKOFF_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
@@ -312,7 +318,7 @@ class Stop extends Error {
   }
 }
 
-type TimerName = 'push' | 'watch' | 'pull' | 'first' | 'retry' | 'hold' | 'resume';
+type TimerName = 'push' | 'watch' | 'latest' | 'pull' | 'first' | 'retry' | 'hold' | 'resume';
 
 /** Why a document was not sent as it stands. */
 type Refusal = 'too-big' | 'full';
@@ -1116,6 +1122,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       await applyActive(unapplied);
       let held: HeldPushes | undefined;
       if (pushing && !holding) {
+        // Progress saved so far goes with this push: one saved from now on waits afresh.
+        cancel('watch');
+        cancel('latest');
         try {
           await push();
           pushFailures = 0;
@@ -1224,11 +1233,21 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
   /** While backing off, the retry carries everything. */
   const backingOff = () => timersOn.has('retry');
 
-  /** Three seconds after the last edit, or fifteen after the last progress save. */
+  /**
+   * Three seconds after the last edit, or fifteen after the last progress save, and a minute at
+   * most after the first progress save not yet sent: saves every 10 seconds would otherwise put
+   * it off for as long as playback goes on.
+   */
   function schedulePush(watchEdit: boolean): void {
-    after(watchEdit ? 'watch' : 'push', watchEdit ? WATCH_PUSH_DELAY_MS : PUSH_DELAY_MS, () => {
+    const go = () => {
       if (!backingOff()) void request(true, false);
-    });
+    };
+    if (!watchEdit) {
+      after('push', PUSH_DELAY_MS, go);
+      return;
+    }
+    after('watch', WATCH_PUSH_DELAY_MS, go);
+    if (!timersOn.has('latest')) after('latest', WATCH_PUSH_LATEST_MS, go);
   }
 
   function startPulls(): void {
@@ -1301,7 +1320,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     watches = [];
     watching = false;
     holding = undefined;
-    (['push', 'watch', 'pull', 'first', 'retry', 'hold'] as const).forEach(cancel);
+    (['push', 'watch', 'latest', 'pull', 'first', 'retry', 'hold'] as const).forEach(cancel);
   }
 
   function scheduleFirstPull(): void {
@@ -1806,6 +1825,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     releasePushes();
     cancel('push');
     cancel('watch');
+    cancel('latest');
     return backingOff() ? Promise.resolve() : request(true, false);
   }
 
@@ -1888,6 +1908,7 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       releasePushes();
       cancel('push');
       cancel('watch');
+      cancel('latest');
       retryFull();
       return request(true, true);
     },
