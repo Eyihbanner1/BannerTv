@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, createPublicKey, generateKeyPairSync, X509Certificate } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +21,9 @@ import { makeCodeSigningPair } from './test/certificate.mjs';
 import {
   asciiJson,
   assetKey,
+  checkRollback,
   chunkEntries,
+  describeRuntimes,
   directiveKey,
   historyKey,
   indexKey,
@@ -26,6 +36,7 @@ import {
   readExport,
   readHistory,
   readKeyList,
+  readRuntimes,
   readSigningKey,
   sha256,
   verifyText,
@@ -285,6 +296,8 @@ describe('publishing', () => {
     expect(kept).toHaveLength(20);
     expect(kept[0]).toEqual({ id: ID, createdAt: NOW.toISOString(), commit: 'abc1234' });
     expect(kept[19]).toEqual(history[18]);
+    // The newest entry rides on the key, so one listing names each runtime version's last publish.
+    expect(plan.pointer[1].metadata).toEqual(kept[0]);
   });
 
   it('refuses a file larger than KV keeps', () => {
@@ -360,6 +373,7 @@ describe('rolling back', () => {
     const plan = planRollbackToEmbedded({
       channel: 'main',
       runtimeVersion: RUNTIME,
+      history,
       signingKey,
       now: NOW,
     });
@@ -374,6 +388,68 @@ describe('rolling back', () => {
     expect(plan.pointer[0].value).toBe(plan.directiveText);
     expect(verifyText(plan.directiveText, plan.pointer[0].metadata.sig, pair.publicKey)).toBe(true);
   });
+
+  // After a native change merges, main builds a new runtime version no phone has yet. A blank
+  // runtime_version would roll that one back, and the phones on the old one keep the bad update.
+  const OLD_RUNTIME = 'fedcba9876543210fedcba9876543210fedcba98';
+  const runtimes = [
+    {
+      runtimeVersion: OLD_RUNTIME,
+      id: ID_3,
+      createdAt: '2026-11-09T11:00:00.000Z',
+      commit: 'c0ffee12345',
+    },
+  ];
+
+  it('refuses to send phones back from a runtime version nothing was published to', () => {
+    const roll = (extra) =>
+      planRollbackToEmbedded({
+        channel: 'main',
+        runtimeVersion: RUNTIME,
+        signingKey,
+        now: NOW,
+        ...extra,
+      });
+    expect(() => roll({ history: [], runtimes })).toThrow(
+      `Nothing was published to runtime version ${RUNTIME} on channel main`,
+    );
+    expect(() => roll({ history: [], runtimes })).toThrow(
+      `${OLD_RUNTIME} (last published 2026-11-09T11:00:00.000Z, commit c0ffee1)`,
+    );
+    expect(() => roll({})).toThrow(/Nothing was published/);
+  });
+
+  it('refuses to step back from a runtime version nothing was published to, naming others', () => {
+    expect(() =>
+      planRollbackPrevious({
+        channel: 'main',
+        runtimeVersion: RUNTIME,
+        history: [],
+        runtimes,
+        previousManifestText: '{}',
+        signingKey,
+        id: ID_3,
+        now: NOW,
+      }),
+    ).toThrow(`Runtime versions with a publish on channel main, newest first: ${OLD_RUNTIME}`);
+  });
+
+  it('says before signing what each roll back can do', () => {
+    const scope = { channel: 'main', runtimeVersion: RUNTIME, runtimes };
+    const one = history.slice(0, 1);
+    expect(checkRollback({ action: 'rollback-previous', history, ...scope })).toBe(ID_2);
+    expect(checkRollback({ action: 'rollback-to-embedded', history, ...scope })).toBeNull();
+    expect(checkRollback({ action: 'rollback-to-embedded', history: one, ...scope })).toBeNull();
+    expect(() => checkRollback({ action: 'rollback-previous', history: one, ...scope })).toThrow(
+      /Only one update/,
+    );
+    for (const action of ['rollback-previous', 'rollback-to-embedded']) {
+      expect(() => checkRollback({ action, history: [], ...scope })).toThrow(OLD_RUNTIME);
+    }
+    expect(() => checkRollback({ action: 'publish', history, ...scope })).toThrow(
+      /not a roll back/,
+    );
+  });
 });
 
 describe('stored state', () => {
@@ -382,6 +458,31 @@ describe('stored state', () => {
     expect(readHistory('')).toEqual([]);
     expect(() => readHistory('{"id":1}')).toThrow(/not a list/);
     expect(() => readHistory('[{}]')).toThrow(/no id/);
+  });
+
+  it('reads which runtime versions have publishes, newest first, from a history listing', () => {
+    const meta = (id, createdAt, commit) => ({ id, createdAt, commit });
+    const listing = [
+      { name: 'history:main:android:old', metadata: meta(ID, '2026-10-01T00:00:00.000Z', 'aaa') },
+      { name: 'history:main:android:new', metadata: meta(ID_2, '2026-11-01T00:00:00.000Z', null) },
+      { name: 'history:main:android:bare' },
+      { name: 'history:main:ios:other', metadata: meta(ID_3, '2026-12-01T00:00:00.000Z') },
+      { name: 'history:test:android:x', metadata: meta(ID_3, '2026-12-01T00:00:00.000Z') },
+    ];
+    const runtimes = readRuntimes(JSON.stringify(listing), {
+      channel: 'main',
+      platform: 'android',
+    });
+    expect(runtimes).toEqual([
+      { runtimeVersion: 'new', id: ID_2, createdAt: '2026-11-01T00:00:00.000Z', commit: null },
+      { runtimeVersion: 'old', id: ID, createdAt: '2026-10-01T00:00:00.000Z', commit: 'aaa' },
+      { runtimeVersion: 'bare', id: null, createdAt: null, commit: null },
+    ]);
+    expect(describeRuntimes(runtimes, 'main')).toBe(
+      'Runtime versions with a publish on channel main, newest first: new (last published 2026-11-01T00:00:00.000Z); old (last published 2026-10-01T00:00:00.000Z, commit aaa); bare. Give one as runtime_version.',
+    );
+    expect(readRuntimes(undefined, { channel: 'main' })).toEqual([]);
+    expect(describeRuntimes([], 'main')).toBe('Nothing has been published on channel main at all.');
   });
 
   it('reads the keys of a wrangler kv key list answer', () => {
@@ -488,6 +589,7 @@ describe('the Worker serves what the script wrote', () => {
     const embedded = planRollbackToEmbedded({
       channel: 'main',
       runtimeVersion: RUNTIME,
+      history: JSON.parse(second.pointer[1].value),
       signingKey,
       now: new Date('2026-11-09T12:00:00.000Z'),
     });
@@ -621,19 +723,96 @@ describe('the command', () => {
     expect(result.stderr).not.toMatch(/PRIVATE KEY-----/);
   });
 
-  it('prints the id rollback-previous needs', () => {
-    const file = join(folder('command-history'), 'history.json');
-    writeFileSync(
-      file,
-      JSON.stringify([
-        { id: ID_2, createdAt: NOW.toISOString() },
-        { id: ID, createdAt: NOW.toISOString() },
-      ]),
+  describe('check-rollback', () => {
+    const scope = ['--channel', 'main', '--runtime-version', RUNTIME];
+    let historyFile;
+    let runtimesFile;
+    beforeAll(() => {
+      historyFile = join(folder('command-history'), 'history.json');
+      writeFileSync(
+        historyFile,
+        JSON.stringify([
+          { id: ID_2, createdAt: NOW.toISOString() },
+          { id: ID, createdAt: NOW.toISOString() },
+        ]),
+      );
+      runtimesFile = join(folder('command-history'), 'runtimes.json');
+      writeFileSync(
+        runtimesFile,
+        JSON.stringify([
+          {
+            name: `history:main:android:${RUNTIME}`,
+            metadata: { id: ID_2, createdAt: NOW.toISOString() },
+          },
+          {
+            name: 'history:main:android:older',
+            metadata: { id: ID_3, createdAt: '2026-10-01T00:00:00.000Z', commit: 'abcdef0123' },
+          },
+        ]),
+      );
+    });
+
+    it('prints the id rollback-previous needs, and nothing for rollback-to-embedded', () => {
+      const check = (action) =>
+        run(['check-rollback', '--action', action, '--history', historyFile, ...scope]);
+      expect(check('rollback-previous')).toEqual({ code: 0, stdout: `${ID}\n`, stderr: '' });
+      expect(check('rollback-to-embedded')).toEqual({ code: 0, stdout: '\n', stderr: '' });
+    });
+
+    it('refuses either roll back of a runtime version nothing was published to', () => {
+      for (const action of ['rollback-previous', 'rollback-to-embedded']) {
+        const result = run([
+          'check-rollback',
+          '--action',
+          action,
+          '--history',
+          join(work, 'none.json'),
+          '--runtimes',
+          runtimesFile,
+          ...scope,
+        ]);
+        expect(result.code).toBe(1);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toMatch(/^::error::Nothing was published to runtime version/);
+        expect(result.stderr).toContain(
+          `newest first: ${RUNTIME} (last published ${NOW.toISOString()}); older (last published 2026-10-01T00:00:00.000Z, commit abcdef0)`,
+        );
+      }
+    });
+
+    it('refuses what is not a roll back, or a runtime version out of form', () => {
+      expect(run(['check-rollback', '--action', 'publish', ...scope]).stderr).toMatch(
+        /not a roll back/,
+      );
+      expect(
+        run(['check-rollback', '--action', 'rollback-previous', '--channel', 'main']).stderr,
+      ).toMatch(/not a runtime version/);
+    });
+  });
+
+  it('refuses rollback-to-embedded with no history even when signing would work', () => {
+    const certFile = join(folder('command-cert-3'), 'certificate.pem');
+    writeFileSync(certFile, certificate);
+    const out = join(work, 'z');
+    const result = run(
+      [
+        'rollback-to-embedded',
+        '--channel',
+        'main',
+        '--runtime-version',
+        RUNTIME,
+        '--certificate',
+        certFile,
+        '--history',
+        join(work, 'none.json'),
+        '--out',
+        out,
+      ],
+      { EXPO_UPDATES_PRIVATE_KEY: pair.privateKeyPem },
     );
-    expect(run(['previous-id', '--history', file]).stdout).toBe(`${ID}\n`);
-    expect(run(['previous-id', '--history', join(work, 'none.json')]).stderr).toMatch(
-      /Nothing was published/,
-    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^::error::Nothing was published to runtime version/);
+    expect(existsSync(out)).toBe(false);
   });
 
   it('gives a public key the certificate agrees with', () => {

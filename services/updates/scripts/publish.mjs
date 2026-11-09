@@ -7,12 +7,17 @@
  *     --expo-config config.json --commit <sha> --channel main --runtime-version <rv> --out <dir>
  *   node scripts/publish.mjs rollback-previous --previous <manifest file> ... --out <dir>
  *   node scripts/publish.mjs rollback-to-embedded --channel main --runtime-version <rv> --out <dir>
- *   node scripts/publish.mjs previous-id --history <file>      prints the id to fetch for the above
+ *   node scripts/publish.mjs check-rollback --action rollback-previous --history <file> \
+ *     --runtimes <file> --channel main --runtime-version <rv>
  *
- * Every action but previous-id signs, with the private key in EXPO_UPDATES_PRIVATE_KEY (or
- * --key-file, for trying it on a laptop). --certificate checks that key against the certificate
- * the app embeds. --history is the stored history (missing: none yet), --stored a `wrangler kv
- * key list --prefix asset:` answer, so files already uploaded are left out.
+ * check-rollback signs nothing: it refuses a roll back the stored history cannot take (nothing
+ * published to that runtime version, or only one update for rollback-previous) and prints the id
+ * of the update rollback-previous publishes again (a blank line for rollback-to-embedded). The
+ * others sign, with the private key in EXPO_UPDATES_PRIVATE_KEY (or --key-file, for trying it on
+ * a laptop). --certificate checks that key against the certificate the app embeds. --history is
+ * the stored history (missing: none yet), --stored a `wrangler kv key list --prefix asset:`
+ * answer, so files already uploaded are left out, and --runtimes a `wrangler kv key list --prefix
+ * history:<channel>:<platform>:` answer, which names the runtime versions that have publishes.
  *
  * Out comes, in --out (which must not exist yet): content-1.json and on (files and the manifest,
  * uploaded first), pointer.json (the index and history, or the directive, uploaded last, so no
@@ -24,19 +29,21 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
+  checkRollback,
+  checkScope,
   chunkEntries,
   planPublish,
   planRollbackPrevious,
   planRollbackToEmbedded,
-  previousId,
   readHistory,
   readKeyList,
+  readRuntimes,
   readSigningKey,
   UPDATE_URL,
   verifyText,
 } from './lib/update.mjs';
 
-const ACTIONS = ['publish', 'rollback-previous', 'rollback-to-embedded', 'previous-id'];
+const ACTIONS = ['publish', 'rollback-previous', 'rollback-to-embedded', 'check-rollback'];
 
 function fail(message) {
   console.error(`::error::${message}`);
@@ -58,6 +65,8 @@ function main() {
       commit: { type: 'string' },
       history: { type: 'string' },
       stored: { type: 'string' },
+      runtimes: { type: 'string' },
+      action: { type: 'string' },
       previous: { type: 'string' },
       certificate: { type: 'string' },
       'key-file': { type: 'string' },
@@ -70,8 +79,24 @@ function main() {
     fail(`Say one of ${ACTIONS.join(', ')}.`);
   }
   const history = readHistory(readText(values.history));
-  if (action === 'previous-id') {
-    process.stdout.write(`${previousId(history)}\n`);
+  const runtimes = readRuntimes(readText(values.runtimes), {
+    channel: values.channel,
+    platform: values.platform,
+  });
+  if (action === 'check-rollback') {
+    checkScope({
+      channel: values.channel,
+      platform: values.platform,
+      runtimeVersion: values['runtime-version'],
+    });
+    const previous = checkRollback({
+      action: values.action,
+      history,
+      channel: values.channel,
+      runtimeVersion: values['runtime-version'],
+      runtimes,
+    });
+    process.stdout.write(`${previous ?? ''}\n`);
     return;
   }
 
@@ -91,6 +116,7 @@ function main() {
     channel: values.channel,
     platform: values.platform,
     runtimeVersion: values['runtime-version'],
+    runtimes,
     signingKey,
     now,
   };
@@ -115,7 +141,7 @@ function main() {
     }
     plan = planRollbackPrevious({ ...common, history, previousManifestText, id: randomUUID() });
   } else {
-    plan = planRollbackToEmbedded(common);
+    plan = planRollbackToEmbedded({ ...common, history });
   }
 
   // The signature is checked once more before anything leaves: a key that signs wrongly is
@@ -142,6 +168,10 @@ function main() {
     republishOf: plan.republishOf ?? null,
     commit: plan.commit ?? null,
     files: plan.files,
+    // The newest publish on this channel before this run, whichever runtime version it went to,
+    // so the summary can say when this run goes to another one: after a native change, phones
+    // keep the older APK's updates until they get the new APK.
+    lastPublish: runtimes[0] ?? null,
   };
   writeFileSync(join(values.out, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(JSON.stringify(summary));

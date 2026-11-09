@@ -40,7 +40,7 @@ export const indexKey = (...s) => `index:${scope(...s)}`;
 export const directiveKey = (...s) => `directive:${scope(...s)}`;
 export const historyKey = (...s) => `history:${scope(...s)}`;
 
-const RUNTIME_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+export const RUNTIME_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const CHANNEL = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEY_ID_FORM = /^[A-Za-z0-9._-]{1,64}$/;
@@ -266,10 +266,81 @@ export function readKeyList(text) {
   return new Set(list.map((item) => (typeof item === 'string' ? item : item?.name)));
 }
 
+/**
+ * The runtime versions that have a publish on a channel, newest publish first, from a
+ * `wrangler kv key list --prefix history:<channel>:<platform>:` answer. Each history key carries
+ * its newest entry as metadata, so one listing says which runtime version was last published to.
+ */
+export function readRuntimes(text, { channel, platform = 'android' }) {
+  if (text === undefined || text === null || text.trim() === '') return [];
+  const list = JSON.parse(text);
+  check(Array.isArray(list), 'The key list is not a list.');
+  const prefix = `history:${channel}:${platform}:`;
+  const runtimes = [];
+  for (const item of list) {
+    const name = typeof item === 'string' ? item : item?.name;
+    if (typeof name !== 'string' || !name.startsWith(prefix)) continue;
+    const latest = item?.metadata ?? {};
+    runtimes.push({
+      runtimeVersion: name.slice(prefix.length),
+      id: typeof latest.id === 'string' ? latest.id : null,
+      createdAt: typeof latest.createdAt === 'string' ? latest.createdAt : null,
+      commit: typeof latest.commit === 'string' ? latest.commit : null,
+    });
+  }
+  // ISO times sort as text; a key without metadata goes last.
+  return runtimes.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+}
+
+/** The runtime versions in a sentence, for an operator choosing one. */
+export function describeRuntimes(runtimes, channel) {
+  if (runtimes.length === 0) return `Nothing has been published on channel ${channel} at all.`;
+  const one = (r) =>
+    [
+      r.runtimeVersion,
+      r.createdAt || r.commit
+        ? ` (last published ${r.createdAt ?? 'at an unknown time'}${r.commit ? `, commit ${r.commit.slice(0, 7)}` : ''})`
+        : '',
+    ].join('');
+  return `Runtime versions with a publish on channel ${channel}, newest first: ${runtimes.map(one).join('; ')}. Give one as runtime_version.`;
+}
+
+/**
+ * Refuses a roll back of a runtime version nothing was published to: no phone runs an update from
+ * there, so it would change nothing, while the phones on the runtime version that did get the bad
+ * update keep it. That is what a blank runtime_version does after a native change has merged.
+ */
+function checkPublished(history, { channel, runtimeVersion, runtimes }) {
+  check(
+    Array.isArray(history) && history.length > 0,
+    `Nothing was published to runtime version ${runtimeVersion} on channel ${channel}, so no phone runs an update from it and there is nothing to roll back. ${describeRuntimes(runtimes ?? [], channel)}`,
+  );
+}
+
+/**
+ * What a roll back needs from the store, checked before anything is signed: the update id
+ * rollback-previous publishes again, or null for rollback-to-embedded.
+ */
+export function checkRollback({ action, history, channel, runtimeVersion, runtimes }) {
+  check(
+    action === 'rollback-previous' || action === 'rollback-to-embedded',
+    `${action} is not a roll back.`,
+  );
+  checkPublished(history, { channel, runtimeVersion, runtimes });
+  return action === 'rollback-previous' ? previousId(history) : null;
+}
+
 function pointerEntries(scopeArgs, id, createdAt, history) {
+  const kept = history.slice(0, HISTORY_LENGTH);
+  const [latest] = kept;
   return [
     { key: indexKey(...scopeArgs), value: JSON.stringify({ id, createdAt }) },
-    { key: historyKey(...scopeArgs), value: JSON.stringify(history.slice(0, HISTORY_LENGTH)) },
+    {
+      key: historyKey(...scopeArgs),
+      value: JSON.stringify(kept),
+      // Listed with the key, so a roll back can name the runtime versions that have publishes.
+      metadata: { id: latest.id, createdAt: latest.createdAt, commit: latest.commit ?? null },
+    },
   ];
 }
 
@@ -389,9 +460,10 @@ export function planRollbackPrevious(options) {
     keyId = KEY_ID,
     id,
     now,
+    runtimes,
   } = options;
   checkScope({ channel, platform, runtimeVersion });
-  previousId(history);
+  checkRollback({ action: 'rollback-previous', history, channel, runtimeVersion, runtimes });
   const previous = history[1];
   let old;
   try {
@@ -441,18 +513,22 @@ export function planRollbackPrevious(options) {
 
 /**
  * Sends phones on this runtime version back to the update inside the app. It wins over the
- * current update because it is newer; the next publish wins over it the same way.
+ * current update because it is newer; the next publish wins over it the same way. Only for a
+ * runtime version that has had a publish (`history`), as no phone on any other runs an update.
  */
 export function planRollbackToEmbedded(options) {
   const {
     platform = 'android',
     channel,
     runtimeVersion,
+    history,
+    runtimes,
     signingKey,
     keyId = KEY_ID,
     now,
   } = options;
   checkScope({ channel, platform, runtimeVersion });
+  checkRollback({ action: 'rollback-to-embedded', history, channel, runtimeVersion, runtimes });
   const commitTime = now.toISOString();
   const text = asciiJson({ type: 'rollBackToEmbedded', parameters: { commitTime } });
   return {

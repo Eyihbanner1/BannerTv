@@ -10,6 +10,7 @@ The Worker holds no key and cannot write. The **Publish phone update** workflow 
 | `src/worker.ts` | The three routes |
 | `scripts/publish.mjs` | Builds and signs a publish or a roll back, as `wrangler kv bulk put` files (the workflow runs it) |
 | `scripts/lib/update.mjs` | What it does: the manifest, hashes, signing, the history |
+| `scripts/runtime-version.mjs`, `scripts/lib/runtime.mjs` | Checks the runtime version expo-updates works out before a publish uses it |
 | `../../.github/workflows/deploy-updates.yml` | Deploys the Worker and makes its KV namespace |
 | `../../.github/workflows/publish-phone-update.yml` | Publishes, or rolls back |
 
@@ -55,7 +56,7 @@ One Workers KV namespace, titled `bannertv-updates`:
 - `asset:<sha256>`: each file (the Hermes bundle, images), with its content type as metadata. Written once, never changed;
 - `manifest:<update id>`: each manifest, exactly as signed, with the signature as metadata. Never changed;
 - `index:<channel>:<platform>:<runtime version>`: which update that runtime version gets now, `{id, createdAt}`;
-- `history:<channel>:<platform>:<runtime version>`: the last 20 publishes, newest first, for rollback-previous;
+- `history:<channel>:<platform>:<runtime version>`: the last 20 publishes, newest first, for rollback-previous. The newest one is also the key's metadata, so one listing of a channel's history keys says which runtime versions have publishes and when each was last published to;
 - `directive:<channel>:<platform>:<runtime version>`: a signed `rollBackToEmbedded`, when one was sent.
 
 ### How a publish fits KV's free plan
@@ -109,7 +110,11 @@ Deploy only through the workflow. Wrangler 4 can make a KV namespace by itself f
 
 Actions, **Publish phone update**, Run workflow, on main, action `publish`, channel `main`.
 
-It runs the phone checks on that commit itself (typecheck, unit tests and the phone journeys on the web build), because a commit on main may never have run the journeys. Then it works out the runtime version with expo-updates' own `runtimeversion:resolve`, the same fingerprint the APK build embeds; exports the Android bundle (`expo export --platform android`, no Gradle); signs; uploads; and waits for `/status` to show the new update. The run's summary gives the update id, runtime version and commit. It takes about as long as the journeys, plus a few minutes.
+It runs the phone checks on that commit itself (typecheck, unit tests and the phone journeys on the web build), because a commit on main may never have run the journeys. Then it works out the runtime version with expo-updates' own `runtimeversion:resolve`, the same fingerprint the APK build embeds; exports the Android bundle (`expo export --platform android`, no Gradle); signs; uploads; and waits for `/status` to show the new update. The run's summary gives the update id, runtime version and commit, and the runtime version the channel's last publish went to. It takes about as long as the journeys, plus a few minutes.
+
+The runtime version only counts when the fingerprint has every source it should: the four CI's Native side step requires (`expoConfig`, `expoAutolinkingAndroid`, `rncoreAutolinkingAndroid`, `buildTools`) and every one `apps/mobile/fingerprint.config.js` adds, read from that file. When the file throws, Expo's fingerprint quietly leaves it out, and the APK would carry the same smaller fingerprint, so a later change to only what the file adds (the images, the stream helper's Kotlin core, the build tools) would reach phones whose APK does not have it. The publish stops instead.
+
+The workflow is four jobs, so neither secret is ever in a job that also runs code from npm. A step can read the memory of the runner it runs on, which holds the secrets its job uses, and change what later steps in that job run, so a secret kept out of one step's settings is not safe from the others. **Build** installs and runs the app's whole dependency tree and has no secret. **Read the store** and **Upload** have the Cloudflare token and run wrangler, at an exact version. **Sign** has the private key and runs nothing but GitHub's own checkout, Node and artifact actions and the scripts here, from its own checkout, with no install and no cache. The jobs pass files to each other as run artifacts kept for a day: the export, what the store holds, and the signed update. None of them holds a secret.
 
 A phone takes the update when it next checks: expo-updates downloads it in the background and runs it on the next launch (when exactly is the app's choice, `apps/mobile`). If an update crashes before its first screen, expo-updates marks it failed and goes back to the last one that worked, by itself.
 
@@ -124,9 +129,14 @@ The same workflow, with another action:
 
 Both are for the runtime version main builds now. For an older APK's, give its runtime version (in the summary of the run that published to it) as `runtime_version`. Phones act on a roll back when they next check, like an update.
 
+After a change to the native side has merged, main builds a runtime version no phone has until its new APK is installed, and the bad update is on the older one. So either roll back is refused for a runtime version nothing was published to, before anything is signed: the error lists the runtime versions that do have publishes on that channel, newest first, with when each was last published to and from which commit. Run it again with the right one as `runtime_version`.
+
 ## If something goes wrong
 
 - **The publish stops at "Check the phone app takes updates".** The certificate is not committed, or the phone app does not have expo-updates yet.
+- **"does not load" or "The fingerprint has no … source" at "Runtime version".** `apps/mobile/fingerprint.config.js` throws, often after an Expo upgrade moves a package it looks up. Fix the file (run `pnpm exec fingerprint fingerprint:generate --platform android` in `apps/mobile` to try it), merge, and install an APK built after the fix before publishing: the APKs built while it threw carry the smaller fingerprint.
+- **"Nothing was published to runtime version …" at "Read the store".** A roll back of a runtime version no phone has an update for, usually the one main builds after a native change. Give one of the runtime versions the error lists as `runtime_version`.
+- **"Add the repository secret …".** The secret is found missing only by the job that uses it, after Build: no secret is ever in Build's job.
 - **"does not belong to apps/mobile/certs/certificate.pem".** The secret is from another key pair than the committed certificate. Put the matching key in the secret; never commit a new certificate without a new APK.
 - **`/status` does not show the update after three minutes.** KV may be slow to reach the runner's location; the upload itself succeeded if the Upload step did. Run the check by hand: `https://updates.bannertv.workers.dev/status?channel=main&platform=android&runtimeVersion=<rv>`.
 - **A phone never takes an update.** Its runtime version differs from the one published to (a different APK), or it was built without the certificate. The summary of each publish names the runtime version.
