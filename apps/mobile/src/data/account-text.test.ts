@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { describe, expect, it } from 'vitest';
-import { bringTotal, joinPlan, matchesLastFour, statusLine } from './account-text';
+import { bringTotal, joinPlan, matchesLastFour, statusLine, syncedLine } from './account-text';
 
 const t = ((key: string, options?: Record<string, unknown>) =>
   options ? `${key} ${JSON.stringify(options)}` : key) as unknown as TFunction;
@@ -29,6 +29,35 @@ describe('statusLine', () => {
     expect(statusLine(t, { state: 'idle', lastSync: now - 2 * 24 * 60 * 60_000 }, now)).toBe(
       'account.status.days {"count":2}',
     );
+  });
+});
+
+describe('syncedLine', () => {
+  const now = 10 * 24 * 60 * 60_000;
+  it('says how long ago the account was last pulled', () => {
+    expect(syncedLine(t, { state: 'idle', lastPull: now - 30_000 }, now)).toBe(
+      'phone.synced.justNow',
+    );
+    // A pull that came in after the clock was last read is just now too.
+    expect(syncedLine(t, { state: 'idle', lastPull: now + 5_000 }, now)).toBe(
+      'phone.synced.justNow',
+    );
+    expect(syncedLine(t, { state: 'syncing', lastPull: now - 3 * 60_000 }, now)).toBe(
+      'phone.synced.minutes {"count":3}',
+    );
+    expect(syncedLine(t, { state: 'paused', lastPull: now - 2 * 60 * 60_000 }, now)).toBe(
+      'phone.synced.hours {"count":2}',
+    );
+    expect(syncedLine(t, { state: 'waiting', lastPull: now - 3 * 24 * 60 * 60_000 }, now)).toBe(
+      'phone.synced.days {"count":3}',
+    );
+  });
+  it('says nothing before the first pull, or without an account', () => {
+    // A sync that only pushed is not a look at what other screens changed.
+    expect(syncedLine(t, { state: 'idle', lastSync: now }, now)).toBeUndefined();
+    expect(syncedLine(t, { state: 'off', lastSync: now, lastPull: now }, now)).toBeUndefined();
+    expect(syncedLine(t, { state: 'setup', lastPull: now }, now)).toBeUndefined();
+    expect(syncedLine(t, { state: 'gone', lastPull: now }, now)).toBeUndefined();
   });
 });
 

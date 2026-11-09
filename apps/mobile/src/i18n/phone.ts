@@ -98,6 +98,16 @@ const PHONE = {
   about: 'BannerTV for phones {{version}} (test build)',
   appName: 'BannerTV',
   continueRow: 'Continue watching',
+  // Beside Continue watching on Home: when the account last brought other screens' changes.
+  synced: {
+    justNow: 'Synced just now',
+    minutes_one: 'Synced 1 min ago',
+    minutes_other: 'Synced {{count}} min ago',
+    hours_one: 'Synced 1 hour ago',
+    hours_other: 'Synced {{count}} hours ago',
+    days_one: 'Synced 1 day ago',
+    days_other: 'Synced {{count}} days ago',
+  },
   nothingToPlay: 'Nothing to play',
   welcomeLead: 'Films and series from the addons you choose, in one place.',
   welcomeJoinLead: 'Already use BannerTV on your TV? Join its account to bring your profiles here.',

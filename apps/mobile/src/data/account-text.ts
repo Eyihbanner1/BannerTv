@@ -22,6 +22,22 @@ export function statusLine(t: TFunction, status: SyncStatus, now: number): strin
   return t('account.status.days', { count: Math.floor(minutes / (24 * 60)) });
 }
 
+/**
+ * Home's quiet line beside Continue watching on when this phone last asked the account what
+ * other screens changed. Undefined without an account, and before the first pull of this launch.
+ */
+export function syncedLine(t: TFunction, status: SyncStatus, now: number): string | undefined {
+  if (status.state === 'off' || status.state === 'setup' || status.state === 'gone') {
+    return undefined;
+  }
+  if (status.lastPull === undefined) return undefined;
+  const minutes = Math.floor(Math.max(0, now - status.lastPull) / MINUTE_MS);
+  if (minutes < 1) return t('phone.synced.justNow');
+  if (minutes < 60) return t('phone.synced.minutes', { count: minutes });
+  if (minutes < 24 * 60) return t('phone.synced.hours', { count: Math.floor(minutes / 60) });
+  return t('phone.synced.days', { count: Math.floor(minutes / (24 * 60)) });
+}
+
 /** What happens to each profile, here and in the account, when joining one way or the other. */
 export function joinPlan(
   t: TFunction,
