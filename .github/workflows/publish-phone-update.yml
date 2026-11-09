@@ -1,0 +1,290 @@
+name: Publish phone update
+
+# Sends the phone app's JavaScript from main to phones over the air, through the update service
+# (services/updates, updates.bannertv.workers.dev), or rolls the last one back. It runs only when
+# started by hand (Actions, Publish phone update, Run workflow), on main. Phones take an update on
+# their next full restart; only one whose native side matches theirs (the runtime version, Expo's
+# fingerprint of everything the APK build reads) is offered to them, and anything else waits for
+# a new APK.
+#
+# Actions:
+# - publish: runs the phone checks itself (a commit on main may never have run the phone
+#   journeys), exports the Android bundle, signs its manifest and uploads it;
+# - rollback-previous: publishes the update before the current one again, so phones that took a
+#   bad update go back one; run it again to go back further;
+# - rollback-to-embedded: sends phones back to the JavaScript inside their APK until the next
+#   publish.
+# A roll back is for the runtime version main builds now, or the one given (an older APK's,
+# shown in the summary of the run that published to it).
+#
+# It needs the repository secrets CLOUDFLARE_API_TOKEN (as for the Workers) and
+# EXPO_UPDATES_PRIVATE_KEY (the code signing key, services/updates/README.md), the certificate in
+# apps/mobile/certs/certificate.pem, and the updates Worker deployed once (Deploy updates Worker).
+# No Gradle: an update is about 5 MB of JavaScript and images, ready in a few minutes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [publish, rollback-previous, rollback-to-embedded]
+        default: publish
+      channel:
+        description: The channel (builds from main ask for main)
+        type: string
+        default: main
+      runtime_version:
+        description: For a roll back only, the runtime version to roll back (blank for the one main builds now)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# One at a time, and never cancelled halfway: two runs would each rewrite the history.
+concurrency:
+  group: publish-phone-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish phone update
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ACTION: ${{ inputs.action }}
+      CHANNEL: ${{ inputs.channel }}
+      RUNTIME_INPUT: ${{ inputs.runtime_version }}
+      NAMESPACE_TITLE: bannertv-updates
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check the secrets and inputs
+        env:
+          SIGNING_KEY: ${{ secrets.EXPO_UPDATES_PRIVATE_KEY }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Add the repository secret CLOUDFLARE_API_TOKEN (Settings, Secrets and variables, Actions) first."
+            exit 1
+          fi
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Add the repository secret EXPO_UPDATES_PRIVATE_KEY first (services/updates/README.md): every update is signed, and phones refuse any other."
+            exit 1
+          fi
+          if ! [[ "$CHANNEL" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
+            echo "::error::\"$CHANNEL\" is not a channel: lower case letters, digits and -."
+            exit 1
+          fi
+          if [ -n "$RUNTIME_INPUT" ]; then
+            if [ "$ACTION" = publish ]; then
+              echo "::error::A publish is always for the runtime version main builds now; leave runtime_version blank."
+              exit 1
+            fi
+            if ! [[ "$RUNTIME_INPUT" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]]; then
+              echo "::error::\"$RUNTIME_INPUT\" is not a runtime version."
+              exit 1
+            fi
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Without the certificate the app is built with updates off, so nothing would take this.
+      - name: Check the phone app takes updates
+        working-directory: apps/mobile
+        run: |
+          if [ ! -f certs/certificate.pem ]; then
+            echo "::error::apps/mobile/certs/certificate.pem is not in the repository, so phone builds have updates turned off. Commit the certificate (services/updates/README.md) and install an APK built with it first."
+            exit 1
+          fi
+          if ! node -e 'require.resolve("expo-updates/package.json")' 2> /dev/null; then
+            echo "::error::The phone app does not have expo-updates."
+            exit 1
+          fi
+
+      # expo-updates' own answer, worked out before anything is exported: the same fingerprint
+      # its Gradle plugin builds into the APK, from apps/mobile/fingerprint.config.js.
+      - name: Runtime version
+        id: runtime
+        working-directory: apps/mobile
+        run: |
+          if [ -n "$RUNTIME_INPUT" ]; then
+            runtime=$RUNTIME_INPUT
+          else
+            runtime=$(pnpm exec expo-updates runtimeversion:resolve --platform android | tail -n 1 |
+              node -e '
+                const { runtimeVersion } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+                if (typeof runtimeVersion !== "string" || runtimeVersion === "") {
+                  throw new Error("app.config.ts sets no runtimeVersion");
+                }
+                process.stdout.write(runtimeVersion);')
+          fi
+          echo "value=$runtime" >> "$GITHUB_OUTPUT"
+          echo "Runtime version: $runtime"
+
+      - name: Typecheck
+        if: inputs.action == 'publish'
+        run: pnpm --filter @bannertv/mobile typecheck
+
+      - name: Unit tests
+        if: inputs.action == 'publish'
+        run: pnpm --filter @bannertv/mobile test
+
+      # The same journeys as CI's phone job, on this exact commit. No traces: on a failure the
+      # screenshots are uploaded, and CI's own run of the journeys keeps traces.
+      - name: Phone journeys
+        if: inputs.action == 'publish'
+        working-directory: apps/mobile
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm export:web
+          pnpm e2e --trace off
+
+      - name: Upload the journeys' screenshots
+        if: failure() && inputs.action == 'publish'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-journeys
+          path: apps/mobile/test-results/
+          retention-days: 3
+          if-no-files-found: ignore
+
+      # Metro for Android and Hermes, as the APK's own bundle step runs them, and the app config
+      # the update carries (Constants.expoConfig on the phone).
+      - name: Export the Android bundle
+        if: inputs.action == 'publish'
+        working-directory: apps/mobile
+        run: |
+          pnpm export:android
+          pnpm exec expo config --type public --json > "$RUNNER_TEMP/expo-config.json"
+
+      # What the store holds now: this runtime version's history, which files are there already,
+      # and for rollback-previous the manifest it goes back to. Read from Cloudflare's API, not
+      # through the Worker, which can be a minute behind.
+      - name: Read the store
+        id: store
+        working-directory: services/updates
+        env:
+          RUNTIME: ${{ steps.runtime.outputs.value }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          namespace=$(npx --yes wrangler@4 kv namespace list |
+            node -e '
+              const list = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              process.stdout.write(list.find((ns) => ns.title === process.argv[1])?.id ?? "");' \
+              "$NAMESPACE_TITLE")
+          if [ -z "$namespace" ]; then
+            echo "::error::There is no KV namespace $NAMESPACE_TITLE yet: run Deploy updates Worker first."
+            exit 1
+          fi
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+          kv() { npx --yes wrangler@4 kv "$@" --remote --namespace-id "$namespace"; }
+          # A key's value into a file, or no file when the key is not there.
+          fetch() {
+            kv key list --prefix "$1" > "$RUNNER_TEMP/listed.json"
+            if node -e '
+              const listed = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              process.exit(listed.some((key) => key.name === process.argv[2]) ? 0 : 1);' \
+              "$RUNNER_TEMP/listed.json" "$1"; then
+              kv key get "$1" > "$2"
+            fi
+          }
+          mkdir -p "$RUNNER_TEMP/store"
+          fetch "history:$CHANNEL:android:$RUNTIME" "$RUNNER_TEMP/store/history.json"
+          if [ "$ACTION" = publish ]; then
+            kv key list --prefix asset: > "$RUNNER_TEMP/store/assets.json"
+          fi
+          if [ "$ACTION" = rollback-previous ]; then
+            previous=$(node scripts/publish.mjs previous-id --history "$RUNNER_TEMP/store/history.json")
+            fetch "manifest:$previous" "$RUNNER_TEMP/store/previous.json"
+          fi
+
+      - name: Build and sign
+        working-directory: services/updates
+        env:
+          EXPO_UPDATES_PRIVATE_KEY: ${{ secrets.EXPO_UPDATES_PRIVATE_KEY }}
+          RUNTIME: ${{ steps.runtime.outputs.value }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          node scripts/publish.mjs "$ACTION" \
+            --channel "$CHANNEL" --runtime-version "$RUNTIME" \
+            --certificate ../../apps/mobile/certs/certificate.pem \
+            --history "$RUNNER_TEMP/store/history.json" \
+            --export ../../apps/mobile/dist/android --expo-config "$RUNNER_TEMP/expo-config.json" \
+            --commit "$COMMIT" --stored "$RUNNER_TEMP/store/assets.json" \
+            --previous "$RUNNER_TEMP/store/previous.json" \
+            --out "$RUNNER_TEMP/update"
+
+      # Files and the manifest first, the index (or the directive) last, so no phone is pointed
+      # at an update before all of it is stored.
+      - name: Upload
+        working-directory: services/updates
+        env:
+          NAMESPACE: ${{ steps.store.outputs.namespace }}
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          part=1
+          while [ -f "$RUNNER_TEMP/update/content-$part.json" ]; do
+            npx --yes wrangler@4 kv bulk put "$RUNNER_TEMP/update/content-$part.json" --remote \
+              --namespace-id "$NAMESPACE"
+            part=$((part + 1))
+          done
+          npx --yes wrangler@4 kv bulk put "$RUNNER_TEMP/update/pointer.json" --remote \
+            --namespace-id "$NAMESPACE"
+
+      # Workers KV can take a minute or so to reach every location, so this waits up to three.
+      - name: Check /status
+        env:
+          RUNTIME: ${{ steps.runtime.outputs.value }}
+        run: |
+          url="https://updates.bannertv.workers.dev/status?channel=$CHANNEL&platform=android&runtimeVersion=$RUNTIME"
+          for attempt in $(seq 1 18); do
+            if status=$(curl -fsS --max-time 10 "$url") &&
+              node -e '
+                const s = JSON.parse(process.argv[1]);
+                const done = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+                const ok = done.action === "rollback-to-embedded"
+                  ? s.serving === "directive" && s.directive?.commitTime === done.createdAt
+                  : s.serving === "update" && s.update?.id === done.id;
+                process.exit(ok ? 0 : 1);' "$status" "$RUNNER_TEMP/update/summary.json"; then
+              echo "/status: $status"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::/status does not show this $ACTION after three minutes: ${status:-no answer}"
+          exit 1
+
+      # Also after a failure past the signing, so the run says what it was uploading.
+      - name: Summary
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          if [ -f "$RUNNER_TEMP/update/summary.json" ]; then
+            node -e '
+              const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const rows = [
+                ["Result", process.env.RESULT === "success" ? "done" : "failed: see the steps above"],
+                ["Action", s.action],
+                ["Channel", s.channel],
+                ["Runtime version", "`" + s.runtimeVersion + "`"],
+                ["Update id", s.id ? "`" + s.id + "`" : "none (phones run the update inside their APK)"],
+                ["Commit", s.commit ? "`" + s.commit + "`" : "-"],
+                ["Published again from", s.republishOf ? "`" + s.republishOf + "`" : "-"],
+                ["Files uploaded", s.files.uploaded + " (" + s.files.skipped + " stored already)"],
+              ];
+              console.log("| | |\n| --- | --- |\n" + rows.map((r) => "| " + r.join(" | ") + " |").join("\n"));
+            ' "$RUNNER_TEMP/update/summary.json" >> "$GITHUB_STEP_SUMMARY"
+          fi

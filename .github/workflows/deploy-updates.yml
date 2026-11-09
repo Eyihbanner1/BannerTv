@@ -1,0 +1,110 @@
+name: Deploy updates Worker
+
+# Deploys services/updates, the phone app's update service at updates.bannertv.workers.dev, from
+# main. It runs only when started by hand (Actions, Deploy updates Worker, Run workflow), like
+# Deploy api Worker. It needs the repository secret CLOUDFLARE_API_TOKEN (the "Edit Cloudflare
+# Workers" template, which includes Workers KV Storage) and, only if that token reaches more than
+# one Cloudflare account, the repository variable CLOUDFLARE_ACCOUNT_ID.
+#
+# The updates live in a Workers KV namespace titled bannertv-updates. This finds it by its title,
+# makes it the first time, and binds it as UPDATES by adding its id to wrangler.toml in this run's
+# checkout only. Wrangler 4 could make one by itself for a binding without an id, but it would
+# name it updates-updates and find it again only through the deployed Worker's own binding, while
+# the publish workflow needs the id for every upload; one lookup by title serves both.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a second waits for the first rather than cancelling it.
+concurrency:
+  group: deploy-updates
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy updates Worker
+    # Production takes main only, whichever branch the run was started from.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      NAMESPACE_TITLE: bannertv-updates
+    steps:
+      - name: Check the token is there
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Add the repository secret CLOUDFLARE_API_TOKEN (Settings, Secrets and variables, Actions) first."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter '@bannertv/updates...'
+
+      - name: Typecheck
+        run: pnpm --filter @bannertv/updates typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @bannertv/updates test
+
+      # Finding it again by title makes a second run, or a run after a failed one, harmless.
+      - name: Find or make the KV namespace
+        working-directory: services/updates
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          find_id() {
+            npx --yes wrangler@4 kv namespace list |
+              node -e '
+                const list = JSON.parse(require("fs").readFileSync(0, "utf8"));
+                const found = list.filter((ns) => ns.title === process.argv[1]);
+                if (found.length > 1) throw new Error("two KV namespaces are titled " + process.argv[1]);
+                process.stdout.write(found[0]?.id ?? "");' "$NAMESPACE_TITLE"
+          }
+          id=$(find_id)
+          if [ -z "$id" ]; then
+            npx --yes wrangler@4 kv namespace create "$NAMESPACE_TITLE"
+            id=$(find_id)
+            echo "Made the KV namespace $NAMESPACE_TITLE." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if ! [[ "$id" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "::error::Could not find or make the KV namespace $NAMESPACE_TITLE."
+            exit 1
+          fi
+          printf '\n[[kv_namespaces]]\nbinding = "UPDATES"\nid = "%s"\n' "$id" >> wrangler.toml
+
+      - name: Deploy
+        working-directory: services/updates
+        run: |
+          if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
+          npx --yes wrangler@4 deploy
+
+      - name: Check /status
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if status=$(curl -fsS --max-time 10 https://updates.bannertv.workers.dev/status); then
+              echo "/status: $status" | tee -a "$GITHUB_STEP_SUMMARY"
+              node -e '
+                const s = JSON.parse(process.argv[1]);
+                if (s.storage !== true || s.protocol !== 1) {
+                  console.log("::error::/status says the KV namespace is not bound.");
+                  process.exit(1);
+                }' "$status"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::/status did not answer after the deploy."
+          exit 1

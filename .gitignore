@@ -34,6 +34,8 @@ apps/androidtv/local.properties
 *.jks
 *.keystore
 
-# The phone's update signing key lives only in the EXPO_UPDATES_PRIVATE_KEY secret, never here
-# (apps/mobile/app.config.ts). `expo-updates codesigning:generate` writes it as private-key.pem.
+# Phone update code signing: only apps/mobile/certs/certificate.pem is committed. The private key
+# lives only in the EXPO_UPDATES_PRIVATE_KEY secret (services/updates/README.md), never here.
+# `expo-updates codesigning:generate` writes it as private-key.pem.
 private-key.pem
+public-key.pem
