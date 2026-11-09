@@ -65,7 +65,10 @@ concurrency:
 env:
   NAMESPACE_TITLE: bannertv-updates
   # An exact version, so a new wrangler release never meets the token before someone has chosen
-  # it. Move it on by hand, to a release at least a couple of weeks old.
+  # it. Move it on by hand, to a release at least a couple of weeks old, together with the one in
+  # deploy-updates.yml and publish-lg-update.yml. Its own dependencies further down still take
+  # in-range releases: the steps with the token run npx with npm_config_ignore_scripts, so at
+  # least no install script runs beside it.
   WRANGLER: wrangler@4.152.0
 
 jobs:
@@ -228,6 +231,8 @@ jobs:
         working-directory: services/updates
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # wrangler's kv commands need no install scripts, so none run beside the token.
+          npm_config_ignore_scripts: 'true'
           ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -n "$ACCOUNT_ID" ]; then export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"; fi
@@ -372,6 +377,8 @@ jobs:
         working-directory: services/updates
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # wrangler's kv commands need no install scripts, so none run beside the token.
+          npm_config_ignore_scripts: 'true'
           ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           NAMESPACE: ${{ needs.store.outputs.namespace }}
         run: |

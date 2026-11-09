@@ -1,7 +1,8 @@
-# BannerTV's update service for the phone app (README.md). It serves expo-updates the signed
-# updates the "Publish phone update" workflow uploads to Workers KV, and holds no key: the private
-# key is a GitHub secret only that workflow uses. Deploy with the "Deploy updates Worker"
-# workflow, not by hand: it binds the KV namespace (below).
+# BannerTV's update service (README.md). It serves expo-updates the signed updates the "Publish
+# phone update" workflow uploads to Workers KV, and the LG TV's Homebrew Channel the .ipk and
+# index the "Publish LG update" workflow uploads there. It holds no key: the phone's private key is
+# a GitHub secret only its workflow uses. Deploy with the "Deploy updates Worker" workflow, not by
+# hand: it binds the KV namespace (below).
 name = "updates"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"

@@ -4,18 +4,23 @@ A Cloudflare Worker that sends the phone app new JavaScript over the air, so mos
 
 The Worker holds no key and cannot write. The **Publish phone update** workflow exports the app's JavaScript and images, signs the manifest with a private key only GitHub holds, and uploads it all to Workers KV with wrangler. The Worker serves the manifest and its signature exactly as uploaded, and the phone checks the signature against the certificate built into the app, so a phone runs only what CI signed. It keeps no logs (observability, traces and log pushes are off in `wrangler.toml`), and it never reads the per-install id expo-updates sends (`eas-client-id`).
 
+The same Worker also serves the LG TV's updates, for the rooted test TV only, as a Homebrew Channel repository: see [LG TV updates through Homebrew Channel](#lg-tv-updates-through-homebrew-channel).
+
 | Path | What it is |
 | --- | --- |
 | `src/protocol.ts` | The protocol's rules: reading a request, the multipart answer, the signature header, the KV keys |
-| `src/worker.ts` | The three routes |
-| `scripts/publish.mjs` | Builds and signs a publish or a roll back, as `wrangler kv bulk put` files (the workflow runs it) |
+| `src/webos.ts` | The LG repository's rules: its KV keys, cache headers, and reading an index for `/status` |
+| `src/worker.ts` | The routes, the phone's and the LG TV's |
+| `scripts/publish.mjs` | Builds and signs a phone publish or a roll back, as `wrangler kv bulk put` files (the workflow runs it) |
 | `scripts/lib/update.mjs` | What it does: the manifest, hashes, signing, the history |
 | `scripts/runtime-version.mjs`, `scripts/lib/runtime.mjs` | Checks the runtime version expo-updates works out before a publish uses it |
+| `scripts/webos.mjs`, `scripts/lib/webos.mjs` | The LG publish's steps: the version, the checks on the .ipk, the index, and the `wrangler kv bulk put` files for a publish or a roll back |
 | `../../.github/workflows/deploy-updates.yml` | Deploys the Worker and makes its KV namespace |
-| `../../.github/workflows/publish-phone-update.yml` | Publishes, or rolls back |
+| `../../.github/workflows/publish-phone-update.yml` | Publishes to phones, or rolls back |
+| `../../.github/workflows/publish-lg-update.yml` | Publishes to the LG test TV, or rolls back |
 
 ```sh
-pnpm --filter @bannertv/updates test        # the Worker, the publish script, and the two together
+pnpm --filter @bannertv/updates test        # the Worker, the publish scripts, and the two together
 pnpm --filter @bannertv/updates typecheck
 ```
 
@@ -45,9 +50,9 @@ A file an update names, by its SHA-256 (base64url), with its type and `cache-con
 
 ### `GET /status`
 
-`{"storage": true, "protocol": 1}`: whether the KV namespace is bound. With `?channel=main&platform=android&runtimeVersion=<rv>` it also says what that runtime version gets: `update` (`{id, createdAt}` or null), `directive` (`{type, commitTime}` or null) and `serving` (`update`, `directive` or `none`). The workflows check it after a deploy or an upload.
+`{"storage": true, "protocol": 1}`: whether the KV namespace is bound. With `?channel=main&platform=android&runtimeVersion=<rv>` it also says what that runtime version gets: `update` (`{id, createdAt}` or null), `directive` (`{type, commitTime}` or null) and `serving` (`update`, `directive` or `none`). The workflows check it after a deploy or an upload. With `?channel=main&platform=webos` it says what the LG repository offers ([below](#what-the-tv-asks)).
 
-Everything else is a 404. There are no write routes.
+Everything else is a 404, a `HEAD` too. There are no write routes.
 
 ## What the store keeps
 
@@ -104,7 +109,7 @@ The repository secret `CLOUDFLARE_API_TOKEN` the api Worker uses was made from t
 
 Actions, **Deploy updates Worker**, Run workflow, on main. It runs the tests, finds the KV namespace `bannertv-updates` by its title (making it on the first run), binds it as `UPDATES` in that run's copy of `wrangler.toml`, deploys, and checks that `/status` says `"storage": true`.
 
-Deploy only through the workflow. Wrangler 4 can make a KV namespace by itself for a binding without an id, but it would call it `updates-updates` and find it again only through the deployed Worker's own binding, while the publish workflow needs the id for every upload. A deploy from a laptop with the committed `wrangler.toml` leaves the binding out, and phones get 503 (they keep what they have) until the workflow deploys again.
+Deploy only through the workflow. Wrangler 4 can make a KV namespace by itself for a binding without an id, but it would call it `updates-updates` and find it again only through the deployed Worker's own binding, while the publish workflows need the id for every upload. A deploy from a laptop with the committed `wrangler.toml` leaves the binding out, and phones and the TV get 503 (they keep what they have) until the workflow deploys again.
 
 ## Publish
 
@@ -146,4 +151,138 @@ The fingerprint hashes what the Android build reads, but not everything CI treat
 
 ## Trying it locally
 
-`pnpm --filter @bannertv/updates test` covers the protocol, the Worker over an in-memory KV, the publish script with a throwaway key pair, and a publish, roll back and republish served end to end. To run the Worker itself, copy this folder, add `[[kv_namespaces]]` with `binding = "UPDATES"` and any 32-hex-digit `id` to the copy's `wrangler.toml`, upload the script's files with `npx wrangler@4 kv bulk put <file> --local --namespace-id <id>`, and run `npx wrangler@4 dev --local`.
+`pnpm --filter @bannertv/updates test` covers the protocol, the Worker over an in-memory KV, the publish script with a throwaway key pair, and a publish, roll back and republish served end to end, and the same for the LG TV ([below](#if-an-lg-publish-goes-wrong)). To run the Worker itself, copy this folder, add `[[kv_namespaces]]` with `binding = "UPDATES"` and any 32-hex-digit `id` to the copy's `wrangler.toml`, upload the script's files (or those `scripts/webos.mjs publish` writes) with `npx wrangler@4 kv bulk put <file> --local --namespace-id <id>`, and run `npx wrangler@4 dev --local`.
+
+## LG TV updates through Homebrew Channel
+
+On 9 November 2026 Eyitayo chose to update the LG app over the air through [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) first, for his rooted test TV only: the LG 65NANO766QA (webOS 22, Chromium 87), where BannerTV is a Developer Mode install of `com.bannertv.app` that Homebrew Channel sees and can install over. Signed updates from inside the app come later, as separate work ([ADR 0001](../../docs/adr/0001-react-norigin-classic-bundle.md), decision 10).
+
+So the Worker also serves a Homebrew Channel repository: an index listing one package, BannerTV, at the build main last published, and that build's `.ipk` and icon. The **Publish LG update** workflow builds the app, gives the build a version of its own, and uploads it.
+
+What Homebrew Channel does with it (0.7.3, read in its source):
+
+- **It never looks for updates by itself.** BannerTV's page in Homebrew Channel has a button that says Update and is on whenever the version installed differs from the index's, higher or lower, and pressing it is how an update arrives. Homebrew Channel reads the index when it opens, with ordinary HTTP caching, which is why the Worker sends the index with `cache-control: no-cache`.
+- **It checks only the SHA-256 we publish.** Its own service downloads the `.ipk` from the index's `ipkUrl`, works out its SHA-256 and installs it only if that is exactly the index's `ipkHash.sha256` (lower-case hex), through the TV's developer installer, over the top. Nothing is signed: whoever can write to the KV namespace, which takes the `CLOUDFLARE_API_TOKEN` secret, could put any app on the TV, and the TV trusts the index because it comes over HTTPS from this Worker. That is one reason this is for the test TV only.
+- Installs over the top have kept BannerTV's data (its IndexedDB and `localStorage`) on this TV so far.
+
+### What the TV asks
+
+Every answer to these routes carries `access-control-allow-origin: *` (Homebrew Channel reads the index from its own web page) and `x-content-type-options: nosniff`. Only `GET` is answered, as for the phone; a `HEAD` is a 404. Nothing here reads a request header, writes or logs.
+
+| Route | Answer |
+| --- | --- |
+| `GET /webos/repo.json` | The index, exactly as the workflow stored it, `application/json; charset=utf-8`, `cache-control: no-cache`. Before the first publish, `{"packages":[]}`. 503 `{"error":"unconfigured"}` or `{"error":"storage"}` when storage is not bound or failing |
+| `GET /webos/ipk/<sha256>.ipk` | The `.ipk` with that SHA-256 (64 lower-case hex digits), `application/octet-stream` with its `content-length` (Homebrew Channel's progress bar reads it), `cache-control: public, max-age=31536000, immutable`: its address is its hash, so it never changes. 404 with `no-store` when it is not there (or not there yet) |
+| `GET /webos/icon/<sha256>.png` | The 130 px icon, `image/png`, cached the same way |
+| `GET /status?channel=main&platform=webos` | `{"storage": true, "protocol": 1, "update": {...} or null, "serving": "update" or "none"}`, where `update` is `{version, sha256, ipkSize, commit, publishedAt, restoredAt}` from the stored index |
+
+The index has the fields of webosbrew's [PackageInfo](https://github.com/webosbrew/apps-repo/blob/main/content/schemas/api/PackageInfo.json) with the [PackageManifest](https://github.com/webosbrew/apps-repo/blob/main/content/schemas/api/PackageManifest.json) inline, every URL absolute, and a few of ours beside them, which Homebrew Channel ignores (`channel`, `commit`, `publishedAt`, `restoredAt`). BannerTV's Settings reads `manifest.version` from it to say whether an update is ready.
+
+```json
+{
+  "packages": [
+    {
+      "id": "com.bannertv.app",
+      "title": "BannerTV",
+      "iconUri": "https://updates.bannertv.workers.dev/webos/icon/81a179f1….png",
+      "shortDescription": "BannerTV from main: version 0.1.1, commit ed387a1, published 2026-11-09 19:37 UTC.",
+      "manifest": {
+        "id": "com.bannertv.app",
+        "version": "0.1.1",
+        "type": "web",
+        "title": "BannerTV",
+        "appDescription": "BannerTV from main: version 0.1.1, commit ed387a1, published 2026-11-09 19:37 UTC.",
+        "iconUri": "https://updates.bannertv.workers.dev/webos/icon/81a179f1….png",
+        "ipkUrl": "https://updates.bannertv.workers.dev/webos/ipk/a170c7d1….ipk",
+        "ipkHash": { "sha256": "a170c7d1…" },
+        "ipkSize": 1269840,
+        "rootRequired": false
+      },
+      "channel": "main",
+      "commit": "ed387a1228288492187ba32540e721775a2f3292",
+      "publishedAt": "2026-11-09T19:37:53.142Z",
+      "restoredAt": null
+    }
+  ]
+}
+```
+
+Homebrew Channel shows `shortDescription` on BannerTV's page, so the TV says which build it offers before Update is pressed.
+
+### Once, on the TV
+
+1. Deploy the Worker with these routes: Actions, **Deploy updates Worker**, Run workflow, on main.
+2. On the TV, add the repository, in either of two ways:
+   - in Homebrew Channel: Settings, Repositories, Add repository, type `https://updates.bannertv.workers.dev/webos/repo.json` and confirm;
+   - or in BannerTV's own Settings, with the button that opens Homebrew Channel's Add repository dialog with the address filled in (it launches `org.webosbrew.hbchannel` with `{"launchMode": "addRepository", "url": "https://updates.bannertv.workers.dev/webos/repo.json"}`); confirm it there.
+
+Until the first publish the repository lists nothing. After it, BannerTV shows in Homebrew Channel's list, and its page says Update, since the Developer Mode install has another version.
+
+### Publishing to the TV
+
+Actions, **Publish LG update**, Run workflow, on main, action `publish`. A run started from another branch does nothing.
+
+1. **Read the store** lists everything under `webos/` and reads the history, then chooses the version (below), so a version that cannot be had stops the run before anything is built.
+2. **Build** stamps that version into `apps/webos/webos-meta/appinfo.json` and `apps/webos/package.json` in its own checkout and holds them to `tools/scripts/check-version.mjs`, then runs the TV app's typecheck and unit tests, builds it, runs the webOS 5.0 check (`pnpm check:bundle`), packages it (`pnpm package`, ares-package) and works out the SHA-256 of the `.ipk` and of its 130 px icon. The journeys are not run again: they ran on the pull request's full build before it merged.
+3. **Upload** reads the history again and stops if it changed since step 1. It checks the `.ipk` once more (its SHA-256 is the one Build gave, and its control file and its `appinfo.json` both say `com.bannertv.app` at this version), uploads the `.ipk` and icon, then the history, and the index last. It waits up to three minutes for `https://updates.bannertv.workers.dev/webos/repo.json` to offer the new version, then downloads the `.ipk` from it as Homebrew Channel will and checks its SHA-256.
+
+The run's summary gives the version, commit, SHA-256 and size, and what the TV was offered before. It takes a few minutes: no journeys and no Gradle.
+
+Then, on the TV: open Homebrew Channel (close it first if it was open, so that it reads the repository again), choose BannerTV, check that its page says the new version, and press **Update**. If it still shows the old one, KV has not reached the Worker's location yet: wait a minute and open the page again.
+
+The secrets are kept as in the phone's workflow: **Read the store** and **Upload** have the Cloudflare token and run nothing but wrangler, at the exact version the phone's workflows use, Node, and the scripts here from their own checkout, with no install and no cache. **Build** installs and runs the app's dependency tree and has no secret. The jobs hand each other files as run artifacts kept for a day: what the store holds, and the `.ipk` with what Build says it is. None of them holds a secret.
+
+### The version
+
+Homebrew Channel offers Update only when the version installed differs from the index's, and webOS may refuse to put a lower version over a higher one, so every publish gets a higher version than the last. The version is in the published `.ipk` only, and never committed:
+
+- **major.minor** are `appinfo.json`'s;
+- **patch** is one above both `appinfo.json`'s patch and the highest patch any earlier publish used on that major.minor, kept in the history as `highest`.
+
+With `0.1.0` committed, publishes go `0.1.1`, `0.1.2`, `0.1.3`…; after `appinfo.json` moves to `0.2.0`, they go `0.2.1`, `0.2.2`…. So each publish is higher than the last, a roll back never lowers `highest`, and every publish is above the committed version, which is what a Developer Mode install of a CI build has. It keeps `check-version.mjs`'s rules (major.minor.patch, minor and patch below 1000, since Android's `versionCode` is made from them). Read the store refuses, before anything is built:
+
+- when the patch would reach 1000: raise the minor version in `appinfo.json` and `apps/webos/package.json` on main (to `0.2.0` from `0.1.x`), then publish;
+- when `appinfo.json`'s major.minor is below one already published: raise it to at least that.
+
+The app shows the stamped version in its Settings and diagnostics, and webOS reports it as the version installed.
+
+### Rolling the TV back
+
+The same workflow, action **`rollback-previous`**: the index points at the build before the one offered now, whose `.ipk` and icon are stored already, so nothing is built or uploaded but the history and the index. The history drops the undone build, so running it again steps back one more, as far as the history goes (20 publishes). `highest` stays, so the next publish is still above the undone build.
+
+The TV gets the earlier build with its own, lower version. Homebrew Channel offers Update all the same, as the two differ, and its page says the build was offered again by a roll back. **Whether webOS's developer installer puts a lower version over a higher one has not been tried on the TV.** If it refuses, revert the change on main and publish instead: a publish always goes up.
+
+### Only main's builds
+
+Only builds of main are published, on the one channel `main`. A pull request's `.ipk` (CI's `bannertv-ipk` artifact) carries the committed version, so when a tester installs one on the TV with `ares-install`, Homebrew Channel shows Update, and pressing it puts main's last publish back over the pull request's build. To keep testing a pull request's build, leave Update alone. A pull request that raises `appinfo.json`'s version above main's last publish would make that Update a downgrade (see [Rolling the TV back](#rolling-the-tv-back)).
+
+### What the store keeps for the TV
+
+In the same KV namespace as the phone's updates, under `webos/`, which no phone key starts with:
+
+- `webos/ipk/<sha256>`: each `.ipk`, as built, with `{version, commit}` as metadata. Written once, never changed;
+- `webos/icon/<sha256>`: the 130 px icon (`appinfo.json`'s `largeIcon`, from `brand/webos/icon_130.png`), read out of the `.ipk` itself. Written once; a publish leaves it out when it is stored already;
+- `webos/history/main`: `{"highest": "<version>", "publishes": [...]}`, the publishes still offered or gone back to, newest first, at most 20, each with its version, SHA-256s, size, title, commit and time, which is everything the index is made from;
+- `webos/repo/main`: the index, exactly as served. Written last.
+
+### How it fits KV's free plan
+
+- **Value size, 25 MiB.** The `.ipk` is about 1.3 MB (1,269,840 bytes at ed387a1, stamped `0.1.1`), and the Worker reads it whole to send its length. The scripts refuse an `.ipk` or icon over the limit.
+- **Writes, 1,000 a day,** shared with the phone. A publish writes 3 keys (the `.ipk`, the history, the index), 4 the first time (the icon); a roll back 2.
+- **Reads and lists.** A run reads the history twice and lists twice. On the TV, opening Homebrew Channel reads the index once, an Update reads the `.ipk` once, and the icon is read once and then cached.
+- **Storage, 1 GB,** shared with the phone. Each publish adds about 1.3 MB, and nothing is deleted. An `.ipk` no longer in the history (older than the last 20 publishes) can be deleted by hand.
+- **Requests.** Each is one Worker request, from the account's 100,000 a day.
+
+KV is eventually consistent ("up to 60 seconds or more", [how KV works](https://developers.cloudflare.com/kv/concepts/how-kv-works/)), so the files go up first and the index last, and the run waits up to three minutes for the Worker to offer the new build before it downloads the `.ipk`.
+
+### If an LG publish goes wrong
+
+- **"The next LG publish would be …, and the patch must stay below 1000".** Raise the minor version on main, as the error says.
+- **"appinfo.json says …, but … was published already".** The committed version went below a publish. Raise it to the major.minor the error names.
+- **"Nothing has been published", "Only … is left in the LG history", or "no longer in the store" at Read the store.** There is no earlier build to go back to. Publish a fix instead.
+- **"The LG history in the store changed since Read the store read it".** Another publish or roll back ran in between, or this run's Upload was started again later. Start the workflow again; nothing was written.
+- **"… is version …, not …: was the version stamped before the build?".** The `.ipk` does not carry the version chosen, so the TV would offer Update for ever. Something in the build read the version before the Stamp step.
+- **The index does not offer the version after three minutes.** As for the phone: the upload succeeded if the Upload step did. Open `https://updates.bannertv.workers.dev/status?channel=main&platform=webos` by hand.
+- **Homebrew Channel says "Invalid file checksum".** The `.ipk` it downloaded is not the one the index names. That should not happen, since an `.ipk`'s address is its hash; publish again.
+
+`pnpm --filter @bannertv/updates test` covers the LG routes over an in-memory KV, reading `.ipk` files laid out as ares-package writes them, the version scheme, the scripts, and a publish, roll back and publish served end to end and installed as Homebrew Channel would (the SHA-256 checked against the index, the version read back from the `.ipk`).

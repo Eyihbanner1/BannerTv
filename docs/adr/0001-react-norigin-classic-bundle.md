@@ -1,7 +1,7 @@
 # ADR 0001: React and Norigin, shipped as one classic ES2017 script
 
 - Status: accepted. Spikes run and re-run on the webOS 22 TV on 27 October 2026; HDR10 and the webOS 5 floor are still open (below)
-- Date: 26 October 2026, results added 27 October 2026
+- Date: 26 October 2026, results added 27 October 2026, decision 10 added 9 November 2026
 
 ## Context
 
@@ -18,6 +18,7 @@ BannerTV is a packaged webOS web app. The oldest TV it supports runs webOS 5.0, 
 7. **webOS APIs**: instead of bundling LG's webOSTV.js, `src/platform/webos.ts` calls the same globals it uses (`webOSSystem` or `PalmSystem`, `PalmServiceBridge`) for `platformBack`, device info, Luna calls and relaunch. `appinfo.json` declares `requiredACG: ["systemconfig.query"]` for `getSystemInfo`, which webOS 26 checks when present and webOS 27 requires.
 8. **Back key**: `disableBackHistoryAPI: true`. Back handlers sit in layers (overlay, then screen, then router). The order is: close an overlay, close the top screen, return to Home, return to Home's first row, then `platformBack()`.
 9. **Focus**: Norigin moves real DOM focus with `preventScroll`, so LG Audio Guidance can read `aria-label`s. Rows and the Home rows area scroll by transform. They slide only in 5-way mode; in pointer mode they hold still, so a tile never slides under a resting pointer and steals focus.
+10. **Updates over the air, through Homebrew Channel first, for the rooted test TV only.** On 9 November 2026 Eyitayo chose to update the LG app over the air through Homebrew Channel (webosbrew, 0.7.3) on his rooted 65NANO766QA, where BannerTV is a Developer Mode install of `com.bannertv.app`, and to build signed updates inside the app later, as separate work. The updates Worker (`services/updates`, ADR 0007 decision 11) serves a Homebrew Channel repository at `https://updates.bannertv.workers.dev/webos/repo.json`, one package at main's last publish, and the `.ipk` and icon it names by their SHA-256. The **Publish LG update** workflow, started by hand on main, builds the app with a version of its own (`appinfo.json`'s major.minor, and a patch one above both its own and the highest published, stamped in the build and never committed), so each publish is higher than the last; `rollback-previous` points the repository at the build before. The reasons: Homebrew Channel, which rooted LG TVs usually have, installs over a Developer Mode install, so the TV can take main's builds without a laptop and `ares-install`; and its repository is plain JSON and two files, which the phone's Worker can serve with the same secret hygiene. Because Homebrew Channel never says when there is something new, the app's Settings has an Updates part on the LG (behind the build switch `HOMEBREW_UPDATES_IN_BUILD`): it reads the repository once a visit, says when a newer build is there, and opens Homebrew Channel, adding the repository the first time (`docs/TV_SETUP.md`). What it does not do: Homebrew Channel never looks for updates by itself, so Update is pressed on the TV, and it checks only the SHA-256 the repository gives, with nothing signed, so it is for a rooted test TV and never the store build. Details in `services/updates/README.md`.
 
 ## What Phase 0 already proved off the TV
 

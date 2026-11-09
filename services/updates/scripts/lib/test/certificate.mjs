@@ -18,8 +18,12 @@ const set = (...items) => tlv(0x31, Buffer.concat(items));
 const nothing = Buffer.from([0x05, 0x00]);
 
 function integer(bytes) {
-  // A leading 0 keeps it positive.
-  return tlv(0x02, bytes[0] & 0x80 ? Buffer.concat([Buffer.from([0]), bytes]) : bytes);
+  // DER takes the shortest form only, and OpenSSL refuses any other ("illegal padding"): no
+  // leading 0 unless the byte after it has its top bit set, where a leading 0 keeps it positive.
+  let start = 0;
+  while (start < bytes.length - 1 && bytes[start] === 0 && bytes[start + 1] < 0x80) start += 1;
+  const shortest = bytes.subarray(start);
+  return tlv(0x02, shortest[0] & 0x80 ? Buffer.concat([Buffer.from([0]), shortest]) : shortest);
 }
 
 function oid(dotted) {
@@ -57,19 +61,20 @@ const CODE_SIGNING_EXTENSIONS = tlv(
 
 /**
  * A key pair and a certificate for its public key, valid from `from` until `to`, for code
- * signing unless `codeSigning` is false.
+ * signing unless `codeSigning` is false. The serial number is random unless given.
  */
 export function makeCodeSigningPair({
   from = new Date(Date.now() - 86_400_000),
   to = new Date(Date.now() + 10 * 365 * 86_400_000),
   commonName = 'BannerTV test',
   codeSigning = true,
+  serial = randomBytes(8),
 } = {}) {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const name = sequence(set(sequence(oid('2.5.4.3'), tlv(0x0c, Buffer.from(commonName)))));
   const tbs = sequence(
     tlv(0xa0, integer(Buffer.from([2]))),
-    integer(randomBytes(8)),
+    integer(serial),
     SHA256_WITH_RSA,
     name,
     sequence(utcTime(from), utcTime(to)),

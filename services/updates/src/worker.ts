@@ -1,6 +1,6 @@
 /**
- * BannerTV's update service for the phone app: a Cloudflare Worker that answers expo-updates
- * (the Expo Updates protocol, version 1) from Workers KV.
+ * BannerTV's update service: a Cloudflare Worker that answers the phone app's expo-updates (the
+ * Expo Updates protocol, version 1) and the LG TV's Homebrew Channel (webos.ts) from Workers KV.
  *
  * It holds no key and has no way to write. The "Publish phone update" workflow exports the app's
  * JavaScript, signs the manifest with the private key only GitHub holds, and uploads the files
@@ -11,11 +11,19 @@
  *   GET /expo/manifest       the newest update for the request's channel, platform and runtime
  *                            version, a roll back to the app's own update, or 204 for none
  *   GET /expo/assets/<hash>  a file an update names, by its SHA-256
- *   GET /status              for the workflows: whether storage is bound, and with ?channel,
- *                            platform and runtimeVersion, what that runtime version is served
+ *   GET /webos/repo.json     the Homebrew Channel repository: the LG build main last published,
+ *                            or no package before the first publish
+ *   GET /webos/ipk/<sha256>.ipk, GET /webos/icon/<sha256>.png
+ *                            the .ipk and icon the repository names, by their SHA-256
+ *   GET /status              for the workflows: whether storage is bound, with ?channel,
+ *                            platform and runtimeVersion what that runtime version is served, and
+ *                            with ?channel and platform=webos what the LG repository offers
+ *
+ * The LG routes are written by the "Publish LG update" workflow, which builds the .ipk and the
+ * repository's index; Homebrew Channel checks each .ipk against the SHA-256 the index gives.
  *
  * A Worker module may export only its handler and Durable Object classes (and types), so the
- * protocol's rules live in protocol.ts.
+ * protocol's rules live in protocol.ts, and the LG repository's in webos.ts.
  */
 import {
   ASSET_CACHE,
@@ -44,10 +52,12 @@ import {
   SFV_VERSION,
   type Signed,
 } from './protocol';
+import * as webos from './webos';
 
 // The few KV types this file uses, so it needs no type package. It only ever reads.
 export interface KVNamespace {
   get(key: string, type: 'text'): Promise<string | null>;
+  get(key: string, type: 'arrayBuffer'): Promise<ArrayBuffer | null>;
   getWithMetadata<M>(
     key: string,
     type: 'text',
@@ -183,6 +193,7 @@ async function status(url: URL, env: Env): Promise<Response> {
   if (!params.has('channel') && !params.has('platform') && !params.has('runtimeVersion')) {
     return plain({ storage: Boolean(kv), protocol: Number(PROTOCOL_VERSION) }, 200);
   }
+  if (params.get('platform') === 'webos') return webosStatus(params, kv);
   const channel = params.get('channel') ?? '';
   const platform = readPlatform(params.get('platform'));
   const runtimeVersion = params.get('runtimeVersion') ?? '';
@@ -213,15 +224,106 @@ async function status(url: URL, env: Env): Promise<Response> {
   }
 }
 
+// The LG TV's Homebrew Channel repository. Every answer, a refusal too, carries
+// access-control-allow-origin: Homebrew Channel reads the index from its own web page.
+const WEBOS_HEADERS = { 'access-control-allow-origin': '*', 'x-content-type-options': 'nosniff' };
+
+const webosError = (error: string, status: number) =>
+  json({ error }, status, { ...WEBOS_HEADERS, 'cache-control': 'no-store' });
+
+/** The index before anything is published: a repository with no package, not an error. */
+const EMPTY_REPO = '{"packages":[]}';
+
+async function webosRepo(env: Env): Promise<Response> {
+  const kv = env.UPDATES;
+  if (!kv) return webosError('unconfigured', 503);
+  try {
+    const stored = await kv.get(webos.repoKey(webos.WEBOS_CHANNEL), 'text');
+    // Exactly as the workflow wrote it, the .ipk and icon it names stored before it.
+    return new Response(stored ?? EMPTY_REPO, {
+      status: 200,
+      headers: {
+        ...WEBOS_HEADERS,
+        'content-type': webos.REPO_TYPE,
+        'cache-control': webos.REPO_CACHE,
+      },
+    });
+  } catch {
+    return webosError('storage', 503);
+  }
+}
+
+/**
+ * An .ipk or icon, read whole rather than streamed so that it is sent with its length: Homebrew
+ * Channel shows its download's progress from content-length. The largest value KV keeps is
+ * 25 MiB, and the .ipk is about 1.3 MB.
+ */
+async function webosFile(key: string, type: string, env: Env): Promise<Response> {
+  const kv = env.UPDATES;
+  if (!kv) return webosError('unconfigured', 503);
+  try {
+    const bytes = await kv.get(key, 'arrayBuffer');
+    // Not cached: a file missing now may only not have reached this location yet.
+    if (bytes === null) return webosError('not-found', 404);
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        ...WEBOS_HEADERS,
+        'content-type': type,
+        'content-length': String(bytes.byteLength),
+        'cache-control': webos.FILE_CACHE,
+      },
+    });
+  } catch {
+    return webosError('storage', 503);
+  }
+}
+
+/** /status?channel=main&platform=webos: the build the LG repository offers, read from its index. */
+async function webosStatus(
+  params: URLSearchParams,
+  kv: KVNamespace | undefined,
+): Promise<Response> {
+  const channel = params.get('channel') ?? '';
+  // An LG build has no runtime version: the .ipk carries everything.
+  if (!isChannel(channel) || params.has('runtimeVersion')) {
+    return plain({ error: 'bad-request' }, 400);
+  }
+  if (!kv) return plain({ storage: false, protocol: Number(PROTOCOL_VERSION) }, 503);
+  try {
+    const update = webos.readRepoIndex(await kv.get(webos.repoKey(channel), 'text'));
+    return plain(
+      {
+        storage: true,
+        protocol: Number(PROTOCOL_VERSION),
+        update: update ?? null,
+        serving: update ? 'update' : 'none',
+      },
+      200,
+    );
+  } catch {
+    return plain({ error: 'storage' }, 503);
+  }
+}
+
 const ASSETS = '/expo/assets/';
+const WEBOS_IPK = /^\/webos\/ipk\/([0-9a-f]{64})\.ipk$/;
+const WEBOS_ICON = /^\/webos\/icon\/([0-9a-f]{64})\.png$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // GET alone: like every other route, a HEAD is a 404 (Homebrew Channel only ever GETs).
     if (request.method === 'GET') {
-      if (url.pathname === '/expo/manifest') return manifest(request, env);
-      if (url.pathname.startsWith(ASSETS)) return asset(url.pathname.slice(ASSETS.length), env);
-      if (url.pathname === '/status') return status(url, env);
+      const path = url.pathname;
+      if (path === '/expo/manifest') return manifest(request, env);
+      if (path.startsWith(ASSETS)) return asset(path.slice(ASSETS.length), env);
+      if (path === '/status') return status(url, env);
+      if (path === '/webos/repo.json') return webosRepo(env);
+      const ipk = WEBOS_IPK.exec(path)?.[1];
+      if (ipk) return webosFile(webos.ipkKey(ipk), webos.IPK_TYPE, env);
+      const icon = WEBOS_ICON.exec(path)?.[1];
+      if (icon) return webosFile(webos.iconKey(icon), webos.ICON_TYPE, env);
     }
     return plain({ error: 'not-found' }, 404);
   },
