@@ -1,4 +1,4 @@
-import { MAX_PROFILES, type JoinMode, type SyncStatus } from '@bannertv/core';
+import { MAIN_PROFILE_ID, MAX_PROFILES, type JoinMode, type SyncStatus } from '@bannertv/core';
 import type { AccountProfile } from '@tv/data/sync';
 import type { TFunction } from 'i18next';
 
@@ -25,8 +25,16 @@ export function statusLine(t: TFunction, status: SyncStatus, now: number): strin
 /**
  * Home's quiet line beside Continue watching on when this phone last asked the account what
  * other screens changed. Undefined without an account, and before the first pull of this launch.
+ * Main only, as Settings shows the account's status line: kids profiles and the others never see
+ * the account (ADR 0006, decision 12).
  */
-export function syncedLine(t: TFunction, status: SyncStatus, now: number): string | undefined {
+export function syncedLine(
+  t: TFunction,
+  status: SyncStatus,
+  now: number,
+  profileId: string | null,
+): string | undefined {
+  if (profileId !== MAIN_PROFILE_ID) return undefined;
   if (status.state === 'off' || status.state === 'setup' || status.state === 'gone') {
     return undefined;
   }

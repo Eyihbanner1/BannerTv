@@ -14,7 +14,7 @@ import { describeAddonError, typeLabel } from '@tv/data/describe';
 import { useHomeBoard, useOwnLinePlaces } from '@tv/data/home-board';
 import { library } from '@tv/data/library';
 import { leaveContinueWatching } from '@tv/data/marks';
-import { activeProfile, isKidsProfile } from '@tv/data/profiles';
+import { activeProfile, activeProfileId, isKidsProfile } from '@tv/data/profiles';
 import { noteFirstPage, sportsFeed, sportsState } from '@tv/data/sports';
 import { accountState } from '@tv/data/sync';
 import { useQuery } from '@tv/data/use-query';
@@ -155,15 +155,16 @@ const HomeRow = memo(function HomeRow({
 });
 
 /**
- * Beside Continue watching, on a phone in an account: when it last asked the account what other
- * screens changed, so what was just watched on the TV can be looked for. A component of its own,
- * so its clock draws only this line again.
+ * Beside Continue watching, on Main on a phone in an account: when it last asked the account what
+ * other screens changed, so what was just watched on the TV can be looked for. A component of its
+ * own, so its clock draws only this line again.
  */
 const SyncedCaption = memo(function SyncedCaption() {
   const { t } = useTranslation();
   const { status } = useSyncExternalStore(accountState.subscribe, accountState.get);
+  const profileId = useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
   const [now, setNow] = useState(() => Date.now());
-  const line = syncedLine(t, status, now);
+  const line = syncedLine(t, status, now, profileId);
   const shown = line !== undefined;
   useEffect(() => {
     if (!shown) return;
