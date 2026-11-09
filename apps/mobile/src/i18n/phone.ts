@@ -169,6 +169,18 @@ const PHONE = {
     denied:
       'Notifications are off for BannerTV. Turn them on in your phone’s settings to get reminders.',
   },
+  // When a screen fails to draw (screens/CrashScreen.tsx), and Settings' Send a report.
+  crash: {
+    title: 'Something went wrong',
+    lead: 'BannerTV ran into a problem it couldn’t get past. Starting again usually sorts it, and keeps the same profile.',
+    startAgain: 'Start again',
+  },
+  sendReport: 'Send a report',
+  sendReportDetail:
+    'Shares a short note of recent problems. Addon links, keys and codes are left out.',
+  reportTitle: 'BannerTV phone report',
+  reportNotShared: 'The report couldn’t be shared.',
+  reportNotSharedShort: 'Couldn’t share',
 } as const;
 
 const OVERRIDES = {

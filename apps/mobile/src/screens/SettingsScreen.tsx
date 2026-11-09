@@ -27,6 +27,7 @@ import type { CheckPhase } from '../runtime/app-updates-plan';
 import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { LanguagesSection } from './LanguagesSection';
+import { SendReportRow } from './SendReportRow';
 import { ListRow } from '../ui/Button';
 import { SubtitleStyleChoices, useSubtitleStyle } from '../player/SubtitleStyle';
 import { Sheet, SheetOption } from '../ui/Sheet';
@@ -136,6 +137,7 @@ function ThisAppSection({ version }: { version: string }) {
           disabled={working}
         />
       ) : null}
+      <SendReportRow />
     </Section>
   );
 }
