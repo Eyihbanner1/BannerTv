@@ -982,6 +982,7 @@
     "get": "Get updates in Homebrew Channel",
     "menuTitle": "Homebrew Channel",
     "open": "Open Homebrew Channel",
+    "openDetail": "if it shows the old version, reload its list with the round arrow",
     "addAgain": "Add BannerTV's repository again",
     "didNotOpen": "Homebrew Channel didn't open. Is it installed?"
   },

@@ -67,7 +67,10 @@ test('on an LG TV, Settings says a newer build is ready and opens Homebrew Chann
 
   // Confirming that dialog again would add the list twice, so now the button asks first.
   await press(page, 'Enter', 'settings-homebrew-menu-0');
-  await expectFocusLabel(page, 'Open Homebrew Channel');
+  await expectFocusLabel(
+    page,
+    'Open Homebrew Channel, if it shows the old version, reload its list with the round arrow',
+  );
   await press(page, 'Enter', 'settings-homebrew');
   await expect.poll(() => launches(page)).toEqual([ADD_LIST, JUST_OPEN]);
 

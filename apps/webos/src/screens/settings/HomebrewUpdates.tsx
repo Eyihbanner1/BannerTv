@@ -97,7 +97,8 @@ export function HomebrewUpdates() {
           focusKey="settings-homebrew-menu"
           title={t('updates.menuTitle')}
           options={[
-            { value: 'open', label: t('updates.open') },
+            // Opened again, a Homebrew Channel left running shows its list as it last read it.
+            { value: 'open', label: t('updates.open'), detail: t('updates.openDetail') },
             { value: 'add-list', label: t('updates.addAgain') },
           ]}
           selected={undefined}
