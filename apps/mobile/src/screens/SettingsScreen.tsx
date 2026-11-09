@@ -28,6 +28,7 @@ import { useAccountRefresh } from './profiles/refresh';
 import { Avatar } from '../ui/Avatar';
 import { LanguagesSection } from './LanguagesSection';
 import { SendReportRow } from './SendReportRow';
+import { EpisodeAlertsSection } from './EpisodeAlertsSection';
 import { ListRow } from '../ui/Button';
 import { SubtitleStyleChoices, useSubtitleStyle } from '../player/SubtitleStyle';
 import { Sheet, SheetOption } from '../ui/Sheet';
@@ -295,6 +296,8 @@ export function SettingsScreen() {
               />
             ) : null}
           </Section>
+
+          <EpisodeAlertsSection />
 
           {helper ? (
             <Section title={t('phone.yourTv')}>

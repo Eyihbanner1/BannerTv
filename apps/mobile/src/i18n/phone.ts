@@ -161,6 +161,21 @@ const PHONE = {
     confirm: 'Add {{name}}?',
     lead: 'This link came from another app. Addons are shared by every profile on this phone.',
   },
+  // New-episode alerts (data/episode-alerts.ts) and their switch in Settings.
+  episodeAlerts: {
+    section: 'Notifications',
+    setting: 'New episode alerts',
+    lead: 'A notification at 18:00 on the day a new episode comes out, for series you watch and series on My List.',
+    denied:
+      'Notifications are off for BannerTV. Turn them on in your phone’s settings to get alerts.',
+    channel: 'New episodes',
+    one: 'New episode: {{show}} S{{season}}:E{{episode}} is out',
+    oneUnnumbered: 'New episode: {{show}} is out',
+    run: 'New episodes: {{show}} S{{season}}:E{{first}}–{{last}} are out',
+    some: '{{count}} new episodes of {{show}} are out',
+    body: 'Tap to open the series.',
+    bodyNamed: '“{{title}}”. Tap to open the series.',
+  },
   reminders: {
     title: '{{name}} is starting',
     body: 'Starts at {{time}}. Tap to open the match.',
