@@ -54,6 +54,12 @@ describe('isNoticeStream', () => {
       'Private manifest required',
       'Check back soon',
       'Streams coming soon',
+      // Behind an emoji, a tag or quotes, after a comma or a dash.
+      '⚠️ No streams found',
+      '[!] No links available',
+      '"No streams found"',
+      'Sorry, no working links right now',
+      'Sports Streams — No streams',
       // Comet and its kin.
       'Invalid debrid API key',
       'Obsolete config, please reconfigure the addon',
@@ -184,6 +190,23 @@ describe('noticeText', () => {
       url: 'https://premium.example.org/x',
     });
     expect(bare).toBe('Link expired. Visit premium.example.org for a new one');
+    // A self-hosted addon's address, by IP or on this device.
+    expect(
+      text({
+        name: 'Addon',
+        description:
+          'Link expired. Visit 192.168.1.20:7000/SECRET-KEY/configure or localhost:7000/SECRET-KEY',
+        url: 'https://a.example/x',
+      }),
+    ).toBe('Link expired. Visit 192.168.1.20 or localhost');
+    // Numbers that only look like one stay as they are.
+    expect(
+      text({
+        name: 'Addon',
+        description: 'No streams found. Rated 1.5/10, v2.0/beta',
+        url: 'https://a.example/x',
+      }),
+    ).toBe('No streams found. Rated 1.5/10, v2.0/beta');
   });
 
   it('cuts a long message at a space', () => {

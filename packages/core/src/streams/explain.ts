@@ -156,7 +156,8 @@ function explainNothing(input: ProblemInput): PlayProblem {
   if (headers.length > 0 && headers.length >= web) {
     return { kind: 'needs-helper', count: headers.length };
   }
-  // Messages with no words of their own, such as a bare settings page, count as web pages.
+  // Messages with no words of their own, such as a bare settings page, are named as web links
+  // only when nothing else is left: they are not links the viewer can open.
   return { kind: 'web-only', count: web || notices.length };
 }
 

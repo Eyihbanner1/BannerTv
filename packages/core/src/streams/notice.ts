@@ -24,9 +24,9 @@ const NOTICE = new RegExp(
     '\\b(?:temporarily|currently) (?:unavailable|offline|down|not available)\\b',
     // "Streams are not available yet", "Link unavailable", "Source offline".
     '\\b(?:streams?|links?|sources?) (?:are |is )?(?:not (?:yet )?available|unavailable|offline)\\b',
-    // "No streams found", "No links available", "No more sources": the start of a sentence only,
-    // as "Link 1 · no other streams use this server" describes a real one.
-    '(?:^|[.!:;·|–-]\\s*)no (?:more |live |available )?(?:streams?|links?|sources?)\\b',
+    // "No streams found", "⚠️ No links available", "Sorry, no working sources": the start of a
+    // sentence only, as "Link 1 · no other streams use this server" describes a real one.
+    '(?:^\\W*|[.!:;,·|–—-]\\s*)no (?:more |live |working |available )?(?:streams?|links?|sources?)\\b',
     // The free Sports Streams link: "Please reinstall the addon".
     '\\b(?:reinstall|re-?configure) (?:the |this |our |your )?add-?on\\b',
     '\\bnew add-?on link\\b',
@@ -49,8 +49,12 @@ const SETTINGS_PAGE = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+(?:\/[^?#]*)?\/configure\/?
 /** Links inside an addon's words: only the host is kept, as the path can carry the viewer's keys. */
 const LINK = /[a-z][a-z0-9+.-]*:\/\/[^\s]+/gi;
 
-/** A link written without its scheme, "premium.example.org/KEY/configure": its host stays, its path goes. */
-const BARE_LINK = /\b((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?[/?#]\S*/gi;
+/**
+ * A link written without its scheme, "premium.example.org/KEY/configure" or a self-hosted addon's
+ * "192.168.1.20:7000/KEY": its host stays, its path goes.
+ */
+const BARE_LINK =
+  /\b((?:[a-z0-9-]+\.)+[a-z]{2,}|\d{1,3}(?:\.\d{1,3}){3}|localhost)(?::\d+)?[/?#]\S*/gi;
 
 /** As long as a problem box line can be: the start of a longer message says what matters. */
 export const NOTICE_MAX = 200;
