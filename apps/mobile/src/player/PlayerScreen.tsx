@@ -908,6 +908,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           now={picture}
           kept={fit}
           pip={pip}
+          live={pictureKind === 'live'}
           viewRef={videoView}
           player={phonePlayer()}
           nativeControls={false}

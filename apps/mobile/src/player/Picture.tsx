@@ -6,11 +6,10 @@ import { Platform, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { pictureSize } from './phone-host';
 import {
   ASSUMED_VIDEO,
-  FIT,
-  isFill,
   type PictureFrame,
   pictureLayout,
   pictureNote,
+  shownShape,
   type Size,
   videoSizeOf,
 } from './picture-fit';
@@ -26,7 +25,7 @@ export interface PictureNow {
   moving: PictureFrame | null;
   /** The screen's size in points, once it has been measured. */
   screen: Size | null;
-  /** The picture's own size, once its player has said. */
+  /** The picture's own shape as it shows (shownShape), once its player has said. */
   video: Size | null;
 }
 
@@ -66,16 +65,26 @@ function webVideo(view: VideoView | null): WebVideo | null {
 const SIZE_EVENTS = ['loadedmetadata', 'resize', 'emptied'];
 
 /**
- * The picture's own size into `now`: from Android's player (phone-host.ts), or on the web build,
- * whose player knows no tracks, from the <video> element.
+ * The picture's own shape into `now`: from Android's player (phone-host.ts), by the size it is
+ * stored at, which shownShape turns into the shape it shows at (`live` for live sport and live
+ * channels); or on the web build, whose player knows no tracks, from the <video> element, which
+ * gives the shape it shows at.
  */
-function useVideoSize(now: Store<PictureNow>, viewRef: RefObject<VideoView | null>): void {
+function useVideoSize(
+  now: Store<PictureNow>,
+  viewRef: RefObject<VideoView | null>,
+  live: boolean,
+): void {
   useEffect(() => {
     const note = (video: Size | null) =>
       now.set((was) => (sameSize(was.video, video) ? was : { ...was, video }));
     if (Platform.OS !== 'web') {
-      note(pictureSize.get());
-      return pictureSize.subscribe(() => note(pictureSize.get()));
+      const read = () => {
+        const stored = pictureSize.get();
+        note(stored && shownShape(stored, live));
+      };
+      read();
+      return pictureSize.subscribe(read);
     }
     const element = webVideo(viewRef.current);
     if (!element) return;
@@ -85,40 +94,44 @@ function useVideoSize(now: Store<PictureNow>, viewRef: RefObject<VideoView | nul
     return () => {
       for (const type of SIZE_EVENTS) element.removeEventListener(type, read);
     };
-  }, [now, viewRef]);
+  }, [now, viewRef, live]);
 }
 
 /**
  * The picture: Android's player (or the web build's <video>), sized and placed as `kept` says,
  * or as the fingers have it while they move it. Laid out, never scaled (picture-fit.ts says why),
- * and clipped to the screen, which shows the part of it on the screen. In picture-in-picture's
- * small window it shows whole, as Android shapes that window to the picture, except a picture
- * filling the screen centred, which fills the window too, as it always has: Android shaped
- * that window to the screen as the stream opened.
+ * and clipped to the screen, which shows the part of it on the screen.
+ *
+ * In picture-in-picture's small window it shows whole, whatever its size and place. Only how the
+ * picture fills its view changes then, not the view's place: Android takes the player out of the
+ * view into the small window, lays it out there itself, and puts it back as the window closes.
+ * The view, still where it was, takes it back as it was, with no jump from the whole picture.
  */
 export function Picture({
   now,
   kept,
   pip,
+  live,
   viewRef,
   ...video
 }: {
   now: Store<PictureNow>;
   kept: PictureFrame;
   pip: boolean;
+  /** Live sport or a live channel, whose squeezed HD sizes show at 16:9 (shownShape). */
+  live: boolean;
   viewRef: RefObject<VideoView | null>;
 } & Omit<VideoViewProps, 'style' | 'contentFit'>) {
   const { moving, screen, video: size } = useSyncExternalStore(now.subscribe, now.get);
-  useVideoSize(now, viewRef);
-  const frame = moving ?? kept;
-  const layout = pictureLayout(pip && !isFill(frame) ? FIT : frame, screen, size);
+  useVideoSize(now, viewRef, live);
+  const layout = pictureLayout(moving ?? kept, screen, size);
   return (
     <View style={styles.clip}>
       <VideoView
         ref={viewRef}
         {...video}
         style={layout.rect ? [styles.placed, layout.rect] : styles.whole}
-        contentFit={layout.contentFit}
+        contentFit={pip ? 'contain' : layout.contentFit}
       />
     </View>
   );

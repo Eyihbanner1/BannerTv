@@ -32,6 +32,7 @@ import {
   pictureRect,
   readPictureFits,
   readPictureFrame,
+  shownShape,
   sizeAt,
   SNAP,
   SNAP_OUT,
@@ -762,6 +763,54 @@ describe('videoSizeOf', () => {
     expect(videoSizeOf(-1, -1)).toBeNull();
     expect(videoSizeOf(1920, undefined)).toBeNull();
     expect(videoSizeOf(Number.NaN, 1080)).toBeNull();
+  });
+});
+
+describe('shownShape', () => {
+  const sixteenNine = (size: { width: number; height: number }, live: boolean) =>
+    expect(shownShape(size, live)).toEqual(ASSUMED_VIDEO);
+
+  it('takes standard definition, never stored with square pixels, as 16:9', () => {
+    for (const live of [true, false]) {
+      sixteenNine({ width: 720, height: 576 }, live);
+      sixteenNine({ width: 720, height: 480 }, live);
+      sixteenNine({ width: 704, height: 576 }, live);
+      sixteenNine({ width: 544, height: 576 }, live);
+      sixteenNine({ width: 352, height: 480 }, live);
+      // HD squeezed to these widths is never square either.
+      sixteenNine({ width: 1280, height: 1080 }, live);
+      sixteenNine({ width: 960, height: 1080 }, live);
+    }
+  });
+
+  it("takes a broadcast's squeezed HD as 16:9, and keeps a film's as it is stored", () => {
+    sixteenNine({ width: 1440, height: 1080 }, true);
+    sixteenNine({ width: 960, height: 720 }, true);
+    expect(shownShape({ width: 1440, height: 1080 }, false)).toEqual({ width: 1440, height: 1080 });
+    expect(shownShape({ width: 960, height: 720 }, false)).toEqual({ width: 960, height: 720 });
+  });
+
+  it('keeps any other size as it is stored', () => {
+    for (const live of [true, false]) {
+      expect(shownShape(HOCKEY, live)).toBe(HOCKEY);
+      const hd = { width: 1280, height: 720 };
+      expect(shownShape(hd, live)).toBe(hd);
+      const wide = { width: 1920, height: 800 };
+      expect(shownShape(wide, live)).toBe(wide);
+      const square = { width: 640, height: 480 };
+      expect(shownShape(square, live)).toBe(square);
+    }
+  });
+
+  it('frames a match on a standard definition channel as it does in HD', () => {
+    const sd = shownShape({ width: 720, height: 576 }, true);
+    expect(pictureRect(PHONE, sd, TOP_KEPT)).toEqual({
+      left: 0,
+      top: 0,
+      width: 3120,
+      height: 1755,
+    });
+    expect(pictureLayout(TOP_KEPT, PHONE, sd)).toEqual(pictureLayout(TOP_KEPT, PHONE, HOCKEY));
   });
 });
 

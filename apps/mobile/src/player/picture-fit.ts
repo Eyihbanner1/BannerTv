@@ -239,6 +239,34 @@ export function videoSizeOf(width: unknown, height: unknown): Size | null {
   return positive(width) && positive(height) ? { width, height } : null;
 }
 
+/** Standard definition's heights, and the widths its pictures are stored at. */
+const SD_HEIGHTS = [576, 480];
+const SD_WIDTHS = [720, 704, 544, 528, 480, 352];
+
+/**
+ * The shape a picture shows at, from the size Android's player says it is stored at. Media3
+ * draws a picture whose pixels are not square at its true shape, but the size expo-video passes
+ * on is the stored one, without that. So the sizes stored that way are taken as the 16:9 they
+ * show at:
+ * - standard definition, 720 by 576 or 480 and the narrower widths it is squeezed to, which is
+ *   never stored with square pixels;
+ * - HD squeezed to 1280 or 960 by 1080, which is never square either;
+ * - for live sport and live channels (`live`), 1440 by 1080 and 960 by 720, which broadcasts
+ *   squeeze HD to. A film or series of those sizes is usually a 4:3 picture with square pixels,
+ *   so it keeps its size: taken as 16:9, it would jump as a pinch reached fill.
+ *
+ * A true 4:3 picture taken as 16:9 shows bars at its sides inside its rectangle, rather than
+ * being cut off. Other pixels that are not square, and a file turned on its side, are still
+ * shaped by their stored size. Not for the web build, whose <video> gives the shape it shows.
+ */
+export function shownShape(stored: Size, live: boolean): Size {
+  const { width, height } = stored;
+  const sd = SD_HEIGHTS.includes(height) && SD_WIDTHS.includes(width);
+  const squeezedHd = height === 1080 && (width === 1280 || width === 960);
+  const broadcastHd = (width === 1440 && height === 1080) || (width === 960 && height === 720);
+  return sd || squeezedHd || (live && broadcastHd) ? ASSUMED_VIDEO : stored;
+}
+
 /**
  * The picture's size whole on this screen (fit) and covering it (fill). Worked out by
  * multiplying before dividing, so a size that comes out whole is exactly whole.
@@ -312,7 +340,8 @@ export function pictureRect(screen: Size, video: Size, frame: PictureFrame): Rec
  *
  * Fit, and fill centred, draw across the screen as they always have. That also keeps the
  * subtitles Media3 draws itself (picture subtitles, PGS and DVB) on the screen at fill:
- * modules/banner-cues fits them into the screen only when the picture's view covers it. Any other
+ * modules/banner-cues fits them into the screen only when the picture's view covers it. At any
+ * other size they sit on the picture, and are cut off with it where it overhangs. Any other
  * size or place is laid out as its rectangle, taking the picture to be 16:9 until its own size
  * is known, and the view covers the screen until the screen has been measured.
  */
