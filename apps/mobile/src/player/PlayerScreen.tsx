@@ -86,9 +86,13 @@ import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
 import {
   contentFitFor,
-  type PictureFit,
+  FILL,
+  FIT,
+  type PictureFrame,
+  type PictureKind,
   pictureFitStore,
   pinchFit,
+  sameFrame,
   touchSpread,
 } from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
@@ -125,7 +129,7 @@ const BACK_TO_TOP = space.m + touch.min + space.s;
 const FIT_NOTE_MS = 1500;
 const noop = () => () => undefined;
 
-/** Whole picture or filling the screen: this phone's choice for each title (picture-fit.ts). */
+/** The picture's size and place: this phone's choice for each title (picture-fit.ts). */
 const pictureFits = pictureFitStore(localStorage);
 
 type Panel =
@@ -171,9 +175,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
   const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
-  // A series' episodes share the show's choice: the route's metaId is the show's for each.
-  const pictureFit = useMemo(() => pictureFits.title(metaId), [metaId]);
-  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
   // event's page comes from the addon that listed it, never another one.
@@ -232,6 +233,15 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   }, []);
 
   useEffect(() => reportScreen('player'), []);
+
+  // A series' episodes share the show's choice: the route's metaId is the show's for each. A
+  // title never chosen for opens as the last of its kind was left: a match or a live channel
+  // (Stremio's tv type, or any stream that turns out to be live) as the last broadcast, a film
+  // or series as the last film.
+  const pictureKind: PictureKind =
+    sportsEvent || titleType === 'tv' || state.live ? 'live' : 'film';
+  const pictureFit = useMemo(() => pictureFits.title(metaId, pictureKind), [metaId, pictureKind]);
+  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
@@ -612,18 +622,18 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
   // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
   // other phone players do; More has the same switch. The phone keeps the choice for the title.
-  const [fitNote, setFitNote] = useState<PictureFit | null>(null);
+  const [fitNote, setFitNote] = useState<PictureFrame | null>(null);
   useEffect(() => {
     if (!fitNote) return;
     const timer = setTimeout(() => setFitNote(null), FIT_NOTE_MS);
     return () => clearTimeout(timer);
   }, [fitNote]);
-  const changeFit = (next: PictureFit) => {
-    if (next === pictureFit.get()) return;
+  const changeFit = (next: PictureFrame) => {
+    if (sameFrame(next, pictureFit.get())) return;
     pictureFit.set(next);
     setFitNote(next);
   };
-  const zoomValue = t(fit === 'fill' ? 'common.on' : 'common.off');
+  const zoomValue = t(contentFitFor(fit) === 'cover' ? 'common.on' : 'common.off');
   // How far apart the fingers were as the pinch began; null once it has decided. One change a
   // pinch, so fingers settling or lifting at the end never undo it.
   const pinchFrom = useRef<number | null>(null);
@@ -650,7 +660,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       const wanted = pinchFit(from, spread);
       if (!wanted) return;
       pinchFrom.current = null;
-      if (wanted === pictureFit.get()) return;
+      if (sameFrame(wanted, pictureFit.get())) return;
       changeFit(wanted);
       Haptics.selectionAsync().catch(() => undefined);
     },
@@ -798,7 +808,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const toast = (() => {
     // Just chosen, so first; never over what the screen says while a stream opens.
     if (fitNote && !waiting) {
-      return t(fitNote === 'fill' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
+      return t(contentFitFor(fitNote) === 'cover' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
     }
     if (switching && waiting && state.entry === switching.entry) {
       return switching.label
@@ -1307,7 +1317,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                   wrap
                   onPress={() => {
                     setPanel(null);
-                    changeFit(fit === 'fill' ? 'fit' : 'fill');
+                    changeFit(contentFitFor(fit) === 'cover' ? FIT : FILL);
                   }}
                 />
               ) : null}

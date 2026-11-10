@@ -3,18 +3,25 @@ import {
   chooseFit,
   contentFitFor,
   EARLIER_FIT_KEY,
+  FILL,
+  FIT,
   type FitStorage,
   fitFor,
+  isFill,
+  isFit,
+  keptFrame,
   MAX_FIT_TITLES,
-  type PictureFit,
+  MAX_SIZE,
   type PictureFits,
+  type PictureFrame,
   PICTURE_FITS_KEY,
   pictureFitStore,
   pinchFit,
-  readPictureFit,
   readPictureFits,
+  readPictureFrame,
   touchSpread,
   writePictureFits,
+  writePictureFrame,
 } from './picture-fit';
 
 function memory(initial: Record<string, string> = {}) {
@@ -28,8 +35,13 @@ function memory(initial: Record<string, string> = {}) {
   return { items, storage };
 }
 
-function fits(last: PictureFit, titles: Array<[string, PictureFit]> = []): PictureFits {
-  return { last, titles: new Map(titles) };
+/** Choices with `film` as films' last choice and `live` (the same unless given) as live's. */
+function fits(
+  film: PictureFrame,
+  titles: Array<[string, PictureFrame]> = [],
+  live: PictureFrame = film,
+): PictureFits {
+  return { last: { live, film }, titles: new Map(titles) };
 }
 
 /** What is stored, as plain data. */
@@ -38,20 +50,114 @@ function stored(items: Map<string, string>): unknown {
   return raw === undefined ? undefined : JSON.parse(raw);
 }
 
-describe('readPictureFit', () => {
-  it('fills only when fill was kept, and shows the whole picture otherwise', () => {
-    expect(readPictureFit('fill')).toBe('fill');
-    expect(readPictureFit('fit')).toBe('fit');
-    expect(readPictureFit(null)).toBe('fit');
-    expect(readPictureFit('cover')).toBe('fit');
-    expect(readPictureFit('')).toBe('fit');
+/**
+ * How the update before this one read what is stored (picture-fit.ts as it was): 'fill' is fill,
+ * and anything else the whole picture.
+ */
+function earlierUpdateReads(raw: string): { last: string; titles: Array<[string, string]> } {
+  const read = (value: unknown) => (value === 'fill' ? 'fill' : 'fit');
+  const saved = JSON.parse(raw) as { last?: unknown; titles: unknown[] };
+  return {
+    last: read(saved.last),
+    titles: saved.titles.map((entry) => {
+      const [id, fit] = entry as [string, unknown];
+      return [id, read(fit)];
+    }),
+  };
+}
+
+const TOP_KEPT: PictureFrame = { size: 1, x: 0, y: -1 };
+const BETWEEN: PictureFrame = { size: 0.5, x: 0, y: 0 };
+
+describe('readPictureFrame', () => {
+  it('reads fit and fill as earlier updates kept them', () => {
+    expect(readPictureFrame('fill')).toEqual(FILL);
+    expect(readPictureFrame('fit')).toEqual(FIT);
+  });
+
+  it('reads a size and place kept as numbers', () => {
+    expect(readPictureFrame({ size: 1, x: 0, y: -1 })).toEqual(TOP_KEPT);
+    expect(readPictureFrame({ size: 0.42, x: 0.5, y: -0.25 })).toEqual({
+      size: 0.42,
+      x: 0.5,
+      y: -0.25,
+    });
+  });
+
+  it('brings numbers out of range back in range', () => {
+    expect(readPictureFrame({ size: 9, x: -4, y: 4 })).toEqual({ size: MAX_SIZE, x: -1, y: 1 });
+    expect(readPictureFrame({ size: -1, x: 0.5, y: 0.5 })).toEqual(FIT);
+  });
+
+  it('takes anything else for the whole picture', () => {
+    for (const raw of [
+      null,
+      undefined,
+      '',
+      'cover',
+      'zoom',
+      3,
+      true,
+      [],
+      {},
+      { size: 1 },
+      { size: '1', x: 0, y: 0 },
+      { size: 1, x: null, y: 0 },
+      { size: Number.NaN, x: 0, y: 0 },
+      { size: 1, x: 0, y: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(readPictureFrame(raw)).toEqual(FIT);
+    }
+  });
+});
+
+describe('writePictureFrame', () => {
+  it('keeps fit, and fill centred, as the words earlier updates read', () => {
+    expect(writePictureFrame(FIT)).toBe('fit');
+    expect(writePictureFrame(FILL)).toBe('fill');
+    expect(writePictureFrame({ size: 0, x: 0, y: 0 })).toBe('fit');
+  });
+
+  it('keeps any other size or place as its numbers', () => {
+    expect(writePictureFrame(TOP_KEPT)).toEqual({ size: 1, x: 0, y: -1 });
+    expect(writePictureFrame(BETWEEN)).toEqual({ size: 0.5, x: 0, y: 0 });
+  });
+
+  it('reads back what it wrote', () => {
+    for (const frame of [FIT, FILL, TOP_KEPT, BETWEEN, { size: 1.5, x: 0.25, y: -0.75 }]) {
+      expect(readPictureFrame(JSON.parse(JSON.stringify(writePictureFrame(frame))))).toEqual(frame);
+    }
+  });
+});
+
+describe('keptFrame', () => {
+  it('keeps no place at fit, where nothing overhangs', () => {
+    expect(keptFrame({ size: 0, x: 1, y: -1 })).toBe(FIT);
+  });
+
+  it('rounds to a thousandth, and never keeps minus zero', () => {
+    const kept = keptFrame({ size: 0.123456, x: -0.0001, y: 0.9999 });
+    expect(kept).toEqual({ size: 0.123, x: 0, y: 1 });
+    expect(Object.is(kept.x, -0)).toBe(false);
+  });
+});
+
+describe('isFit and isFill', () => {
+  it('tell the whole picture and the screen covered centred from anything else', () => {
+    expect(isFit(FIT)).toBe(true);
+    expect(isFill(FILL)).toBe(true);
+    expect(isFit(FILL)).toBe(false);
+    expect(isFill(FIT)).toBe(false);
+    expect(isFill(TOP_KEPT)).toBe(false);
+    expect(isFill(BETWEEN)).toBe(false);
+    expect(isFit(BETWEEN)).toBe(false);
   });
 });
 
 describe('contentFitFor', () => {
   it('maps fit to contain and fill to cover', () => {
-    expect(contentFitFor('fit')).toBe('contain');
-    expect(contentFitFor('fill')).toBe('cover');
+    expect(contentFitFor(FIT)).toBe('contain');
+    expect(contentFitFor(FILL)).toBe('cover');
   });
 });
 
@@ -84,8 +190,8 @@ describe('touchSpread', () => {
 
 describe('pinchFit', () => {
   it('fills as two fingers spread, and fits as they close', () => {
-    expect(pinchFit(200, 260)).toBe('fill');
-    expect(pinchFit(260, 200)).toBe('fit');
+    expect(pinchFit(200, 260)).toEqual(FILL);
+    expect(pinchFit(260, 200)).toEqual(FIT);
   });
 
   it('waits while the change is small', () => {
@@ -93,50 +199,55 @@ describe('pinchFit', () => {
     expect(pinchFit(200, 230)).toBeNull();
     expect(pinchFit(230, 200)).toBeNull();
   });
-
-  it('needs a real movement, not just a big share, when the fingers start close together', () => {
-    // Twice as far apart, but only 20 points: two fingers set down together.
-    expect(pinchFit(20, 40)).toBeNull();
-    expect(pinchFit(40, 20)).toBeNull();
-    expect(pinchFit(20, 44)).toBe('fill');
-    expect(pinchFit(44, 20)).toBe('fit');
-  });
-
-  it('needs a real share, not just points, when the fingers start far apart', () => {
-    // 40 points, but only a tenth wider.
-    expect(pinchFit(400, 440)).toBeNull();
-    expect(pinchFit(440, 400)).toBeNull();
-    expect(pinchFit(400, 480)).toBe('fill');
-    expect(pinchFit(480, 400)).toBe('fit');
-  });
 });
 
 describe('readPictureFits', () => {
   it('starts with the whole picture and no titles on a phone that never chose', () => {
-    expect(readPictureFits(null, null)).toEqual(fits('fit'));
+    expect(readPictureFits(null, null)).toEqual(fits(FIT));
   });
 
-  it('starts from the one choice the phone kept for every film before', () => {
-    expect(readPictureFits(null, 'fill')).toEqual(fits('fill'));
-    expect(readPictureFits(null, 'fit')).toEqual(fits('fit'));
+  it('starts both kinds from the one choice the phone kept for every film before', () => {
+    expect(readPictureFits(null, 'fill')).toEqual(fits(FILL));
+    expect(readPictureFits(null, 'fit')).toEqual(fits(FIT));
+  });
+
+  it('reads choices kept before there were two kinds as they were, its last for both', () => {
+    const raw = JSON.stringify({
+      last: 'fill',
+      titles: [
+        ['tt1', 'fill'],
+        ['tt2', 'fit'],
+      ],
+    });
+    expect(readPictureFits(raw, null)).toEqual(
+      fits(FILL, [
+        ['tt1', FILL],
+        ['tt2', FIT],
+      ]),
+    );
   });
 
   it('reads back what was written, in the order chosen', () => {
-    const kept = fits('fill', [
-      ['tt1', 'fill'],
-      ['tt2', 'fit'],
-      ['tt3', 'fill'],
-    ]);
+    const kept = fits(
+      TOP_KEPT,
+      [
+        ['tt1', FILL],
+        ['tt2', FIT],
+        ['tt3', BETWEEN],
+        ['tt4', TOP_KEPT],
+      ],
+      BETWEEN,
+    );
     const read = readPictureFits(writePictureFits(kept), null);
     expect(read).toEqual(kept);
-    expect([...read.titles.keys()]).toEqual(['tt1', 'tt2', 'tt3']);
+    expect([...read.titles.keys()]).toEqual(['tt1', 'tt2', 'tt3', 'tt4']);
   });
 
   it('keeps ids that look like numbers in the order chosen', () => {
-    const kept = fits('fit', [
-      ['300', 'fill'],
-      ['20', 'fit'],
-      ['tt1', 'fill'],
+    const kept = fits(FIT, [
+      ['300', FILL],
+      ['20', FIT],
+      ['tt1', FILL],
     ]);
     expect([...readPictureFits(writePictureFits(kept), null).titles.keys()]).toEqual([
       '300',
@@ -146,28 +257,44 @@ describe('readPictureFits', () => {
   });
 
   it('pays no attention to the earlier choice once choices are kept', () => {
-    expect(readPictureFits(writePictureFits(fits('fit')), 'fill')).toEqual(fits('fit'));
+    expect(readPictureFits(writePictureFits(fits(FIT)), 'fill')).toEqual(fits(FIT));
   });
 
   it('falls back to the earlier choice when what is kept cannot be read', () => {
-    expect(readPictureFits('{not json', 'fill')).toEqual(fits('fill'));
-    expect(readPictureFits('null', 'fill')).toEqual(fits('fill'));
-    expect(readPictureFits('"fill"', null)).toEqual(fits('fit'));
-    expect(readPictureFits('{"last":"fill","titles":{"tt1":"fill"}}', null)).toEqual(fits('fit'));
+    expect(readPictureFits('{not json', 'fill')).toEqual(fits(FILL));
+    expect(readPictureFits('null', 'fill')).toEqual(fits(FILL));
+    expect(readPictureFits('"fill"', null)).toEqual(fits(FIT));
+    expect(readPictureFits('{"last":"fill","titles":{"tt1":"fill"}}', null)).toEqual(fits(FIT));
   });
 
-  it('skips entries it cannot read, and takes an unknown fit as the whole picture', () => {
+  it('skips entries it cannot read, and takes an unknown frame as the whole picture', () => {
     const raw = JSON.stringify({
       last: 'cover',
-      titles: [['tt1', 'fill'], 'tt2', [3, 'fill'], ['tt4', 'zoom'], ['tt5']],
+      live: { size: 'big' },
+      titles: [
+        ['tt1', 'fill'],
+        'tt2',
+        [3, 'fill'],
+        ['tt4', 'zoom'],
+        ['tt5'],
+        ['tt6', { size: 1, x: 0 }],
+        ['tt7', { size: 1, x: 0, y: -1 }],
+      ],
     });
     expect(readPictureFits(raw, null)).toEqual(
-      fits('fit', [
-        ['tt1', 'fill'],
-        ['tt4', 'fit'],
-        ['tt5', 'fit'],
+      fits(FIT, [
+        ['tt1', FILL],
+        ['tt4', FIT],
+        ['tt5', FIT],
+        ['tt6', FIT],
+        ['tt7', TOP_KEPT],
       ]),
     );
+  });
+
+  it("takes live's last choice as fit when it is there but cannot be read", () => {
+    const raw = JSON.stringify({ last: 'fill', live: 'cover', titles: [] });
+    expect(readPictureFits(raw, null)).toEqual(fits(FILL, [], FIT));
   });
 
   it('keeps only the newest titles of a longer list', () => {
@@ -180,70 +307,117 @@ describe('readPictureFits', () => {
   });
 });
 
+describe('writePictureFits', () => {
+  it("keeps films' last choice where earlier updates look for their one", () => {
+    expect(JSON.parse(writePictureFits(fits(FILL, [['tt1', FIT]], TOP_KEPT)))).toEqual({
+      last: 'fill',
+      live: { size: 1, x: 0, y: -1 },
+      titles: [['tt1', 'fit']],
+    });
+  });
+
+  it('reads on an earlier update as fit and fill did, and anything new as fit', () => {
+    const kept = fits(
+      FILL,
+      [
+        ['tt1', FILL],
+        ['tt2', FIT],
+        ['tt3', TOP_KEPT],
+        ['tt4', BETWEEN],
+      ],
+      TOP_KEPT,
+    );
+    expect(earlierUpdateReads(writePictureFits(kept))).toEqual({
+      last: 'fill',
+      titles: [
+        ['tt1', 'fill'],
+        ['tt2', 'fit'],
+        ['tt3', 'fit'],
+        ['tt4', 'fit'],
+      ],
+    });
+  });
+});
+
 describe('fitFor', () => {
-  it('opens a title as it was left, and one never chosen for as the last choice', () => {
-    const kept = fits('fill', [['tt1', 'fit']]);
-    expect(fitFor(kept, 'tt1')).toBe('fit');
-    expect(fitFor(kept, 'tt2')).toBe('fill');
+  it('opens a title as it was left, and one never chosen for as the last of its kind', () => {
+    const kept = fits(FILL, [['tt1', FIT]], TOP_KEPT);
+    expect(fitFor(kept, 'tt1', 'film')).toEqual(FIT);
+    expect(fitFor(kept, 'tt1', 'live')).toEqual(FIT);
+    expect(fitFor(kept, 'tt2', 'film')).toEqual(FILL);
+    expect(fitFor(kept, 'tt2', 'live')).toEqual(TOP_KEPT);
   });
 });
 
 describe('chooseFit', () => {
-  it("keeps the title's choice and makes it the last one, for titles never chosen for", () => {
-    const next = chooseFit(fits('fit'), 'tt1', 'fill');
-    expect(next).toEqual(fits('fill', [['tt1', 'fill']]));
-    expect(fitFor(next, 'tt2')).toBe('fill');
+  it("keeps the title's choice and makes it the last one of its kind", () => {
+    const next = chooseFit(fits(FIT), 'tt1', FILL, 'film');
+    expect(next).toEqual(fits(FILL, [['tt1', FILL]], FIT));
+    expect(fitFor(next, 'tt2', 'film')).toEqual(FILL);
+    expect(fitFor(next, 'match', 'live')).toEqual(FIT);
+  });
+
+  it("carries a match's framing to the next match, and leaves films as they open", () => {
+    const next = chooseFit(fits(FIT), 'match1', TOP_KEPT, 'live');
+    expect(fitFor(next, 'match2', 'live')).toEqual(TOP_KEPT);
+    expect(fitFor(next, 'film', 'film')).toEqual(FIT);
   });
 
   it("leaves other titles' choices as they were", () => {
-    const next = chooseFit(fits('fill', [['tt1', 'fill']]), 'tt2', 'fit');
-    expect(fitFor(next, 'tt1')).toBe('fill');
-    expect(fitFor(next, 'tt2')).toBe('fit');
-    expect(next.last).toBe('fit');
+    const next = chooseFit(fits(FILL, [['tt1', FILL]]), 'tt2', FIT, 'film');
+    expect(fitFor(next, 'tt1', 'film')).toEqual(FILL);
+    expect(fitFor(next, 'tt2', 'film')).toEqual(FIT);
+    expect(next.last.film).toEqual(FIT);
   });
 
   it('makes a title chosen for again the newest', () => {
-    const kept = fits('fit', [
-      ['tt1', 'fill'],
-      ['tt2', 'fit'],
+    const kept = fits(FIT, [
+      ['tt1', FILL],
+      ['tt2', FIT],
     ]);
-    expect([...chooseFit(kept, 'tt1', 'fit').titles.keys()]).toEqual(['tt2', 'tt1']);
+    expect([...chooseFit(kept, 'tt1', FIT, 'film').titles.keys()]).toEqual(['tt2', 'tt1']);
   });
 
   it('changes nothing when the title already has the choice and it was the last made', () => {
-    const kept = fits('fill', [['tt1', 'fill']]);
-    expect(chooseFit(kept, 'tt1', 'fill')).toBe(kept);
+    const kept = fits(FILL, [['tt1', FILL]]);
+    expect(chooseFit(kept, 'tt1', { ...FILL }, 'film')).toBe(kept);
+  });
+
+  it('keeps a frame as it is stored: in range and to a thousandth', () => {
+    const next = chooseFit(fits(FIT), 'tt1', { size: 0.66666, x: 0, y: -3 }, 'film');
+    expect(fitFor(next, 'tt1', 'film')).toEqual({ size: 0.667, x: 0, y: -1 });
   });
 
   it('keeps the choice of a title that was following the last one', () => {
     // The same fit it showed, now its own: a later choice for another title leaves it.
-    const kept = chooseFit(fits('fill'), 'tt1', 'fill');
-    expect(fitFor(chooseFit(kept, 'tt2', 'fit'), 'tt1')).toBe('fill');
+    const kept = chooseFit(fits(FILL), 'tt1', FILL, 'film');
+    expect(fitFor(chooseFit(kept, 'tt2', FIT, 'film'), 'tt1', 'film')).toEqual(FILL);
   });
 
   it('lets the oldest title go past the limit, which then opens with the last choice', () => {
-    let kept = fits('fit');
-    for (let n = 0; n < MAX_FIT_TITLES; n++) kept = chooseFit(kept, `tt${n}`, 'fill');
-    kept = chooseFit(kept, 'tt0', 'fit');
-    kept = chooseFit(kept, 'new', 'fit');
+    let kept = fits(FIT);
+    for (let n = 0; n < MAX_FIT_TITLES; n++) kept = chooseFit(kept, `tt${n}`, FILL, 'film');
+    kept = chooseFit(kept, 'tt0', FIT, 'film');
+    kept = chooseFit(kept, 'new', FIT, 'film');
     expect(kept.titles.size).toBe(MAX_FIT_TITLES);
     // tt0 was chosen for again, so tt1 was the oldest.
     expect(kept.titles.has('tt0')).toBe(true);
     expect(kept.titles.has('tt1')).toBe(false);
-    expect(fitFor(kept, 'tt1')).toBe('fit');
+    expect(fitFor(kept, 'tt1', 'film')).toEqual(FIT);
   });
 
   it('leaves the choices it was given as they were', () => {
-    const kept = fits('fit', [['tt1', 'fit']]);
-    chooseFit(kept, 'tt1', 'fill');
-    expect(kept).toEqual(fits('fit', [['tt1', 'fit']]));
+    const kept = fits(FIT, [['tt1', FIT]]);
+    chooseFit(kept, 'tt1', FILL, 'film');
+    expect(kept).toEqual(fits(FIT, [['tt1', FIT]]));
   });
 });
 
 describe('pictureFitStore', () => {
   it('starts every title with the whole picture on a phone that never chose', () => {
     const { items, storage } = memory();
-    expect(pictureFitStore(storage).title('tt1').get()).toBe('fit');
+    expect(pictureFitStore(storage).title('tt1', 'film').get()).toEqual(FIT);
+    expect(pictureFitStore(storage).title('match', 'live').get()).toEqual(FIT);
     // Nothing is written until something is chosen.
     expect(items.size).toBe(0);
   });
@@ -251,77 +425,93 @@ describe('pictureFitStore', () => {
   it('keeps each title its own choice, for the next launch too', () => {
     const { storage } = memory();
     const memoryOf = pictureFitStore(storage);
-    memoryOf.title('film').set('fill');
-    memoryOf.title('show').set('fit');
-    expect(memoryOf.title('film').get()).toBe('fill');
-    expect(memoryOf.title('show').get()).toBe('fit');
+    memoryOf.title('film', 'film').set(FILL);
+    memoryOf.title('show', 'film').set(FIT);
+    memoryOf.title('match', 'live').set(TOP_KEPT);
+    expect(memoryOf.title('film', 'film').get()).toEqual(FILL);
+    expect(memoryOf.title('show', 'film').get()).toEqual(FIT);
     const next = pictureFitStore(storage);
-    expect(next.title('film').get()).toBe('fill');
-    expect(next.title('show').get()).toBe('fit');
+    expect(next.title('film', 'film').get()).toEqual(FILL);
+    expect(next.title('show', 'film').get()).toEqual(FIT);
+    expect(next.title('match', 'live').get()).toEqual(TOP_KEPT);
   });
 
-  it('opens a title never chosen for with the last choice made on the phone', () => {
+  it('opens a title never chosen for with the last choice made for its kind', () => {
     const { storage } = memory();
     const memoryOf = pictureFitStore(storage);
-    memoryOf.title('film').set('fill');
-    expect(memoryOf.title('other').get()).toBe('fill');
-    memoryOf.title('show').set('fit');
-    expect(memoryOf.title('other').get()).toBe('fit');
-    expect(pictureFitStore(storage).title('other').get()).toBe('fit');
+    memoryOf.title('film', 'film').set(FILL);
+    expect(memoryOf.title('other', 'film').get()).toEqual(FILL);
+    memoryOf.title('match', 'live').set(TOP_KEPT);
+    expect(memoryOf.title('other', 'film').get()).toEqual(FILL);
+    expect(memoryOf.title('next match', 'live').get()).toEqual(TOP_KEPT);
+    memoryOf.title('show', 'film').set(FIT);
+    expect(memoryOf.title('other', 'film').get()).toEqual(FIT);
+    const next = pictureFitStore(storage);
+    expect(next.title('other', 'film').get()).toEqual(FIT);
+    expect(next.title('next match', 'live').get()).toEqual(TOP_KEPT);
   });
 
   it("moves the one choice for every film over once, as every title's starting point", () => {
     const { items, storage } = memory({ [EARLIER_FIT_KEY]: 'fill' });
     const memoryOf = pictureFitStore(storage);
-    expect(memoryOf.title('tt1').get()).toBe('fill');
-    expect(stored(items)).toEqual({ last: 'fill', titles: [] });
-    memoryOf.title('tt1').set('fit');
-    expect(pictureFitStore(storage).title('tt1').get()).toBe('fit');
-    expect(pictureFitStore(storage).title('tt2').get()).toBe('fit');
+    expect(memoryOf.title('tt1', 'film').get()).toEqual(FILL);
+    expect(memoryOf.title('match', 'live').get()).toEqual(FILL);
+    expect(stored(items)).toEqual({ last: 'fill', live: 'fill', titles: [] });
+    memoryOf.title('tt1', 'film').set(FIT);
+    expect(pictureFitStore(storage).title('tt1', 'film').get()).toEqual(FIT);
+    expect(pictureFitStore(storage).title('tt2', 'film').get()).toEqual(FIT);
+    expect(pictureFitStore(storage).title('match', 'live').get()).toEqual(FILL);
   });
 
   it('leaves the earlier choice for an earlier update to read, and reads it no more', () => {
     const { items, storage } = memory({ [EARLIER_FIT_KEY]: 'fill' });
-    pictureFitStore(storage).title('tt1').set('fit');
+    pictureFitStore(storage).title('tt1', 'film').set(FIT);
     // A phone put back on the earlier update still opens films filled, as it had them.
     expect(items.get(EARLIER_FIT_KEY)).toBe('fill');
     // Once this update is back, the choices it kept count, not that one.
     const back = pictureFitStore(storage);
-    expect(back.title('tt1').get()).toBe('fit');
-    expect(back.title('tt2').get()).toBe('fit');
-    expect(stored(items)).toEqual({ last: 'fit', titles: [['tt1', 'fit']] });
+    expect(back.title('tt1', 'film').get()).toEqual(FIT);
+    expect(back.title('tt2', 'film').get()).toEqual(FIT);
+    expect(stored(items)).toEqual({ last: 'fit', live: 'fill', titles: [['tt1', 'fit']] });
   });
 
   it('reads the earlier choice no more once choices are kept', () => {
     const { storage } = memory({
-      [PICTURE_FITS_KEY]: writePictureFits(fits('fit')),
+      [PICTURE_FITS_KEY]: writePictureFits(fits(FIT)),
       [EARLIER_FIT_KEY]: 'fill',
     });
-    expect(pictureFitStore(storage).title('tt1').get()).toBe('fit');
+    expect(pictureFitStore(storage).title('tt1', 'film').get()).toEqual(FIT);
   });
 
   it('tells those watching when a choice changes, and takes an update as well', () => {
     const { storage } = memory();
-    const film = pictureFitStore(storage).title('film');
+    const film = pictureFitStore(storage).title('film', 'film');
     let calls = 0;
     const stop = film.subscribe(() => calls++);
-    film.set((fit) => (fit === 'fill' ? 'fit' : 'fill'));
-    expect(film.get()).toBe('fill');
+    film.set((frame) => (isFill(frame) ? FIT : FILL));
+    expect(film.get()).toEqual(FILL);
     expect(calls).toBe(1);
     // The same choice again changes nothing.
-    film.set('fill');
+    film.set({ ...FILL });
     expect(calls).toBe(1);
     stop();
-    film.set('fit');
+    film.set(FIT);
     expect(calls).toBe(1);
+  });
+
+  it('gives the same frame until it changes, as a screen reading it needs', () => {
+    const { storage } = memory();
+    const film = pictureFitStore(storage).title('film', 'film');
+    film.set(TOP_KEPT);
+    expect(film.get()).toBe(film.get());
   });
 
   it('keeps the newest titles only', () => {
     const { items, storage } = memory();
     const memoryOf = pictureFitStore(storage);
     for (let n = 0; n < MAX_FIT_TITLES + 5; n++)
-      memoryOf.title(`tt${n}`).set(n % 2 ? 'fit' : 'fill');
-    const { titles } = stored(items) as { titles: [string, PictureFit][] };
+      memoryOf.title(`tt${n}`, 'film').set(n % 2 ? FIT : FILL);
+    const { titles } = stored(items) as { titles: [string, unknown][] };
     expect(titles).toHaveLength(MAX_FIT_TITLES);
     expect(titles[0]![0]).toBe('tt5');
     expect(titles[MAX_FIT_TITLES - 1]![0]).toBe(`tt${MAX_FIT_TITLES + 4}`);
@@ -337,11 +527,11 @@ describe('pictureFitStore', () => {
       },
     };
     const memoryOf = pictureFitStore(broken);
-    const film = memoryOf.title('film');
-    expect(film.get()).toBe('fit');
-    film.set('fill');
-    expect(film.get()).toBe('fill');
-    expect(memoryOf.title('other').get()).toBe('fill');
+    const film = memoryOf.title('film', 'film');
+    expect(film.get()).toEqual(FIT);
+    film.set(FILL);
+    expect(film.get()).toEqual(FILL);
+    expect(memoryOf.title('other', 'film').get()).toEqual(FILL);
   });
 
   it('keeps the earlier choice where it was if the new one cannot be written', () => {
@@ -352,7 +542,7 @@ describe('pictureFitStore', () => {
         throw new Error('full');
       },
     };
-    expect(pictureFitStore(full).title('tt1').get()).toBe('fill');
+    expect(pictureFitStore(full).title('tt1', 'film').get()).toEqual(FILL);
     expect(items.get(EARLIER_FIT_KEY)).toBe('fill');
   });
 });

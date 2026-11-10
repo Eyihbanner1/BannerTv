@@ -116,7 +116,11 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
   await more.click();
   await page.getByRole('button', { name: 'Zoom to fill, Off' }).click();
   await expect.poll(video).toBe('cover');
-  expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
+  expect(await storedFits(page)).toEqual({
+    last: 'fill',
+    live: 'fit',
+    titles: [['tt2285752', 'fill']],
+  });
 
   // Quality, under More options, switches to the 720p stream.
   if (!(await more.isVisible())) await page.mouse.click(206, 160);
@@ -175,7 +179,11 @@ test.describe('with touch', () => {
     await pinch([160, 260], [90, 330], [140, 280]);
     await expect.poll(fit).toBe('cover');
     await expect(page.getByText('Zoomed to fill')).toBeVisible();
-    expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
+    expect(await storedFits(page)).toEqual({
+      last: 'fill',
+      live: 'fit',
+      titles: [['tt2285752', 'fill']],
+    });
     await page.waitForTimeout(600);
     await expect(more).toBeHidden();
     expect(Math.abs((await time()) - before)).toBeLessThan(3);
@@ -354,6 +362,7 @@ test.describe('with touch', () => {
     await expect.poll(fit).toBe('contain');
     expect(await storedFits(page)).toEqual({
       last: 'fill',
+      live: 'fill',
       titles: [
         ['tt8000001', 'fit'],
         ['tt2285752', 'fill'],
