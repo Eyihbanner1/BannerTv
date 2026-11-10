@@ -256,6 +256,8 @@ const OVERRIDES = {
         "The {{count}} streams found didn't play a moment ago. Try again to give them another go, or open Streams.",
       uncached:
         "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in Streams.",
+      addonNoticeHelp:
+        "That's a message from the addon, not a video. Try again later, or check the addon's settings in Settings, Addons.",
     },
   },
 } as const;

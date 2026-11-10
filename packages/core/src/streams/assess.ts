@@ -1,4 +1,5 @@
 import type { Stream } from '@bannertv/protocol';
+import { isNoticeStream } from './notice';
 import type {
   AudioFormat,
   Container,
@@ -66,9 +67,11 @@ export function streamRequestHeaders(stream: Stream): Record<string, string> | u
   return count > 0 ? headers : undefined;
 }
 
-function actionFor(stream: Stream, tv: TvCapabilities): StreamAction {
+function actionFor(stream: Stream, facts: StreamFacts, tv: TvCapabilities): StreamAction {
   switch (stream.source.kind) {
     case 'url': {
+      // An addon's message posing as a stream: there is nothing to play, only words to show.
+      if (isNoticeStream(stream, facts)) return { kind: 'unavailable', reason: 'notice' };
       // webOS's <video> cannot send request headers, and Chromium overwrites
       // any passed through mediaOption; Android's player sends them. Response
       // headers need no help to play.
@@ -134,5 +137,5 @@ export function assessStream(
   // What stops a picture or sound comes before what only changes the picture.
   const severe = warnings.filter((warning) => SEVERE_WARNINGS.has(warning));
   const mild = warnings.filter((warning) => !SEVERE_WARNINGS.has(warning));
-  return { action: actionFor(stream, tv), warnings: severe.concat(mild) };
+  return { action: actionFor(stream, facts, tv), warnings: severe.concat(mild) };
 }

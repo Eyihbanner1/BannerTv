@@ -14,7 +14,7 @@ import {
 } from 'expo-video';
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
-import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { errorAfterHlsRetry, errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
 import { type ClockReading, readClock, STOPPED_CLOCK } from './player-clock';
 import { toAndroidTrack, trackId } from './tracks';
 import { videoSource } from './video-source';
@@ -190,12 +190,16 @@ function onStatus({ status, error }: StatusChangeEventPayload): void {
       open(openedUrl, openedStartAt, 'hls');
       return;
     }
-    // If it was not HLS either, the first answer is the one that describes the link.
-    reportError(firstError ?? message);
+    // After the HLS try: its own answer, unless that too says the link holds no stream.
+    reportError(errorAfterHlsRetry(firstError, message));
     return;
   }
   if (status === 'readyToPlay') {
     readyOnce = true;
+    // The link opened, so its kind is known and an error before it no longer describes it: a
+    // playlist that ends or a server that stops answering later reports its own trouble.
+    typeSettled = true;
+    firstError = undefined;
     if (!startChecked) {
       startChecked = true;
       if (openedStartAt > 0 && Math.abs(position(player) - openedStartAt) > START_SLACK_S) {

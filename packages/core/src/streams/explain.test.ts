@@ -52,6 +52,16 @@ const headerLink = (rank = 0) =>
     rank,
   );
 const youtube = () => entry({ name: 'Trailer', ytId: 'abcdefghijk' });
+const SPORTS = { manifest: { name: 'Sports Streams' } };
+const notice = (addonRank = 0) =>
+  entry(
+    {
+      name: 'Sports Streams',
+      description: 'Streams temporarily unavailable - try again shortly',
+      url: 'https://premium.example.org/KEY-123/unavailable',
+    },
+    addonRank,
+  );
 
 function input(overrides: Partial<ProblemInput>): ProblemInput {
   return {
@@ -184,5 +194,68 @@ describe('explainProblem, after streams were tried', () => {
     expect(
       explainProblem(input({ nothing: false, entries, attempts: [attempt(first)] })).torrentsToo,
     ).toEqual({ addon: 'Torrentio', count: 2 });
+  });
+});
+
+describe('explainProblem, when an addon sent a message instead of a stream', () => {
+  it('says what the addon said when that is all it sent', () => {
+    expect(explainProblem(input({ asked: [SPORTS], entries: [notice()] }))).toEqual({
+      problem: {
+        kind: 'addon-notice',
+        addon: 'Sports Streams',
+        text: 'Streams temporarily unavailable - try again shortly',
+      },
+    });
+    // Without a name, the words alone.
+    expect(
+      explainProblem(input({ asked: [{ manifest: { name: ' ' } }], entries: [notice()] })).problem,
+    ).toEqual({
+      kind: 'addon-notice',
+      addon: '',
+      text: 'Streams temporarily unavailable - try again shortly',
+    });
+  });
+
+  it('never shows the link, which can carry the viewer’s key', () => {
+    const explained = explainProblem(input({ asked: [SPORTS], entries: [notice()] }));
+    expect(JSON.stringify(explained)).not.toContain('KEY-123');
+  });
+
+  it("adds the addon's words to another reason", () => {
+    const tried = link('Film.1080p.mkv');
+    expect(
+      explainProblem(
+        input({
+          nothing: false,
+          asked: [TORRENTIO, SPORTS],
+          entries: [tried, notice(1)],
+          attempts: [attempt(tried, 'network')],
+        }),
+      ),
+    ).toEqual({
+      problem: { kind: 'tried', tried: 1, last: 'network' },
+      noticeToo: {
+        addon: 'Sports Streams',
+        text: 'Streams temporarily unavailable - try again shortly',
+      },
+    });
+    // Torrents beside it still say to set up debrid, then what the other addon said.
+    expect(
+      explainProblem(input({ asked: [TORRENTIO, SPORTS], entries: [torrent(), notice(1)] })),
+    ).toEqual({
+      problem: { kind: 'torrents', addon: 'Torrentio', count: 1 },
+      noticeToo: {
+        addon: 'Sports Streams',
+        text: 'Streams temporarily unavailable - try again shortly',
+      },
+    });
+  });
+
+  it('counts a message with no words as a web link', () => {
+    const page = entry({ url: 'https://addon.example/abc/configure' });
+    expect(page.assessment.action).toEqual({ kind: 'unavailable', reason: 'notice' });
+    expect(explainProblem(input({ asked: [SPORTS], entries: [page] }))).toEqual({
+      problem: { kind: 'web-only', count: 1 },
+    });
   });
 });

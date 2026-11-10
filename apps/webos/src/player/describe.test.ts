@@ -1,7 +1,9 @@
+import { assessStream, describeStream, type StreamEntry } from '@bannertv/core';
+import { parseStream } from '@bannertv/protocol';
 import i18next from 'i18next';
 import { beforeAll, describe, expect, it } from 'vitest';
 import en from '../i18n/en.json';
-import { problemText } from './describe';
+import { problemText, streamRowText } from './describe';
 
 const t = i18next.getFixedT('en');
 
@@ -10,6 +12,40 @@ beforeAll(async () => {
     resources: { en: { translation: en } },
     lng: 'en',
     interpolation: { escapeValue: false },
+  });
+});
+
+describe('problemText for a message from an addon', () => {
+  const text = 'Streams temporarily unavailable - try again shortly';
+
+  it("gives the addon's words, then what to do", () => {
+    expect(
+      problemText(t, { problem: { kind: 'addon-notice', addon: 'Sports Streams', text } }),
+    ).toEqual({
+      title: 'No stream could play',
+      lines: [
+        'Sports Streams says: “Streams temporarily unavailable - try again shortly”',
+        "That's a message from the addon, not a video. Try again later, or check the addon's settings in Addons.",
+      ],
+    });
+    expect(problemText(t, { problem: { kind: 'addon-notice', addon: '', text } }).lines[0]).toBe(
+      'Your addon says: “Streams temporarily unavailable - try again shortly”',
+    );
+  });
+
+  it("adds the addon's words after another reason", () => {
+    expect(
+      problemText(t, {
+        problem: { kind: 'tried', tried: 1, last: 'network' },
+        noticeToo: { addon: 'Sports Streams', text },
+      }),
+    ).toEqual({
+      title: "This stream won't play",
+      lines: [
+        'The stream stopped loading. Its source may be busy or offline.',
+        'Sports Streams also said: “Streams temporarily unavailable - try again shortly”',
+      ],
+    });
   });
 });
 
@@ -74,6 +110,44 @@ describe('problemText', () => {
         "Your stream helper isn't on. Open BannerTV on the Android phone or box, turn the helper on, and keep it on the same Wi-Fi.",
         'Torrentio also sent 3 torrents, which play once a debrid service is set up in its settings.',
       ],
+    });
+  });
+});
+
+describe('streamRowText for a message from an addon', () => {
+  it('shows the whole message, and says it is not a video', () => {
+    const stream = parseStream({
+      name: 'Please reinstall the addon',
+      title:
+        'We have updated our free addon to improve service quality.\nPlease visit sports.highfly.to/configure\nto get a new addon link.',
+      url: 'https://sports.highfly.to/configure',
+      behaviorHints: { notWebReady: true },
+    })!;
+    const facts = describeStream(stream);
+    const entry: StreamEntry = {
+      stream,
+      addonId: 'community.sports.fly',
+      addonRank: 0,
+      rank: 0,
+      facts,
+      assessment: assessStream(stream, facts, {
+        webOS: null,
+        uhd: null,
+        hdr10: null,
+        dolbyVision: null,
+        hevc: null,
+        av1: null,
+        dts: null,
+        truehd: null,
+      }),
+    };
+    expect(streamRowText(t, entry, { heavy: false })).toEqual({
+      title:
+        'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.highfly.to/configure to get a new addon link.',
+      badges: [],
+      playable: false,
+      note: 'A message from the addon, not a video.',
+      notes: ['A message from the addon, not a video.'],
     });
   });
 });
