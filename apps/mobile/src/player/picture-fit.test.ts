@@ -19,6 +19,7 @@ import {
   MAX_SIZE,
   movePinch,
   PAN_MIN_PX,
+  PAN_SLACK_PX,
   type Pinch,
   PINCH_MIN_PX,
   pictureChoice,
@@ -32,6 +33,8 @@ import {
   readPictureFits,
   readPictureFrame,
   sizeAt,
+  SNAP,
+  SNAP_OUT,
   snapOf,
   startPinch,
   switchedFrame,
@@ -782,8 +785,25 @@ describe('pinching', () => {
     a: { x: 1560 - spread / 2 + across, y: 720 + down },
     b: { x: 1560 + spread / 2 + across, y: 720 + down },
   });
+  /** Two fingers one above the other in the middle of the screen, `spread` apart, moved by `down`. */
+  const above = (spread: number, down = 0): Fingers => ({
+    a: { x: 1560, y: 720 - spread / 2 + down },
+    b: { x: 1560, y: 720 + spread / 2 + down },
+  });
   const move = (pinch: Pinch, ...steps: Fingers[]) =>
     steps.reduce((now, fingers) => movePinch(now, fingers, PHONE, HOCKEY), pinch);
+  /** The same numbers between 0 and 1 on every run, for fingers that are never quite steady. */
+  const seeded = (seed: number) => {
+    let state = seed >>> 0;
+    return () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let mixed = Math.imul(state ^ (state >>> 15), state | 1);
+      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  /** How far the picture's top edge is below where it is at fill, centred. */
+  const loweredBy = (pinch: Pinch) => pictureRect(PHONE, HOCKEY, pinch.frame).top + 157.5;
 
   it('leaves the picture as it was while two fingers rest, settle or barely move', () => {
     const start = startPinch(FILL, apart(400));
@@ -835,6 +855,46 @@ describe('pinching', () => {
     expect(between.frame.size).toBeLessThan(1);
   });
 
+  it('lands once as fingers held at the edge of fill shake, and stays', () => {
+    // As far apart as takes the picture just to SNAP from fill.
+    const edge = 424 * HOCKEY_FILL * (1 - SNAP);
+    let pinch = move(startPinch(FIT, apart(400)), apart(424), apart(edge - 1));
+    expect(snapOf(pinch.frame)).toBeNull();
+    const random = seeded(4);
+    let landings = 0;
+    let changes = 0;
+    for (let step = 0; step < 100; step++) {
+      const next = movePinch(pinch, apart(edge + (random() - 0.5) * 0.3), PHONE, HOCKEY);
+      if (snapOf(next.frame) !== snapOf(pinch.frame)) {
+        changes++;
+        if (snapOf(next.frame)) landings++;
+      }
+      pinch = next;
+    }
+    expect(landings).toBe(1);
+    expect(changes).toBe(1);
+    expect(pinch.frame).toEqual(FILL);
+  });
+
+  it('leaves fit or fill only once the fingers take it SNAP_OUT away', () => {
+    const fit = startPinch(FIT, apart(400));
+    expect(move(fit, apart(424), apart(424 * (1 + (SNAP + SNAP_OUT) / 2))).frame).toBe(FIT);
+    expect(move(fit, apart(424), apart(424 * (1 + SNAP_OUT + 0.005))).frame.size).toBeGreaterThan(
+      0,
+    );
+
+    const filled = move(fit, apart(424), apart(424 * HOCKEY_FILL));
+    expect(filled.frame).toEqual(FILL);
+    const held = move(filled, apart(424 * HOCKEY_FILL * (1 + (SNAP + SNAP_OUT) / 2)));
+    expect(held.frame).toBe(filled.frame);
+    const out = move(held, apart(424 * HOCKEY_FILL * (1 + SNAP_OUT + 0.005)));
+    expect(out.frame.size).toBeGreaterThan(1);
+    // Back towards fill, it lands again only within SNAP of it.
+    const near = move(out, apart(424 * HOCKEY_FILL * (1 + (SNAP + SNAP_OUT) / 2)));
+    expect(near.frame.size).toBeGreaterThan(1);
+    expect(move(near, apart(424 * HOCKEY_FILL * (1 + SNAP / 2))).frame).toEqual(FILL);
+  });
+
   it('never goes smaller than the whole picture, nor past the biggest size', () => {
     expect(move(startPinch(FILL, apart(800)), apart(700), apart(100)).frame).toEqual(FIT);
     expect(move(startPinch(FIT, apart(100)), apart(130), apart(2000)).frame.size).toBe(MAX_SIZE);
@@ -847,6 +907,75 @@ describe('pinching', () => {
     expect(moved.frame.size).toBe(1);
     expect(moved.frame.y).toBeCloseTo(-200 / 315);
     expect(pictureRect(PHONE, HOCKEY, moved.frame).top).toBeCloseTo(-157.5 + 100);
+  });
+
+  it('follows two fingers dragged together point for point, however unevenly each touch moves them', () => {
+    const start = apart(400);
+    // Each touch moves one finger and then the other, 1.5 points at a time, 120 points in all.
+    const turns: Fingers[] = [];
+    for (let step = 1; step <= 160; step++) {
+      const a = 1.5 * Math.ceil(step / 2);
+      const b = 1.5 * Math.floor(step / 2);
+      turns.push({ a: { ...start.a, y: start.a.y + a }, b: { ...start.b, y: start.b.y + b } });
+    }
+    const turned = move(startPinch(FILL, start), ...turns);
+    expect(Math.abs(loweredBy(turned) - (120 - PAN_MIN_PX))).toBeLessThanOrEqual(1);
+
+    // Each finger a fraction of a point off where it truly is at each touch, as a screen reads
+    // it, while both move down 0.5 points a touch, 80 points in all.
+    const random = seeded(56);
+    const shaky = (at: { x: number; y: number }, down: number) => ({
+      x: at.x + (random() - 0.5) * 0.5,
+      y: at.y + down + (random() - 0.5) * 0.5,
+    });
+    const shakes: Fingers[] = [];
+    for (let step = 1; step <= 160; step++) {
+      shakes.push({ a: shaky(start.a, step * 0.5), b: shaky(start.b, step * 0.5) });
+    }
+    const shook = move(startPinch(FILL, start), ...shakes);
+    expect(Math.abs(loweredBy(shook) - (80 - PAN_MIN_PX))).toBeLessThanOrEqual(1);
+    expect(shook.frame.size).toBe(1);
+
+    // And read to the screen's own steps of 0.29 points, with one finger a little lower than the
+    // other, so each steps on touches of its own.
+    const stepped = (at: { x: number; y: number }, down: number) => ({
+      x: at.x,
+      y: Math.round((at.y + down) / 0.29) * 0.29,
+    });
+    const lower = { ...start.b, y: start.b.y + 0.13 };
+    const steps: Fingers[] = [];
+    for (let step = 1; step <= 160; step++) {
+      steps.push({ a: stepped(start.a, step * 0.25), b: stepped(lower, step * 0.25) });
+    }
+    const stepping = move(
+      startPinch(FILL, { a: stepped(start.a, 0), b: stepped(lower, 0) }),
+      ...steps,
+    );
+    expect(Math.abs(loweredBy(stepping) - (40 - PAN_MIN_PX))).toBeLessThanOrEqual(1);
+  });
+
+  it('moves the picture after a pinch, trailing the fingers by PAN_SLACK_PX at most', () => {
+    const pinched = move(startPinch(FILL, above(400)), above(424), above(424 * 1.1));
+    expect(pinched.frame.size).toBeGreaterThan(1);
+    expect(pinched.frame.y).toBe(0);
+    const top = pictureRect(PHONE, HOCKEY, pinched.frame).top;
+    const drags: Fingers[] = [];
+    for (let down = 1; down <= 100; down++) drags.push(above(424 * 1.1, down));
+    const dragged = move(pinched, ...drags);
+    expect(dragged.frame.size).toBe(pinched.frame.size);
+    const lowered = pictureRect(PHONE, HOCKEY, dragged.frame).top - top;
+    expect(lowered).toBeLessThanOrEqual(100 - PAN_MIN_PX + 0.001);
+    expect(lowered).toBeGreaterThanOrEqual(100 - PAN_MIN_PX - PAN_SLACK_PX - 0.001);
+  });
+
+  it('leaves the picture where a drag put it as the fingers then pinch', () => {
+    const dragged = move(startPinch(FILL, above(400)), above(400, 20), above(400, 120));
+    expect(dragged.frame.y).toBeCloseTo(-200 / 315);
+    const spreads: Fingers[] = [];
+    for (let wider = 1; wider <= 100; wider++) spreads.push(above(400 + wider, 120));
+    const pinched = move(dragged, ...spreads);
+    expect(pinched.frame.size).toBeGreaterThan(1);
+    expect(pinched.frame.y).toBe(dragged.frame.y);
   });
 
   it('keeps the picture covering the screen, and comes straight back from the edge', () => {

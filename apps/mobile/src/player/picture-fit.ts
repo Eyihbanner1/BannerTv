@@ -389,8 +389,23 @@ export function fingersOf(touches: readonly TouchPoint[] | undefined): Fingers |
 export const PINCH_MIN_PX = 24;
 /** Both fingers must move this many points together before the picture moves with them. */
 export const PAN_MIN_PX = 16;
+/**
+ * How far one finger's own movement, that the other has not made yet, counts towards the two
+ * moving together. Two fingers dragged together never move exactly alike from one touch to the
+ * next: one moves a little more, or not at all, and the next touch makes up for it. Carried
+ * over, that keeps the picture under the fingers point for point. Fingers pinching move apart
+ * for good, and past this many points what one moved alone is let go, so a drag after a pinch
+ * trails the fingers by this much at most, and a pinch never moves the picture.
+ */
+export const PAN_SLACK_PX = 2;
 /** Within this share of fit or fill (4 percent), a pinch lands on it exactly. */
 export const SNAP = 0.04;
+/**
+ * A pinch landed on fit or fill stays there until it is this share away (5 percent), a little
+ * further than it came in from. Fingers held still at the edge are never quite still, and would
+ * otherwise make the picture jump on and off it, with a buzz each time.
+ */
+export const SNAP_OUT = 0.05;
 
 /** A pinch on the picture, from the fingers coming down to the first of them lifting. */
 export interface Pinch {
@@ -405,15 +420,33 @@ export interface Pinch {
   zoomFrom: number | null;
   /** Where the fingers were at the last move. */
   fingers: Fingers;
+  /**
+   * What each finger has moved that the other has not moved with it yet, each way, within
+   * PAN_SLACK_PX: it counts as moving together once the other catches up.
+   */
+  left: Fingers;
   /** How far both have moved together so far, until it passes PAN_MIN_PX; then null. */
   drift: Point | null;
+  /** Fit or fill when the pinch has landed on it, until it leaves by SNAP_OUT; else null. */
+  snapped: 'fit' | 'fill' | null;
   /** The frame now. */
   frame: PictureFrame;
 }
 
+const STILL: Fingers = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 } };
+
 export function startPinch(frame: PictureFrame, fingers: Fingers): Pinch {
   const spread = Math.hypot(fingers.a.x - fingers.b.x, fingers.a.y - fingers.b.y);
-  return { from: frame, spread, zoomFrom: null, fingers, drift: { x: 0, y: 0 }, frame };
+  return {
+    from: frame,
+    spread,
+    zoomFrom: null,
+    fingers,
+    left: STILL,
+    drift: { x: 0, y: 0 },
+    snapped: snapOf(frame),
+    frame,
+  };
 }
 
 /**
@@ -427,11 +460,24 @@ function together(a: number, b: number): number {
   return 0;
 }
 
-/** Fit or fill exactly when a zoom is within SNAP of it, and the zoom as it is otherwise. */
-function snapZoom(zoom: number, fill: number): number {
-  if (zoom <= 1 + SNAP) return 1;
-  if (Math.abs(zoom / fill - 1) <= SNAP) return fill;
-  return zoom;
+/**
+ * What one finger moved along one direction (`moved`, with what it had left over) less what the
+ * two moved together (`shared`), kept for the next touch within PAN_SLACK_PX.
+ */
+function leftOver(moved: number, shared: number): number {
+  return clamp(moved - shared, -PAN_SLACK_PX, PAN_SLACK_PX) + 0;
+}
+
+/**
+ * Whether a pinch at `zoom` (fill being `fill` times the whole picture) lands on fit or fill:
+ * within SNAP of either, or still within SNAP_OUT of the one it had landed on (`snapped`).
+ */
+function snapAt(zoom: number, fill: number, snapped: Pinch['snapped']): Pinch['snapped'] {
+  if (snapped === 'fit' && zoom <= 1 + SNAP_OUT) return 'fit';
+  if (snapped === 'fill' && Math.abs(zoom / fill - 1) <= SNAP_OUT) return 'fill';
+  if (zoom <= 1 + SNAP) return 'fit';
+  if (Math.abs(zoom / fill - 1) <= SNAP) return 'fill';
+  return null;
 }
 
 /**
@@ -448,8 +494,9 @@ function moveAlong(screen: number, length: number, at: number, by: number): numb
 /**
  * The pinch once the fingers are at `fingers`, on a screen `screen` big showing a picture of
  * `video`'s shape. The size follows how far apart the fingers are, from the size it had as they
- * came down, between fit and MAX_SIZE, and lands exactly on fit or fill within SNAP of them.
- * The place follows the fingers as they move together, where the picture overhangs.
+ * came down, between fit and MAX_SIZE, and lands exactly on fit or fill within SNAP of them,
+ * staying there until SNAP_OUT. The place follows the fingers as they move together, where the
+ * picture overhangs.
  */
 export function movePinch(pinch: Pinch, fingers: Fingers, screen: Size, video: Size): Pinch {
   const fill = fillZoom(screen, video);
@@ -457,13 +504,27 @@ export function movePinch(pinch: Pinch, fingers: Fingers, screen: Size, video: S
   let zoomFrom = pinch.zoomFrom;
   if (zoomFrom === null && Math.abs(spread - pinch.spread) >= PINCH_MIN_PX) zoomFrom = spread;
   let size = pinch.frame.size;
+  let snapped = pinch.snapped;
   if (zoomFrom !== null && zoomFrom > 0) {
-    const zoom = (zoomAt(pinch.from.size, fill) * spread) / zoomFrom;
-    size = sizeAt(snapZoom(Math.min(fill * BEYOND_FILL, Math.max(1, zoom)), fill), fill);
+    const raw = (zoomAt(pinch.from.size, fill) * spread) / zoomFrom;
+    const zoom = clamp(raw, 1, fill * BEYOND_FILL);
+    snapped = snapAt(zoom, fill, snapped);
+    size = snapped === 'fit' ? 0 : snapped === 'fill' ? 1 : sizeAt(zoom, fill);
   }
-  const moved = {
-    x: together(fingers.a.x - pinch.fingers.a.x, fingers.b.x - pinch.fingers.b.x),
-    y: together(fingers.a.y - pinch.fingers.a.y, fingers.b.y - pinch.fingers.b.y),
+  // What each finger has moved since the picture last moved with both, each way: this touch's
+  // movement and what was left over from the ones before.
+  const a = {
+    x: pinch.left.a.x + fingers.a.x - pinch.fingers.a.x,
+    y: pinch.left.a.y + fingers.a.y - pinch.fingers.a.y,
+  };
+  const b = {
+    x: pinch.left.b.x + fingers.b.x - pinch.fingers.b.x,
+    y: pinch.left.b.y + fingers.b.y - pinch.fingers.b.y,
+  };
+  const moved = { x: together(a.x, b.x), y: together(a.y, b.y) };
+  const left = {
+    a: { x: leftOver(a.x, moved.x), y: leftOver(a.y, moved.y) },
+    b: { x: leftOver(b.x, moved.x), y: leftOver(b.y, moved.y) },
   };
   let drift = pinch.drift;
   let by = { x: 0, y: 0 };
@@ -475,7 +536,7 @@ export function movePinch(pinch: Pinch, fingers: Fingers, screen: Size, video: S
   }
   // Fingers resting, or not yet past either dead zone, leave the frame exactly as it was.
   if (size === pinch.frame.size && by.x === 0 && by.y === 0) {
-    return { ...pinch, zoomFrom, fingers, drift };
+    return { ...pinch, zoomFrom, fingers, left, drift, snapped };
   }
   const rect = pictureRect(screen, video, { ...pinch.frame, size });
   const frame = {
@@ -487,7 +548,9 @@ export function movePinch(pinch: Pinch, fingers: Fingers, screen: Size, video: S
     ...pinch,
     zoomFrom,
     fingers,
+    left,
     drift,
+    snapped,
     frame: sameFrame(frame, pinch.frame) ? pinch.frame : frame,
   };
 }
