@@ -47,7 +47,7 @@ import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { motion } from '@brand/tokens/design';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import { VideoView } from 'expo-video';
+import type { VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -55,11 +55,13 @@ import {
   AppState,
   BackHandler,
   type GestureResponderEvent,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/routes';
@@ -84,15 +86,20 @@ import {
 } from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
+import { Picture, PictureNote, noteScreen, pictureNow } from './Picture';
 import {
-  contentFitFor,
-  FILL,
-  FIT,
+  ASSUMED_VIDEO,
+  fingersOf,
+  movePinch,
+  type Pinch,
+  pictureChoice,
   type PictureFrame,
   type PictureKind,
   pictureFitStore,
-  pinchFit,
   sameFrame,
+  snapOf,
+  startPinch,
+  switchedFrame,
   touchSpread,
 } from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
@@ -131,6 +138,14 @@ const noop = () => () => undefined;
 
 /** The picture's size and place: this phone's choice for each title (picture-fit.ts). */
 const pictureFits = pictureFitStore(localStorage);
+
+/**
+ * In a browser (the web build) fingers on the player are the player's, as on the phone, where
+ * nothing else takes them: two would otherwise zoom the whole page instead of the picture.
+ * React Native has no such style, so its types do not know it; React Native for Web does.
+ */
+const ownTouches =
+  Platform.OS === 'web' ? ({ touchAction: 'none' } as unknown as ViewStyle) : undefined;
 
 type Panel =
   | 'tracks'
@@ -618,29 +633,49 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       touchSpread(event.nativeEvent.touches) !== null,
   };
 
-  // Zoom to fill: the whole frame (fit), or the picture covering the screen with what overhangs
-  // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
-  // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
-  // other phone players do; More has the same switch. The phone keeps the choice for the title.
-  const [fitNote, setFitNote] = useState<PictureFrame | null>(null);
+  // The picture's size and place (picture-fit.ts): anything from the whole frame (fit) through
+  // covering the screen (fill) to a little beyond, so a wide film kept in a TV-shaped frame with
+  // its black bars fills the phone's width. Two fingers pinch it to size as they move, landing
+  // on fit and fill with a light buzz, and where it overhangs, moving them together moves it, so
+  // the viewer chooses what is cut off: the score at the top of a match, say. More has a switch
+  // between fit and fill. The phone keeps the choice for the title as the fingers lift.
+  const picture = useMemo(() => pictureNow(), []);
+  // The note says how the picture is while the fingers move it (held), and for a moment after.
+  const [fitNote, setFitNote] = useState<{ held: boolean } | null>(null);
   useEffect(() => {
-    if (!fitNote) return;
+    if (!fitNote || fitNote.held) return;
     const timer = setTimeout(() => setFitNote(null), FIT_NOTE_MS);
     return () => clearTimeout(timer);
   }, [fitNote]);
   const changeFit = (next: PictureFrame) => {
     if (sameFrame(next, pictureFit.get())) return;
     pictureFit.set(next);
-    setFitNote(next);
+    setFitNote({ held: false });
   };
-  const zoomValue = t(contentFitFor(fit) === 'cover' ? 'common.on' : 'common.off');
-  // How far apart the fingers were as the pinch began; null once it has decided. One change a
-  // pinch, so fingers settling or lifting at the end never undo it.
-  const pinchFrom = useRef<number | null>(null);
+  const choice = pictureChoice(fit);
+  const pictureValue = t(
+    choice === 'fit'
+      ? 'phone.pictureFit'
+      : choice === 'fill'
+        ? 'phone.pictureFill'
+        : 'phone.pictureCustom',
+  );
+  // The pinch under way, from two fingers down to the first lifting; null otherwise.
+  const pinch = useRef<Pinch | null>(null);
   // Not while a stream opens or fails, a panel is open or the film is in its small window.
   const pinchAllowed = shown && !waiting && !problem && !pip && panel === null;
   const wantsPinch = (event: GestureResponderEvent) =>
     pinchAllowed && touchSpread(event.nativeEvent.touches) !== null;
+  // Keeps what the fingers made as the first of them lifts, once, rather than at every move.
+  const endPinch = () => {
+    const ended = pinch.current;
+    pinch.current = null;
+    if (!ended) return;
+    if (!sameFrame(ended.frame, ended.from)) pictureFit.set(ended.frame);
+    picture.set((now) => (now.moving ? { ...now, moving: null } : now));
+    // The note stays a moment longer, then goes.
+    setFitNote((note) => (note?.held ? { held: false } : note));
+  };
   // On the whole screen, so a pinch takes over from whatever the first finger was on: a tap, a
   // swipe or a button, none of which then goes ahead. The seek bar alone keeps its finger.
   const pinchHandlers = {
@@ -650,31 +685,32 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       noteInput();
       clearTimeout(tapTimer.current);
       lastTap.current = null;
-      pinchFrom.current = touchSpread(event.nativeEvent.touches);
+      const fingers = fingersOf(event.nativeEvent.touches);
+      pinch.current = fingers
+        ? startPinch(picture.get().moving ?? pictureFit.get(), fingers)
+        : null;
     },
+    // Each move draws the picture alone (Picture.tsx), not this screen: the frame goes to its
+    // store, and the note is held up once, as the picture first changes.
     onResponderMove: (event: GestureResponderEvent) => {
-      const from = pinchFrom.current;
-      const spread = touchSpread(event.nativeEvent.touches);
-      // Decided already, ended by a lifted finger, or down to one finger.
-      if (from === null || spread === null) return;
-      const wanted = pinchFit(from, spread);
-      if (!wanted) return;
-      pinchFrom.current = null;
-      if (sameFrame(wanted, pictureFit.get())) return;
-      changeFit(wanted);
-      Haptics.selectionAsync().catch(() => undefined);
+      const from = pinch.current;
+      const fingers = fingersOf(event.nativeEvent.touches);
+      const { screen, video } = picture.get();
+      // Ended by a lifted finger, down to one finger, or not measured yet.
+      if (!from || !fingers || !screen) return;
+      const next = movePinch(from, fingers, screen, video ?? ASSUMED_VIDEO);
+      pinch.current = next;
+      if (next.frame === from.frame) return;
+      if (sameFrame(from.frame, from.from)) setFitNote({ held: true });
+      picture.set((now) => ({ ...now, moving: next.frame }));
+      const snap = snapOf(next.frame);
+      if (snap && snap !== snapOf(from.frame)) Haptics.selectionAsync().catch(() => undefined);
     },
-    // A finger lifting ends the pinch, decided or not: one set down again, or the next two of
-    // three, would otherwise be measured against fingers no longer there.
-    onResponderEnd: () => {
-      pinchFrom.current = null;
-    },
-    onResponderRelease: () => {
-      pinchFrom.current = null;
-    },
-    onResponderTerminate: () => {
-      pinchFrom.current = null;
-    },
+    // A finger lifting ends the pinch: one set down again, or the next two of three, would
+    // otherwise be measured against fingers no longer there.
+    onResponderEnd: endPinch,
+    onResponderRelease: endPinch,
+    onResponderTerminate: endPinch,
     // The fingers left on the glass after a pinch never become a swipe or a tap.
     onResponderTerminationRequest: () => false,
   };
@@ -805,11 +841,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const clock = useCallback(() => playerClock() ?? element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
+  // The picture's note, just changed, goes first; never over what the screen says while a
+  // stream opens. It draws itself as the fingers move (Picture.tsx).
+  const pictureNoteUp = !!fitNote && !waiting;
   const toast = (() => {
-    // Just chosen, so first; never over what the screen says while a stream opens.
-    if (fitNote && !waiting) {
-      return t(contentFitFor(fitNote) === 'cover' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
-    }
+    if (pictureNoteUp) return undefined;
     if (switching && waiting && state.entry === switching.entry) {
       return switching.label
         ? t('player.switchingTo', { quality: switching.label })
@@ -858,19 +894,22 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   return (
     <View
-      style={styles.screen}
+      style={[styles.screen, ownTouches]}
       onLayout={(event) => {
-        surfaceWidth.current = event.nativeEvent.layout.width;
+        const { width, height } = event.nativeEvent.layout;
+        surfaceWidth.current = width;
+        noteScreen(picture, { width, height });
       }}
       {...pinchHandlers}
     >
       <StatusBar hidden />
       {shown ? (
-        <VideoView
-          ref={videoView}
+        <Picture
+          now={picture}
+          kept={fit}
+          pip={pip}
+          viewRef={videoView}
           player={phonePlayer()}
-          style={styles.video}
-          contentFit={contentFitFor(fit)}
           nativeControls={false}
           allowsPictureInPicture
           // Home or a swipe away while a film plays keeps it going in a small window.
@@ -1215,9 +1254,18 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {toast && !waiting && !pip ? (
+      {(pictureNoteUp || toast) && !waiting && !pip ? (
         <View style={styles.toast} pointerEvents="none">
-          <Text style={styles.toastText}>{toast}</Text>
+          {pictureNoteUp ? (
+            <PictureNote
+              now={picture}
+              kept={fit}
+              textStyle={styles.toastText}
+              hintStyle={styles.toastHint}
+            />
+          ) : (
+            <Text style={styles.toastText}>{toast}</Text>
+          )}
         </View>
       ) : null}
 
@@ -1310,14 +1358,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               ) : null}
               <SleepRow timer={sleep.timer} episode={!!current} onPress={() => setPanel('sleep')} />
               {shown ? (
+                // Fit or Fill, or Custom once pinched to another size or moved. A tap switches
+                // fit to fill centred, and anything else back to the whole picture
+                // (switchedFrame), the one choice that never cuts anything off.
                 <PanelOption
-                  label={t('phone.zoomToFill')}
-                  detail={zoomValue}
-                  accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
+                  label={t('phone.pictureSize')}
+                  detail={pictureValue}
+                  accessibilityLabel={`${t('phone.pictureSize')}, ${pictureValue}`}
                   wrap
                   onPress={() => {
                     setPanel(null);
-                    changeFit(contentFitFor(fit) === 'cover' ? FIT : FILL);
+                    changeFit(switchedFrame(fit));
                   }}
                 />
               ) : null}
@@ -1451,8 +1502,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 }
 
 const styles = StyleSheet.create({
-  // Sized as well as placed: the web build draws a <video>, which keeps its own size otherwise.
-  video: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
   screen: { flex: 1, backgroundColor: colors.playerBg },
   dim: { backgroundColor: 'rgba(0,0,0,0.6)' },
   centre: {
@@ -1564,6 +1613,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.l,
     paddingVertical: space.s,
   },
-  toastText: { ...type.label, color: colors.text },
+  toastText: { ...type.label, color: colors.text, textAlign: 'center' },
+  toastHint: { ...type.small, color: colors.textMuted, textAlign: 'center' },
   sheetNote: { ...type.small, color: colors.textMuted, padding: space.m },
 });

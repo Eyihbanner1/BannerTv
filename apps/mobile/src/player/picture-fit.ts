@@ -9,6 +9,11 @@ import { createStore, type Store } from '@bannertv/core';
  * - fill: the frame covers the screen and what overhangs is cut off. The bars a file carries go
  *   first, so a wide film framed that way fills the width and loses nothing of the picture.
  *
+ * Two fingers pinch the picture to any size from fit to a little past fill, and where it
+ * overhangs they move it, so the viewer chooses what is cut off: a match filled with the top
+ * kept, so the score stays on the screen, or a wide film with bars in its frame trimmed past
+ * fill.
+ *
  * Kept on the phone for each title, not with the profile or the account: it is about how this
  * screen shows that film or series, and one film's frame is not another's. Every episode of a
  * series shares its show's choice, so the next episode opens the way the last was left. A title
@@ -21,8 +26,8 @@ import { createStore, type Store } from '@bannertv/core';
  * A picture's size and where it sits, in numbers that mean the same on any screen.
  *
  * - size: 0 is fit and 1 is fill. In between, the picture is that far from one to the other
- *   (on a scale where each step makes it the same share bigger). Past fill it grows on to
- *   BEYOND_FILL times the fill size at MAX_SIZE, to trim black bars a file carries inside its frame.
+ *   (on a scale where each step makes it the same share bigger). Past fill it grows on, to
+ *   BEYOND_FILL times the fill size at MAX_SIZE, for black bars a file carries in its frame.
  * - x and y: where the picture sits in the part of it that overhangs the screen, from -1 (its
  *   left or top edge on the screen's) through 0 (centred) to 1 (its right or bottom edge). Where
  *   nothing overhangs, the picture is centred whatever they say.
@@ -191,6 +196,166 @@ export function contentFitFor(frame: PictureFrame): 'contain' | 'cover' {
   return frame.size >= 1 ? 'cover' : 'contain';
 }
 
+/** What More's switch says the picture is: fit, fill (centred), or a size or place pinched. */
+export function pictureChoice(frame: PictureFrame): 'fit' | 'fill' | 'custom' {
+  if (isFit(frame)) return 'fit';
+  return isFill(frame) ? 'fill' : 'custom';
+}
+
+/**
+ * What More's switch makes of the picture: fit fills the screen, and anything else goes back to
+ * the whole picture. A size or place pinched by hand goes back whole too rather than to fill,
+ * because whole is the one choice that never cuts anything off; a second tap fills.
+ */
+export function switchedFrame(frame: PictureFrame): PictureFrame {
+  return isFit(frame) ? FILL : FIT;
+}
+
+export interface Size {
+  width: number;
+  height: number;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** A rectangle on the screen, in the screen's own points, from its top left corner. */
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The shape taken for a picture until its own size is known: the TV's 16:9. */
+export const ASSUMED_VIDEO: Size = { width: 16, height: 9 };
+
+/** A picture's own size, when its player has said: two whole, positive numbers, or null. */
+export function videoSizeOf(width: unknown, height: unknown): Size | null {
+  const positive = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+  return positive(width) && positive(height) ? { width, height } : null;
+}
+
+/**
+ * The picture's size whole on this screen (fit) and covering it (fill). Worked out by
+ * multiplying before dividing, so a size that comes out whole is exactly whole.
+ */
+function fitAndFill(screen: Size, video: Size): { fit: Size; fill: Size } {
+  const byHeight = { width: (screen.height * video.width) / video.height, height: screen.height };
+  const byWidth = { width: screen.width, height: (screen.width * video.height) / video.width };
+  // A screen wider than the picture's shape fits it by its height and fills it by its width.
+  return screen.width * video.height >= screen.height * video.width
+    ? { fit: byHeight, fill: byWidth }
+    : { fit: byWidth, fill: byHeight };
+}
+
+/** How many times its whole size the picture is at fill on this screen: 1 when the shapes match. */
+export function fillZoom(screen: Size, video: Size): number {
+  const { fit, fill } = fitAndFill(screen, video);
+  return fill.width / fit.width;
+}
+
+/** How many times its whole size a picture of `size` is, when fill is `fill` times. */
+export function zoomAt(size: number, fill: number): number {
+  if (size <= 0) return 1;
+  if (size <= 1) return fill ** size;
+  return fill * BEYOND_FILL ** ((Math.min(size, MAX_SIZE) - 1) / (MAX_SIZE - 1));
+}
+
+/** The size of a picture `zoom` times its whole size: zoomAt the other way round. */
+export function sizeAt(zoom: number, fill: number): number {
+  if (zoom <= 1) return 0;
+  if (zoom < fill) return Math.log(zoom) / Math.log(fill);
+  return Math.min(MAX_SIZE, 1 + ((MAX_SIZE - 1) * Math.log(zoom / fill)) / Math.log(BEYOND_FILL));
+}
+
+/**
+ * Where a picture `length` long starts along a side of the screen `screen` long, at `at`: as
+ * PictureFrame's x and y say where it overhangs, and centred where it does not.
+ */
+function place(screen: number, length: number, at: number): number {
+  const share = length > screen ? 1 + at : 1;
+  return ((screen - length) * share) / 2 + 0;
+}
+
+/**
+ * The picture's rectangle on the screen for `frame`, in the screen's points: the whole frame of
+ * the video, which may be bigger than the screen, and the screen shows the part on it.
+ */
+export function pictureRect(screen: Size, video: Size, frame: PictureFrame): Rect {
+  const { fit, fill } = fitAndFill(screen, video);
+  let { width, height } = fit;
+  if (frame.size === 1) ({ width, height } = fill);
+  else if (frame.size > 0) {
+    const zoom = zoomAt(frame.size, fill.width / fit.width);
+    width = fit.width * zoom;
+    height = fit.height * zoom;
+  }
+  return {
+    left: place(screen.width, width, frame.x),
+    top: place(screen.height, height, frame.y),
+    width,
+    height,
+  };
+}
+
+/**
+ * How the player screen draws the picture: its view across the screen (`rect` null) with
+ * `contentFit` placing the picture in it, or its view laid out as the picture's own rectangle
+ * (`rect`, possibly bigger than the screen, which shows the part on it) with the whole frame in
+ * it. On Android expo-video draws into a SurfaceView, which does not follow a view's scale
+ * reliably, so the picture is sized by its layout and never scaled; growing past the screen is
+ * what fill does inside expo-video anyway.
+ *
+ * Fit, and fill centred, draw across the screen as they always have. That also keeps the
+ * subtitles Media3 draws itself (picture subtitles, PGS and DVB) on the screen at fill:
+ * modules/banner-cues fits them into the screen only when the picture's view covers it. Any other
+ * size or place is laid out as its rectangle, taking the picture to be 16:9 until its own size
+ * is known, and the view covers the screen until the screen has been measured.
+ */
+export interface PictureLayout {
+  contentFit: 'contain' | 'cover';
+  rect: Rect | null;
+}
+
+export function pictureLayout(
+  frame: PictureFrame,
+  screen: Size | null,
+  video: Size | null,
+): PictureLayout {
+  const measured = screen !== null && screen.width > 0 && screen.height > 0;
+  if (!measured || isFit(frame) || isFill(frame)) {
+    return { contentFit: contentFitFor(frame), rect: null };
+  }
+  return { contentFit: 'contain', rect: pictureRect(screen, video ?? ASSUMED_VIDEO, frame) };
+}
+
+/** What the note says while the picture changes: fit, fill, or how big it is. */
+export type PictureNote =
+  | { kind: 'fit' }
+  | { kind: 'fill' }
+  | {
+      kind: 'zoom';
+      /** How big the picture is, as a share of its whole size: fit is 100. */
+      percent: number;
+    };
+
+export function pictureNote(frame: PictureFrame, screen: Size | null, video: Size): PictureNote {
+  if (isFit(frame)) return { kind: 'fit' };
+  if (frame.size === 1) return { kind: 'fill' };
+  const fill = screen && screen.width > 0 && screen.height > 0 ? fillZoom(screen, video) : 1;
+  return { kind: 'zoom', percent: Math.round(zoomAt(frame.size, fill) * 100) };
+}
+
+/** Fit or fill when a frame is exactly one of the two sizes, for the buzz as a pinch reaches it. */
+export function snapOf(frame: PictureFrame): 'fit' | 'fill' | null {
+  if (frame.size === 0) return 'fit';
+  return frame.size === 1 ? 'fill' : null;
+}
+
 export interface TouchPoint {
   pageX: number;
   pageY: number;
@@ -204,19 +369,127 @@ export function touchSpread(touches: readonly TouchPoint[] | undefined): number 
   return Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
 }
 
-/** Two fingers must spread (or close) to this many times as far apart as they were... */
-export const PINCH_RATIO = 1.2;
-/** ...and move this many points, so fingers set down close together do not flicker it. */
-export const PINCH_MIN_PX = 24;
+/** The first two fingers on the screen, or null with fewer than two. */
+export interface Fingers {
+  a: Point;
+  b: Point;
+}
+
+export function fingersOf(touches: readonly TouchPoint[] | undefined): Fingers | null {
+  const a = touches?.[0];
+  const b = touches?.[1];
+  if (!a || !b) return null;
+  return { a: { x: a.pageX, y: a.pageY }, b: { x: b.pageX, y: b.pageY } };
+}
 
 /**
- * What two fingers going from `from` to `to` points apart ask for: fill as they spread, fit as
- * they close, and null while the change is too small to tell.
+ * Two fingers must spread or close this many points before the size changes, so fingers set
+ * down, resting or settling never flicker it. It changes from there, so it never jumps.
  */
-export function pinchFit(from: number, to: number): PictureFrame | null {
-  if (to - from >= PINCH_MIN_PX && to >= from * PINCH_RATIO) return FILL;
-  if (from - to >= PINCH_MIN_PX && from >= to * PINCH_RATIO) return FIT;
-  return null;
+export const PINCH_MIN_PX = 24;
+/** Both fingers must move this many points together before the picture moves with them. */
+export const PAN_MIN_PX = 16;
+/** Within this share of fit or fill (4 percent), a pinch lands on it exactly. */
+export const SNAP = 0.04;
+
+/** A pinch on the picture, from the fingers coming down to the first of them lifting. */
+export interface Pinch {
+  /** The frame as the fingers came down. */
+  from: PictureFrame;
+  /** How far apart they came down. */
+  spread: number;
+  /**
+   * How far apart they were as they first spread or closed past PINCH_MIN_PX: from there the
+   * size follows them, as many times bigger as they are further apart. Null until then.
+   */
+  zoomFrom: number | null;
+  /** Where the fingers were at the last move. */
+  fingers: Fingers;
+  /** How far both have moved together so far, until it passes PAN_MIN_PX; then null. */
+  drift: Point | null;
+  /** The frame now. */
+  frame: PictureFrame;
+}
+
+export function startPinch(frame: PictureFrame, fingers: Fingers): Pinch {
+  const spread = Math.hypot(fingers.a.x - fingers.b.x, fingers.a.y - fingers.b.y);
+  return { from: frame, spread, zoomFrom: null, fingers, drift: { x: 0, y: 0 }, frame };
+}
+
+/**
+ * How far two fingers moved the same way along one direction: as far as the one that moved
+ * less, and not at all when they went opposite ways. A pinch with one finger still, or both
+ * spreading, moves nothing; two fingers dragged together move the picture.
+ */
+function together(a: number, b: number): number {
+  if (a > 0 && b > 0) return Math.min(a, b);
+  if (a < 0 && b < 0) return Math.max(a, b);
+  return 0;
+}
+
+/** Fit or fill exactly when a zoom is within SNAP of it, and the zoom as it is otherwise. */
+function snapZoom(zoom: number, fill: number): number {
+  if (zoom <= 1 + SNAP) return 1;
+  if (Math.abs(zoom / fill - 1) <= SNAP) return fill;
+  return zoom;
+}
+
+/**
+ * Where the picture sits along one side once moved `by` points (x or y): moved as far as the
+ * fingers, and kept covering the screen, so it never shows a gap where it overhangs. Centred
+ * where it does not overhang.
+ */
+function moveAlong(screen: number, length: number, at: number, by: number): number {
+  const over = length - screen;
+  if (over <= 0) return 0;
+  return Math.min(1, Math.max(-1, at - (2 * by) / over)) + 0;
+}
+
+/**
+ * The pinch once the fingers are at `fingers`, on a screen `screen` big showing a picture of
+ * `video`'s shape. The size follows how far apart the fingers are, from the size it had as they
+ * came down, between fit and MAX_SIZE, and lands exactly on fit or fill within SNAP of them.
+ * The place follows the fingers as they move together, where the picture overhangs.
+ */
+export function movePinch(pinch: Pinch, fingers: Fingers, screen: Size, video: Size): Pinch {
+  const fill = fillZoom(screen, video);
+  const spread = Math.hypot(fingers.a.x - fingers.b.x, fingers.a.y - fingers.b.y);
+  let zoomFrom = pinch.zoomFrom;
+  if (zoomFrom === null && Math.abs(spread - pinch.spread) >= PINCH_MIN_PX) zoomFrom = spread;
+  let size = pinch.frame.size;
+  if (zoomFrom !== null && zoomFrom > 0) {
+    const zoom = (zoomAt(pinch.from.size, fill) * spread) / zoomFrom;
+    size = sizeAt(snapZoom(Math.min(fill * BEYOND_FILL, Math.max(1, zoom)), fill), fill);
+  }
+  const moved = {
+    x: together(fingers.a.x - pinch.fingers.a.x, fingers.b.x - pinch.fingers.b.x),
+    y: together(fingers.a.y - pinch.fingers.a.y, fingers.b.y - pinch.fingers.b.y),
+  };
+  let drift = pinch.drift;
+  let by = { x: 0, y: 0 };
+  if (drift === null) by = moved;
+  else {
+    drift = { x: drift.x + moved.x, y: drift.y + moved.y };
+    // From here on the picture moves with the fingers; what they moved to get here does not count.
+    if (Math.hypot(drift.x, drift.y) >= PAN_MIN_PX) drift = null;
+  }
+  // Fingers resting, or not yet past either dead zone, leave the frame exactly as it was.
+  if (size === pinch.frame.size && by.x === 0 && by.y === 0) {
+    return { ...pinch, zoomFrom, fingers, drift };
+  }
+  const rect = pictureRect(screen, video, { ...pinch.frame, size });
+  const frame = {
+    size,
+    x: moveAlong(screen.width, rect.width, pinch.frame.x, by.x),
+    y: moveAlong(screen.height, rect.height, pinch.frame.y, by.y),
+  };
+  return {
+    ...pinch,
+    zoomFrom,
+    fingers,
+    drift,
+    frame: sameFrame(frame, pinch.frame) ? pinch.frame : frame,
+  };
 }
 
 /** The part of Web Storage the choices need. */

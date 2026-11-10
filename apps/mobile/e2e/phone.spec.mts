@@ -32,32 +32,102 @@ async function addStreamAddon(page: Page): Promise<void> {
   await page.getByRole('tab', { name: 'Home' }).click();
 }
 
+/** The phone turns sideways for the player; the web build's page is turned by the test. */
+const SIDEWAYS = { width: 915, height: 412 };
+const UPRIGHT = { width: 412, height: 915 };
+/** How far down the page fingers go on the picture, sideways: across its middle. */
+const FINGERS_Y = 200;
+
+/** Where each of two fingers is: [x, y] for the first, then the second. */
+type TwoFingers = [[number, number], [number, number]];
+
 /** Touches as a phone's, through DevTools: each finger down, moved and lifted, by id. */
 async function touchscreen(page: Page) {
   const cdp = await page.context().newCDPSession(page);
   const touch = (type: string, touchPoints: { x: number; y: number; id: number }[]) =>
     cdp.send('Input.dispatchTouchEvent', { type, touchPoints } as never);
-  /** Two fingers from `from` to `to`, then on to each of `then`, before they lift. */
-  const pinch = async (from: [number, number], ...to: [number, number][]) => {
-    await touch('touchStart', [{ x: from[0], y: 450, id: 0 }]);
+  /** Two fingers down at `from`, then on to each of `to` in small steps, before they lift. */
+  const fingers = async (from: TwoFingers, ...to: TwoFingers[]) => {
+    await touch('touchStart', [{ x: from[0][0], y: from[0][1], id: 0 }]);
     await touch('touchStart', [
-      { x: from[0], y: 450, id: 0 },
-      { x: from[1], y: 450, id: 1 },
+      { x: from[0][0], y: from[0][1], id: 0 },
+      { x: from[1][0], y: from[1][1], id: 1 },
     ]);
     let at = from;
     for (const next of to) {
       for (let step = 1; step <= 6; step++) {
-        const x = (index: 0 | 1) => at[index] + ((next[index] - at[index]) * step) / 6;
+        const point = (finger: 0 | 1, axis: 0 | 1) =>
+          at[finger][axis] + ((next[finger][axis] - at[finger][axis]) * step) / 6;
         await touch('touchMove', [
-          { x: x(0), y: 450, id: 0 },
-          { x: x(1), y: 450, id: 1 },
+          { x: point(0, 0), y: point(0, 1), id: 0 },
+          { x: point(1, 0), y: point(1, 1), id: 1 },
         ]);
       }
       at = next;
     }
     await touch('touchEnd', []);
   };
-  return { touch, pinch };
+  /** Two fingers side by side across the picture, at `from` ([left x, right x]), then `to`. */
+  const pinch = (from: [number, number], ...to: [number, number][]) => {
+    const across = ([left, right]: [number, number]): TwoFingers => [
+      [left, FINGERS_Y],
+      [right, FINGERS_Y],
+    ];
+    return fingers(across(from), ...to.map(across));
+  };
+  return { touch, fingers, pinch };
+}
+
+/**
+ * Where the browser draws the video's whole frame on the page, whatever the element's
+ * object-fit: possibly bigger than the screen, which shows the part on it.
+ */
+function shownPicture(page: Page) {
+  return page.evaluate(() => {
+    const video = document.querySelector('video');
+    if (!video || !video.videoWidth || !video.videoHeight) return null;
+    const box = video.getBoundingClientRect();
+    const pick = getComputedStyle(video).objectFit === 'cover' ? Math.max : Math.min;
+    const scale = pick(box.width / video.videoWidth, box.height / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    return {
+      left: box.left + (box.width - width) / 2,
+      top: box.top + (box.height - height) / 2,
+      width,
+      height,
+    };
+  });
+}
+
+/** The same, to the nearest point. */
+async function pictureBox(page: Page) {
+  const shown = await shownPicture(page);
+  return (
+    shown && {
+      left: Math.round(shown.left),
+      top: Math.round(shown.top),
+      width: Math.round(shown.width),
+      height: Math.round(shown.height),
+    }
+  );
+}
+
+/** Filled sideways with the top of the picture kept on the screen. */
+const TOP_KEPT_BOX = { left: 0, top: 0, width: 915, height: 515 };
+
+/** Whole on the screen (fit), covering it (fill), or a size between the two or beyond fill. */
+async function framing(page: Page): Promise<'fit' | 'fill' | 'between' | 'beyond' | null> {
+  const shown = await shownPicture(page);
+  const screen = page.viewportSize();
+  if (!shown || !screen) return null;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1;
+  const edge = near(shown.width, screen.width) || near(shown.height, screen.height);
+  const inside = shown.width < screen.width + 1 && shown.height < screen.height + 1;
+  const covers = shown.width > screen.width - 1 && shown.height > screen.height - 1;
+  if (edge && inside) return 'fit';
+  if (edge && covers) return 'fill';
+  return covers ? 'beyond' : 'between';
 }
 
 /** The picture fit the phone keeps for each title, as stored. */
@@ -103,19 +173,14 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
     .poll(() => page.evaluate(() => document.querySelector('video')?.currentTime ?? 0))
     .toBeGreaterThan(1);
 
-  // Zoom to fill, under More options, makes the picture cover the screen, and the phone keeps
+  // Picture size, under More options, makes the picture cover the screen, and the phone keeps
   // it for this film. The controls hide while the film plays: a tap brings them.
   const more = page.getByRole('button', { name: 'More options' });
-  const video = () =>
-    page.evaluate(() => {
-      const element = document.querySelector('video');
-      return element ? getComputedStyle(element).objectFit : null;
-    });
-  expect(await video()).toBe('contain');
+  await expect.poll(() => framing(page)).toBe('fit');
   if (!(await more.isVisible())) await page.mouse.click(206, 160);
   await more.click();
-  await page.getByRole('button', { name: 'Zoom to fill, Off' }).click();
-  await expect.poll(video).toBe('cover');
+  await page.getByRole('button', { name: 'Picture size, Fit' }).click();
+  await expect.poll(() => framing(page)).toBe('fill');
   expect(await storedFits(page)).toEqual({
     last: 'fill',
     live: 'fit',
@@ -139,7 +204,9 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
 test.describe('with touch', () => {
   test.use({ hasTouch: true });
 
-  test('two fingers zoom the picture to fill and back, and never seek or tap', async ({ page }) => {
+  test('two fingers pinch the picture to any size and move it, and never seek or tap', async ({
+    page,
+  }) => {
     const errors = watchErrors(page);
     await mockAddons(page, { firstRun: true });
     await mockPlayback(page);
@@ -163,43 +230,65 @@ test.describe('with touch', () => {
     await expect.poll(time).toBeGreaterThan(1);
     const more = page.getByRole('button', { name: 'More options' });
     await expect(more).toBeHidden({ timeout: 15_000 });
+    // The phone turns sideways for the film: the whole 16:9 picture is 732 by 412 there, and
+    // filling the screen it is 915 by 515.
+    await page.setViewportSize(SIDEWAYS);
+    const shows = () => framing(page);
+    const { touch, fingers, pinch } = await touchscreen(page);
+    const kept = async () =>
+      ((await storedFits(page)) as { titles: [string, unknown][] }).titles.find(
+        ([id]) => id === 'tt2285752',
+      )?.[1];
 
-    const fit = () =>
-      page.evaluate(() => {
-        const element = document.querySelector('video');
-        return element ? getComputedStyle(element).objectFit : null;
-      });
-    const { touch, pinch } = await touchscreen(page);
-
-    // Spreading fills the screen, says so, and the phone keeps it for the film. No tap shows
-    // the controls, and the film goes on from where it was.
-    // The fingers easing back in before they lift change nothing: one change a pinch.
-    expect(await fit()).toBe('contain');
+    // Spreading part way makes the picture as much bigger as the fingers spread, says how big,
+    // and the phone keeps that size for the film. No tap shows the controls, and the film goes
+    // on from where it was.
+    await expect.poll(shows).toBe('fit');
     const before = await time();
-    await pinch([160, 260], [90, 330], [140, 280]);
-    await expect.poll(fit).toBe('cover');
+    await pinch([357, 557], [332, 582]);
+    await expect.poll(shows).toBe('between');
+    await expect(page.getByText(/^Zoomed to 1\d\d%$/)).toBeVisible();
+    await expect(page.getByText('Move it with two fingers')).toBeVisible();
+    const part = (await shownPicture(page))!;
+    expect(part.width).toBeGreaterThan(760);
+    expect(part.width).toBeLessThan(890);
+    expect(part.left).toBeCloseTo((SIDEWAYS.width - part.width) / 2, 0);
+    const between = (await kept()) as { size: number; x: number; y: number };
+    expect(between).toEqual({ size: between.size, x: 0, y: 0 });
+    expect(between.size).toBeGreaterThan(0.2);
+    expect(between.size).toBeLessThan(0.8);
+    await page.waitForTimeout(600);
+    await expect(more).toBeHidden();
+    expect(Math.abs((await time()) - before)).toBeLessThan(3);
+
+    // Closing them again goes back to the whole picture.
+    await pinch([332, 582], [357, 557]);
+    await expect.poll(shows).toBe('fit');
+    await expect(page.getByText('Fit to screen')).toBeVisible();
+    expect(await kept()).toBe('fit');
+
+    // Spreading further lands on fill, says so, and the phone keeps it as it always has.
+    await pinch([357, 557], [317, 597]);
+    await expect.poll(shows).toBe('fill');
     await expect(page.getByText('Zoomed to fill')).toBeVisible();
     expect(await storedFits(page)).toEqual({
       last: 'fill',
       live: 'fit',
       titles: [['tt2285752', 'fill']],
     });
-    await page.waitForTimeout(600);
-    await expect(more).toBeHidden();
-    expect(Math.abs((await time()) - before)).toBeLessThan(3);
 
     // Two fingers resting, one lifting and coming down again near the other, are no pinch.
     // DevTools lifts only every finger at once, so these touches are the page's own.
-    const fingers = (
+    const pageFingers = (
       type: string,
       touches: [number, number][],
       changed: [number, number][] = touches,
     ) =>
       page.evaluate(
-        ({ type, touches, changed }) => {
-          const target = document.elementFromPoint(200, 450) ?? document.body;
+        ({ type, touches, changed, y }) => {
+          const target = document.elementFromPoint(200, y) ?? document.body;
           const make = ([identifier, x]: [number, number]) =>
-            new Touch({ identifier, target, clientX: x, clientY: 450, pageX: x, pageY: 450 });
+            new Touch({ identifier, target, clientX: x, clientY: y, pageX: x, pageY: y });
           target.dispatchEvent(
             new TouchEvent(type, {
               bubbles: true,
@@ -210,10 +299,10 @@ test.describe('with touch', () => {
             }),
           );
         },
-        { type, touches, changed },
+        { type, touches, changed, y: FINGERS_Y },
       );
-    await fingers('touchstart', [[0, 100]]);
-    await fingers(
+    await pageFingers('touchstart', [[0, 100]]);
+    await pageFingers(
       'touchstart',
       [
         [0, 100],
@@ -221,8 +310,8 @@ test.describe('with touch', () => {
       ],
       [[1, 300]],
     );
-    await fingers('touchend', [[0, 100]], [[1, 300]]);
-    await fingers(
+    await pageFingers('touchend', [[0, 100]], [[1, 300]]);
+    await pageFingers(
       'touchstart',
       [
         [0, 100],
@@ -230,7 +319,7 @@ test.describe('with touch', () => {
       ],
       [[2, 140]],
     );
-    await fingers(
+    await pageFingers(
       'touchmove',
       [
         [0, 100],
@@ -238,7 +327,7 @@ test.describe('with touch', () => {
       ],
       [[2, 135]],
     );
-    await fingers(
+    await pageFingers(
       'touchend',
       [],
       [
@@ -247,42 +336,62 @@ test.describe('with touch', () => {
       ],
     );
     await page.waitForTimeout(300);
-    expect(await fit()).toBe('cover');
+    expect(await shows()).toBe('fill');
+    expect(await kept()).toBe('fill');
 
-    // Closing the fingers fits the whole picture again.
-    await pinch([100, 320], [190, 230]);
-    await expect.poll(fit).toBe('contain');
+    // Two fingers dragged down together move the picture down, as far as its top edge: the top
+    // of the frame shows, with the score a match has there, and the bottom is cut off instead.
+    // The phone keeps that place for the film too.
+    await fingers(
+      [
+        [357, 150],
+        [557, 150],
+      ],
+      [
+        [357, 250],
+        [557, 250],
+      ],
+    );
+    await expect.poll(() => pictureBox(page)).toEqual(TOP_KEPT_BOX);
+    expect(await kept()).toEqual({ size: 1, x: 0, y: -1 });
+
+    // Closing the fingers fits the whole picture again, centred.
+    await pinch([317, 597], [397, 517]);
+    await expect.poll(shows).toBe('fit');
     await expect(page.getByText('Fit to screen')).toBeVisible();
+    expect(await pictureBox(page)).toEqual({ left: 91, top: 0, width: 732, height: 412 });
 
     // A swipe that gets a second finger part way seeks nowhere: it is a pinch now.
     const swipeFrom = await time();
-    await touch('touchStart', [{ x: 120, y: 450, id: 0 }]);
+    await touch('touchStart', [{ x: 120, y: FINGERS_Y, id: 0 }]);
     for (let step = 1; step <= 5; step++) {
-      await touch('touchMove', [{ x: 120 + step * 20, y: 450, id: 0 }]);
+      await touch('touchMove', [{ x: 120 + step * 20, y: FINGERS_Y, id: 0 }]);
     }
     await touch('touchStart', [
-      { x: 220, y: 450, id: 0 },
-      { x: 300, y: 450, id: 1 },
+      { x: 220, y: FINGERS_Y, id: 0 },
+      { x: 300, y: FINGERS_Y, id: 1 },
     ]);
     for (let step = 1; step <= 6; step++) {
       await touch('touchMove', [
-        { x: 220 - step * 12, y: 450, id: 0 },
-        { x: 300 + step * 12, y: 450, id: 1 },
+        { x: 220 - step * 4, y: FINGERS_Y, id: 0 },
+        { x: 300 + step * 4, y: FINGERS_Y, id: 1 },
       ]);
     }
     await touch('touchEnd', []);
-    await expect.poll(fit).toBe('cover');
+    await expect.poll(shows).toBe('fill');
     await page.waitForTimeout(600);
     expect(Math.abs((await time()) - swipeFrom)).toBeLessThan(4);
 
     // One finger still taps the controls up.
-    await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
+    await touch('touchStart', [{ x: 200, y: FINGERS_Y, id: 0 }]);
     await touch('touchEnd', []);
     await expect(more).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test("each title keeps its own picture fit, and every episode its show's", async ({ page }) => {
+  test("each title keeps its own picture size and place, and every episode its show's", async ({
+    page,
+  }) => {
     const errors = watchErrors(page);
     // An earlier version kept one choice for every film: filled. Nobody loses it.
     await page.addInitScript(() => {
@@ -294,32 +403,46 @@ test.describe('with touch', () => {
     await seedStreamAddon(page);
     await mockPlayback(page);
     await openApp(page);
-    const { touch, pinch } = await touchscreen(page);
-    const fit = () =>
-      page.evaluate(() => {
-        const element = document.querySelector('video');
-        return element ? getComputedStyle(element).objectFit : null;
-      });
+    const { touch, fingers, pinch } = await touchscreen(page);
+    const shows = () => framing(page);
     const playing = async () => {
       const pause = page.getByLabel('Pause', { exact: true }).first();
       await expect(pause).toBeVisible();
       // The browser waits for a tap before it plays; the phone does not.
       await pause.click();
       await page.getByLabel('Play', { exact: true }).first().click();
+      // The phone turns sideways for the film.
+      await page.setViewportSize(SIDEWAYS);
+    };
+    const tapControlsUp = async (button: ReturnType<Page['getByLabel']>) => {
+      if (!(await button.isVisible())) {
+        await touch('touchStart', [{ x: 200, y: FINGERS_Y, id: 0 }]);
+        await touch('touchEnd', []);
+      }
     };
     // The web build's stand-in for the phone's player opens only the first video of a launch,
     // so the app starts again after each one. The choices last from one launch to the next.
     const leaveAndRelaunch = async () => {
       const button = page.getByLabel('Leave the player').first();
-      if (!(await button.isVisible())) {
-        await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
-        await touch('touchEnd', []);
-      }
+      await tapControlsUp(button);
       await button.click();
       // Back on the title's page first: a back still on its way after the launch would ask the
       // test server for the title's address, which it has no page for.
       await expect(page.getByLabel('Leave the player')).toHaveCount(0);
+      await page.setViewportSize(UPRIGHT);
       await page.goto('/');
+    };
+    const openFilm = async () => {
+      await page
+        .getByLabel(/Tears of Steel/)
+        .last()
+        .click();
+      await page.getByRole('button', { name: /All streams/ }).click();
+      await page
+        .getByText(/Open Movie 1080p/)
+        .first()
+        .click();
+      await playing();
     };
     const series = page.getByRole('button', { name: /^Morevna Project, 2016/ }).first();
 
@@ -328,30 +451,32 @@ test.describe('with touch', () => {
     await series.click();
     await page.getByRole('button', { name: /^1\. Season 1 episode 1,/ }).click();
     await playing();
-    await expect.poll(fit).toBe('cover');
+    await expect.poll(shows).toBe('fill');
     // The earlier key stays, for a phone put back on an earlier update.
     expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
       'fill',
     );
-    await pinch([100, 320], [190, 230]);
-    await expect.poll(fit).toBe('contain');
+    await pinch([317, 597], [397, 517]);
+    await expect.poll(shows).toBe('fit');
     await leaveAndRelaunch();
 
-    // A film never zoomed opens as the series was left. Spreading two fingers fills it, for the
-    // film alone.
-    await page
-      .getByLabel(/Tears of Steel/)
-      .last()
-      .click();
-    await page.getByRole('button', { name: /All streams/ }).click();
-    await page
-      .getByText(/Open Movie 1080p/)
-      .first()
-      .click();
-    await playing();
-    await expect.poll(fit).toBe('contain');
-    await pinch([160, 260], [90, 330]);
-    await expect.poll(fit).toBe('cover');
+    // A film never chosen for opens as the series was left. Spreading two fingers fills it, and
+    // dragging them down keeps the top of the picture on the screen, for the film alone.
+    await openFilm();
+    await expect.poll(shows).toBe('fit');
+    await pinch([357, 557], [317, 597]);
+    await expect.poll(shows).toBe('fill');
+    await fingers(
+      [
+        [357, 150],
+        [557, 150],
+      ],
+      [
+        [357, 250],
+        [557, 250],
+      ],
+    );
+    await expect.poll(() => pictureBox(page)).toEqual(TOP_KEPT_BOX);
     await leaveAndRelaunch();
 
     // The series' next episode opens fitted, as its first was left, though the film was filled
@@ -359,13 +484,31 @@ test.describe('with touch', () => {
     await series.click();
     await page.getByRole('button', { name: /^2\. Season 1 episode 2,/ }).click();
     await playing();
-    await expect.poll(fit).toBe('contain');
+    await expect.poll(shows).toBe('fit');
     expect(await storedFits(page)).toEqual({
-      last: 'fill',
+      last: { size: 1, x: 0, y: -1 },
       live: 'fill',
       titles: [
         ['tt8000001', 'fit'],
-        ['tt2285752', 'fill'],
+        ['tt2285752', { size: 1, x: 0, y: -1 }],
+      ],
+    });
+    await leaveAndRelaunch();
+
+    // The film opens again filled with its top kept, as it was left.
+    await openFilm();
+    await expect.poll(() => pictureBox(page)).toEqual(TOP_KEPT_BOX);
+
+    // More's Picture size says it is a size of its own, and takes it back to the whole picture.
+    const more = page.getByRole('button', { name: 'More options' });
+    await tapControlsUp(more);
+    await more.click();
+    await page.getByRole('button', { name: 'Picture size, Custom' }).click();
+    await expect.poll(shows).toBe('fit');
+    expect((await storedFits(page)) as { titles: unknown }).toMatchObject({
+      titles: [
+        ['tt8000001', 'fit'],
+        ['tt2285752', 'fit'],
       ],
     });
     expect(errors).toEqual([]);
