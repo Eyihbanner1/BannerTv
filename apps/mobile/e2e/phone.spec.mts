@@ -32,6 +32,42 @@ async function addStreamAddon(page: Page): Promise<void> {
   await page.getByRole('tab', { name: 'Home' }).click();
 }
 
+/** Touches as a phone's, through DevTools: each finger down, moved and lifted, by id. */
+async function touchscreen(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: string, touchPoints: { x: number; y: number; id: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints } as never);
+  /** Two fingers from `from` to `to`, then on to each of `then`, before they lift. */
+  const pinch = async (from: [number, number], ...to: [number, number][]) => {
+    await touch('touchStart', [{ x: from[0], y: 450, id: 0 }]);
+    await touch('touchStart', [
+      { x: from[0], y: 450, id: 0 },
+      { x: from[1], y: 450, id: 1 },
+    ]);
+    let at = from;
+    for (const next of to) {
+      for (let step = 1; step <= 6; step++) {
+        const x = (index: 0 | 1) => at[index] + ((next[index] - at[index]) * step) / 6;
+        await touch('touchMove', [
+          { x: x(0), y: 450, id: 0 },
+          { x: x(1), y: 450, id: 1 },
+        ]);
+      }
+      at = next;
+    }
+    await touch('touchEnd', []);
+  };
+  return { touch, pinch };
+}
+
+/** The picture fit the phone keeps for each title, as stored. */
+function storedFits(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem('bannertv.phone.pictureFits');
+    return raw === null ? null : (JSON.parse(raw) as unknown);
+  });
+}
+
 test('first run: welcome, Home, an addon, a title, All streams and the player', async ({
   page,
 }) => {
@@ -68,7 +104,7 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
     .toBeGreaterThan(1);
 
   // Zoom to fill, under More options, makes the picture cover the screen, and the phone keeps
-  // it for the next film. The controls hide while the film plays: a tap brings them.
+  // it for this film. The controls hide while the film plays: a tap brings them.
   const more = page.getByRole('button', { name: 'More options' });
   const video = () =>
     page.evaluate(() => {
@@ -80,7 +116,7 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
   await more.click();
   await page.getByRole('button', { name: 'Zoom to fill, Off' }).click();
   await expect.poll(video).toBe('cover');
-  expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe('fill');
+  expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
 
   // Quality, under More options, switches to the 720p stream.
   if (!(await more.isVisible())) await page.mouse.click(206, 160);
@@ -129,42 +165,17 @@ test.describe('with touch', () => {
         const element = document.querySelector('video');
         return element ? getComputedStyle(element).objectFit : null;
       });
-    // Touches as a phone's: each finger down, moved and lifted, by id.
-    const cdp = await page.context().newCDPSession(page);
-    const touch = (type: string, touchPoints: { x: number; y: number; id: number }[]) =>
-      cdp.send('Input.dispatchTouchEvent', { type, touchPoints } as never);
-    /** Two fingers from `from` to `to`, then on to each of `then`, before they lift. */
-    const pinch = async (from: [number, number], ...to: [number, number][]) => {
-      await touch('touchStart', [{ x: from[0], y: 450, id: 0 }]);
-      await touch('touchStart', [
-        { x: from[0], y: 450, id: 0 },
-        { x: from[1], y: 450, id: 1 },
-      ]);
-      let at = from;
-      for (const next of to) {
-        for (let step = 1; step <= 6; step++) {
-          const x = (index: 0 | 1) => at[index] + ((next[index] - at[index]) * step) / 6;
-          await touch('touchMove', [
-            { x: x(0), y: 450, id: 0 },
-            { x: x(1), y: 450, id: 1 },
-          ]);
-        }
-        at = next;
-      }
-      await touch('touchEnd', []);
-    };
+    const { touch, pinch } = await touchscreen(page);
 
-    // Spreading fills the screen, says so, and the phone keeps it. No tap shows the controls,
-    // and the film goes on from where it was.
+    // Spreading fills the screen, says so, and the phone keeps it for the film. No tap shows
+    // the controls, and the film goes on from where it was.
     // The fingers easing back in before they lift change nothing: one change a pinch.
     expect(await fit()).toBe('contain');
     const before = await time();
     await pinch([160, 260], [90, 330], [140, 280]);
     await expect.poll(fit).toBe('cover');
     await expect(page.getByText('Zoomed to fill')).toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
-      'fill',
-    );
+    expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
     await page.waitForTimeout(600);
     await expect(more).toBeHidden();
     expect(Math.abs((await time()) - before)).toBeLessThan(3);
@@ -260,6 +271,94 @@ test.describe('with touch', () => {
     await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
     await touch('touchEnd', []);
     await expect(more).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("each title keeps its own picture fit, and every episode its show's", async ({ page }) => {
+    const errors = watchErrors(page);
+    // An earlier version kept one choice for every film: filled. Nobody loses it.
+    await page.addInitScript(() => {
+      if (localStorage.getItem('bannertv.phone.pictureFits') === null) {
+        localStorage.setItem('bannertv.phone.pictureFit', 'fill');
+      }
+    });
+    await mockAddons(page);
+    await seedStreamAddon(page);
+    await mockPlayback(page);
+    await openApp(page);
+    const { touch, pinch } = await touchscreen(page);
+    const fit = () =>
+      page.evaluate(() => {
+        const element = document.querySelector('video');
+        return element ? getComputedStyle(element).objectFit : null;
+      });
+    const playing = async () => {
+      const pause = page.getByLabel('Pause', { exact: true }).first();
+      await expect(pause).toBeVisible();
+      // The browser waits for a tap before it plays; the phone does not.
+      await pause.click();
+      await page.getByLabel('Play', { exact: true }).first().click();
+    };
+    // The web build's stand-in for the phone's player opens only the first video of a launch,
+    // so the app starts again after each one. The choices last from one launch to the next.
+    const leaveAndRelaunch = async () => {
+      const button = page.getByLabel('Leave the player').first();
+      if (!(await button.isVisible())) {
+        await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
+        await touch('touchEnd', []);
+      }
+      await button.click();
+      // Back on the title's page first: a back still on its way after the launch would ask the
+      // test server for the title's address, which it has no page for.
+      await expect(page.getByLabel('Leave the player')).toHaveCount(0);
+      await page.goto('/');
+    };
+    const series = page.getByRole('button', { name: /^Morevna Project, 2016/ }).first();
+
+    // A series' first episode opens filled, as the phone had every film. Closing two fingers
+    // fits it, for the series.
+    await series.click();
+    await page.getByRole('button', { name: /^1\. Season 1 episode 1,/ }).click();
+    await playing();
+    await expect.poll(fit).toBe('cover');
+    // The earlier key stays, for a phone put back on an earlier update.
+    expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
+      'fill',
+    );
+    await pinch([100, 320], [190, 230]);
+    await expect.poll(fit).toBe('contain');
+    await leaveAndRelaunch();
+
+    // A film never zoomed opens as the series was left. Spreading two fingers fills it, for the
+    // film alone.
+    await page
+      .getByLabel(/Tears of Steel/)
+      .last()
+      .click();
+    await page.getByRole('button', { name: /All streams/ }).click();
+    await page
+      .getByText(/Open Movie 1080p/)
+      .first()
+      .click();
+    await playing();
+    await expect.poll(fit).toBe('contain');
+    await pinch([160, 260], [90, 330]);
+    await expect.poll(fit).toBe('cover');
+    await leaveAndRelaunch();
+
+    // The series' next episode opens fitted, as its first was left, though the film was filled
+    // since.
+    await series.click();
+    await page.getByRole('button', { name: /^2\. Season 1 episode 2,/ }).click();
+    await playing();
+    await expect.poll(fit).toBe('contain');
+    expect(await storedFits(page)).toEqual({
+      last: 'fill',
+      titles: [
+        ['tt8000001', 'fit'],
+        ['tt2285752', 'fill'],
+      ],
+    });
     expect(errors).toEqual([]);
   });
 });

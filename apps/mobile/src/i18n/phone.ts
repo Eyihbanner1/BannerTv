@@ -61,6 +61,10 @@ const PHONE = {
   traktCopied:
     'The code is copied, so you can paste it. Come back here when Trakt says you’re done.',
   pictureInPicture: 'Picture-in-picture',
+  // The player's More: what the sleep timer has left, and what speed the next stream plays at.
+  sleepLeft_one: '{{count}} min left',
+  sleepLeft_other: '{{count}} min left',
+  speedNote: 'Another stream, or the next episode, starts at Normal.',
   zoomToFill: 'Zoom to fill',
   zoomedToFill: 'Zoomed to fill',
   fitToScreen: 'Fit to screen',
@@ -161,6 +165,21 @@ const PHONE = {
     confirm: 'Add {{name}}?',
     lead: 'This link came from another app. Addons are shared by every profile on this phone.',
   },
+  // New-episode alerts (data/episode-alerts.ts) and their switch in Settings.
+  episodeAlerts: {
+    section: 'Notifications',
+    setting: 'New episode alerts',
+    lead: 'A notification at 18:00 on the day a new episode comes out, for series you watch and series on My List.',
+    denied:
+      'Notifications are off for BannerTV. Turn them on in your phone’s settings to get alerts.',
+    channel: 'New episodes',
+    one: 'New episode: {{show}} S{{season}}:E{{episode}} is out',
+    oneUnnumbered: 'New episode: {{show}} is out',
+    run: 'New episodes: {{show}} S{{season}}:E{{first}}–{{last}} are out',
+    some: '{{count}} new episodes of {{show}} are out',
+    body: 'Tap to open the series.',
+    bodyNamed: '“{{title}}”. Tap to open the series.',
+  },
   reminders: {
     title: '{{name}} is starting',
     body: 'Starts at {{time}}. Tap to open the match.',
@@ -169,6 +188,18 @@ const PHONE = {
     denied:
       'Notifications are off for BannerTV. Turn them on in your phone’s settings to get reminders.',
   },
+  // When a screen fails to draw (screens/CrashScreen.tsx), and Settings' Send a report.
+  crash: {
+    title: 'Something went wrong',
+    lead: 'BannerTV ran into a problem it couldn’t get past. Starting again usually sorts it, and keeps the same profile.',
+    startAgain: 'Start again',
+  },
+  sendReport: 'Send a report',
+  sendReportDetail:
+    'Shares a short note of recent problems. Addon links, keys and codes are left out.',
+  reportTitle: 'BannerTV phone report',
+  reportNotShared: 'The report couldn’t be shared.',
+  reportNotSharedShort: 'Couldn’t share',
 } as const;
 
 const OVERRIDES = {
@@ -208,6 +239,7 @@ const OVERRIDES = {
       'Cinemeta and BannerTV Demo are already added, so Home is ready to browse, with a few free films to play. You can add more addons at any time in Settings, Addons.',
   },
   player: {
+    sleep: { offNote: 'Off: the phone plays on.' },
     problem: {
       nothing:
         'None of your addons offered a stream this phone can play. Try Streams, or add a stream addon in Settings, Addons.',
