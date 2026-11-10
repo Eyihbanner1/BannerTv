@@ -141,13 +141,14 @@ function explainNothing(input: ProblemInput): PlayProblem {
   if (playable.length > 0) return { kind: 'failed-recently', count: playable.length };
   const torrents = unavailable(entries, 'torrent');
   const headers = unavailable(entries, 'proxy-headers');
+  const notices = unavailable(entries, 'notice');
   // Only messages: the addon's own words say why better than anything BannerTV could.
-  if (unavailable(entries, 'notice').length === entries.length) {
+  if (notices.length === entries.length) {
     const notice = firstNotice(entries, asked);
     if (notice) return { kind: 'addon-notice', ...notice };
   }
-  // Web and YouTube links, and messages beside torrents or the like (explainProblem adds their words).
-  const web = entries.length - torrents.length - headers.length;
+  // Web and YouTube links. Messages beside them say their own words (explainProblem adds them).
+  const web = entries.length - torrents.length - headers.length - notices.length;
   if (torrents.length > 0 && torrents.length >= headers.length && torrents.length >= web) {
     const top = topAddon(torrents, asked);
     return { kind: 'torrents', addon: top?.addon ?? '', count: top?.count ?? torrents.length };
@@ -155,7 +156,8 @@ function explainNothing(input: ProblemInput): PlayProblem {
   if (headers.length > 0 && headers.length >= web) {
     return { kind: 'needs-helper', count: headers.length };
   }
-  return { kind: 'web-only', count: web };
+  // Messages with no words of their own, such as a bare settings page, count as web pages.
+  return { kind: 'web-only', count: web || notices.length };
 }
 
 /** Why what was tried did not play: the helper, uncached links, or the last stream's own error. */

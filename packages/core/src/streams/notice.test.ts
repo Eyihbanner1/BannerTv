@@ -53,6 +53,11 @@ describe('isNoticeStream', () => {
       'Configure the addon to see streams',
       'Private manifest required',
       'Check back soon',
+      'Streams coming soon',
+      // Comet and its kin.
+      'Invalid debrid API key',
+      'Obsolete config, please reconfigure the addon',
+      'Scraping in progress, try again in a minute',
     ]) {
       expect(notice({ name: 'Addon', description: words, url: 'https://a.example/n' })).toBe(true);
     }
@@ -62,6 +67,10 @@ describe('isNoticeStream', () => {
     expect(notice({ name: 'Addon', url: 'https://addon.example/abc123/configure' })).toBe(true);
     expect(notice({ url: 'https://addon.example/configure/?from=stream' })).toBe(true);
     expect(notice({ url: 'https://addon.example/configure-live/1' })).toBe(false);
+    // Whatever it says about a video: no video lives on a settings page.
+    expect(notice({ name: 'Addon\n1080p', url: 'https://addon.example/abc123/configure' })).toBe(
+      true,
+    );
   });
 
   it('never takes a stream that says anything about a video for a message', () => {
@@ -102,6 +111,28 @@ describe('isNoticeStream', () => {
       }),
     ).toBe(false);
     expect(notice({ name: 'No Limits TV', url: 'https://cdn.example.org/c' })).toBe(false);
+    // "No other streams", "reinstall" or "coming soon" mid-sentence describe a real stream.
+    expect(
+      notice({
+        name: 'Server 2',
+        description: 'Backup link · no other streams use this server',
+        url: 'https://cdn.example.org/e',
+      }),
+    ).toBe(false);
+    expect(
+      notice({
+        name: 'Assista no Link 1 · Dublado',
+        description: 'Reinstall VLC if it stutters',
+        url: 'https://cdn.example.org/f',
+      }),
+    ).toBe(false);
+    expect(
+      notice({
+        name: 'Highlights',
+        description: 'Final coming soon after',
+        url: 'https://cdn.example.org/g',
+      }),
+    ).toBe(false);
     // A tip further down a real stream's description is not its headline.
     expect(
       notice({
@@ -120,12 +151,12 @@ describe('isNoticeStream', () => {
 describe('noticeText', () => {
   it("reads the addon's message as sentences", () => {
     expect(text(REINSTALL)).toBe(
-      'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.highfly.to/configure to get a new addon link.',
+      'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.highfly.to to get a new addon link.',
     );
     expect(text(UNAVAILABLE)).toBe('Streams temporarily unavailable - try again shortly');
   });
 
-  it("leaves out the addon's name tag, and uses the name when there is nothing else", () => {
+  it("leaves out the addon's name tag, and uses the name when it is the message", () => {
     expect(
       text({ name: 'Sports Streams', description: 'No streams found', url: 'https://a.example/x' }),
     ).toBe('No streams found');
@@ -133,6 +164,8 @@ describe('noticeText', () => {
       'No streams found. Try later',
     );
     expect(text({ url: 'https://a.example/configure' })).toBe('');
+    // A name tag alone is no message.
+    expect(text({ name: 'Sports Streams', url: 'https://a.example/configure' })).toBe('');
   });
 
   it('shows only the host of a link, never its path, which can carry the viewer’s key', () => {
@@ -144,6 +177,13 @@ describe('noticeText', () => {
     });
     expect(said).toBe('Your link has expired. Get a new one at premium.example.org');
     expect(said).not.toContain('SECRET');
+    // Written without its scheme too.
+    const bare = text({
+      name: 'Addon',
+      description: 'Link expired. Visit premium.example.org/SECRET-KEY/configure for a new one',
+      url: 'https://premium.example.org/x',
+    });
+    expect(bare).toBe('Link expired. Visit premium.example.org for a new one');
   });
 
   it('cuts a long message at a space', () => {

@@ -249,6 +249,12 @@ describe('explainProblem, when an addon sent a message instead of a stream', () 
         text: 'Streams temporarily unavailable - try again shortly',
       },
     });
+    // Two messages do not outnumber one torrent as web links would.
+    expect(
+      explainProblem(
+        input({ asked: [TORRENTIO, SPORTS], entries: [torrent(), notice(1), notice(1)] }),
+      ).problem,
+    ).toEqual({ kind: 'torrents', addon: 'Torrentio', count: 1 });
   });
 
   it('counts a message with no words as a web link', () => {

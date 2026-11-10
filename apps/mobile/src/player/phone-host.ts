@@ -196,10 +196,6 @@ function onStatus({ status, error }: StatusChangeEventPayload): void {
   }
   if (status === 'readyToPlay') {
     readyOnce = true;
-    // The link opened, so its kind is known and an error before it no longer describes it: a
-    // playlist that ends or a server that stops answering later reports its own trouble.
-    typeSettled = true;
-    firstError = undefined;
     if (!startChecked) {
       startChecked = true;
       if (openedStartAt > 0 && Math.abs(position(player) - openedStartAt) > START_SLACK_S) {
@@ -235,6 +231,11 @@ function onPlayingChange({ isPlaying }: PlayingChangeEventPayload): void {
 
 function onSourceLoad(): void {
   if (!player || !hasMedia) return;
+  // This link opened, so its kind is known and an error before it no longer describes it: a
+  // playlist that ends or a server that stops answering later reports its own trouble. Only the
+  // source's own load says so, as a readyToPlay can still be the last stream's.
+  typeSettled = true;
+  firstError = undefined;
   const video = player.availableVideoTracks;
   if (video.length > 0 && video.every((track) => !track.isSupported)) {
     // With no decoder for the picture Media3 plays the sound alone and calls it playing. Stop,

@@ -24,15 +24,21 @@ const NOTICE = new RegExp(
     '\\b(?:temporarily|currently) (?:unavailable|offline|down|not available)\\b',
     // "Streams are not available yet", "Link unavailable", "Source offline".
     '\\b(?:streams?|links?|sources?) (?:are |is )?(?:not (?:yet )?available|unavailable|offline)\\b',
-    // "No streams found", "No links available", "No more sources".
-    '\\bno (?:(?:more|live|working|available|other) )?(?:streams?|links?|sources?)\\b',
+    // "No streams found", "No links available", "No more sources": the start of a sentence only,
+    // as "Link 1 · no other streams use this server" describes a real one.
+    '(?:^|[.!:;·|–-]\\s*)no (?:more |live |available )?(?:streams?|links?|sources?)\\b',
     // The free Sports Streams link: "Please reinstall the addon".
-    '\\breinstall\\b',
+    '\\b(?:reinstall|re-?configure) (?:the |this |our |your )?add-?on\\b',
     '\\bnew add-?on link\\b',
     '\\b(?:install|configure|update|set up) (?:the |this |your |our )?(?:add-?on|manifest)\\b',
     '\\b(?:private )?manifest required\\b',
     '\\b(?:subscription|membership|trial|account|api key|token|link) (?:has |is )?(?:expired|ended|inactive|invalid)\\b',
-    '\\b(?:check back|coming) soon\\b',
+    // What Comet and its kin say: "Invalid debrid API key", "Obsolete config", "Scraping in progress".
+    '\\binvalid (?:\\w+ )?(?:config(?:uration)?|api key|token)\\b',
+    '\\bobsolete config(?:uration)?\\b',
+    '\\bscraping in progress\\b',
+    '\\bcheck back (?:later|soon)\\b',
+    '^\\W*(?:streams? |links? )?coming soon\\b',
   ].join('|'),
   'i',
 );
@@ -41,7 +47,10 @@ const NOTICE = new RegExp(
 const SETTINGS_PAGE = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+(?:\/[^?#]*)?\/configure\/?(?:[?#]|$)/i;
 
 /** Links inside an addon's words: only the host is kept, as the path can carry the viewer's keys. */
-const LINK = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]+/gi;
+const LINK = /[a-z][a-z0-9+.-]*:\/\/[^\s]+/gi;
+
+/** A link written without its scheme, "premium.example.org/KEY/configure": its host stays, its path goes. */
+const BARE_LINK = /\b((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?[/?#]\S*/gi;
 
 /** As long as a problem box line can be: the start of a longer message says what matters. */
 export const NOTICE_MAX = 200;
@@ -75,8 +84,10 @@ function linesOf(text: string | undefined): string[] {
 
 /** Whether a stream is an addon's message rather than a video. */
 export function isNoticeStream(stream: Stream, facts: StreamFacts): boolean {
-  if (stream.source.kind !== 'url' || describesVideo(stream, facts)) return false;
+  if (stream.source.kind !== 'url') return false;
+  // No video lives on an addon's settings page, whatever the stream says about one.
   if (SETTINGS_PAGE.test(stream.source.url)) return true;
+  if (describesVideo(stream, facts)) return false;
   const headline = linesOf(stream.name).concat(linesOf(stream.description).slice(0, 1));
   return headline.some((line) => NOTICE.test(line));
 }
@@ -103,12 +114,13 @@ function clip(text: string, max: number): string {
 export function noticeText(stream: Stream): string {
   const description = linesOf(stream.description);
   const name = linesOf(stream.name);
-  const nameSays = description.length === 0 || name.some((line) => NOTICE.test(line));
+  // A name is part of the message only when it reads as one: "Sports Streams" is a name tag.
+  const nameSays = name.some((line) => NOTICE.test(line));
   const lines = (nameSays ? name : []).concat(description);
   let text = '';
   const seen: string[] = [];
   for (const raw of lines) {
-    const line = raw.replace(LINK, hostOnly).replace(/\s+/g, ' ').trim();
+    const line = raw.replace(LINK, hostOnly).replace(BARE_LINK, '$1').replace(/\s+/g, ' ').trim();
     const key = line.toLowerCase();
     if (line === '' || seen.indexOf(key) >= 0) continue;
     seen.push(key);
