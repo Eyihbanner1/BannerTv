@@ -95,7 +95,9 @@ function folder(name) {
 
 beforeAll(() => {
   work = mkdtempSync(join(tmpdir(), 'bannertv-updates-'));
-  pair = makeCodeSigningPair();
+  // Valid from a day before the tests' fixed NOW until years after today, so it holds for both the
+  // functions given NOW and the commands, which read the clock.
+  pair = makeCodeSigningPair({ from: new Date(NOW.getTime() - 86_400_000) });
   certificate = pair.certificatePem;
   signingKey = readSigningKey(pair.privateKeyPem, { certificate, now: NOW });
 });
