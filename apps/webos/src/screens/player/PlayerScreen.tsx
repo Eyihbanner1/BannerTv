@@ -5,7 +5,15 @@ import {
   bingeEntry,
   type BingeHint,
   bingeHint,
+  type CreditsCard,
+  creditsCardAt,
+  creditsCount,
+  creditsCue,
   endAction,
+  guessIntro,
+  guessSettles,
+  introKnown,
+  type IntroGuess,
   inLastStretch,
   languageName,
   liveFraction,
@@ -33,6 +41,8 @@ import {
   stopsBeforeNext,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
+  UP_NEXT_BEFORE_END_S,
+  upNextStage,
 } from '@bannertv/core';
 import type { MetaPreview, Video } from '@bannertv/protocol';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
@@ -67,7 +77,7 @@ import {
   speedMemory,
 } from '../../data/playback';
 import { preferences } from '../../data/preferences';
-import { useSkipSegments } from '../../data/skips';
+import { learnedIntros, useEpisodeMarks } from '../../data/skips';
 import { chooseAudioLanguage, wantedAudio } from '../../data/tracks';
 import { useQuery } from '../../data/use-query';
 import { markActivity, sinceInput } from '../../navigation/activity';
@@ -249,6 +259,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // OK pressed while the stream was starting: the controls show once it plays.
   const wantsControls = useRef(false);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
+  // Up Next as the credits start: where it came up, whether it counts to the
+  // next episode, and whether the viewer chose Watch credits.
+  const [creditsCard, setCreditsCard] = useState<CreditsCard | null>(null);
+  // A skip by hand that looks like the intro, until playback shows it was (learned-intros.ts).
+  const introGuess = useRef<IntroGuess | null>(null);
   // The sleep timer, kept for this title through All streams and the next episode.
   const [sleep, setSleep] = useState(() => sleepTimerFor(metaId));
   // The time it is read at, moved on as it nears a change.
@@ -259,6 +274,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const askPreference = useSyncExternalStore(
     preferences.subscribe,
     () => preferences.get().stillWatching,
+  );
+  const startsAtCredits = useSyncExternalStore(
+    preferences.subscribe,
+    () => preferences.get().nextAtCredits,
   );
   // What the Lab passed on this TV, which its speed test can change while the sheet shows.
   const speeds = useSyncExternalStore(speedMemory.subscribe, speedMemory.results);
@@ -290,6 +309,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // Forward 10 s, Fast forward and Go to live nowhere to go.
   const atLive = state.live && state.liveWindow !== null && state.behind === 0;
 
+  // What IntroDB marks in this episode: the intro and recap to skip (with an
+  // intro learned from the viewer's own skips where it has none), and the
+  // end credits. Never for the Lab or sports.
+  const marks = useEpisodeMarks(type, metaId, videoId, !props.lab && !sportsEvent);
+
   // Up Next, in the last 30 seconds of an episode: a card while nothing else
   // is on screen, else the count on Next episode. It counts to the real end,
   // in watching seconds, so the ending is never cut. Never on a broadcast,
@@ -299,6 +323,16 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const ended = state.status === 'ended';
   const running = state.status === 'playing' || state.status === 'buffering';
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
+  // From IntroDB's end credits, when its mark fits this file: the card comes
+  // up as they start, offering the next episode or Watch credits. With "Start
+  // next at credits" on, and a mark for this very release, it counts
+  // CREDITS_COUNT_S and plays the next episode, unless "Still watching?" is
+  // due or the sleep timer stops at this end. Otherwise the ending plays out
+  // and the last 30 seconds count down as before.
+  const cue = state.clip || state.live ? undefined : creditsCue(marks.credits, state.duration);
+  const stage = offersNext
+    ? upNextStage(state.position, state.duration, state.rate, cue?.start)
+    : 'none';
   // The sleep timer. Minutes pause the video wherever it is; the end of what
   // plays, or minutes that would run out early in the next episode, stop at this end.
   const sleepAt = sleepPhase(sleep, sleepNow, {
@@ -324,6 +358,50 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
   // Not when the sleep timer stops at this end.
   const counting = inStretch && !upNextDismissed && !held && !sleepsHere;
+  if (!waiting) {
+    // Whether it counts is decided once, as it comes up, as the end decides "Still watching?".
+    const counts = () =>
+      startsAtCredits &&
+      !!cue?.startsNext &&
+      !sleepsHere &&
+      !(
+        askPreference &&
+        askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
+      );
+    let card =
+      offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
+    // On a stream the mark is not exact for, or once the sleep timer stops at this end,
+    // the count stops for good: back on the marked one, or with the timer off or put
+    // off, the card only offers, never starting the next episode at once.
+    if (card && card.counts && (!cue?.startsNext || sleepsHere)) {
+      card = { ...card, counts: false };
+    }
+    if (card !== creditsCard) setCreditsCard(card);
+  }
+  // Counting to the next episode at the credits, until Watch credits, Keep watching or the end.
+  // Only while the file playing is the release marked: another stream (Quality, a
+  // failover) cut a little differently stops the count, and the ending plays out.
+  const creditsCounts =
+    !!creditsCard &&
+    creditsCard.counts &&
+    !!cue?.startsNext &&
+    !creditsCard.gone &&
+    !upNextDismissed &&
+    !sleepsHere;
+  // The credits card is up in its own right while the credits play, or while it
+  // counts; in the last 30 seconds otherwise, the end's count takes over.
+  const creditsUp =
+    !!creditsCard &&
+    !creditsCard.gone &&
+    !ended &&
+    !held &&
+    !sleepsHere &&
+    running &&
+    (stage === 'credits' || creditsCounts);
+  const creditsLeft =
+    creditsCard && creditsCounts
+      ? creditsCount(creditsCard, state.position, state.duration, state.rate)
+      : null;
   // Whether the count was on screen as the episode played into its end: the
   // next one then starts as it ends. Kept through the pause the video makes as it ends.
   const [countSeen, setCountSeen] = useState(false);
@@ -371,10 +449,20 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const count = ended
     ? (afterEnd ?? UP_NEXT_AFTER_END_S)
     : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
+  // What the card and Next episode count: to the next episode at the credits,
+  // or to the end, or nothing over credits it only offers it over.
+  const nextCount = creditsUp ? creditsLeft : showsCount ? count : null;
+  // The count ran out while something held it (a sheet, a skip on its way,
+  // a pause): it counts no more, and the ending plays out.
+  if (creditsCard && creditsCounts && creditsLeft === 0 && !creditsUp && !waiting) {
+    setCreditsCard({ ...creditsCard, counts: false });
+  }
+  // It ran out on screen, on the card or on Next episode: the next episode plays.
+  const creditsDue = creditsUp && creditsCounts && creditsLeft === 0;
   // The sleep timer's last minute, in the corner as Up Next is.
   const warns = sleepAt === 'warning' && !sleepWarningGone && !held;
   // The controls win: with them up, the count is on Next episode instead.
-  const cardUp = showsCount && !chrome && !warns;
+  const cardUp = (showsCount || creditsUp) && !chrome && !warns;
   const warningUp = warns && !chrome;
 
   // Skip intro and Skip recap, from IntroDB's timings for this episode: in
@@ -382,7 +470,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // screen, for SKIP_CARD_S, then gone until a rewind brings it back. It only
   // offers; it never skips by itself. Never over a clip, a broadcast, the Lab
   // or sports.
-  const skips = useSkipSegments(type, videoId, !props.lab && !sportsEvent);
+  const skips = marks.segments;
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
   // The intro or recap the card was for, where it first showed, and whether it was let go.
@@ -430,6 +518,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     { type, metaId, videoId, lab: props.lab },
     finder.runtimeSeconds,
     finder.knownRuntimeSeconds,
+    cue?.start,
   );
 
   // Once the video plays, Home's Continue Watching gets its name, artwork and
@@ -671,6 +760,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       if (!atLive) session.goToLive();
     } else session.seek(current.target);
     offerBackTo(current.origin, current.target);
+    noteJump(current.origin, current.target);
     return true;
   }
   function cancelScrub(): boolean {
@@ -708,8 +798,30 @@ export function PlayerScreen(props: PlayerScreenProps) {
       const from = session.trustedPosition() ?? state.position;
       session.seek(seconds);
       offerBackTo(from, seconds);
+      noteJump(from, seconds);
     }
     armHide();
+  }
+
+  /**
+   * A jump the viewer made by hand (Left and Right, the skip buttons, a click
+   * on the bar), to learn the intro from where IntroDB has none: one of an
+   * intro's length early in an episode is taken as it once playback goes on
+   * from there, and the series' next episode offers Skip intro at the same
+   * place. Only in a series' episode, never the Lab, sports, a broadcast or a
+   * clip, nor one whose intro IntroDB times or says it has none. A jump from
+   * inside IntroDB's recap is that recap's.
+   */
+  function noteJump(from: number, to: number) {
+    const learns = type === 'series' && !props.lab && !sportsEvent && !state.live && !state.clip;
+    if (!learns || introKnown(marks)) {
+      introGuess.current = null;
+      return;
+    }
+    const inRecap = skips.some(
+      (segment) => segment.kind === 'recap' && from >= segment.start && from < segment.end,
+    );
+    if (!inRecap) introGuess.current = guessIntro(introGuess.current, from, to);
   }
 
   /**
@@ -725,6 +837,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     if (undo !== null) {
       session.seek(undo);
       setUndo(null);
+      // Going back is not playback going on from a skip: no intro is learned from it.
+      introGuess.current = null;
       return;
     }
     const from = session.trustedPosition() ?? state.position;
@@ -1020,9 +1134,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }, [panel]);
 
   // The next episode's streams are asked for well before Up Next, so reading
-  // them does not hold up the count, and the episode starts at once.
+  // them does not hold up the count, and the episode starts at once: as long
+  // before the credits card as before the last 30 seconds' count.
   const remaining = state.duration > 0 ? state.duration - state.position : Infinity;
-  const nearEnd = ended || remaining <= NEXT_STREAMS_BEFORE_END_S;
+  const toCredits = cue ? cue.start - state.position : Infinity;
+  const nearEnd =
+    ended ||
+    remaining <= NEXT_STREAMS_BEFORE_END_S ||
+    toCredits <= NEXT_STREAMS_BEFORE_END_S - UP_NEXT_BEFORE_END_S;
   useEffect(() => {
     if (nearEnd && next) streamFinder(type, next.id).start();
   }, [nearEnd, next, type]);
@@ -1042,6 +1161,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
   function playNextEpisode() {
     if (next) playEpisode(next);
   }
+  /** Watch credits: the card goes for the credits, and the last 30 seconds count down as ever. */
+  function watchCredits() {
+    setCreditsCard((card) => card && { ...card, gone: true });
+  }
 
   /** Skip intro or Skip recap: to its end, and the card goes. */
   function skipSegment() {
@@ -1052,6 +1175,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     session.seek(skipping.end);
     // A long recap skipped offers the way back, as any big jump does.
     offerBackTo(from, skipping.end);
+    // A learned intro skipped can be corrected as the skip it was learned from.
+    introGuess.current = skipping.learned ? { start: skipping.start, end: skipping.end } : null;
     setSkipShown((shown) => shown && { ...shown, gone: true });
   }
   /** Skip intro from the controls: the controls go with it, back to the picture. */
@@ -1097,6 +1222,31 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Only the button going matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skipInControls]);
+
+  // A skip taken for the intro is learned once playback goes on from where it
+  // landed, and forgotten once playback goes back before it.
+  const position = state.position;
+  useEffect(() => {
+    const guess = introGuess.current;
+    if (!guess || waiting) return;
+    const verdict = guessSettles(guess, position);
+    if (verdict === 'wait') return;
+    introGuess.current = null;
+    // IntroDB may have answered since the skip: its own word wins.
+    if (verdict === 'learn' && !introKnown(marks)) learnedIntros.learn(metaId, guess);
+  }, [position, waiting, metaId, marks]);
+
+  // The count at the credits ran out on screen: on to the next episode.
+  useEffect(() => {
+    if (!creditsDue) return;
+    countAutoplay();
+    playNextEpisode();
+    // Only the count running out matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditsDue]);
+  // The progress saved, and Trakt, count the episode watched from the credits.
+  const creditsAt = cue?.start;
+  useEffect(() => session?.markCredits(creditsAt), [session, creditsAt]);
 
   // The end: back to the title's page, or on to the next episode, once nothing holds it.
   useEffect(() => {
@@ -1317,7 +1467,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
             focusKey: 'player-next',
             icon: 'next',
             // Up Next's count, while the controls hide its card.
-            label: showsCount ? t('player.nextIn', { seconds: count }) : t('player.nextEpisode'),
+            label:
+              nextCount !== null
+                ? t('player.nextIn', { seconds: nextCount })
+                : t('player.nextEpisode'),
             // Over a clip too: only the count and the end leave it alone.
             unavailable: hasNext ? undefined : noNextReason(),
             onPress: playNextEpisode,
@@ -1604,9 +1757,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
               ? t('player.episodeNumber', { season: next.season, episode: next.episode })
               : undefined
           }
-          seconds={count}
+          seconds={nextCount}
+          credits={creditsUp}
           onPlay={playNextEpisode}
-          onDismiss={() => setUpNextDismissed(true)}
+          onDismiss={creditsUp ? watchCredits : () => setUpNextDismissed(true)}
           onControls={() => show('player-play')}
         />
       )}

@@ -6,7 +6,7 @@
 /*
  * The build this TV runs, then what Homebrew Channel has, above the button.
  * Two lines at most: on Main, with the account, Trakt and TMDB, the right
- * column then still ends above the left one, so the about line stays on screen.
+ * column then still ends above the bottom of a 1080 line screen.
  */
 .status {
   margin-bottom: 20px;

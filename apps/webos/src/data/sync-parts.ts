@@ -268,6 +268,7 @@ type PreferenceKey =
   | 'pref/subtitleLanguage'
   | 'pref/tmdb'
   | 'pref/stillWatching'
+  | 'pref/nextAtCredits'
   | 'pref/subtitleWhen'
   | 'pref/maxResolution'
   | 'pref/avoidHdr'
@@ -303,6 +304,7 @@ const PREFERENCE_KEYS: ReadonlyArray<
   ],
   ['pref/tmdb', (p) => p.tmdb, (p, v) => ({ ...p, tmdb: v as never })],
   ['pref/stillWatching', (p) => p.stillWatching, (p, v) => ({ ...p, stillWatching: v as never })],
+  ['pref/nextAtCredits', (p) => p.nextAtCredits, (p, v) => ({ ...p, nextAtCredits: v as never })],
   ['pref/subtitleWhen', (p) => p.subtitleWhen, (p, v) => ({ ...p, subtitleWhen: v as never })],
   ['pref/maxResolution', (p) => p.maxResolution, (p, v) => ({ ...p, maxResolution: v as never })],
   ['pref/avoidHdr', (p) => p.avoidHdr, (p, v) => ({ ...p, avoidHdr: v as never })],

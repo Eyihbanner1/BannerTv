@@ -28,6 +28,7 @@ test('Stream helper: the phone sends its helper through a short code, and the TV
     'settings-probing',
     'settings-subtitle-style',
     'settings-still-watching',
+    'settings-next-at-credits',
     'settings-diagnostics',
     'settings-lab',
     'settings-stream-helper',

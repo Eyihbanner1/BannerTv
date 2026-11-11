@@ -31,6 +31,7 @@ const PHONE = {
   nextIn: 'Next episode in {{seconds}}',
   playNow: 'Play now',
   keepWatching: 'Keep watching',
+  watchCredits: 'Watch credits',
   stillWatching: 'Still watching?',
   stillWatchingLead: 'The next episode is ready when you are.',
   stop: 'Stop',
@@ -105,6 +106,7 @@ const PHONE = {
   codeNotCopied: 'The code wasn’t copied. Write it down instead.',
   playback: 'Playback',
   stillWatchingSetting: 'Ask “Still watching?”',
+  nextAtCreditsSetting: 'Start next episode at the credits',
   about: 'BannerTV for phones {{version}} (test build)',
   // Over-the-air updates (runtime/app-updates.ts), in Settings for grown-ups.
   thisApp: 'This app',

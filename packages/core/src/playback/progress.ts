@@ -87,7 +87,15 @@ export interface ProgressAdoption {
 export type ProgressUpdate = Pick<
   ProgressEntry,
   'metaId' | 'type' | 'videoId' | 'position' | 'duration' | 'continueRow'
->;
+> & {
+  /**
+   * Where the episode's end credits start, when IntroDB's mark fits the
+   * file. From there it counts as watched, and is kept at its end, so it
+   * never resumes in the credits and Continue Watching offers the next one.
+   * Not saved itself.
+   */
+  creditsAt?: number;
+};
 
 export interface ProgressStore {
   /** Reads saved progress. Safe to call more than once. */
@@ -99,8 +107,9 @@ export interface ProgressStore {
   recent(): ProgressEntry[];
   /**
    * Saves where playback is. Marks the video watched once the position
-   * passes WATCHED_FRACTION of a known duration; a watched video stays
-   * watched until it is started over. Writes to storage straight away.
+   * passes WATCHED_FRACTION of a known duration, or its credits start; a
+   * watched video stays watched until it is started over. Writes to storage
+   * straight away.
    */
   record(update: ProgressUpdate): ProgressEntry;
   /** Forgets the position (Start over); keeps nothing about the video. */
@@ -378,9 +387,19 @@ export function createProgressStore(options: {
     },
     recent: () => newestFirst(Array.from(entries.values()).reverse()),
     record(update) {
-      const position = seconds(update.position);
+      const played = seconds(update.position);
       const duration = seconds(update.duration);
-      const reachedEnd = duration > 0 && position >= WATCHED_FRACTION * duration;
+      const credits = update.creditsAt;
+      const inCredits =
+        duration > 0 &&
+        credits !== undefined &&
+        isFinite(credits) &&
+        credits > 0 &&
+        credits < duration &&
+        played >= credits;
+      // In the credits, as Mark as watched does: at the end.
+      const position = inCredits ? duration : played;
+      const reachedEnd = inCredits || (duration > 0 && position >= WATCHED_FRACTION * duration);
       const entry: ProgressEntry = {
         metaId: update.metaId,
         type: update.type,

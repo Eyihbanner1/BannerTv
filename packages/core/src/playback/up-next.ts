@@ -52,6 +52,76 @@ export function rearms(position: number, duration: number, rate = 1): boolean {
 }
 
 /**
+ * With "Start next at credits" on, the card that comes up as the credits
+ * start counts this many watching seconds, then the next episode plays.
+ */
+export const CREDITS_COUNT_S = 10;
+
+/**
+ * Where Up Next is in an episode:
+ * - 'none': not due yet.
+ * - 'credits': IntroDB's credits have started (`creditsAt`), before the last
+ *   UP_NEXT_BEFORE_END_S. The card offers the next episode, or Watch credits.
+ * - 'last': the last UP_NEXT_BEFORE_END_S, or past the end, counting to it.
+ */
+export type UpNextStage = 'none' | 'credits' | 'last';
+
+/** Which stage of Up Next the episode is at. 'none' while the length is unknown. */
+export function upNextStage(
+  position: number,
+  duration: number,
+  rate = 1,
+  creditsAt?: number,
+): UpNextStage {
+  if (inLastStretch(position, duration, rate)) return 'last';
+  if (watchingLeft(position, duration, rate) === null) return 'none';
+  return creditsAt !== undefined && position >= creditsAt ? 'credits' : 'none';
+}
+
+/** The card offered as the credits start, kept while they play. */
+export interface CreditsCard {
+  /** Where it first showed, in media seconds. */
+  at: number;
+  /** It counts CREDITS_COUNT_S, then the next episode plays. */
+  counts: boolean;
+  /** The viewer chose Watch credits (or Back): gone until a rewind before the credits. */
+  gone: boolean;
+}
+
+/**
+ * The credits card after a clock reading: it comes up once playback is past
+ * the credits mark, stays while they play, and is forgotten once a rewind
+ * goes UP_NEXT_REARM_S before the mark, so it comes again. `counts` says,
+ * as it comes up, whether it counts down to the next episode.
+ */
+export function creditsCardAt(
+  card: CreditsCard | null,
+  position: number,
+  creditsAt: number | undefined,
+  counts: () => boolean,
+): CreditsCard | null {
+  if (creditsAt === undefined || !isFinite(position)) return null;
+  if (position < creditsAt) return card && position < creditsAt - UP_NEXT_REARM_S ? null : card;
+  return card ?? { at: position, counts: counts(), gone: false };
+}
+
+/**
+ * The credits card's count: CREDITS_COUNT_S watching seconds from where it
+ * came up, rounded up, never more than is left to the real end. 0 once it ran out.
+ */
+export function creditsCount(
+  card: CreditsCard,
+  position: number,
+  duration: number,
+  rate = 1,
+): number {
+  const speed = usable(rate) ? rate : 1;
+  const left = Math.ceil(CREDITS_COUNT_S - Math.max(0, position - card.at) / speed);
+  const toEnd = secondsToEnd(position, duration, speed);
+  return Math.max(0, toEnd === null ? left : Math.min(left, toEnd));
+}
+
+/**
  * What the player does when a video ends:
  * - 'leave': back to the title's page.
  * - 'play': the next episode, now.

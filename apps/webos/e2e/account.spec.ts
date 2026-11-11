@@ -1440,6 +1440,7 @@ test('Diagnostics says whether this is a secure context and Web Crypto gives the
   await press(page, 'ArrowDown', 'settings-probing');
   await press(page, 'ArrowDown', 'settings-subtitle-style');
   await press(page, 'ArrowDown', 'settings-still-watching');
+  await press(page, 'ArrowDown', 'settings-next-at-credits');
   await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'Enter', 'diagnostics-refresh');
   const row = (label: string) =>

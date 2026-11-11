@@ -12,9 +12,16 @@ interface UpNextProps {
   video: Video;
   /** Its season and number, as the controls name episodes: "S2:E5". */
   number?: string;
-  /** The count the player keeps: seconds to the end, or after it. */
-  seconds: number;
+  /**
+   * The count the player keeps: seconds to the end, or after it, or to the
+   * next episode starting at the credits. Null in credits it only offers
+   * the next episode over: no count.
+   */
+  seconds: number | null;
+  /** Offered as the credits start: Watch credits in place of Keep watching. */
+  credits?: boolean;
   onPlay: () => void;
+  /** Keep watching, Watch credits, or Back. */
   onDismiss: () => void;
   /** Up or Down: the controls come up in its place, with the count on Next episode. */
   onControls: () => void;
@@ -22,14 +29,24 @@ interface UpNextProps {
 
 /**
  * "Next episode in 12 s", in the corner over the credits, counting to the
- * end of the episode, with the episode's number and name. OK plays it now,
- * Back keeps watching, Up or Down brings the controls. The player shows it
+ * end of the episode, with the episode's number and name. As IntroDB's end
+ * credits start it comes with Watch credits, and says only "Next episode"
+ * unless it counts to starting it there. OK plays it now, Back keeps
+ * watching (or watches the credits), Up or Down brings the controls. The player shows it
  * only while nothing else is on screen (the controls, a sheet, a skip), so it
  * takes focus from the picture alone; the player says where focus goes after.
  * The pointer over it moves focus to the button under it, and a click on
  * the picture beside it brings the controls.
  */
-export function UpNext({ video, number, seconds, onPlay, onDismiss, onControls }: UpNextProps) {
+export function UpNext({
+  video,
+  number,
+  seconds,
+  credits = false,
+  onPlay,
+  onDismiss,
+  onControls,
+}: UpNextProps) {
   const { t } = useTranslation();
   const { ref, focusKey } = useFocusable<object, HTMLDivElement>({
     focusKey: 'player-upnext',
@@ -47,7 +64,7 @@ export function UpNext({ video, number, seconds, onPlay, onDismiss, onControls }
   const name =
     video.title ||
     (video.episode !== undefined ? t('details.untitledEpisode', { number: video.episode }) : '');
-  const count = t('player.nextEpisodeIn', { seconds });
+  const count = seconds === null ? t('player.nextEpisode') : t('player.nextEpisodeIn', { seconds });
   return (
     <FocusContext.Provider value={focusKey}>
       <div ref={ref} className={styles.upNext} role="dialog" aria-label={t('player.upNext')}>
@@ -70,7 +87,7 @@ export function UpNext({ video, number, seconds, onPlay, onDismiss, onControls }
           </Button>
           <Button
             focusKey="player-upnext-dismiss"
-            label={t('player.keepWatching')}
+            label={t(credits ? 'player.watchCredits' : 'player.keepWatching')}
             onPress={onDismiss}
             onArrowPress={onArrowPress}
           />

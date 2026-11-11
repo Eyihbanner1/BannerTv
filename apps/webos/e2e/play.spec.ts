@@ -752,6 +752,7 @@ test('Languages and picture in Settings: the highest picture keeps Play within i
     'settings-probing',
     'settings-subtitle-style',
     'settings-still-watching',
+    'settings-next-at-credits',
     'settings-diagnostics',
     'settings-lab',
     'settings-stream-helper',

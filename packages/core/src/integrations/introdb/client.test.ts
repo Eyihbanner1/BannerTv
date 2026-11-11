@@ -30,7 +30,7 @@ describe('episodeOf', () => {
 });
 
 describe('createIntroDbClient', () => {
-  it("asks IntroDB for a series episode's timings and reads its intro and recap", async () => {
+  it("asks IntroDB for a series episode's timings and reads its intro, recap and credits", async () => {
     const { client, fetchJson } = setup(() =>
       Promise.resolve({
         intro: { start_sec: 61, end_sec: 92 },
@@ -38,20 +38,23 @@ describe('createIntroDbClient', () => {
         outro: { start_sec: 2600, end_sec: 2680 },
       }),
     );
-    const query = client.segments('series', 'tt0903747:2:1');
+    const query = client.marks('series', 'tt0903747:2:1');
     query.load();
     await flush();
     expect(fetchJson).toHaveBeenCalledWith(EPISODE, { timeoutMs: INTRODB_TIMEOUT_MS });
-    expect(query.get().data).toEqual([
-      { kind: 'recap', start: 0, end: 45 },
-      { kind: 'intro', start: 61, end: 92 },
-    ]);
+    expect(query.get().data).toEqual({
+      segments: [
+        { kind: 'recap', start: 0, end: 45 },
+        { kind: 'intro', start: 61, end: 92 },
+      ],
+      credits: { start: 2600, end: 2680, sceneAfter: false },
+    });
   });
 
   it('asks once for the same episode', async () => {
     const { client, fetchJson } = setup(() => Promise.resolve({ intro: null }));
-    client.segments('series', 'tt0903747:2:1').load();
-    client.segments('series', 'tt0903747:2:1').load();
+    client.marks('series', 'tt0903747:2:1').load();
+    client.marks('series', 'tt0903747:2:1').load();
     await flush();
     expect(fetchJson).toHaveBeenCalledTimes(1);
   });
@@ -60,15 +63,15 @@ describe('createIntroDbClient', () => {
     const { client } = setup(() =>
       Promise.reject(new HttpError('status', 'The addon answered 404', 404)),
     );
-    const query = client.segments('series', 'tt0903747:2:1');
+    const query = client.marks('series', 'tt0903747:2:1');
     query.load();
     await flush();
-    expect(query.get()).toMatchObject({ status: 'success', data: [] });
+    expect(query.get()).toMatchObject({ status: 'success', data: { segments: [] } });
   });
 
   it('leaves other failures as failures, which show no skip', async () => {
     const { client } = setup(() => Promise.reject(new HttpError('network', 'offline')));
-    const query = client.segments('series', 'tt0903747:2:1');
+    const query = client.marks('series', 'tt0903747:2:1');
     query.load();
     await flush();
     expect(query.get().status).toBe('error');
@@ -82,9 +85,9 @@ describe('createIntroDbClient', () => {
       ['series', 'kitsu:1:1'],
       ['tv', 'tt0903747:2:1'],
     ] as const) {
-      const query = client.segments(type, id);
+      const query = client.marks(type, id);
       query.load();
-      expect(query.get()).toMatchObject({ status: 'success', data: [] });
+      expect(query.get()).toMatchObject({ status: 'success', data: { segments: [] } });
     }
     await flush();
     expect(fetchJson).not.toHaveBeenCalled();
@@ -97,7 +100,7 @@ describe('createIntroDbClient', () => {
       fetchJson,
       queries: createQueryCache(),
     });
-    client.segments('series', 'tt1:1:1').load();
+    client.marks('series', 'tt1:1:1').load();
     await flush();
     expect(fetchJson).toHaveBeenCalledWith(
       'https://proxy.example/introdb/segments?imdb_id=tt1&season=1&episode=1',

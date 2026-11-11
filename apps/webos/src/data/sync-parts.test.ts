@@ -391,6 +391,19 @@ describe('preferencesPart', () => {
     expect(store.get().avoidHdr).toBe(false);
   });
 
+  it('carries "Start next episode at the credits" like "Still watching?"', () => {
+    const { part, store } = prefsSetup({ nextAtCredits: true });
+    expect(plain(part.snapshot())).toEqual({ 'pref/nextAtCredits': { v: true } });
+    // Turned off on another screen: a removal, as off is the default.
+    void part.adopt(change([], ['pref/nextAtCredits']));
+    expect(store.get().nextAtCredits).toBe(false);
+    void part.adopt(change([['pref/nextAtCredits', { t: 1, v: true }]]));
+    expect(store.get().nextAtCredits).toBe(true);
+    // A value this build cannot use is the default.
+    void part.adopt(change([['pref/nextAtCredits', { t: 2, v: 'yes' }]]));
+    expect(store.get().nextAtCredits).toBe(false);
+  });
+
   it('carries the stream filter as its canonical JSON, and anything it cannot read is no filter', () => {
     const { part, store } = prefsSetup({ streamFilter: { resolution: '1080p', cached: true } });
     expect(plain(part.snapshot())).toEqual({

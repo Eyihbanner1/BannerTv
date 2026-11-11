@@ -23,10 +23,12 @@ function runtimesOf(
 /**
  * Tells Trakt what plays: start when the video plays, pause when it is
  * paused, and stop when it ends or the player closes, which Trakt counts as
- * watched from 80% on. Nothing for the Lab, a live broadcast, a title Trakt
- * cannot name, or a profile not signed in. A clip of the video (one the
- * viewer picked in Sources) starts nothing, and a pause or close during one
- * sends the place the last real file reached, or nothing.
+ * watched from 80% on. Closed in the end credits (`creditsAt`), it stops at
+ * 100%: the episode was seen, as its saved progress says. Nothing for the
+ * Lab, a live broadcast, a title Trakt cannot name, or a profile not signed
+ * in. A clip of the video (one the viewer picked in Sources) starts nothing,
+ * and a pause or close during one sends the place the last real file
+ * reached, or nothing.
  */
 export function useScrobble(
   session: PlaybackSession | null,
@@ -36,13 +38,17 @@ export function useScrobble(
   runtimeSeconds: () => number,
   /** The running time the title's page gives, if it gives one. */
   knownRuntimeSeconds: () => number | undefined,
+  /** Where the end credits start in the file playing, when IntroDB's mark fits it. */
+  creditsAt?: number,
 ): void {
   const { type, metaId, videoId, lab } = ids;
   const runtime = useRef(runtimeSeconds);
   const knownRuntime = useRef(knownRuntimeSeconds);
+  const credits = useRef(creditsAt);
   useEffect(() => {
     runtime.current = runtimeSeconds;
     knownRuntime.current = knownRuntimeSeconds;
+    credits.current = creditsAt;
   });
   const scrobbler = useMemo(() => {
     if (lab || !traktAvailable()) return null;
@@ -95,7 +101,10 @@ export function useScrobble(
           runtimesOf(runtime, knownRuntime),
         );
         sent.current = next.sent;
-        if (next.call) void scrobbler.stop(next.call.percent);
+        // In the end credits of the file itself (never a clip): seen, as its saved progress says.
+        const at = credits.current;
+        const inCredits = at !== undefined && !latest.current.clip && latest.current.position >= at;
+        if (next.call) void scrobbler.stop(inCredits ? 100 : next.call.percent);
       }
       if (played) syncTraktSoon();
     };
