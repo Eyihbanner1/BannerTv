@@ -15,7 +15,7 @@ import {
 } from 'expo-video';
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
-import { errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { errorAfterHlsRetry, errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
 import { type Size, videoSizeOf } from './picture-fit';
 import { type ClockReading, readClock, STOPPED_CLOCK } from './player-clock';
 import { toAndroidTrack, trackId } from './tracks';
@@ -208,8 +208,8 @@ function onStatus({ status, error }: StatusChangeEventPayload): void {
       open(openedUrl, openedStartAt, 'hls');
       return;
     }
-    // If it was not HLS either, the first answer is the one that describes the link.
-    reportError(firstError ?? message);
+    // After the HLS try: its own answer, unless that too says the link holds no stream.
+    reportError(errorAfterHlsRetry(firstError, message));
     return;
   }
   if (status === 'readyToPlay') {
@@ -249,6 +249,11 @@ function onPlayingChange({ isPlaying }: PlayingChangeEventPayload): void {
 
 function onSourceLoad(): void {
   if (!player || !hasMedia) return;
+  // This link opened, so its kind is known and an error before it no longer describes it: a
+  // playlist that ends or a server that stops answering later reports its own trouble. Only the
+  // source's own load says so, as a readyToPlay can still be the last stream's.
+  typeSettled = true;
+  firstError = undefined;
   const video = player.availableVideoTracks;
   if (video.length > 0 && video.every((track) => !track.isSupported)) {
     // With no decoder for the picture Media3 plays the sound alone and calls it playing. Stop,

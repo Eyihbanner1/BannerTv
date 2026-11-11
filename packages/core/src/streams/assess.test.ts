@@ -121,6 +121,27 @@ describe('assessStream actions', () => {
       reason: 'torrent',
     });
   });
+
+  it("never plays an addon's message posing as a stream", () => {
+    const unavailable = parseStream({
+      name: 'Sports Streams',
+      description: 'Streams temporarily unavailable - try again shortly',
+      url: 'https://premium.example.org/unavailable',
+      // Even with headers this player can send: there is still no video.
+      behaviorHints: { proxyHeaders: { request: { Referer: 'https://site.example/' } } },
+    })!;
+    const notice = { kind: 'unavailable', reason: 'notice' };
+    expect(assessStream(unavailable, describeStream(unavailable), UNKNOWN).action).toEqual(notice);
+    expect(
+      assessStream(unavailable, describeStream(unavailable), { ...UNKNOWN, requestHeaders: true })
+        .action,
+    ).toEqual(notice);
+    // The same words on a stream with a picture size are a real stream's.
+    expect(
+      assessStream(unavailable, facts({ resolution: '720p' }), { ...UNKNOWN, requestHeaders: true })
+        .action,
+    ).toEqual({ kind: 'play' });
+  });
 });
 
 describe('streamRequestHeaders', () => {

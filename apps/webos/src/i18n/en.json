@@ -517,6 +517,11 @@
       "needsHelper_other": "The {{count}} streams found need request headers this TV can't send. Turn on the stream helper in BannerTV on an Android phone or box, then pair it in Settings > Stream helper.",
       "webOnly_one": "Your addons sent only a link that opens in a browser or on YouTube.",
       "webOnly_other": "Your addons sent only links that open in a browser or on YouTube.",
+      "addonNotice": "{{addon}} says: “{{text}}”",
+      "addonNoticeUnnamed": "Your addon says: “{{text}}”",
+      "addonNoticeHelp": "That's a message from the addon, not a video. Try again later, or check the addon's settings in Addons.",
+      "addonNoticeToo": "{{addon}} also said: “{{text}}”",
+      "addonNoticeTooUnnamed": "An addon also said: “{{text}}”",
       "helperOff": "Your stream helper isn't on. Open BannerTV on the Android phone or box, turn the helper on, and keep it on the same Wi-Fi.",
       "uncached": "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in All streams.",
       "tried_one": "Tried {{count}} stream, and it didn't play.",
@@ -554,7 +559,8 @@
       "torrent": "A torrent. Torrents need a streaming engine, which comes in a later update.",
       "proxy-headers": "Needs request headers the TV's player can't send. Pair a stream helper in Settings to play it.",
       "youtube": "Opens in the YouTube app.",
-      "external": "Opens a web page, which BannerTV can't show."
+      "external": "Opens a web page, which BannerTV can't show.",
+      "notice": "A message from the addon, not a video."
     },
     "warnings": {
       "truehd": "Dolby TrueHD sound: this TV may play it silently.",

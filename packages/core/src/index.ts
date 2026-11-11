@@ -375,6 +375,7 @@ export {
   parseRuntime,
 } from './streams/bitrate';
 export { describeStream } from './streams/facts';
+export { isNoticeStream, NOTICE_MAX, noticeText } from './streams/notice';
 export {
   closestCandidate,
   namesOnlyOthers,
