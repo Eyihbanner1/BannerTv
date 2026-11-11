@@ -58,6 +58,26 @@ export function parseHelperAddress(text: string): { host: string; port: number }
   return { host: match[1]!, port };
 }
 
+/**
+ * What a phone running the helper sends the TV through the pairing relay
+ * (services/pair), so nobody types on the TV: the helper's address and the
+ * code it shows now. The relay passes it on as it would an addon's address;
+ * only the TV's Stream helper screen reads it. The TV still pairs itself, so
+ * the key never leaves the home network.
+ */
+export function helperOffer(host: string, port: number, code: string): string {
+  return `http://${host}:${port}/pair?code=${code}`;
+}
+
+/** The address and code in a phone's offer, or null for anything else (an addon's address, say). */
+export function readHelperOffer(link: string): { address: string; code: string } | null {
+  const match = /^http:\/\/(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})\/pair\?code=(\d{6})$/.exec(
+    link.trim(),
+  );
+  if (!match || !parseHelperAddress(match[1]!)) return null;
+  return { address: match[1]!, code: match[2]! };
+}
+
 /** How Settings shows the address: without the port when it is the usual one. */
 export function formatHelperAddress(pairing: Pick<HelperPairing, 'host' | 'port'>): string {
   return pairing.port === HELPER_PORT ? pairing.host : `${pairing.host}:${pairing.port}`;

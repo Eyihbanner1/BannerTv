@@ -1,11 +1,12 @@
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { TextField } from '../../components/TextField';
 import { streamHelper } from '../../data/helper';
-import { formatHelperAddress, type PairResult } from '../../data/stream-helper';
+import { createPairing, PAIR_SERVICE } from '../../data/pairing';
+import { formatHelperAddress, type PairResult, readHelperOffer } from '../../data/stream-helper';
 import {
   type AndroidHelperState,
   androidHelperState,
@@ -85,6 +86,59 @@ function RunHelper() {
   );
 }
 
+/** Spaced in threes, which is easier to read across a room. */
+function spaced(code: string): string {
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+
+/**
+ * "Pair from your phone": a short code for the pairing relay (services/pair).
+ * The phone types it and sends its helper's address and code (helperOffer),
+ * so nothing is typed with the remote. The TV then pairs as if they were typed.
+ */
+function PairFromPhone({ onOffer }: { onOffer: (link: string) => void }) {
+  const { t } = useTranslation();
+  const [pairing] = useState(() => createPairing({ service: PAIR_SERVICE }));
+  const state = useSyncExternalStore(pairing.subscribe, pairing.get);
+  useEffect(() => pairing.onAddress(onOffer), [pairing, onOffer]);
+  useEffect(() => {
+    pairing.start();
+    return () => pairing.stop();
+  }, [pairing]);
+
+  let body;
+  if (state.status === 'waiting') {
+    body = (
+      <>
+        <p className={styles.note}>{t('streamHelper.fromPhoneSteps')}</p>
+        <p className={styles.phoneCode}>{spaced(state.session.code)}</p>
+      </>
+    );
+  } else if (state.status === 'opening') {
+    body = <p className={styles.note}>{t('addons.phone.opening')}</p>;
+  } else {
+    const expired = state.status === 'expired';
+    body = (
+      <>
+        <p className={styles.note}>
+          {expired ? t('addons.phone.expired') : t('addons.phone.unavailable')}
+        </p>
+        <Button
+          focusKey="helper-phone-retry"
+          label={expired ? t('addons.phone.newCode') : t('addons.phone.retry')}
+          onPress={() => pairing.start()}
+        />
+      </>
+    );
+  }
+  return (
+    <section className={styles.fromPhone} aria-live="polite">
+      <h2 className={styles.heading}>{t('streamHelper.fromPhone')}</h2>
+      {body}
+    </section>
+  );
+}
+
 /** On the LG: pair with a helper once, then see whether it answers. */
 function PairWithHelper() {
   const { t } = useTranslation();
@@ -96,12 +150,43 @@ function PairWithHelper() {
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  // A pairing the phone started and one typed here never run at once.
+  const busyRef = useRef(false);
   const [result, setResult] = useState<PairResult | null>(null);
+  const [fromPhone, setFromPhone] = useState<'pairing' | 'notOffer' | null>(null);
 
   useEffect(() => {
     void streamHelper.load().then(() => streamHelper.reachable(true));
   }, []);
   useScreenFocus(pairing ? 'helper-check' : 'helper-address');
+
+  // Only setters and the module's helper store, so the relay's handler can keep it.
+  const pairWith = useCallback((to: string, digits: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setResult(null);
+    void streamHelper.pair(to, digits).then((answer) => {
+      busyRef.current = false;
+      setBusy(false);
+      setResult(answer);
+      setFromPhone(null);
+      if (answer === 'paired') void setFocus('helper-check');
+    });
+  }, []);
+  const pair = () => pairWith(address, code);
+  const onOffer = useCallback(
+    (link: string) => {
+      const offer = readHelperOffer(link);
+      if (!offer) {
+        setFromPhone('notOffer');
+        return;
+      }
+      setFromPhone('pairing');
+      pairWith(offer.address, offer.code);
+    },
+    [pairWith],
+  );
 
   if (pairing) {
     const status =
@@ -137,19 +222,15 @@ function PairWithHelper() {
     );
   }
 
-  const pair = () => {
-    if (busy) return;
-    setBusy(true);
-    setResult(null);
-    void streamHelper.pair(address, code).then((answer) => {
-      setBusy(false);
-      setResult(answer);
-      if (answer === 'paired') void setFocus('helper-check');
-    });
-  };
-
   return (
     <div className={`${screen.column} ${styles.actions}`}>
+      {PAIR_SERVICE ? <PairFromPhone onOffer={onOffer} /> : null}
+      {fromPhone && (
+        <p className={styles.note} role="status">
+          {t(fromPhone === 'pairing' ? 'streamHelper.pairingFromPhone' : 'streamHelper.notOffer')}
+        </p>
+      )}
+      {PAIR_SERVICE ? <h2 className={styles.heading}>{t('streamHelper.orType')}</h2> : null}
       <TextField
         focusKey="helper-address"
         label={t('streamHelper.address')}

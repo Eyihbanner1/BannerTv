@@ -5,7 +5,9 @@ import {
   HelperUnavailable,
   createStreamHelper,
   formatHelperAddress,
+  helperOffer,
   parseHelperAddress,
+  readHelperOffer,
 } from './stream-helper';
 
 const KEY = 'k'.repeat(32);
@@ -69,6 +71,23 @@ describe('helper address', () => {
   it('shows the port only when it is not the usual one', () => {
     expect(formatHelperAddress({ host: '192.168.1.42', port: HELPER_PORT })).toBe('192.168.1.42');
     expect(formatHelperAddress({ host: '192.168.1.42', port: 47021 })).toBe('192.168.1.42:47021');
+  });
+});
+
+describe("a phone's offer", () => {
+  it('carries the helper address and code, and reads back', () => {
+    const offer = helperOffer('192.168.1.42', 47020, '123456');
+    expect(offer).toBe('http://192.168.1.42:47020/pair?code=123456');
+    expect(readHelperOffer(offer)).toEqual({ address: '192.168.1.42:47020', code: '123456' });
+  });
+
+  it('is refused for addon addresses, other networks and malformed codes', () => {
+    expect(readHelperOffer('https://addon.example/manifest.json')).toBeNull();
+    expect(readHelperOffer('http://8.8.8.8:47020/pair?code=123456')).toBeNull();
+    expect(readHelperOffer('http://192.168.1.42:47020/pair?code=12345')).toBeNull();
+    expect(readHelperOffer('http://192.168.1.42:47020/pair?code=123456&x=1')).toBeNull();
+    expect(readHelperOffer('https://192.168.1.42:47020/pair?code=123456')).toBeNull();
+    expect(readHelperOffer('http://192.168.1.42:99999/pair?code=123456')).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@ import type { EventSource, InstalledAddon, ItemSource, QueryState } from '@banne
 import { parseStream, type Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { trackMemory } from '../data/library';
+import { requestHeaderRelayChanged, setRequestHeaderRelay } from '../platform/capabilities';
 import { setPreference } from '../data/preferences';
 import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
 import {
@@ -229,6 +230,37 @@ describe('streamFinder', () => {
     finder.markFailed(first!);
     expect(finder.get().candidates.map((entry) => entry.stream)).toEqual([second!.stream]);
     expect(finder.next(new Set([entryKey(first!)]))?.stream).toBe(second!.stream);
+  });
+
+  it('plays streams that need request headers once a stream helper is paired, without asking again', () => {
+    let paired = false;
+    setRequestHeaderRelay(() => paired);
+    addons.installs = [
+      {
+        id: 'org.test.sports',
+        streams: [
+          {
+            url: 'https://live.example.com/match.m3u8',
+            name: 'Live',
+            behaviorHints: { proxyHeaders: { request: { Referer: 'https://site.example.com/' } } },
+          },
+        ],
+      },
+    ];
+    const finder = streamFinder('tv', 'tt-needs-headers');
+    finder.start();
+    expect(finder.get().entries[0]!.assessment.action).toEqual({
+      kind: 'unavailable',
+      reason: 'proxy-headers',
+    });
+    expect(finder.get().candidates).toHaveLength(0);
+
+    // Paired in Settings while this list was kept: the same finder, no new answers.
+    paired = true;
+    requestHeaderRelayChanged();
+    expect(finder.get().entries[0]!.assessment.action).toEqual({ kind: 'play' });
+    expect(finder.get().candidates).toHaveLength(1);
+    setRequestHeaderRelay(() => false);
   });
 });
 

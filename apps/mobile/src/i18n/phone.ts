@@ -153,6 +153,21 @@ const PHONE = {
   streamHelperSwitch: 'Use the stream helper',
   streamHelperNotificationsOff:
     'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
+  // Stream helper: send this phone's helper to the LG (data/helper-pairing.ts).
+  helperPair: {
+    title: 'Pair with your TV',
+    lead: 'On your LG, open Settings > Stream helper. Type the code it shows under Pair from your phone.',
+    tvCode: 'Code on the TV',
+    placeholder: 'For example K7M 2QX',
+    send: 'Pair',
+    sent: 'Sent. Your TV pairs in a few seconds.',
+    badCode: 'That isn’t the TV’s code. It has six letters and numbers.',
+    gone: 'That code has run out. On the TV, choose New code and type the new one here.',
+    used: 'That code was already used. On the TV, choose New code.',
+    offline:
+      'Couldn’t reach BannerTV’s pairing service. Check this phone’s internet and try again.',
+    orType: 'Or type this on the TV',
+  },
   // Search: what only the phone's list needs.
   search: {
     /** The line that opens each addon's own results, under Top results. */
