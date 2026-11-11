@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons } from './addons';
-import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
+import { APP_URL, expectFocus, openSection, press, pressBack, railSections } from './tv';
 
 const picker = (page: import('@playwright/test').Page, key: string) =>
   page.locator(`[data-focus-key="discover-${key}"]`);
@@ -72,6 +72,32 @@ test('Discover pages through a catalog and filters it by genre', async ({ page }
   await press(page, 'Enter', 'discover-catalog');
   await expect(picker(page, 'catalog')).toHaveAttribute('aria-label', 'Catalog: New');
   await expect(picker(page, 'genre')).not.toHaveAttribute('aria-label', 'Genre: All genres');
+});
+
+test('Discover opened again from the rail starts at the top, and Back from a title keeps the place', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  for (const n of [7, 14, 21, 28]) await press(page, 'ArrowDown', `discover-tile-${n}`);
+  await press(page, 'Enter', 'details-watch');
+  await pressBack(page);
+  await expectFocus(page, 'discover-tile-28');
+
+  // Home by the rail, then Discover again: the grid was drawn scrolled down
+  // while focus went to its first tile, which was not drawn, and stayed lost.
+  await press(page, 'ArrowLeft', 'rail-discover');
+  const sections = await railSections(page);
+  for (const item of sections.slice(0, sections.indexOf('discover')).reverse()) {
+    await press(page, 'ArrowUp', `rail-${item}`);
+  }
+  await press(page, 'Enter', `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'discover');
+  await expectFocus(page, 'discover-tile-0');
+  await press(page, 'ArrowDown', 'discover-tile-7');
 });
 
 test('See all on a Home row opens that catalog, and Back returns to the row', async ({ page }) => {

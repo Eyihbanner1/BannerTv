@@ -12,13 +12,14 @@ import {
 import type { ExtraArg, MetaPreview } from '@bannertv/protocol';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { push } from '../../app/router';
+import { push, router } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import type { MenuOption } from '../../components/Menu';
 import { Picker } from '../../components/Picker';
 import { addonClient, addonCollection } from '../../data/addons';
 import { describeAddonError, typeLabel } from '../../data/describe';
 import { isKidsProfile } from '../../data/profiles';
+import { forgetFocus } from '../../navigation/focus-memory';
 import { eventForItem, noteFirstPage, prepareItems, sportsState } from '../../data/sports';
 import { openDetails } from '../home/Hero';
 import { gridTileKey, PosterGrid } from './PosterGrid';
@@ -44,6 +45,15 @@ function memoryFor(key: string): Memory {
   return memory;
 }
 
+/**
+ * Forgets where the section's grid was, so it opens on its first tile. The
+ * type, catalog and genre picked stay.
+ */
+function startSectionAtTop(): void {
+  memoryFor('section').index = undefined;
+  forgetFocus('discover:section:');
+}
+
 const IDLE: PagerState = { items: [], status: 'loading' };
 const noSubscription = () => () => undefined;
 
@@ -57,6 +67,13 @@ export function DiscoverScreen({ preset }: { preset?: DiscoverSelection }) {
   const memoryKey = preset
     ? `see-all:${preset.transportUrl}|${preset.type}|${preset.catalogId}|${preset.genre ?? ''}`
     : 'section';
+  // Opened from the menu (the only screen open), the section starts at the top,
+  // before the grid reads its memory. What it remembers is for coming back from
+  // a title. Kept, it drew the grid scrolled down while focus went to the first
+  // tile, which was not drawn, so nothing had focus and the remote did nothing.
+  useState(() => {
+    if (!preset && router.get().stack.length === 1) startSectionAtTop();
+  });
   const collection = useSyncExternalStore(addonCollection.subscribe, addonCollection.get);
   const sports = useSyncExternalStore(sportsState.subscribe, sportsState.get);
   // A kids profile browses Family catalogs only (ADR 0004), and has no Sports,
