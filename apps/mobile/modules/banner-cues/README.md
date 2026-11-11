@@ -7,6 +7,8 @@ expo-video plays through Media3's ExoPlayer but tells JS nothing about cues. Thi
 - `watch(player)`: the player phone-host.ts makes once and keeps.
 - `draw(on)`: sent with each subtitle choice. While on, Media3's own subtitle view is hidden for text lines. Picture subtitles (PGS, DVB) still show there, and the shared code gets an empty group for them.
 
+With the picture zoomed to fill the screen (the player's Zoom to fill, contentFit `cover`), Media3's content frame and the subtitle view inside it are larger than the screen. The module pads that view down to the whole frame fitted in the screen, measured again at each layout, so the subtitles Media3 draws stay on the screen where they would be with the picture fitted, never cut off or stretched.
+
 `Cues.kt` is the same code as the Android TV app's `apps/androidtv/app/src/main/java/com/bannertv/app/Cues.kt`, where JUnit tests cover it. Change both together.
 
 The module depends on expo-video through `expoModule.getExpoDependency("expo-video")`, which names its source project or the prebuilt library autolinking chose for it, and on Media3 at expo-video's own version (1.9.1). Update that version when expo-video moves.

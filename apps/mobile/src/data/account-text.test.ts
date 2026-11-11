@@ -1,6 +1,7 @@
+import type { SyncStatus } from '@bannertv/core';
 import type { TFunction } from 'i18next';
 import { describe, expect, it } from 'vitest';
-import { bringTotal, joinPlan, matchesLastFour, statusLine } from './account-text';
+import { bringTotal, joinPlan, matchesLastFour, statusLine, syncedLine } from './account-text';
 
 const t = ((key: string, options?: Record<string, unknown>) =>
   options ? `${key} ${JSON.stringify(options)}` : key) as unknown as TFunction;
@@ -29,6 +30,39 @@ describe('statusLine', () => {
     expect(statusLine(t, { state: 'idle', lastSync: now - 2 * 24 * 60 * 60_000 }, now)).toBe(
       'account.status.days {"count":2}',
     );
+  });
+});
+
+describe('syncedLine', () => {
+  const now = 10 * 24 * 60 * 60_000;
+  const line = (status: SyncStatus, profileId: string | null = 'main') =>
+    syncedLine(t, status, now, profileId);
+  it('says how long ago the account was last pulled', () => {
+    expect(line({ state: 'idle', lastPull: now - 30_000 })).toBe('phone.synced.justNow');
+    // A pull that came in after the clock was last read is just now too.
+    expect(line({ state: 'idle', lastPull: now + 5_000 })).toBe('phone.synced.justNow');
+    expect(line({ state: 'syncing', lastPull: now - 3 * 60_000 })).toBe(
+      'phone.synced.minutes {"count":3}',
+    );
+    expect(line({ state: 'paused', lastPull: now - 2 * 60 * 60_000 })).toBe(
+      'phone.synced.hours {"count":2}',
+    );
+    expect(line({ state: 'waiting', lastPull: now - 3 * 24 * 60 * 60_000 })).toBe(
+      'phone.synced.days {"count":3}',
+    );
+  });
+  it('says nothing before the first pull, or without an account', () => {
+    // A sync that only pushed is not a look at what other screens changed.
+    expect(line({ state: 'idle', lastSync: now })).toBeUndefined();
+    expect(line({ state: 'off', lastSync: now, lastPull: now })).toBeUndefined();
+    expect(line({ state: 'setup', lastPull: now })).toBeUndefined();
+    expect(line({ state: 'gone', lastPull: now })).toBeUndefined();
+  });
+  it('says nothing away from Main, as only Main sees the account', () => {
+    // A kids profile is never Main; nor is any other profile, nor none chosen yet.
+    expect(line({ state: 'idle', lastPull: now }, 'kids1')).toBeUndefined();
+    expect(line({ state: 'idle', lastPull: now }, 'guest4')).toBeUndefined();
+    expect(line({ state: 'idle', lastPull: now }, null)).toBeUndefined();
   });
 });
 

@@ -141,6 +141,8 @@ describe('createSyncEngine without an account', () => {
     await w.time.advance(DAY);
     a.engine.hide();
     a.engine.show();
+    a.engine.pushSoon();
+    await w.time.advance(DAY);
     await a.engine.syncNow();
     expect(a.engine.status()).toEqual({ state: 'off' });
     expect(w.service.requests).toEqual([]);
@@ -426,7 +428,7 @@ describe('a signed-in screen', () => {
     expect(pushes()).toBe(before + 3);
   });
 
-  it('pulls two seconds after start, when back after two minutes away, and on Sync now', async () => {
+  it('pulls two seconds after start, when back after fifteen seconds away, and on Sync now', async () => {
     const w = world();
     const storage = memoryKeyValueStore();
     const { code } = await created(w, async () => undefined);
@@ -447,16 +449,192 @@ describe('a signed-in screen', () => {
 
     b.engine.hide();
     await settled(b.engine);
-    await w.time.advance(60 * 1000);
+    await w.time.advance(14 * 1000);
     b.engine.show();
     expect(pulls()).toBe(before + 1);
     b.engine.hide();
-    await w.time.advance(2 * 60 * 1000);
+    await w.time.advance(20 * 1000);
     b.engine.show();
     await settled(b.engine);
     expect(pulls()).toBe(before + 2);
     await b.engine.syncNow();
     expect(pulls()).toBe(before + 3);
+  });
+
+  it('takes a pull asked for as it starts as the first sync, rather than pulling twice', async () => {
+    const w = world();
+    const storage = memoryKeyValueStore();
+    const { a, code } = await created(w);
+    await a.stores.library.add(preview('tt1'));
+    await a.engine.flush();
+    const keys = await deriveAccountKeys(crypto, code);
+    await storage.set('sync/state', { v: 1, code, accountId: keys.accountId, phase: 'ready' });
+    const b = screen(w, { storage });
+    await b.start();
+    const pulls = () => w.service.count('/v1/pull');
+    const before = pulls();
+    await b.engine.pullNow();
+    expect(pulls()).toBe(before + 1);
+    expect(titles(b)).toEqual(['tt1']);
+    await w.time.advance(29 * 60 * 1000);
+    expect(pulls()).toBe(before + 1);
+    // The regular pulls go on from there.
+    await w.time.advance(60 * 1000);
+    await settled(b.engine);
+    expect(pulls()).toBe(before + 2);
+  });
+
+  it('comes back to a pull only after longer away while the service asks for rarer pulls', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    expect(a.engine.pullMinutes()).toBe(30);
+    const keys = await deriveAccountKeys(crypto, code);
+    /** Another screen of the account, started. */
+    const another = async () => {
+      const storage = memoryKeyValueStore();
+      await storage.set('sync/state', { v: 1, code, accountId: keys.accountId, phase: 'ready' });
+      const made = screen(w, { storage });
+      await made.start();
+      return made;
+    };
+
+    // Pulls four hours apart, eight times the usual: the 15 seconds away become 2 minutes.
+    w.service.pullEvery(240);
+    const b = await another();
+    await w.time.advance(2000);
+    await settled(b.engine);
+    expect(b.engine.pullMinutes()).toBe(240);
+    const pulls = () => w.service.count('/v1/pull');
+    const before = pulls();
+    b.engine.hide();
+    await settled(b.engine);
+    await w.time.advance(2 * 60 * 1000 - 1);
+    b.engine.show();
+    expect(pulls()).toBe(before);
+    b.engine.hide();
+    await w.time.advance(2 * 60 * 1000);
+    b.engine.show();
+    await settled(b.engine);
+    expect(pulls()).toBe(before + 1);
+
+    // Pulls asked more often than the usual do not make the return pull come sooner.
+    w.service.pullEvery(15);
+    const c = await another();
+    await w.time.advance(2000);
+    await settled(c.engine);
+    expect(c.engine.pullMinutes()).toBe(15);
+    const now = pulls();
+    c.engine.hide();
+    await settled(c.engine);
+    await w.time.advance(14 * 1000);
+    c.engine.show();
+    expect(pulls()).toBe(now);
+  });
+
+  it('pushes progress within a minute while playback goes on saving, then about once a minute', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    const pushes = () => w.service.count('/v1/push');
+    const before = pushes();
+    // Seconds after the first save at which each push went out.
+    const sent: number[] = [];
+    for (let save = 0; save < 30; save++) {
+      a.stores.progress.record({
+        metaId: 'tt2',
+        type: 'movie',
+        videoId: 'tt2',
+        position: 60 + save * 10,
+        duration: 6000,
+      });
+      const had = pushes();
+      await w.time.advance(10 * 1000);
+      await settled(a.engine);
+      if (pushes() > had) sent.push((save + 1) * 10);
+    }
+    expect(sent).toEqual([60, 120, 180, 240, 300]);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 350 },
+    });
+    // The saves stopped with the last of them sent: nothing more goes.
+    await w.time.advance(5 * 60 * 1000);
+    expect(pushes()).toBe(before + 5);
+  });
+
+  it('pushes three seconds after the player pauses, unless failures are backing off', async () => {
+    const w = world();
+    const { a, code } = await created(w);
+    const pushes = () => w.service.count('/v1/push');
+    const before = pushes();
+    const save = (position: number) =>
+      a.stores.progress.record({
+        metaId: 'tt2',
+        type: 'movie',
+        videoId: 'tt2',
+        position,
+        duration: 6000,
+      });
+
+    save(60);
+    a.engine.pushSoon();
+    await w.time.advance(2999);
+    expect(pushes()).toBe(before);
+    await w.time.advance(1);
+    await settled(a.engine);
+    expect(pushes()).toBe(before + 1);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 60 },
+    });
+    // Nothing waits: nothing is sent, and the progress save's own wait has gone with the push.
+    a.engine.pushSoon();
+    await w.time.advance(60 * 1000);
+    expect(pushes()).toBe(before + 1);
+    expect(a.engine.status().state).toBe('idle');
+
+    // The service out of reach: the retry, not the pause, sends it.
+    w.service.failNext({ path: '/v1/push', network: true });
+    save(120);
+    await a.engine.flush();
+    expect(a.engine.status()).toMatchObject({ state: 'paused', reason: 'offline' });
+    const failed = pushes();
+    save(180);
+    a.engine.pushSoon();
+    await w.time.advance(29 * 1000);
+    expect(pushes()).toBe(failed);
+    await w.time.advance(1000);
+    await settled(a.engine);
+    expect(pushes()).toBe(failed + 1);
+    expect((await accountItems(w, code, 'p/main/watch'))!.tt2).toMatchObject({
+      v: { position: 180 },
+    });
+  });
+
+  it('says when it last pulled, which pushes alone and hiding leave', async () => {
+    const w = world();
+    const { a } = await created(w);
+    expect(a.engine.status().lastPull).toBeUndefined();
+    await a.engine.pullNow();
+    const pulled = w.now();
+    expect(a.engine.status()).toMatchObject({ state: 'idle', lastPull: pulled });
+
+    await w.time.advance(10 * 1000);
+    await a.stores.library.add(preview('tt1'));
+    await a.engine.flush();
+    expect(a.engine.status().lastSync).toBe(pulled + 10 * 1000);
+    expect(a.engine.status().lastPull).toBe(pulled);
+    await w.time.advance(10 * 1000);
+    a.engine.hide();
+    await settled(a.engine);
+    expect(a.engine.status().lastSync).toBe(pulled + 20 * 1000);
+    expect(a.engine.status().lastPull).toBe(pulled);
+
+    // A pull that does not get through leaves it too.
+    await w.time.advance(20 * 1000);
+    w.service.failNext({ path: '/v1/pull', network: true });
+    a.engine.show();
+    await settled(a.engine);
+    expect(a.engine.status()).toMatchObject({ state: 'paused', lastPull: pulled });
+    await a.engine.syncNow();
+    expect(a.engine.status()).toMatchObject({ state: 'idle', lastPull: pulled + 40 * 1000 });
   });
 
   it("does not take the account's changes for edits", async () => {

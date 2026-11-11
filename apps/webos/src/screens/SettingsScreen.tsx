@@ -7,10 +7,12 @@ import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { Menu } from '../components/Menu';
 import { serviceStatus } from '../data/api';
+import { homebrewUpdatesShown } from '../data/homebrew';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
 import { activeProfileId, isKidsProfile } from '../data/profiles';
 import { accountSection, checkAccountSection } from '../data/sync';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
+import { HomebrewUpdates } from './settings/HomebrewUpdates';
 import styles from './Screen.module.css';
 import settings from './SettingsScreen.module.css';
 
@@ -69,7 +71,7 @@ function FullSettings() {
   return (
     <div className={styles.screen}>
       <h1 className={styles.title}>{t('rail.settings')}</h1>
-      <p className={styles.lead}>{t('settings.lead')}</p>
+      <p className={`${styles.lead} ${settings.lead}`}>{t('settings.lead')}</p>
       <div className={`${styles.column} ${settings.left}`}>
         <h2 className={settings.heading}>{t('settings.playback')}</h2>
         <Button
@@ -174,7 +176,10 @@ function FullSettings() {
             onPress={() => setPreference('tmdb', !prefs.tmdb)}
           />
         )}
-        <p className={`${styles.muted} ${settings.about}`}>
+        {homebrewUpdatesShown() && <HomebrewUpdates />}
+      </div>
+      <div className={settings.about}>
+        <p className={styles.muted}>
           {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
         </p>
         {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}

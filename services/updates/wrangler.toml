@@ -1,0 +1,32 @@
+# BannerTV's update service (README.md). It serves expo-updates the signed updates the "Publish
+# phone update" workflow uploads to Workers KV, and the LG TV's Homebrew Channel the .ipk and
+# index the "Publish LG update" workflow uploads there. It holds no key: the phone's private key is
+# a GitHub secret only its workflow uses. Deploy with the "Deploy updates Worker" workflow, not by
+# hand: it binds the KV namespace (below).
+name = "updates"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+logpush = false
+
+# The KV namespace titled bannertv-updates is bound as UPDATES at deploy time. The deploy
+# workflow finds it by its title (making it the first time) and adds a [[kv_namespaces]] block
+# with its id to this file in its own checkout, so the id lives in Cloudflare alone. A deploy
+# from a laptop would leave the binding out, and the Worker would then answer 503 to every phone
+# until the workflow deploys again.
+
+# No request logs, traces or log pushes: requests carry a per-install id (eas-client-id).
+# Leave out any [cache] block; Workers Cache would bill every file request.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[observability.issues]
+enabled = false

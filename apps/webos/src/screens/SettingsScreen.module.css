@@ -28,7 +28,20 @@
   margin-top: 24px;
 }
 
-/* The version line and the TMDB credit, under the shorter right column so they stay on screen. */
+/* Over the left column only, so it never runs under the version line and the TMDB credit. */
+.lead {
+  max-width: 640px;
+}
+
+/*
+ * The version line and the TMDB credit, top right beside the title, over the right column.
+ * On Main with the account, Trakt, TMDB and Updates both columns reach the bottom of a
+ * 1080 line screen, so neither has room for them under it. The right column starts the left
+ * one's 640 px and its 96 px margin in from the content's left edge.
+ */
 .about {
-  margin-top: 24px;
+  position: absolute;
+  top: 104px;
+  left: calc(var(--bt-content-inset) + 736px);
+  width: 640px;
 }

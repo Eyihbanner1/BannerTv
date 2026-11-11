@@ -6,10 +6,14 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ScreenTrail } from '../nav/screen-trail';
 import { keepOrientation } from '../player/orientation';
 import { ProfilePicker } from '../screens/ProfilePicker';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { colors } from '../ui/theme';
+
+// A screen that fails to draw shows "Something went wrong" instead of a blank screen.
+export { CrashScreen as ErrorBoundary } from '../screens/CrashScreen';
 
 /**
  * The app's frame. The screens stay mounted underneath; until the welcome is done and someone
@@ -51,6 +55,7 @@ export default function RootLayout() {
           <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
           <Stack.Screen name="profiles" options={{ animation: 'fade_from_bottom' }} />
         </Stack>
+        <ScreenTrail />
         {cover ? <View style={styles.cover}>{cover}</View> : null}
       </View>
     </SafeAreaProvider>

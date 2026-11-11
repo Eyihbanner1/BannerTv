@@ -6,16 +6,16 @@ describe('releaseGroup', () => {
     expect(releaseGroup('Film.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX')).toBe('flux');
     expect(
       releaseGroup(
-        'Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR',
+        'Lanternfall.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR',
       ),
     ).toBe('framestor');
-    expect(releaseGroup('Deadpool 2016 BluRay 1080p DTS-ES AC3 x264-3Li')).toBe('3li');
+    expect(releaseGroup('Lanternfall 2016 BluRay 1080p DTS-ES AC3 x264-3Li')).toBe('3li');
   });
 
   it('looks past a file extension, a site tag and spaces at the end', () => {
-    expect(releaseGroup('Shrinking.S02E05.720p.WEB.h264-ETHEL.mkv')).toBe('ethel');
+    expect(releaseGroup('Unwinding.S02E05.720p.WEB.h264-ETHEL.mkv')).toBe('ethel');
     expect(releaseGroup('The.Long.Shore.S01E04.720p.HDTV-NTb.srt')).toBe('ntb');
-    expect(releaseGroup('Show.S01E01.720p.HDTV.x264-GRP[eztv]')).toBe('grp');
+    expect(releaseGroup('Show.S01E01.720p.HDTV.x264-GRP[showfeed]')).toBe('grp');
     expect(releaseGroup('  Film.2020.1080p.BluRay.x264-AMIABLE  ')).toBe('amiable');
   });
 
@@ -33,7 +33,7 @@ describe('releaseGroup', () => {
       'Film.2020.1080p.Multi-Subs',
       'Film.2020.1080p.Multi-Lang',
       'Film.2020.1080p.x264-GRP-sample',
-      'Thunderbolts 2025 1080p CAMRip x264 AAC-NOGRP',
+      'Stormglass 2025 1080p CAMRip x264 AAC-NOGRP',
       'Film.2020.1080p-10bit',
       'Film.2020.1080p.x265.10-bit',
       'Film-1080p',
@@ -54,9 +54,9 @@ describe('releaseGroup', () => {
 
   it('gives nothing without a dash and a word of two or more at the end', () => {
     expect(releaseGroup('')).toBeUndefined();
-    expect(releaseGroup('Deadpool [2016] 2160p BDRip x265 Kira [SEV]')).toBeUndefined();
-    expect(releaseGroup('Sherlock S01 E01 BluRay 1080p x264 ESub - mkvCinemas')).toBeUndefined();
-    expect(releaseGroup('Reacher.S03E07.2160p.WEB-DL.H.265-MeM.GP')).toBeUndefined();
+    expect(releaseGroup('Lanternfall [2016] 2160p BDRip x265 Kira [SEV]')).toBeUndefined();
+    expect(releaseGroup('Holloway S01 E01 BluRay 1080p x264 ESub - mkvHouse')).toBeUndefined();
+    expect(releaseGroup('Kestrel.S03E07.2160p.WEB-DL.H.265-MeM.GP')).toBeUndefined();
     expect(releaseGroup('Film.2020.DTS-X')).toBeUndefined();
   });
 

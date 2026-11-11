@@ -177,40 +177,45 @@ function AddonCard({
         </Pressable>
       ) : null}
       <View style={styles.actions}>
-        <Pressable
-          onPress={() => allAddons.move(addon.transportUrl, -1)}
-          disabled={index === 0}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={t('addons.moveUp', { name: manifest.name })}
-          style={[styles.iconButton, index === 0 && styles.disabled]}
-        >
-          <Icon name="up" />
-        </Pressable>
-        <Pressable
-          onPress={() => allAddons.move(addon.transportUrl, 1)}
-          disabled={index === count - 1}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={t('addons.moveDown', { name: manifest.name })}
-          style={[styles.iconButton, index === count - 1 && styles.disabled]}
-        >
-          <Icon name="down" />
-        </Pressable>
-        <View style={styles.spacer} />
-        {manifest.behaviorHints.configurable ? (
+        <View style={styles.moves}>
+          <Pressable
+            onPress={() => allAddons.move(addon.transportUrl, -1)}
+            disabled={index === 0}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('addons.moveUp', { name: manifest.name })}
+            style={[styles.iconButton, index === 0 && styles.disabled]}
+          >
+            <Icon name="up" />
+          </Pressable>
+          <Pressable
+            onPress={() => allAddons.move(addon.transportUrl, 1)}
+            disabled={index === count - 1}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('addons.moveDown', { name: manifest.name })}
+            style={[styles.iconButton, index === count - 1 && styles.disabled]}
+          >
+            <Icon name="down" />
+          </Pressable>
+        </View>
+        {/* Settings and Remove keep to the right, and go under the arrows (and under each
+            other) rather than off the card when large text leaves no room beside them. */}
+        <View style={styles.buttons}>
+          {manifest.behaviorHints.configurable ? (
+            <Button
+              label={t('addons.settings')}
+              accessibilityLabel={t('addons.settingsLabel', { name: manifest.name })}
+              onPress={() => onSettings(addon)}
+            />
+          ) : null}
           <Button
-            label={t('addons.settings')}
-            accessibilityLabel={t('addons.settingsLabel', { name: manifest.name })}
-            onPress={() => onSettings(addon)}
+            label={t('addons.remove')}
+            accessibilityLabel={t('addons.removeLabel', { name: manifest.name })}
+            kind="danger"
+            onPress={remove}
           />
-        ) : null}
-        <Button
-          label={t('addons.remove')}
-          accessibilityLabel={t('addons.removeLabel', { name: manifest.name })}
-          kind="danger"
-          onPress={remove}
-        />
+        </View>
       </View>
     </View>
   );
@@ -491,7 +496,22 @@ const styles = StyleSheet.create({
   healthRow: { flexDirection: 'row', alignItems: 'center', gap: space.s },
   health: { ...type.label, color: colors.textMuted, flex: 1 },
   failing: { color: colors.danger },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: space.s, paddingTop: space.s },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space.s,
+    paddingTop: space.s,
+  },
+  moves: { flexDirection: 'row', gap: space.s },
+  buttons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: space.s,
+    flexShrink: 1,
+    marginLeft: 'auto',
+  },
   iconButton: {
     width: 44,
     height: 44,
@@ -501,7 +521,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface3,
   },
   disabled: { opacity: 0.35 },
-  spacer: { flex: 1 },
   form: { padding: space.l, gap: space.m },
   input: {
     ...type.body,

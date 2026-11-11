@@ -131,7 +131,8 @@ export function PanelColumn({ title, children }: { title?: string; children: Rea
 
 /**
  * One choice in a panel: the chosen one sits on a raised fill with a tick. A dimmed one (a
- * subtitle file that couldn't be read) can still be tapped, to try it again.
+ * subtitle file that couldn't be read) can still be tapped, to try it again. With `wrap`, a
+ * long name or detail goes onto more lines instead of losing its end, as large text needs.
  */
 export function PanelOption({
   label,
@@ -140,6 +141,7 @@ export function PanelOption({
   onPress,
   disabled = false,
   dim = false,
+  wrap = false,
   accessibilityLabel,
 }: {
   label: string;
@@ -148,6 +150,7 @@ export function PanelOption({
   onPress: () => void;
   disabled?: boolean;
   dim?: boolean;
+  wrap?: boolean;
   accessibilityLabel?: string;
 }) {
   return (
@@ -167,12 +170,12 @@ export function PanelOption({
       <View style={styles.optionText}>
         <Text
           style={[styles.optionLabel, selected && styles.optionLabelSelected]}
-          numberOfLines={1}
+          numberOfLines={wrap ? undefined : 1}
         >
           {label}
         </Text>
         {detail ? (
-          <Text style={styles.optionDetail} numberOfLines={1}>
+          <Text style={styles.optionDetail} numberOfLines={wrap ? undefined : 1}>
             {detail}
           </Text>
         ) : null}

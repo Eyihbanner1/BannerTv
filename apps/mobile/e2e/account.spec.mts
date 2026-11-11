@@ -1,7 +1,7 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import { mockAddons } from '../../webos/e2e/addons.ts';
-import { readKv } from '../../webos/e2e/play.ts';
-import { lockedWith, main, seedProfiles } from '../../webos/e2e/profiles.ts';
+import { mockPlayback, readKv, seedStreamAddon } from '../../webos/e2e/play.ts';
+import { GUEST_ID, lockedWith, main, seedProfiles } from '../../webos/e2e/profiles.ts';
 import { type FakeSync, fakeSync, mockSync } from '../../webos/e2e/sync.ts';
 
 /*
@@ -16,6 +16,10 @@ const CHECK_LABEL = 'Last four characters of the code';
 /** The copy a join keeps in IndexedDB of what it wrote to localStorage (data/sync-joined.ts). */
 const JOINED = 'sync-joined';
 const NOT_OPEN = "New accounts aren't open yet.";
+/** Tears of Steel, Cinemeta's copy, which the test stream addon answers for. */
+const FILM = 'tt2285752';
+/** Morevna Project, a series of the fake Cinemeta. */
+const SERIES = 'tt8000001';
 const OFF_LEAD = /^Everything is encrypted on this screen/;
 
 function watchErrors(page: Page): string[] {
@@ -70,6 +74,48 @@ async function confirmCode(page: Page, code: string): Promise<void> {
 
 function creates(sync: FakeSync): number {
   return sync.requests.filter((request) => request === 'POST /v1/account/create').length;
+}
+
+/** Counts what this phone alone asks the service at `path`, such as `/v1/pull`. */
+function asked(page: Page, path: string): () => number {
+  let count = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === path) count += 1;
+  });
+  return () => count;
+}
+
+/** When the account's last sync finished, as the page keeps it for the next launch. */
+async function lastSync(page: Page): Promise<number | undefined> {
+  return page.evaluate(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('bannertv.syncStatus') ?? '{}') as {
+        lastSync?: unknown;
+      };
+      return typeof saved.lastSync === 'number' ? saved.lastSync : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/** The phone goes to the background (true) or comes back (false), as the browser tells it. */
+async function background(page: Page, away: boolean): Promise<void> {
+  await page.evaluate((hidden) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (hidden ? 'hidden' : 'visible'),
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, away);
+}
+
+/** Where a phone has saved it is up to in a video, in seconds. */
+async function savedPosition(page: Page, metaId: string): Promise<number | undefined> {
+  const saved = (await readKv(page, 'progress')) as
+    { metaId: string; position: number }[] | undefined;
+  return saved?.find((entry) => entry.metaId === metaId)?.position;
 }
 
 test('Create an account on the phone: its code to write down or copy, the last four typed back, and a second phone joins with it', async ({
@@ -250,6 +296,172 @@ test("a create with no service carries on at the next launch, behind Main's PIN,
   expect(await shownCode(page)).toBe(code);
   await confirmCode(page, code);
   expect(errors).toEqual([]);
+});
+
+test("a film paused on one phone reaches the other's Home without pulling to refresh, and Main's Home says when it synced", async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const errors = watchErrors(page);
+  const sync = fakeSync();
+  // This phone stays on Home, and its clock is moved on rather than waited for.
+  await page.clock.install();
+  const episode = {
+    metaId: SERIES,
+    type: 'series' as const,
+    videoId: `${SERIES}:1:2`,
+    position: 600,
+    duration: 1500,
+  };
+  const card = {
+    videoId: episode.videoId,
+    metaId: SERIES,
+    type: 'series' as const,
+    name: 'Morevna Project',
+    season: 1,
+    episode: 2,
+  };
+  await seedProfiles(page, {
+    profiles: [main(), { id: GUEST_ID, name: 'Guest', colour: 1 }],
+    lastId: 'main',
+    askAtLaunch: false,
+  });
+  // Main and Guest each have an episode part way.
+  await seedStreamAddon(page, {
+    progress: [episode],
+    played: [card],
+    kv: {
+      [`p/${GUEST_ID}/progress`]: [{ ...episode, watched: false, updatedAt: 1000 }],
+      [`p/${GUEST_ID}/played`]: [{ ...card, updatedAt: 1000 }],
+    },
+  });
+  await mockPlayback(page);
+  await openApp(page, sync);
+  const pulls = asked(page, '/v1/pull');
+  const caption = page.getByText(/^Synced /);
+
+  // Without an account, Continue watching says nothing of syncing, and Home asks nothing.
+  await expect(page.getByRole('button', { name: 'Play Morevna Project' })).toBeVisible();
+  await expect(page.getByText('Continue watching')).toBeVisible();
+  await expect(caption).toHaveCount(0);
+  await openAccount(page);
+  await page.getByRole('button', { name: 'Create an account' }).click();
+  const code = await shownCode(page);
+  await confirmCode(page, code);
+  expect(pulls()).toBe(0);
+  // Making the account only pushed. Settings, back in focus, pulls once for its profiles: that
+  // pull has to land before the clock moves on, or Home would count it as just now and rightly
+  // not pull again. The time it landed is the account's last sync, which the page keeps.
+  const created = await lastSync(page);
+  await page.getByRole('button', { name: 'Back' }).first().click();
+  await expect.poll(pulls).toBe(1);
+  await expect.poll(() => lastSync(page)).not.toBe(created);
+  // Home, in focus over half a minute later, pulls.
+  await page.clock.fastForward('00:31');
+  await page.getByRole('tab', { name: 'Home' }).click();
+  await expect(page.getByText('Synced just now')).toBeVisible();
+  await expect.poll(pulls).toBe(2);
+
+  // The other phone joins, plays the film and pauses it.
+  const other = await secondPhone(browser, sync);
+  const otherErrors = watchErrors(other);
+  await mockPlayback(other);
+  await openAccount(other);
+  await other.getByRole('button', { name: 'Join with an account code' }).click();
+  await other.getByLabel('Account code').fill(code);
+  const loaded = other.waitForEvent('load', { timeout: 20000 });
+  await other.getByRole('button', { name: 'Continue', exact: true }).click();
+  await loaded;
+  await other.goto('/');
+  await expect
+    .poll(async () => (await readKv(other, JOINED).catch(() => 'starting again')) ?? 'settled', {
+      timeout: 20000,
+    })
+    .toBe('settled');
+  // The account brought Guest, so the phone asks who is watching.
+  await other.getByRole('button', { name: 'Main', exact: true }).click();
+  await other
+    .getByLabel(/Tears of Steel/)
+    .last()
+    .click();
+  await other.getByRole('button', { name: /All streams/ }).click();
+  await other
+    .getByText(/Open Movie 1080p/)
+    .first()
+    .click();
+  const pause = other.getByLabel('Pause', { exact: true }).first();
+  await expect(pause).toBeVisible();
+  // The browser waits for a tap before it plays; the phone does not.
+  await pause.click();
+  await other.getByLabel('Play', { exact: true }).first().click();
+  await expect
+    .poll(() => other.evaluate(() => document.querySelector('video')?.currentTime ?? 0))
+    .toBeGreaterThan(2);
+  // What the tap before Play sent has gone by now.
+  await other.waitForTimeout(4000);
+  const pushes = asked(other, '/v1/push');
+  if (!(await pause.isVisible())) await other.mouse.click(206, 160);
+  await pause.click();
+  const pausedAt = Date.now();
+  // Sent within seconds, where it used to wait 15 seconds after the last progress save.
+  await expect.poll(pushes, { timeout: 10000 }).toBe(1);
+  expect(Date.now() - pausedAt).toBeLessThan(10000);
+  expect(await savedPosition(other, FILM)).toBeGreaterThan(2);
+
+  // Here, Home's pull every 2 minutes brings it, with no pull to refresh. The test file is 40
+  // seconds long, too short for Continue watching to show it (30 seconds is the least that
+  // resumes, and the last minute counts as the end), so what the phone now holds is read.
+  expect(await savedPosition(page, FILM)).toBeUndefined();
+  await page.clock.fastForward('02:00');
+  await expect.poll(() => savedPosition(page, FILM)).toBeGreaterThan(2);
+  const cards = (await readKv(page, 'played')) as { videoId: string; name: string }[];
+  expect(cards.find((played) => played.videoId === FILM)?.name).toBe('Tears of Steel');
+  await expect(page.getByText('Synced just now')).toBeVisible();
+
+  // Away from Home, its pulls stop (Settings pulls once as it opens, for its profiles); back in
+  // focus, one.
+  let before = pulls();
+  await page.getByRole('tab', { name: 'Settings' }).click();
+  await expect.poll(pulls).toBe(before + 1);
+  before = pulls();
+  await page.clock.fastForward('05:00');
+  await page.waitForTimeout(500);
+  expect(pulls()).toBe(before);
+  await page.getByRole('tab', { name: 'Home' }).click();
+  await expect.poll(pulls).toBe(before + 1);
+
+  // In the background, nothing. Coming back pulls once, as the account does after 15 seconds
+  // away, and Home's 2 minutes start again from there.
+  before = pulls();
+  await background(page, true);
+  await page.clock.fastForward('05:00');
+  await page.waitForTimeout(500);
+  expect(pulls()).toBe(before);
+  await background(page, false);
+  await expect.poll(pulls).toBe(before + 1);
+  await page.waitForTimeout(500);
+  expect(pulls()).toBe(before + 1);
+  await page.clock.fastForward('02:00');
+  await expect.poll(pulls).toBe(before + 2);
+
+  // Guest has Continue watching too, but only Main sees the account.
+  await page.getByRole('button', { name: 'Switch profile' }).click();
+  const switched = page.waitForEvent('load', { timeout: 20000 });
+  await page.getByRole('button', { name: 'Guest', exact: true }).click();
+  await switched;
+  // The test server has no page at /profiles, where the web build starts again.
+  const pulled = page.waitForResponse((response) => response.url().endsWith('/v1/pull'));
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Switch profile' })).toHaveText('G');
+  await expect(page.getByRole('button', { name: 'Play Morevna Project' })).toBeVisible();
+  await expect(page.getByText('Continue watching')).toBeVisible();
+  // Once the launch's pull is in, Main would say so.
+  await pulled;
+  await page.waitForTimeout(1000);
+  await expect(caption).toHaveCount(0);
+  expect(errors).toEqual([]);
+  expect(otherErrors).toEqual([]);
 });
 
 test('the welcome offers Create an account beside Join while new accounts are open', async ({

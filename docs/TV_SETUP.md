@@ -61,6 +61,20 @@ pnpm ares ares-install -d tv path/to/com.bannertv.app_0.1.0_all.ipk
 
 `pnpm tv:inspect` opens Chrome DevTools for the running app, which shows its console.
 
+### Updates through Homebrew Channel
+
+On a TV with [Homebrew Channel](https://www.webosbrew.org/), BannerTV can be updated from the sofa, with no computer. The updates Worker (`services/updates`) serves BannerTV's own Homebrew Channel repository at `https://updates.bannertv.workers.dev/webos/repo.json`, with the newest build of main in it. Homebrew Channel sees BannerTV because it is a Developer Mode install of `com.bannertv.app`.
+
+1. In BannerTV, open **Settings**. **Updates** says which build this TV has and, when the repository has a newer one, "BannerTV 0.2.0 is ready in Homebrew Channel" (or "You have the latest build"). It reads the repository once each time Settings opens, without holding the screen up, and when there is no answer it says nothing more.
+2. Choose **Get updates in Homebrew Channel**. The first time, Homebrew Channel opens on its Add repository dialog with BannerTV's address filled in. Choose **Add repository**, then press Back to reach its list of apps.
+3. Choose **BannerTV**, then **Update**. Homebrew Channel downloads the `.ipk`, checks its SHA-256 and installs it over the one on the TV. Installs over the top on the test TV have kept BannerTV's profiles, addons and settings so far. If Homebrew Channel was still open from last time, it shows its list as it last read it, so the old version with Update greyed out: press Back until its list of apps, press the round arrow at the top to read the list again, and choose BannerTV again (closing Homebrew Channel and opening it again works too). BannerTV cannot make it read the list again itself.
+
+After the first time, the button asks first: **Open Homebrew Channel**, or **Add BannerTV's repository again**. Homebrew Channel does not notice a repository it has already, and confirming the dialog a second time lists it twice. That is harmless but untidy: select the extra copy in Homebrew Channel's Settings to remove it. Add it again only when BannerTV is missing from Homebrew Channel's apps, because the dialog was closed without adding it or the repository was removed. If Homebrew Channel is not on the TV, the line above the button says so.
+
+Homebrew Channel never looks for updates by itself, and its Update button is on whenever the installed version differs from the repository's, even when the repository's is older. Settings says when that is so: "This build is newer than Homebrew Channel's 0.1.0".
+
+None of this shows in the Android app or in a browser. `HOMEBREW_UPDATES_IN_BUILD` in `apps/webos/src/app/features.ts` turns it off for an LG Content Store build, where the store updates the app.
+
 ## 5. Run the spikes
 
 All three spikes live under **Settings** in the app. Take a photo of each result screen, or copy the console lines from `pnpm tv:inspect`.

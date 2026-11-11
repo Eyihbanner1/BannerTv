@@ -73,6 +73,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/routes';
+import { localStorage } from '../runtime/web-globals';
 import { reportScreen } from '../runtime/whereabouts';
 import { Artwork } from '../ui/Artwork';
 import { Button } from '../ui/Button';
@@ -80,17 +81,30 @@ import { Icon, OutlineIcon } from '../ui/icons';
 import { StreamList } from '../ui/StreamList';
 import { colors, radius, space, touch, type } from '../ui/theme';
 import { phoneArt } from '../ui/Tile';
+import { EpisodesPanel, EpisodesRow } from './EpisodesPanel';
+import { InfoPanel } from './InfoPanel';
 import { holdLandscape } from './orientation';
 import {
   BACKGROUND_PAUSE_DELAY_MS,
   phonePlayer,
   pictureInPicture,
   pictureShown,
+  playerClock,
+  setPlayerRate,
 } from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
+import {
+  contentFitFor,
+  type PictureFit,
+  pictureFitStore,
+  pinchFit,
+  touchSpread,
+} from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SkipRipple } from './SkipRipple';
+import { SleepPanel, SleepRow, SleepScreen, SleepWarning } from './SleepTimer';
+import { SpeedPanel, SpeedRow } from './SpeedPanel';
 import { SubtitleStyleChoices } from './SubtitleStyle';
 import { SubtitleText } from './SubtitleText';
 import { isSwipe, startsAtEdge, swipeMoves, swipeTarget } from './swipe-seek';
@@ -104,6 +118,7 @@ import {
   tapSide,
 } from './tap-skip';
 import { TracksPanel } from './TracksPanel';
+import { useSleepTimer } from './use-sleep-timer';
 import { asVideoElement, PhoneVideoElement } from './video-element';
 
 const CONTROLS_HIDE_MS = motion.controlsHide;
@@ -116,9 +131,24 @@ const SKIP_PILL_H = 40;
 const SKIP_RAISED = 112;
 /** The Back to pill sits just under the title row: its padding, its buttons and a small gap. */
 const BACK_TO_TOP = space.m + touch.min + space.s;
+/** How long the note a change of picture fit shows. */
+const FIT_NOTE_MS = 1500;
 const noop = () => () => undefined;
 
-type Panel = 'tracks' | 'style' | 'more' | 'streams' | 'quality' | null;
+/** Whole picture or filling the screen: this phone's choice for each title (picture-fit.ts). */
+const pictureFits = pictureFitStore(localStorage);
+
+type Panel =
+  | 'tracks'
+  | 'style'
+  | 'more'
+  | 'streams'
+  | 'quality'
+  | 'episodes'
+  | 'info'
+  | 'speed'
+  | 'sleep'
+  | null;
 
 function episodeLabel(video: Video | undefined): string | undefined {
   if (!video || video.season === undefined || video.episode === undefined) return undefined;
@@ -131,7 +161,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const sportsEvent = route.event;
   const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
-  const element = useMemo(() => new PhoneVideoElement(), []);
+  // The speed the session sets goes on to Android's player.
+  const element = useMemo(() => new PhoneVideoElement(setPlayerRate), []);
   const finder = useMemo(
     () => streamFinder(titleType, videoId, sportsEvent),
     [titleType, videoId, sportsEvent],
@@ -150,6 +181,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
   const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
+  // A series' episodes share the show's choice: the route's metaId is the show's for each.
+  const pictureFit = useMemo(() => pictureFits.title(metaId), [metaId]);
+  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
   // event's page comes from the addon that listed it, never another one.
@@ -330,6 +364,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const offersNext = !!next && !state.live && !state.clip;
   // As long before the credits pill as before the last 30 seconds' count.
   const toCredits = cue ? cue.start - state.position : Infinity;
+  // The sleep timer, as on the TV: as it runs out it closes what is open and pauses.
+  const sleep = useSleepTimer(metaId, session, state, offersNext, pip, () => {
+    setPanel(null);
+    setControls(false);
+  });
+  const keepSleep = sleep.carryOn;
   useEffect(() => {
     if (!next) return;
     if (
@@ -344,6 +384,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const playEpisode = useCallback(
     (target: Video) => {
       session?.saveProgress();
+      keepSleep();
       const binge = bingeHint(state.entry);
       const stream =
         binge && bingeEntry(streamFinder(titleType, target.id).get().candidates, binge);
@@ -359,7 +400,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         'replace',
       );
     },
-    [session, state.entry, titleType, metaId, item],
+    [session, state.entry, titleType, metaId, item, keepSleep],
   );
 
   // Up Next and the end of a video, decided by core's endAction as on the TV.
@@ -370,12 +411,15 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // A skip still adding up (the 10 s buttons, double taps, below) holds Up Next as a sheet
   // does, as on the TV: a count does not run out under it and start the next episode.
   const [pending, setPending] = useState<PendingSkip | null>(null);
-  const held = panel !== null || waiting || problem || scrubbing || pending !== null;
+  const held =
+    panel !== null || waiting || problem || scrubbing || pending !== null || sleep.asleep;
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
-  const counting = inStretch && !dismissed && !held;
+  // Not when the sleep timer stops at this end.
+  const counting = inStretch && !dismissed && !held && !sleep.sleepsHere;
   // As the credits start, the pill offers the next episode or Watch credits; with "Start next
   // at credits" on and a mark for this very release, it counts a few seconds and plays it,
   // unless "Still watching?" is due. Otherwise the last 30 seconds count down as before.
+  // Neither when the sleep timer stops at this end, as on the TV.
   const stage = offersNext
     ? upNextStage(state.position, state.duration, state.rate, cue?.start)
     : 'none';
@@ -384,6 +428,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     const counts = () =>
       prefs.nextAtCredits &&
       !!cue?.startsNext &&
+      !sleep.sleepsHere &&
       !(
         prefs.stillWatching &&
         askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
@@ -398,12 +443,18 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Only while the file playing is the release marked: another stream cut a little
   // differently stops the count, and the ending plays out.
   const creditsCounts =
-    !!creditsCard && creditsCard.counts && !!cue?.startsNext && !creditsCard.gone && !dismissed;
+    !!creditsCard &&
+    creditsCard.counts &&
+    !!cue?.startsNext &&
+    !creditsCard.gone &&
+    !dismissed &&
+    !sleep.sleepsHere;
   const creditsUp =
     !!creditsCard &&
     !creditsCard.gone &&
     !ended &&
     !held &&
+    !sleep.sleepsHere &&
     playing &&
     (stage === 'credits' || creditsCounts);
   const creditsLeft =
@@ -454,12 +505,26 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         dismissed,
         held,
         countedOnScreen: seen || afterEnd === 0,
-        sleepsHere: false,
+        sleepsHere: sleep.sleepsHere,
         stillWatching: askAtEnd === true,
       })
     : null;
   // An end nobody saw counted down gets a short count of its own.
   if (decision === 'hold' && !held && afterEnd === null) setAfterEnd(UP_NEXT_AFTER_END_S);
+  if (decision === 'sleep') sleep.fallAsleep();
+  // The sleep timer's last minute, in Up Next's corner, over the picture alone.
+  const warningUp = sleep.warning && !held && !controls && !problem && !pip;
+  // Carry on watching plays on from where the timer paused, with the controls up to say where;
+  // Back leaves it paused. At an end it stopped, Up Next counts instead, with the controls down
+  // so its card shows.
+  const wake = (carryOn: boolean) => {
+    sleep.wake();
+    if (ended) setAskAtEnd(false);
+    else {
+      if (carryOn) session?.resume();
+      poke();
+    }
+  };
   useEffect(() => {
     if (decision === 'leave') goBack();
     else if (decision === 'play' && next) {
@@ -474,6 +539,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   }, [afterEnd, held]);
 
   // Back closes a sheet first, then leaves.
+  const dismissSleepWarning = sleep.dismissWarning;
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (panel !== null) {
@@ -490,10 +556,24 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         setDismissed(true);
         return true;
       }
+      if (warningUp) {
+        dismissSleepWarning();
+        return true;
+      }
       return false;
     });
     return () => subscription.remove();
-  }, [panel, counting, ended, decision, creditsUp, controls, creditsCounts]);
+  }, [
+    panel,
+    counting,
+    ended,
+    decision,
+    creditsUp,
+    controls,
+    creditsCounts,
+    warningUp,
+    dismissSleepWarning,
+  ]);
 
   // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
   // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
@@ -654,6 +734,69 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     },
     onResponderRelease: (event: GestureResponderEvent) => endSwipe(event.nativeEvent.pageX),
     onResponderTerminate: () => endSwipe(null),
+    // A second finger makes it a pinch (below), and the swipe goes nowhere.
+    onResponderTerminationRequest: (event: GestureResponderEvent) =>
+      touchSpread(event.nativeEvent.touches) !== null,
+  };
+
+  // Zoom to fill: the whole frame (fit), or the picture covering the screen with what overhangs
+  // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
+  // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
+  // other phone players do; More has the same switch. The phone keeps the choice for the title.
+  const [fitNote, setFitNote] = useState<PictureFit | null>(null);
+  useEffect(() => {
+    if (!fitNote) return;
+    const timer = setTimeout(() => setFitNote(null), FIT_NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [fitNote]);
+  const changeFit = (next: PictureFit) => {
+    if (next === pictureFit.get()) return;
+    pictureFit.set(next);
+    setFitNote(next);
+  };
+  const zoomValue = t(fit === 'fill' ? 'common.on' : 'common.off');
+  // How far apart the fingers were as the pinch began; null once it has decided. One change a
+  // pinch, so fingers settling or lifting at the end never undo it.
+  const pinchFrom = useRef<number | null>(null);
+  // Not while a stream opens or fails, a panel is open or the film is in its small window.
+  const pinchAllowed = shown && !waiting && !problem && !pip && panel === null;
+  const wantsPinch = (event: GestureResponderEvent) =>
+    pinchAllowed && touchSpread(event.nativeEvent.touches) !== null;
+  // On the whole screen, so a pinch takes over from whatever the first finger was on: a tap, a
+  // swipe or a button, none of which then goes ahead. The seek bar alone keeps its finger.
+  const pinchHandlers = {
+    onStartShouldSetResponderCapture: wantsPinch,
+    onMoveShouldSetResponderCapture: wantsPinch,
+    onResponderGrant: (event: GestureResponderEvent) => {
+      noteInput();
+      clearTimeout(tapTimer.current);
+      lastTap.current = null;
+      pinchFrom.current = touchSpread(event.nativeEvent.touches);
+    },
+    onResponderMove: (event: GestureResponderEvent) => {
+      const from = pinchFrom.current;
+      const spread = touchSpread(event.nativeEvent.touches);
+      // Decided already, ended by a lifted finger, or down to one finger.
+      if (from === null || spread === null) return;
+      const wanted = pinchFit(from, spread);
+      if (!wanted) return;
+      pinchFrom.current = null;
+      if (wanted === pictureFit.get()) return;
+      changeFit(wanted);
+      Haptics.selectionAsync().catch(() => undefined);
+    },
+    // A finger lifting ends the pinch, decided or not: one set down again, or the next two of
+    // three, would otherwise be measured against fingers no longer there.
+    onResponderEnd: () => {
+      pinchFrom.current = null;
+    },
+    onResponderRelease: () => {
+      pinchFrom.current = null;
+    },
+    onResponderTerminate: () => {
+      pinchFrom.current = null;
+    },
+    // The fingers left on the glass after a pinch never become a swipe or a tap.
     onResponderTerminationRequest: () => false,
   };
   // Frames for the scene preview come from the stream playing; another stream starts over.
@@ -783,10 +926,15 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setSwitching({ entry });
   };
 
-  const clock = useCallback(() => element.currentTime, [element]);
+  // The player's own time, at the speed playing, so drawn subtitles keep pace at any speed.
+  const clock = useCallback(() => playerClock() ?? element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
   const toast = (() => {
+    // Just chosen, so first; never over what the screen says while a stream opens.
+    if (fitNote && !waiting) {
+      return t(fitNote === 'fill' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
+    }
     if (switching && waiting && state.entry === switching.entry) {
       return switching.label
         ? t('player.switchingTo', { quality: switching.label })
@@ -839,6 +987,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       onLayout={(event) => {
         surfaceWidth.current = event.nativeEvent.layout.width;
       }}
+      {...pinchHandlers}
     >
       <StatusBar hidden />
       {shown ? (
@@ -846,7 +995,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           ref={videoView}
           player={phonePlayer()}
           style={styles.video}
-          contentFit="contain"
+          contentFit={contentFitFor(fit)}
           nativeControls={false}
           allowsPictureInPicture
           // Home or a swipe away while a film plays keeps it going in a small window.
@@ -1142,6 +1291,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       {!controls &&
       !problem &&
       !pip &&
+      !sleep.asleep &&
       (creditsUp || (counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
@@ -1171,6 +1321,16 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
+      {warningUp ? (
+        <SleepWarning
+          timer={sleep.timer}
+          episode={!!current}
+          right={Math.max(insets.right, space.xl)}
+          onAdd={sleep.add}
+          onOff={() => sleep.choose('off')}
+        />
+      ) : null}
+
       {ended && decision === 'ask' && next && !pip ? (
         <View style={styles.centre}>
           <View style={styles.problem}>
@@ -1196,6 +1356,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <Text style={styles.toastText}>{toast}</Text>
         </View>
       ) : null}
+
+      <SleepScreen visible={sleep.asleep && !pip} onWake={wake} />
 
       <SidePanel
         visible={panel === 'tracks'}
@@ -1255,18 +1417,116 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       </SidePanel>
 
       <SidePanel visible={panel === 'more'} title={t('phone.more')} onClose={() => setPanel(null)}>
+        {/* Rows wrap at large text, and the list scrolls once they no longer fit. */}
         {() => (
-          <PanelColumn>
-            <PanelOption
-              label={t('player.quality')}
-              detail={qualityValue}
-              accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
-              disabled={!state.entry}
-              onPress={() => setPanel('quality')}
+          <ScrollView>
+            <PanelColumn>
+              <PanelOption
+                label={t('player.quality')}
+                detail={qualityValue}
+                accessibilityLabel={`${t('player.quality')}, ${qualityValue}`}
+                disabled={!state.entry}
+                wrap
+                onPress={() => setPanel('quality')}
+              />
+              <PanelOption label={t('phone.sources')} wrap onPress={() => setPanel('streams')} />
+              {metaQuery ? (
+                <EpisodesRow
+                  listed={!!meta && meta.videos.length > 0}
+                  onPress={() => setPanel('episodes')}
+                />
+              ) : null}
+              <PanelOption label={t('player.info')} wrap onPress={() => setPanel('info')} />
+              {!state.live ? (
+                <SpeedRow
+                  rate={state.rate}
+                  disabled={!state.entry}
+                  onPress={() => setPanel('speed')}
+                />
+              ) : null}
+              <SleepRow timer={sleep.timer} episode={!!current} onPress={() => setPanel('sleep')} />
+              {shown ? (
+                <PanelOption
+                  label={t('phone.zoomToFill')}
+                  detail={zoomValue}
+                  accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
+                  wrap
+                  onPress={() => {
+                    setPanel(null);
+                    changeFit(fit === 'fill' ? 'fit' : 'fill');
+                  }}
+                />
+              ) : null}
+              {shown ? (
+                <PanelOption label={t('phone.pictureInPicture')} wrap onPress={startPip} />
+              ) : null}
+            </PanelColumn>
+          </ScrollView>
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'episodes'}
+        title={t('player.episodes')}
+        onClose={() => setPanel(null)}
+      >
+        {() =>
+          meta ? (
+            <EpisodesPanel
+              meta={meta}
+              videoId={videoId}
+              onPlay={playEpisode}
+              onClose={() => setPanel(null)}
             />
-            <PanelOption label={t('phone.sources')} onPress={() => setPanel('streams')} />
-            {shown ? <PanelOption label={t('phone.pictureInPicture')} onPress={startPip} /> : null}
-          </PanelColumn>
+          ) : null
+        }
+      </SidePanel>
+
+      <SidePanel visible={panel === 'info'} title={t('player.info')} onClose={() => setPanel(null)}>
+        {() => (
+          <InfoPanel
+            title={title}
+            episode={current}
+            item={item}
+            position={state.position}
+            duration={state.duration}
+            rate={state.rate}
+            live={state.live}
+          />
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'speed'}
+        title={t('player.speed.title')}
+        onClose={() => setPanel(null)}
+      >
+        {() => (
+          <SpeedPanel
+            rate={state.rate}
+            onChoose={(rate) => {
+              setPanel(null);
+              session?.setRate(rate);
+            }}
+          />
+        )}
+      </SidePanel>
+
+      <SidePanel
+        visible={panel === 'sleep'}
+        title={t('player.sleep.title')}
+        onClose={() => setPanel(null)}
+      >
+        {() => (
+          <SleepPanel
+            timer={sleep.timer}
+            episode={!!current}
+            live={state.live}
+            onChoose={(choice) => {
+              setPanel(null);
+              sleep.choose(choice);
+            }}
+          />
         )}
       </SidePanel>
 
@@ -1318,6 +1578,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             finder={finder}
             {...(state.entry ? { playingKey: entryKey(state.entry) } : {})}
             onPick={pickStream}
+            background={colors.sheet}
           />
         )}
       </SidePanel>

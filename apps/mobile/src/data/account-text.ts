@@ -1,4 +1,4 @@
-import { MAX_PROFILES, type JoinMode, type SyncStatus } from '@bannertv/core';
+import { MAIN_PROFILE_ID, MAX_PROFILES, type JoinMode, type SyncStatus } from '@bannertv/core';
 import type { AccountProfile } from '@tv/data/sync';
 import type { TFunction } from 'i18next';
 
@@ -20,6 +20,30 @@ export function statusLine(t: TFunction, status: SyncStatus, now: number): strin
   if (minutes < 60) return t('account.status.minutes', { count: minutes });
   if (minutes < 24 * 60) return t('account.status.hours', { count: Math.floor(minutes / 60) });
   return t('account.status.days', { count: Math.floor(minutes / (24 * 60)) });
+}
+
+/**
+ * Home's quiet line beside Continue watching on when this phone last asked the account what
+ * other screens changed. Undefined without an account, and before the first pull of this launch.
+ * Main only, as Settings shows the account's status line: kids profiles and the others never see
+ * the account (ADR 0006, decision 12).
+ */
+export function syncedLine(
+  t: TFunction,
+  status: SyncStatus,
+  now: number,
+  profileId: string | null,
+): string | undefined {
+  if (profileId !== MAIN_PROFILE_ID) return undefined;
+  if (status.state === 'off' || status.state === 'setup' || status.state === 'gone') {
+    return undefined;
+  }
+  if (status.lastPull === undefined) return undefined;
+  const minutes = Math.floor(Math.max(0, now - status.lastPull) / MINUTE_MS);
+  if (minutes < 1) return t('phone.synced.justNow');
+  if (minutes < 60) return t('phone.synced.minutes', { count: minutes });
+  if (minutes < 24 * 60) return t('phone.synced.hours', { count: Math.floor(minutes / 60) });
+  return t('phone.synced.days', { count: Math.floor(minutes / (24 * 60)) });
 }
 
 /** What happens to each profile, here and in the account, when joining one way or the other. */

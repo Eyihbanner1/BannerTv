@@ -11,6 +11,8 @@ import { startTrakt } from '@tv/data/trakt';
 import { initI18n } from '@tv/i18n';
 import { initAndroid } from '@tv/platform/android';
 import { addPhoneStrings } from './i18n/phone';
+import { startAppUpdates } from './runtime/app-updates';
+import { catchCrashes } from './runtime/crash-catcher';
 
 let booted = false;
 
@@ -18,6 +20,8 @@ let booted = false;
 export function boot(): void {
   if (booted) return;
   booted = true;
+  // First, so a problem as the data layer starts is kept for Send a report.
+  catchCrashes();
   initI18n();
   addPhoneStrings();
   initAndroid({ onRelaunch: askAgainOnRelaunch });
@@ -29,4 +33,6 @@ export function boot(): void {
   // The phone has no Sports screen yet, but Home and Search wait for the sports state.
   void startSports();
   startSync();
+  // Over-the-air updates, after the stores that say when a restart would interrupt nothing.
+  startAppUpdates();
 }

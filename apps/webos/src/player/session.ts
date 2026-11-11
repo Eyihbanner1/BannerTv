@@ -14,6 +14,7 @@ import {
   type StreamEntry,
 } from '@bannertv/core';
 import { bandwidth, progress, releaseMemory, sourceMemory } from '../data/playback';
+import { pushAccountSoon } from '../data/sync';
 import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
@@ -732,6 +733,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         judgeTimer = undefined;
         endBuffering();
         save();
+        // Where it stopped goes to the account in seconds, not once the saves have gone quiet.
+        pushAccountSoon();
         // Before the first picture too, so the loading screen gives way to Play.
         if (startedPlaying || pausedByViewer) patch({ status: 'paused' });
       },
@@ -862,6 +865,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         }
         const duration = savedLength();
         record(duration, duration);
+        pushAccountSoon();
         patch({ status: 'ended', position: duration });
       },
     ],
@@ -1165,6 +1169,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     destroy() {
       if (destroyed) return;
       save();
+      pushAccountSoon();
       destroyed = true;
       clearTimers();
       clearInterval(liveTimer);

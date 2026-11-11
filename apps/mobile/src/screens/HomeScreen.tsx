@@ -14,13 +14,15 @@ import { describeAddonError, typeLabel } from '@tv/data/describe';
 import { useHomeBoard, useOwnLinePlaces } from '@tv/data/home-board';
 import { library } from '@tv/data/library';
 import { leaveContinueWatching } from '@tv/data/marks';
-import { activeProfile, isKidsProfile } from '@tv/data/profiles';
+import { activeProfile, activeProfileId, isKidsProfile } from '@tv/data/profiles';
 import { noteFirstPage, sportsFeed, sportsState } from '@tv/data/sports';
+import { accountState } from '@tv/data/sync';
 import { useQuery } from '@tv/data/use-query';
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { syncedLine } from '../data/account-text';
 import { phoneOwnLines } from '../data/home-lines';
 import { syncForRefresh } from '../data/refresh';
 import { useContinueItems } from '../data/use-continue';
@@ -45,6 +47,8 @@ const LOAD_AHEAD = 3;
 /** Rows found empty this run; they stay off Home until the app starts again. */
 const emptyRows = new Set<string>();
 const NO_CONTINUE: readonly ContinueItem[] = [];
+/** How often the line beside Continue watching is worked out again, so "just now" moves on. */
+const SYNCED_TICK_MS = 30_000;
 
 function playContinue(item: ContinueItem): void {
   const preview = item.preview;
@@ -147,6 +151,31 @@ const HomeRow = memo(function HomeRow({
         ) : undefined
       }
     />
+  );
+});
+
+/**
+ * Beside Continue watching, on Main on a phone in an account: when it last asked the account what
+ * other screens changed, so what was just watched on the TV can be looked for. A component of its
+ * own, so its clock draws only this line again.
+ */
+const SyncedCaption = memo(function SyncedCaption() {
+  const { t } = useTranslation();
+  const { status } = useSyncExternalStore(accountState.subscribe, accountState.get);
+  const profileId = useSyncExternalStore(activeProfileId.subscribe, activeProfileId.get);
+  const [now, setNow] = useState(() => Date.now());
+  const line = syncedLine(t, status, now, profileId);
+  const shown = line !== undefined;
+  useEffect(() => {
+    if (!shown) return;
+    const timer = setInterval(() => setNow(Date.now()), SYNCED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [shown]);
+  if (!shown) return null;
+  return (
+    <Text style={styles.synced} numberOfLines={1}>
+      {line}
+    </Text>
   );
 });
 
@@ -341,6 +370,7 @@ export function HomeScreen() {
         {continueRow.length > 0 ? (
           <Row
             title={t('home.continueWatching')}
+            tag={<SyncedCaption />}
             shape="landscape"
             items={continueRow.map((item) => {
               const note = continueNote(t, item);
@@ -471,6 +501,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // As a row's tag.
+  synced: { ...type.small, color: colors.textSubtle, flexShrink: 1 },
   rowError: { paddingHorizontal: gutter, gap: space.s, alignItems: 'flex-start' },
   rowErrorText: { ...type.body, color: colors.textMuted },
 });

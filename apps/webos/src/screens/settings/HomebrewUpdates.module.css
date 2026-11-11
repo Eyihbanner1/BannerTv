@@ -1,0 +1,27 @@
+/* Under the groups above it, with the same space as Services. */
+.updates {
+  margin-top: 24px;
+}
+
+/*
+ * The build this TV runs, then what Homebrew Channel has, above the button.
+ * Two lines at most: on Main, with the account, Trakt and TMDB, the right
+ * column then still ends above the bottom of a 1080 line screen.
+ */
+.status {
+  margin-bottom: 20px;
+  color: var(--bt-text-muted);
+  font: var(--bt-text-label);
+}
+
+/* The heading starts the first line rather than taking a line of its own, for the same reason. */
+.title {
+  display: inline;
+  color: var(--bt-text-subtle);
+  font: inherit;
+}
+
+/* A newer build is waiting: the one line here in full-strength text. */
+.ready {
+  color: var(--bt-text);
+}

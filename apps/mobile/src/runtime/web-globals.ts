@@ -150,16 +150,28 @@ const location = {
   },
   /** Starts the app again, keeping the session as a page reload keeps it. */
   reload(): void {
-    try {
-      sessionDb.setItemSync(RELOADING, String(Date.now()));
-    } catch {
-      // Starts as a fresh launch instead: the profile picker asks again.
-    }
-    reloadAppAsync('BannerTV starts again').catch((error: unknown) => {
-      console.warn('[BannerTV] could not start again:', String(error));
-    });
+    void startAgain();
   },
 };
+
+/**
+ * Starts the app again, keeping the session as a page reload keeps it: the profile in use stays
+ * chosen. `restart` is how: Expo's reloadAppAsync by default, which runs the same JavaScript
+ * again; an app update passes expo-updates' reloadAsync, the one that starts a downloaded update
+ * (runtime/app-updates.ts). A restart that fails is only logged.
+ */
+export function startAgain(
+  restart: () => Promise<void> = () => reloadAppAsync('BannerTV starts again'),
+): Promise<void> {
+  try {
+    sessionDb.setItemSync(RELOADING, String(Date.now()));
+  } catch {
+    // Starts as a fresh launch instead: the profile picker asks again.
+  }
+  return restart().catch((error: unknown) => {
+    console.warn('[BannerTV] could not start again:', String(error));
+  });
+}
 
 export const history = {
   /** The shared modules only use this to take the hash back out of the address. */

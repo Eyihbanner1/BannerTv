@@ -5,9 +5,10 @@ import { isKidsProfile } from '@tv/data/profiles';
 import { sportsState } from '@tv/data/sports';
 import { Fragment, useMemo, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { openCatalog, openSearch } from '../nav/routes';
 import { Artwork } from '../ui/Artwork';
+import { ChipRow } from '../ui/ChipRow';
 import { colors, radius, space, touch, type } from '../ui/theme';
 
 const MAX_GENRES = 4;
@@ -110,11 +111,8 @@ export function CastList({
       <Text style={styles.heading} accessibilityRole="header">
         {t('details.castTitle')}
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.cast}
-      >
+      {/* Out to the screen's edges, past the title's side margin, as the season pills. */}
+      <ChipRow bleed gap={space.m}>
         {cast.map((person, index) => (
           <Pressable
             key={`${index}:${person.name}`}
@@ -138,7 +136,7 @@ export function CastList({
             </Text>
           </Pressable>
         ))}
-      </ScrollView>
+      </ChipRow>
     </View>
   );
 }
@@ -163,7 +161,6 @@ const styles = StyleSheet.create({
   genreText: { ...type.meta, color: colors.textMuted },
   pressed: { backgroundColor: colors.raised },
   heading: { ...type.label, color: colors.text, marginBottom: space.s },
-  cast: { gap: space.m },
   person: { width: FACE + space.xl, alignItems: 'center', borderRadius: radius.m },
   face: { width: FACE, height: FACE, borderRadius: FACE / 2, overflow: 'hidden' },
   initials: {

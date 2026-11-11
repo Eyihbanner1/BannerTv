@@ -4,6 +4,7 @@
  * (player/engines/android.ts) lays Android's player clock and controls over these properties
  * while a stream is open, and Android's own player draws the picture (src/player/phone-host.ts).
  * What is here is what is left when the engine takes its properties off again: an empty element.
+ * The engine leaves the speed alone, so a speed set here goes on to Android's player (`onRate`).
  */
 
 type Listener = (event: { type: string }) => void;
@@ -16,6 +17,8 @@ export class PhoneVideoElement {
   private readonly listeners = new Map<string, Set<Listener>>();
   readonly style: Record<string, string> = {};
   src = '';
+
+  constructor(private readonly onRate?: (rate: number) => void) {}
 
   get currentTime(): number {
     return this.time;
@@ -51,6 +54,7 @@ export class PhoneVideoElement {
 
   set playbackRate(value: number) {
     this.rate = Number(value) || 1;
+    this.onRate?.(this.rate);
   }
 
   play(): Promise<void> {

@@ -32,6 +32,42 @@ async function addStreamAddon(page: Page): Promise<void> {
   await page.getByRole('tab', { name: 'Home' }).click();
 }
 
+/** Touches as a phone's, through DevTools: each finger down, moved and lifted, by id. */
+async function touchscreen(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: string, touchPoints: { x: number; y: number; id: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints } as never);
+  /** Two fingers from `from` to `to`, then on to each of `then`, before they lift. */
+  const pinch = async (from: [number, number], ...to: [number, number][]) => {
+    await touch('touchStart', [{ x: from[0], y: 450, id: 0 }]);
+    await touch('touchStart', [
+      { x: from[0], y: 450, id: 0 },
+      { x: from[1], y: 450, id: 1 },
+    ]);
+    let at = from;
+    for (const next of to) {
+      for (let step = 1; step <= 6; step++) {
+        const x = (index: 0 | 1) => at[index] + ((next[index] - at[index]) * step) / 6;
+        await touch('touchMove', [
+          { x: x(0), y: 450, id: 0 },
+          { x: x(1), y: 450, id: 1 },
+        ]);
+      }
+      at = next;
+    }
+    await touch('touchEnd', []);
+  };
+  return { touch, pinch };
+}
+
+/** The picture fit the phone keeps for each title, as stored. */
+function storedFits(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem('bannertv.phone.pictureFits');
+    return raw === null ? null : (JSON.parse(raw) as unknown);
+  });
+}
+
 test('first run: welcome, Home, an addon, a title, All streams and the player', async ({
   page,
 }) => {
@@ -67,9 +103,22 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
     .poll(() => page.evaluate(() => document.querySelector('video')?.currentTime ?? 0))
     .toBeGreaterThan(1);
 
-  // Quality, under More options, switches to the 720p stream. The controls hide while the film
-  // plays: a tap brings them.
+  // Zoom to fill, under More options, makes the picture cover the screen, and the phone keeps
+  // it for this film. The controls hide while the film plays: a tap brings them.
   const more = page.getByRole('button', { name: 'More options' });
+  const video = () =>
+    page.evaluate(() => {
+      const element = document.querySelector('video');
+      return element ? getComputedStyle(element).objectFit : null;
+    });
+  expect(await video()).toBe('contain');
+  if (!(await more.isVisible())) await page.mouse.click(206, 160);
+  await more.click();
+  await page.getByRole('button', { name: 'Zoom to fill, Off' }).click();
+  await expect.poll(video).toBe('cover');
+  expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
+
+  // Quality, under More options, switches to the 720p stream.
   if (!(await more.isVisible())) await page.mouse.click(206, 160);
   await more.click();
   await page.getByRole('button', { name: /^Quality, 1080p/ }).click();
@@ -83,6 +132,237 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
   expect(errors).toEqual([]);
 });
 
+test.describe('with touch', () => {
+  test.use({ hasTouch: true });
+
+  test('two fingers zoom the picture to fill and back, and never seek or tap', async ({ page }) => {
+    const errors = watchErrors(page);
+    await mockAddons(page, { firstRun: true });
+    await mockPlayback(page);
+    await openApp(page);
+    await page.getByText('Start browsing').click();
+    await addStreamAddon(page);
+    await page
+      .getByLabel(/Tears of Steel/)
+      .last()
+      .click();
+    await page.getByRole('button', { name: /All streams/ }).click();
+    await page
+      .getByText(/Open Movie 1080p/)
+      .first()
+      .click();
+    const pause = page.getByLabel('Pause', { exact: true }).first();
+    await expect(pause).toBeVisible();
+    await pause.click();
+    await page.getByLabel('Play', { exact: true }).first().click();
+    const time = () => page.evaluate(() => document.querySelector('video')?.currentTime ?? 0);
+    await expect.poll(time).toBeGreaterThan(1);
+    const more = page.getByRole('button', { name: 'More options' });
+    await expect(more).toBeHidden({ timeout: 15_000 });
+
+    const fit = () =>
+      page.evaluate(() => {
+        const element = document.querySelector('video');
+        return element ? getComputedStyle(element).objectFit : null;
+      });
+    const { touch, pinch } = await touchscreen(page);
+
+    // Spreading fills the screen, says so, and the phone keeps it for the film. No tap shows
+    // the controls, and the film goes on from where it was.
+    // The fingers easing back in before they lift change nothing: one change a pinch.
+    expect(await fit()).toBe('contain');
+    const before = await time();
+    await pinch([160, 260], [90, 330], [140, 280]);
+    await expect.poll(fit).toBe('cover');
+    await expect(page.getByText('Zoomed to fill')).toBeVisible();
+    expect(await storedFits(page)).toEqual({ last: 'fill', titles: [['tt2285752', 'fill']] });
+    await page.waitForTimeout(600);
+    await expect(more).toBeHidden();
+    expect(Math.abs((await time()) - before)).toBeLessThan(3);
+
+    // Two fingers resting, one lifting and coming down again near the other, are no pinch.
+    // DevTools lifts only every finger at once, so these touches are the page's own.
+    const fingers = (
+      type: string,
+      touches: [number, number][],
+      changed: [number, number][] = touches,
+    ) =>
+      page.evaluate(
+        ({ type, touches, changed }) => {
+          const target = document.elementFromPoint(200, 450) ?? document.body;
+          const make = ([identifier, x]: [number, number]) =>
+            new Touch({ identifier, target, clientX: x, clientY: 450, pageX: x, pageY: 450 });
+          target.dispatchEvent(
+            new TouchEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              touches: touches.map(make),
+              targetTouches: touches.map(make),
+              changedTouches: changed.map(make),
+            }),
+          );
+        },
+        { type, touches, changed },
+      );
+    await fingers('touchstart', [[0, 100]]);
+    await fingers(
+      'touchstart',
+      [
+        [0, 100],
+        [1, 300],
+      ],
+      [[1, 300]],
+    );
+    await fingers('touchend', [[0, 100]], [[1, 300]]);
+    await fingers(
+      'touchstart',
+      [
+        [0, 100],
+        [2, 140],
+      ],
+      [[2, 140]],
+    );
+    await fingers(
+      'touchmove',
+      [
+        [0, 100],
+        [2, 135],
+      ],
+      [[2, 135]],
+    );
+    await fingers(
+      'touchend',
+      [],
+      [
+        [0, 100],
+        [2, 135],
+      ],
+    );
+    await page.waitForTimeout(300);
+    expect(await fit()).toBe('cover');
+
+    // Closing the fingers fits the whole picture again.
+    await pinch([100, 320], [190, 230]);
+    await expect.poll(fit).toBe('contain');
+    await expect(page.getByText('Fit to screen')).toBeVisible();
+
+    // A swipe that gets a second finger part way seeks nowhere: it is a pinch now.
+    const swipeFrom = await time();
+    await touch('touchStart', [{ x: 120, y: 450, id: 0 }]);
+    for (let step = 1; step <= 5; step++) {
+      await touch('touchMove', [{ x: 120 + step * 20, y: 450, id: 0 }]);
+    }
+    await touch('touchStart', [
+      { x: 220, y: 450, id: 0 },
+      { x: 300, y: 450, id: 1 },
+    ]);
+    for (let step = 1; step <= 6; step++) {
+      await touch('touchMove', [
+        { x: 220 - step * 12, y: 450, id: 0 },
+        { x: 300 + step * 12, y: 450, id: 1 },
+      ]);
+    }
+    await touch('touchEnd', []);
+    await expect.poll(fit).toBe('cover');
+    await page.waitForTimeout(600);
+    expect(Math.abs((await time()) - swipeFrom)).toBeLessThan(4);
+
+    // One finger still taps the controls up.
+    await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
+    await touch('touchEnd', []);
+    await expect(more).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("each title keeps its own picture fit, and every episode its show's", async ({ page }) => {
+    const errors = watchErrors(page);
+    // An earlier version kept one choice for every film: filled. Nobody loses it.
+    await page.addInitScript(() => {
+      if (localStorage.getItem('bannertv.phone.pictureFits') === null) {
+        localStorage.setItem('bannertv.phone.pictureFit', 'fill');
+      }
+    });
+    await mockAddons(page);
+    await seedStreamAddon(page);
+    await mockPlayback(page);
+    await openApp(page);
+    const { touch, pinch } = await touchscreen(page);
+    const fit = () =>
+      page.evaluate(() => {
+        const element = document.querySelector('video');
+        return element ? getComputedStyle(element).objectFit : null;
+      });
+    const playing = async () => {
+      const pause = page.getByLabel('Pause', { exact: true }).first();
+      await expect(pause).toBeVisible();
+      // The browser waits for a tap before it plays; the phone does not.
+      await pause.click();
+      await page.getByLabel('Play', { exact: true }).first().click();
+    };
+    // The web build's stand-in for the phone's player opens only the first video of a launch,
+    // so the app starts again after each one. The choices last from one launch to the next.
+    const leaveAndRelaunch = async () => {
+      const button = page.getByLabel('Leave the player').first();
+      if (!(await button.isVisible())) {
+        await touch('touchStart', [{ x: 200, y: 300, id: 0 }]);
+        await touch('touchEnd', []);
+      }
+      await button.click();
+      // Back on the title's page first: a back still on its way after the launch would ask the
+      // test server for the title's address, which it has no page for.
+      await expect(page.getByLabel('Leave the player')).toHaveCount(0);
+      await page.goto('/');
+    };
+    const series = page.getByRole('button', { name: /^Morevna Project, 2016/ }).first();
+
+    // A series' first episode opens filled, as the phone had every film. Closing two fingers
+    // fits it, for the series.
+    await series.click();
+    await page.getByRole('button', { name: /^1\. Season 1 episode 1,/ }).click();
+    await playing();
+    await expect.poll(fit).toBe('cover');
+    // The earlier key stays, for a phone put back on an earlier update.
+    expect(await page.evaluate(() => localStorage.getItem('bannertv.phone.pictureFit'))).toBe(
+      'fill',
+    );
+    await pinch([100, 320], [190, 230]);
+    await expect.poll(fit).toBe('contain');
+    await leaveAndRelaunch();
+
+    // A film never zoomed opens as the series was left. Spreading two fingers fills it, for the
+    // film alone.
+    await page
+      .getByLabel(/Tears of Steel/)
+      .last()
+      .click();
+    await page.getByRole('button', { name: /All streams/ }).click();
+    await page
+      .getByText(/Open Movie 1080p/)
+      .first()
+      .click();
+    await playing();
+    await expect.poll(fit).toBe('contain');
+    await pinch([160, 260], [90, 330]);
+    await expect.poll(fit).toBe('cover');
+    await leaveAndRelaunch();
+
+    // The series' next episode opens fitted, as its first was left, though the film was filled
+    // since.
+    await series.click();
+    await page.getByRole('button', { name: /^2\. Season 1 episode 2,/ }).click();
+    await playing();
+    await expect.poll(fit).toBe('contain');
+    expect(await storedFits(page)).toEqual({
+      last: 'fill',
+      titles: [
+        ['tt8000001', 'fit'],
+        ['tt2285752', 'fill'],
+      ],
+    });
+    expect(errors).toEqual([]);
+  });
+});
+
 test('a later launch opens on Home, and Settings shows playback and the build', async ({
   page,
 }) => {
@@ -92,6 +372,11 @@ test('a later launch opens on Home, and Settings shows playback and the build', 
   await page.getByRole('tab', { name: 'Settings' }).click();
   await expect(page.getByText('Auto-play picks')).toBeVisible();
   await expect(page.getByText(/BannerTV for phones/)).toBeVisible();
+  // The web build takes no over-the-air updates: it runs its built-in code and has no check.
+  await expect(page.getByText('App version', { exact: true })).toBeVisible();
+  await expect(page.getByText('Built in', { exact: true })).toBeVisible();
+  await expect(page.getByText(/This build doesn’t take updates/)).toBeVisible();
+  await expect(page.getByText('Check for updates', { exact: true })).toHaveCount(0);
   // The stream helper runs in the phone build's native module, which the web build has not.
   await expect(page.getByText('Stream helper', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Your TV', { exact: true })).toHaveCount(0);

@@ -15,15 +15,16 @@ import { isKidsProfile } from '@tv/data/profiles';
 import { eventForItem, noteFirstPage, prepareItems, sportsState } from '@tv/data/sports';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { CatalogRoute } from '../nav/routes';
 import { openEvent, openTitle } from '../nav/routes';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
+import { ChipRow } from '../ui/ChipRow';
 import { Grid } from '../ui/Grid';
 import { Message } from '../ui/Message';
 import { ScreenHeader } from '../ui/ScreenHeader';
-import { colors, gutter, space, type } from '../ui/theme';
+import { colors, space, type } from '../ui/theme';
 
 const IDLE = { items: [], status: 'loading' as const };
 const noop = () => () => undefined;
@@ -31,7 +32,10 @@ const noop = () => () => undefined;
 // What each Browse showed last, for this run: Browse itself, and each See all by its row.
 const memories = new Map<string, DiscoverSelection>();
 
-/** One line of chips that scrolls sideways when it does not fit. */
+/**
+ * One line of chips that scrolls sideways when it does not fit, opening on the chosen one: a
+ * genre remembered from last time may be far along the row.
+ */
 function ChipLine({
   label,
   options,
@@ -44,10 +48,8 @@ function ChipLine({
   onChange: (value: string) => void;
 }) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chips}
+    <ChipRow
+      selected={options.findIndex((option) => option.value === value)}
       accessibilityLabel={label}
     >
       {options.map((option) => (
@@ -58,7 +60,7 @@ function ChipLine({
           onPress={() => onChange(option.value)}
         />
       ))}
-    </ScrollView>
+    </ChipRow>
   );
 }
 
@@ -223,7 +225,6 @@ export function CatalogScreen({ route }: { route?: CatalogRoute }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   pickers: { gap: space.s, paddingBottom: space.m },
-  chips: { gap: space.s, paddingHorizontal: gutter },
   spinner: { padding: space.xl },
   error: { padding: space.l, gap: space.s, alignItems: 'flex-start' },
   muted: { ...type.body, color: colors.textMuted },

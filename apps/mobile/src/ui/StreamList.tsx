@@ -14,16 +14,9 @@ import {
 } from '@tv/player/stream-filter';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Chip } from './Chip';
+import { ChipRow } from './ChipRow';
 import { Sheet, SheetOption } from './Sheet';
 import { colors, radius, space, type } from './theme';
 
@@ -43,6 +36,7 @@ export function StreamList({
   onPick,
   header,
   canOpen,
+  background = colors.bg,
 }: {
   finder: StreamFinder;
   playingKey?: string;
@@ -50,6 +44,8 @@ export function StreamList({
   header?: React.ReactElement;
   /** Rows this screen can act on though the player can't play them (YouTube, in All streams). */
   canOpen?: (entry: StreamEntry) => boolean;
+  /** What the list sits on (the player's panel is a sheet), for the chips' edge fades. */
+  background?: string;
 }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(finder.subscribe, finder.get);
@@ -194,13 +190,9 @@ export function StreamList({
           <View>
             {header}
             {chips.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chips}
-              >
+              <ChipRow inset={space.l} fadeColor={background} style={styles.chips}>
                 {chips}
-              </ScrollView>
+              </ChipRow>
             ) : null}
             <View style={styles.status}>
               {state.pending > 0 ? <ActivityIndicator color={colors.accent} size="small" /> : null}
@@ -264,7 +256,7 @@ export function StreamList({
 
 const styles = StyleSheet.create({
   list: { paddingBottom: space.xxl },
-  chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: space.l, paddingTop: space.s },
+  chips: { marginTop: space.s },
   status: { flexDirection: 'row', gap: space.s, alignItems: 'center', padding: space.l },
   statusText: { ...type.label, color: colors.textMuted },
   row: {

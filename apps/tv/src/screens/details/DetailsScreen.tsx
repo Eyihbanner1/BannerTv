@@ -1,10 +1,4 @@
-import {
-  kidsTitleAllowed,
-  MIN_RESUME_SECONDS,
-  nextVideo,
-  ratingAllowed,
-  tmdbImageUrl,
-} from '@bannertv/core';
+import { kidsDetailsAllowed, MIN_RESUME_SECONDS, nextVideo, tmdbImageUrl } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { Artwork } from '@phone/ui/Artwork';
 import { addonClient } from '@tv/data/addons';
@@ -158,12 +152,7 @@ export function DetailsScreen({ item: preview, active }: { item: MetaPreview; ac
   const kidsMax = activeProfile()?.kids;
   const kidsDecided = !kids || (meta !== undefined && tmdb.settled);
   const kidsAllowed =
-    !kids ||
-    (kidsDecided &&
-      meta !== undefined &&
-      kidsTitleAllowed(meta) &&
-      (extra?.certificate === undefined ||
-        (kidsMax !== undefined && ratingAllowed(extra.certificate, kidsMax))));
+    !kids || (kidsDecided && meta !== undefined && kidsDetailsAllowed(meta, extra, kidsMax));
 
   const isMovie = titleType === 'movie';
   const hasEpisodes = !isMovie && meta !== undefined && meta.videos.length > 0;

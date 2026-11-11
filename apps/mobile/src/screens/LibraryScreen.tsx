@@ -12,19 +12,21 @@ import { isKidsProfile } from '@tv/data/profiles';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { libraryWatch, type Watch } from '../data/library-watch';
 import { syncForRefresh } from '../data/refresh';
 import { openTitle } from '../nav/routes';
 import { CalendarList } from '../ui/CalendarList';
 import { Chip } from '../ui/Chip';
+import { ChipRow } from '../ui/ChipRow';
 import { Grid } from '../ui/Grid';
 import { Message } from '../ui/Message';
 import { colors, gutter, space, type } from '../ui/theme';
 import { usePullRefresh } from '../ui/use-pull-refresh';
 
 type Show = 'list' | 'history' | 'calendar';
+const KINDS: readonly LibraryKind[] = ['all', 'movie', 'series'];
 
 // My List follows the list alone, so the tab (which stays mounted under the player) is left as
 // it is while a video saves its place every 10 seconds; History follows its stores too, and the
@@ -96,7 +98,7 @@ export function LibraryScreen() {
       <Text style={styles.title} accessibilityRole="header">
         {t('phone.tabs.library')}
       </Text>
-      <View style={styles.chips}>
+      <View style={styles.shows}>
         <Chip label={t('library.myList')} on={show === 'list'} onPress={() => setShow('list')} />
         <Chip
           label={t('library.history')}
@@ -109,12 +111,7 @@ export function LibraryScreen() {
           onPress={() => setShow('calendar')}
         />
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.kinds}
-        contentContainerStyle={styles.chips}
-      >
+      <ChipRow selected={KINDS.indexOf(kind)}>
         <Chip label={t('library.all')} on={kind === 'all'} onPress={() => setKind('all')} />
         <Chip label={t('library.films')} on={kind === 'movie'} onPress={() => setKind('movie')} />
         <Chip
@@ -122,7 +119,7 @@ export function LibraryScreen() {
           on={kind === 'series'}
           onPress={() => setKind('series')}
         />
-      </ScrollView>
+      </ChipRow>
       {show === 'calendar' && calendar.days.length > 0 ? (
         <Text style={styles.lead}>{t('calendar.lead')}</Text>
       ) : null}
@@ -150,7 +147,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { paddingBottom: space.m, gap: space.m },
   title: { ...type.display, color: colors.text, paddingHorizontal: gutter },
-  chips: { flexDirection: 'row', gap: space.s, paddingHorizontal: gutter },
-  kinds: { flexGrow: 0 },
+  // With large text the three go onto a second line rather than off the screen.
+  shows: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s, paddingHorizontal: gutter },
   lead: { ...type.meta, color: colors.textMuted, paddingHorizontal: gutter },
 });
