@@ -435,9 +435,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       );
     let card =
       offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
-    // On a stream the mark is not exact for, the count stops for good: back on the marked one,
-    // the pill only offers, never starting the next episode at once.
-    if (card && card.counts && !cue?.startsNext) card = { ...card, counts: false };
+    // On a stream the mark is not exact for, or once the sleep timer stops at this end, the count
+    // stops for good: back on the marked one, or with the timer off or put off, the pill only
+    // offers, never starting the next episode at once.
+    if (card && card.counts && (!cue?.startsNext || sleep.sleepsHere)) {
+      card = { ...card, counts: false };
+    }
     if (card !== creditsCard) setCreditsCard(card);
   }
   // Only while the file playing is the release marked: another stream cut a little

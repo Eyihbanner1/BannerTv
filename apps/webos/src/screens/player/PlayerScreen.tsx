@@ -370,9 +370,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
       );
     let card =
       offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
-    // On a stream the mark is not exact for, the count stops for good: back on the
-    // marked one, the card only offers, never starting the next episode at once.
-    if (card && card.counts && !cue?.startsNext) card = { ...card, counts: false };
+    // On a stream the mark is not exact for, or once the sleep timer stops at this end,
+    // the count stops for good: back on the marked one, or with the timer off or put
+    // off, the card only offers, never starting the next episode at once.
+    if (card && card.counts && (!cue?.startsNext || sleepsHere)) {
+      card = { ...card, counts: false };
+    }
     if (card !== creditsCard) setCreditsCard(card);
   }
   // Counting to the next episode at the credits, until Watch credits, Keep watching or the end.

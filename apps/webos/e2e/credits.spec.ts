@@ -6,6 +6,7 @@ import {
   APP_URL,
   expectFocus,
   expectFocusLabel,
+  focusedKey,
   openSection,
   press,
   pressBack,
@@ -205,6 +206,72 @@ test('with "Start next at credits" on, the card counts ten seconds from the cred
     )
     .toBe(true);
   expect(latest).toBeLessThan(20);
+});
+
+/** Presses `key` until `focusKey` has focus, a few times at most. */
+async function pressUntil(page: Page, key: string, focusKey: string) {
+  for (let i = 0; i < 8 && (await focusedKey(page)) !== focusKey; i++) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(150);
+  }
+  await expectFocus(page, focusKey);
+}
+
+test('with "Start next at credits" on, a sleep timer set to stop at this end stops the count for good, even once turned off', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { nextAtCredits: true } });
+  const mock = await mockPlayback(page, { skips: CREDITS });
+  await playFirstEpisode(page);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+  await expect(
+    page.getByRole('dialog', { name: 'Up next' }).getByText(/^Next episode in \d+ s$/),
+  ).toBeVisible();
+
+  // Paused, nothing counts. In Info the sleep timer is set to the end of the episode, then off.
+  await page.keyboard.press('Pause');
+  await expectFocus(page, 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await pressUntil(page, 'ArrowRight', 'player-info-button');
+  await press(page, 'Enter', 'player-info-about');
+  await press(page, 'ArrowUp', 'player-info-tab-about');
+  await press(page, 'ArrowRight', 'player-info-tab-sleep');
+  const tab = page.locator('[data-focus-key="player-info-tab-sleep"]');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Off');
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await pressUntil(page, 'ArrowRight', 'player-info-sleep-end');
+  await page.keyboard.press('Enter');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, End of episode');
+  await pressUntil(page, 'ArrowLeft', 'player-info-sleep-off');
+  await page.keyboard.press('Enter');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Off');
+
+  // Playing again, the episode plays on through its credits: the count does not come back.
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+  await press(page, 'ArrowUp', 'player-play');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // Its streams are fetched ahead, as always, but it never starts: the time only goes on.
+  let latest = 0;
+  let restarted = false;
+  await expect
+    .poll(
+      async () => {
+        const now = (await video(page)).time;
+        if (now < latest - 1) restarted = true;
+        latest = Math.max(latest, now);
+        return latest;
+      },
+      { timeout: 20000 },
+    )
+    .toBeGreaterThan(20);
+  expect(restarted).toBe(false);
+  expect(mock.streams).toContain(`series/${NEXT_EPISODE}`);
 });
 
 test('a skip by hand over the intro is learned, and the next episode offers Skip intro there', async ({
