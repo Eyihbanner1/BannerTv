@@ -984,7 +984,11 @@
     "open": "Open Homebrew Channel",
     "openDetail": "if it shows the old version, reload its list with the round arrow",
     "addAgain": "Add BannerTV's repository again",
-    "didNotOpen": "Homebrew Channel didn't open. Is it installed?"
+    "didNotOpen": "Homebrew Channel didn't open. Is it installed?",
+    "downloading": "Downloading BannerTV {{version}}…",
+    "starting": "BannerTV {{version}} is ready. Starting it now…",
+    "startingBuiltIn": "Going back to the build installed on this TV…",
+    "notStarted": "BannerTV {{version}} didn't start on this TV, so it runs the build installed here."
   },
   "browsing": {
     "play": "Play",

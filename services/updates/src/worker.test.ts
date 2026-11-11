@@ -634,6 +634,171 @@ describe('the LG TV’s Homebrew Channel repository', () => {
     });
   });
 
+  describe('in-app updates for the LG app', () => {
+    const LG_RUNTIME = 'webos-1-0123456789abcdef';
+    const FILE_SHA = 'c'.repeat(64);
+    const SCRIPT = new TextEncoder().encode('console.log("app");');
+    const update = '?channel=main&runtime=' + LG_RUNTIME;
+    /** An answer as the workflow stores it; the Worker never reads it but for /status. */
+    const answer = (fields: Record<string, unknown>, kind = 'manifest') =>
+      JSON.stringify({
+        [kind]: JSON.stringify({
+          createdAt: CREATED,
+          channel: 'main',
+          platform: 'webos',
+          ...fields,
+        }),
+        sig: 'c2ln',
+        keyid: 'lg-0123456789abcdef',
+      });
+    const MANIFEST = answer({
+      type: 'bannertv-lg-update',
+      id: '00000000-0000-4000-8000-000000000001',
+      version: '0.1.9',
+      commit: 'ed387a1',
+      runtime: LG_RUNTIME,
+    });
+
+    function withApp(text = MANIFEST) {
+      const { kv, env } = setUp();
+      kv.put(webos.appKey('main', LG_RUNTIME), text);
+      kv.put(webos.appFileKey(FILE_SHA), SCRIPT);
+      return { kv, env };
+    }
+
+    it('serves the stored answer byte for byte, never cached, to any origin', async () => {
+      const { env } = withApp();
+      const response = await worker.fetch(ask(`/webos/update${update}`), env);
+      expect(response.status).toBe(200);
+      expectWebosHeaders(response);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(await response.text()).toBe(MANIFEST);
+    });
+
+    it('answers 204, readable from file://, when nothing was published for that runtime', async () => {
+      const { env } = withApp();
+      const response = await worker.fetch(
+        ask('/webos/update?channel=main&runtime=webos-1-ffffffffffffffff'),
+        env,
+      );
+      expect(response.status).toBe(204);
+      expectWebosHeaders(response);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it('serves a script by its SHA-256 with its length, for ever', async () => {
+      const { env } = withApp();
+      const response = await worker.fetch(ask(`/webos/file/${FILE_SHA}`), env);
+      expect(response.status).toBe(200);
+      expectWebosHeaders(response);
+      expect(response.headers.get('content-type')).toBe('application/octet-stream');
+      expect(response.headers.get('content-length')).toBe(String(SCRIPT.length));
+      expect(response.headers.get('cache-control')).toBe(webos.FILE_CACHE);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(SCRIPT);
+      const missing = await worker.fetch(ask(`/webos/file/${'d'.repeat(64)}`), env);
+      expect(missing.status).toBe(404);
+      expectWebosHeaders(missing);
+      expect(missing.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it.each([
+      '/webos/update',
+      '/webos/update?channel=main',
+      '/webos/update?runtime=webos-1-0123456789abcdef',
+      '/webos/update?channel=Main&runtime=webos-1-0123456789abcdef',
+      '/webos/update?channel=main&runtime=webos-1-0123456789ABCDEF',
+      '/webos/update?channel=main&runtime=1.0.0',
+    ])('refuses %s without reading storage', async (path) => {
+      const { kv, env } = withApp();
+      const reads = kv.reads.length;
+      const response = await worker.fetch(ask(path), env);
+      expect(response.status).toBe(400);
+      expectWebosHeaders(response);
+      expect(kv.reads).toHaveLength(reads);
+    });
+
+    it.each([
+      `/webos/file/${FILE_SHA.toUpperCase()}`,
+      `/webos/file/${FILE_SHA}.js`,
+      '/webos/file/',
+    ])('%s is 404', async (path) => {
+      const { env } = withApp();
+      expect((await worker.fetch(ask(path), env)).status).toBe(404);
+    });
+
+    it('answers 503 when storage fails or is not bound', async () => {
+      const { kv, env } = withApp();
+      kv.down = true;
+      for (const path of [`/webos/update${update}`, `/webos/file/${FILE_SHA}`]) {
+        const response = await worker.fetch(ask(path), env);
+        expect(response.status).toBe(503);
+        expectWebosHeaders(response);
+        expect((await worker.fetch(ask(path), {})).status).toBe(503);
+      }
+    });
+
+    it('says on /status what a runtime is served', async () => {
+      const query = `/status?channel=main&platform=webos&runtime=${LG_RUNTIME}`;
+      expect(await (await worker.fetch(ask(query), setUp().env)).json()).toEqual({
+        storage: true,
+        protocol: 1,
+        update: null,
+        serving: 'none',
+      });
+      expect(await (await worker.fetch(ask(query), withApp().env)).json()).toEqual({
+        storage: true,
+        protocol: 1,
+        update: {
+          type: 'update',
+          id: '00000000-0000-4000-8000-000000000001',
+          version: '0.1.9',
+          commit: 'ed387a1',
+          createdAt: CREATED,
+          keyId: 'lg-0123456789abcdef',
+        },
+        serving: 'update',
+      });
+      const back = withApp(
+        answer({ type: 'bannertv-lg-built-in', runtime: LG_RUNTIME }, 'directive'),
+      );
+      expect(await (await worker.fetch(ask(query), back.env)).json()).toMatchObject({
+        update: { type: 'built-in', id: null, version: null, createdAt: CREATED },
+        serving: 'built-in',
+      });
+      const junk = withApp('{"manifest":"not json"}');
+      expect(await (await worker.fetch(ask(query), junk.env)).json()).toMatchObject({
+        update: null,
+        serving: 'none',
+      });
+      const bad = await worker.fetch(
+        ask(`/status?channel=main&platform=webos&runtime=x`),
+        setUp().env,
+      );
+      expect(bad.status).toBe(400);
+    });
+
+    it('reads no request header, writes nothing and logs nothing', async () => {
+      const { kv, env } = withApp();
+      const writes = kv.writes.length;
+      const read: string[] = [];
+      const get = Headers.prototype.get;
+      vi.spyOn(Headers.prototype, 'get').mockImplementation(function (this: Headers, name: string) {
+        read.push(name.toLowerCase());
+        return get.call(this, name);
+      });
+      const logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) =>
+        vi.spyOn(console, level),
+      );
+      await worker.fetch(ask(`/webos/update${update}`), env);
+      await worker.fetch(ask(`/webos/file/${FILE_SHA}`), env);
+      vi.mocked(Headers.prototype.get).mockRestore();
+      expect(read).toEqual([]);
+      expect(kv.writes).toHaveLength(writes);
+      for (const log of logs) expect(log).not.toHaveBeenCalled();
+    });
+  });
+
   it('reads no request header, writes nothing and logs nothing', async () => {
     const { kv, env } = stored();
     const writes = kv.writes.length;
@@ -671,6 +836,9 @@ describe('everything else', () => {
     ['HEAD', '/webos/repo.json'],
     ['POST', '/webos/repo.json'],
     ['PUT', `/webos/ipk/${'a'.repeat(64)}.ipk`],
+    ['POST', '/webos/update?channel=main&runtime=webos-1-0123456789abcdef'],
+    ['HEAD', `/webos/file/${'a'.repeat(64)}`],
+    ['GET', '/webos/file'],
   ])('%s %s is 404', async (method, path) => {
     const { kv, env } = setUp();
     const response = await worker.fetch(ask(path, {}, method), env);

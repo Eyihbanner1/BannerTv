@@ -39,3 +39,8 @@ apps/androidtv/local.properties
 # `expo-updates codesigning:generate` writes it as private-key.pem.
 private-key.pem
 public-key.pem
+
+# LG in-app update signing: only apps/webos/certs/lg-updates.pem (the public key) is committed.
+# The private key lives only in the LG_UPDATES_PRIVATE_KEY secret; services/updates/scripts/lg-key.mjs
+# writes it outside the repository as lg-updates-private.pem.
+lg-updates-private.pem

@@ -4,29 +4,36 @@ name: Publish LG update
 # the update service (services/updates, updates.bannertv.workers.dev), or rolls the last one back.
 # It runs only when started by hand (Actions, Publish LG update, Run workflow), on main. Homebrew
 # Channel never looks for updates by itself: after a run, open it on the TV, choose BannerTV and
-# press Update (services/updates/README.md, "LG TV updates through Homebrew Channel").
+# press Update (services/updates/README.md, "LG TV updates through Homebrew Channel"). Once the LG
+# update key is committed, the same run also signs the build's scripts as an in-app update, which
+# a BannerTV that takes them downloads and starts by itself ("In-app updates on the LG").
 #
 # Actions:
 # - publish: builds the LG app from this commit with a version of its own, one patch above
 #   anything published before (stamped in this run's checkout only, never committed), runs the TV
 #   bundle's checks, and uploads the .ipk and the repository index that offers it;
-# - rollback-previous: offers the build before the current one again, without building; run it
-#   again to go back further.
+# - rollback-previous: offers the build before the current one again, without building, and sends
+#   TVs that run in-app updates back to it too; run it again to go back further.
 #
-# Three jobs, so that the Cloudflare token is never in a job that also runs code from npm: a step
+# Four jobs, so that neither secret is ever in a job that also runs code from npm: a step
 # can read the memory of the runner it runs on, which holds the secrets its job uses, and can
 # change the files and environment of every later step in that job, so keeping a secret out of a
 # step's env is not enough.
 # - Read the store has the token, and runs wrangler (pinned below) and services/updates/scripts,
 #   from its own checkout with Node alone. It chooses the version, before anything is built.
 # - Build uses no secret. It is the only job that installs the app's dependencies and runs them
-#   (Vite, the unit tests, ares-package), and hands on only files: the .ipk and what it says it
-#   is, which Upload reads as data and checks again.
+#   (Vite, the unit tests, ares-package), and hands on only files: the .ipk, the in-app update's
+#   scripts and what they say they are, which Sign and Upload read as data and check again.
+# - Sign has the LG update key alone, and runs Node and services/updates/scripts from its own
+#   checkout: it signs what Build described, or, for a roll back, what TVs go back to.
 # - Upload has the token again, and runs wrangler, the same scripts and the check of the Worker.
 #
 # It needs the repository secret CLOUDFLARE_API_TOKEN (as for the Workers) and the updates Worker
-# deployed with its LG routes (Deploy updates Worker). No signing key: Homebrew Channel installs
-# the .ipk only when its SHA-256 is the one the index gives.
+# deployed with its LG routes (Deploy updates Worker). Homebrew Channel installs the .ipk only
+# when its SHA-256 is the one the index gives. In-app updates also need LG_UPDATES_PRIVATE_KEY,
+# the private half of apps/webos/certs/lg-updates.pem: with the public key committed, Sign stops
+# without it; with no public key committed, the build takes no in-app updates and Sign signs
+# nothing.
 
 on:
   workflow_dispatch:
@@ -190,6 +197,15 @@ jobs:
       - name: Check the build for webOS 5.0
         run: pnpm check:bundle
 
+      # The scripts an in-app update carries, read from index.html's shell config and each checked
+      # against the file built, copied out by their SHA-256 for Sign and Upload.
+      - name: Describe the in-app update
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          node services/updates/scripts/webos.mjs describe-update --dist apps/webos/dist \
+            --version "$VERSION" --commit "$COMMIT" --out "$RUNNER_TEMP/build/update"
+
       - name: Package .ipk
         run: pnpm package
 
@@ -219,12 +235,76 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  upload:
-    name: Upload
+  # The one job with the LG update key, and Node alone: no pnpm, no install and no cache, so
+  # nothing Build ran or saved is loaded here. The script holds the key to the committed public
+  # key, and the scripts Build handed on to what Build said they are, before it signs.
+  sign:
+    name: Sign
     needs: [store, build]
     # After Build for a publish. A roll back builds nothing, so its Build is skipped.
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && needs.store.result == 'success'
+      && (needs.build.result == 'success'
+      || (inputs.action == 'rollback-previous' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ACTION: ${{ inputs.action }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Fetch what the store held
+        uses: actions/download-artifact@v4
+        with:
+          name: lg-update-store
+          path: ${{ runner.temp }}/store
+
+      - name: Fetch the build
+        if: inputs.action == 'publish'
+        uses: actions/download-artifact@v4
+        with:
+          name: lg-update-build
+          path: ${{ runner.temp }}/build
+
+      # Signs nothing, with a notice, when the build takes no in-app updates (no public key
+      # committed yet), or the build rolled back took none; stops when the key is committed and
+      # the secret is missing or another key's.
+      - name: Sign
+        working-directory: services/updates
+        env:
+          LG_UPDATES_PRIVATE_KEY: ${{ secrets.LG_UPDATES_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signed"
+          key=../../apps/webos/certs/lg-updates.pem
+          out="$RUNNER_TEMP/signed/signed.json"
+          if [ "$ACTION" = publish ]; then
+            node scripts/webos.mjs sign-update --update "$RUNNER_TEMP/build/update" \
+              --public-key "$key" --out "$out"
+          else
+            node scripts/webos.mjs sign-rollback --history "$RUNNER_TEMP/store/history.json" \
+              --keys "$RUNNER_TEMP/store/keys.json" --public-key "$key" --out "$out"
+          fi
+
+      - name: Hand the signed update to Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lg-update-signed
+          path: ${{ runner.temp }}/signed/
+          retention-days: 1
+          if-no-files-found: error
+
+  upload:
+    name: Upload
+    needs: [store, build, sign]
+    # After Build and Sign for a publish. A roll back builds nothing, so its Build is skipped.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && needs.store.result == 'success'
+      && needs.sign.result == 'success'
       && (needs.build.result == 'success'
       || (inputs.action == 'rollback-previous' && needs.build.result == 'skipped'))
     runs-on: ubuntu-latest
@@ -253,10 +333,18 @@ jobs:
           name: lg-update-build
           path: ${{ runner.temp }}/build
 
+      - name: Fetch the signed update
+        uses: actions/download-artifact@v4
+        with:
+          name: lg-update-signed
+          path: ${{ runner.temp }}/signed
+
       # The history is read again just before anything is written, and the upload stops if it
       # changed since Read the store: another run in between, or this job started again later,
       # could otherwise use a version twice or undo a newer publish. Then the script checks the
-      # .ipk (its SHA-256, and that it says it is BannerTV at this version) and writes the files.
+      # .ipk (its SHA-256, and that it says it is BannerTV at this version), the signed update
+      # (its signature, against the committed public key, and each script against its SHA-256)
+      # and writes the files.
       - name: Plan the upload
         working-directory: services/updates
         env:
@@ -280,17 +368,21 @@ jobs:
             kv key get webos/history/main > "$now/history.json"
           fi
           given=(--history "$RUNNER_TEMP/store/history.json" --history-now "$now/history.json"
-            --keys "$RUNNER_TEMP/store/keys.json" --out "$RUNNER_TEMP/upload")
+            --keys "$RUNNER_TEMP/store/keys.json" --out "$RUNNER_TEMP/upload"
+            --signed "$RUNNER_TEMP/signed/signed.json"
+            --public-key ../../apps/webos/certs/lg-updates.pem)
           if [ "$ACTION" = publish ]; then
             node scripts/webos.mjs publish "${given[@]}" \
               --ipk "$RUNNER_TEMP/build/com.bannertv.app_${VERSION}_all.ipk" \
-              --build "$RUNNER_TEMP/build/build.json" --version "$VERSION" --commit "$COMMIT"
+              --build "$RUNNER_TEMP/build/build.json" --version "$VERSION" --commit "$COMMIT" \
+              --update "$RUNNER_TEMP/build/update"
           else
             node scripts/webos.mjs rollback-previous "${given[@]}"
           fi
 
-      # The .ipk and icon first, then the history, and the index last, so the TV is never offered
-      # a build before its files are stored, and a version is never used twice.
+      # The .ipk, icon and in-app scripts first, then the history, then the in-app update's signed
+      # answer, and the index last, so neither the app nor Homebrew Channel is offered a build
+      # before its files are stored, and a version is never used twice.
       - name: Upload
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -307,6 +399,7 @@ jobs:
             part=$((part + 1))
           done
           put "$RUNNER_TEMP/upload/history.json"
+          if [ -f "$RUNNER_TEMP/upload/app.json" ]; then put "$RUNNER_TEMP/upload/app.json"; fi
           put "$RUNNER_TEMP/upload/repo.json"
 
       # Workers KV can take a minute or so to reach every location, so this waits up to three for
@@ -337,6 +430,38 @@ jobs:
             sleep 10
           done
           echo "::error::https://updates.bannertv.workers.dev/webos/repo.json does not offer $VERSION after three minutes. The upload itself succeeded if the Upload step did; KV may be slow to reach the runner's location."
+          exit 1
+
+      # The same for the in-app update, when this run made one: the Worker's answer must be the
+      # signed one byte for byte, and each script it names must have its SHA-256.
+      - name: Check the Worker serves the in-app update
+        working-directory: services/updates
+        run: |
+          if [ ! -f "$RUNNER_TEMP/upload/app.json" ]; then
+            echo "This run made no in-app update."
+            exit 0
+          fi
+          summary="$RUNNER_TEMP/upload/summary.json"
+          url=$(node -e '
+            const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            console.log(s.inApp.url);' "$summary")
+          for attempt in $(seq 1 18); do
+            if curl -fsS --max-time 10 -o "$RUNNER_TEMP/served-app.json" "$url" &&
+              node scripts/webos.mjs serves-app --plan "$RUNNER_TEMP/upload" \
+                --served "$RUNNER_TEMP/served-app.json"; then
+              for sha in $(node -e '
+                const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                console.log(s.inApp.files.join(" "));' "$summary"); do
+                curl -fsS --max-time 60 -o "$RUNNER_TEMP/served-file" \
+                  "https://updates.bannertv.workers.dev/webos/file/$sha"
+                echo "$sha  $RUNNER_TEMP/served-file" | sha256sum --check --quiet
+              done
+              echo "The Worker serves the signed in-app update at $url, and every script it names."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$url does not serve this run's signed in-app update after three minutes. The upload succeeded if the Upload step did; KV may be slow to reach the runner's location."
           exit 1
 
       # Also after a failed upload or check, so the run says what it was uploading.

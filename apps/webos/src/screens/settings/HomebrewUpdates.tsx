@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import appinfo from '../../../webos-meta/appinfo.json';
 import { Button } from '../../components/Button';
@@ -10,6 +11,8 @@ import {
   openHomebrewChannel,
   type RepoNews,
 } from '../../data/homebrew';
+import { checkLgUpdates, lgUpdateStatus, lgUpdatesShown } from '../../data/lg-updates';
+import type { ShellStatus } from '../../shell/contract';
 import { fetchJson } from '../../platform/http';
 import styles from './HomebrewUpdates.module.css';
 
@@ -17,11 +20,34 @@ const BUTTON_KEY = 'settings-homebrew';
 const TITLE_ID = 'settings-updates-title';
 
 /**
+ * What the app's own updates are doing, for the line under the build, or ''
+ * when there is nothing to say and Homebrew Channel's news can show.
+ */
+function inAppLine(status: ShellStatus, t: TFunction): string {
+  if (status.check.kind === 'downloading') {
+    return t('updates.downloading', { version: status.check.version });
+  }
+  if (status.next === 'built-in') return t('updates.startingBuiltIn');
+  if (status.next) return t('updates.starting', { version: status.next.version });
+  if (status.running === null && status.failed) {
+    return t('updates.notStarted', { version: status.failed.version });
+  }
+  return '';
+}
+
+/**
  * Settings > Updates, on an LG TV in a sideload build (data/homebrew.ts): the
  * build this TV runs, whether Homebrew Channel has a newer one, and a button
  * that opens Homebrew Channel to install it. The list is read once each time
  * Settings opens, after the screen has drawn, and an answer that never comes
  * or makes no sense leaves only the installed build showing.
+ *
+ * In a build that updates itself (data/lg-updates.ts), opening Settings also
+ * asks the updates Worker, and the line says what the app's own updates are
+ * doing first: an update downloading, or about to start (the app starts again
+ * here, a moment later), or one that did not start on this TV. Homebrew
+ * Channel is still how a new .ipk arrives, for the changes an update cannot
+ * carry.
  *
  * The first press opens Homebrew Channel on its Add repository dialog with
  * BannerTV's list filled in. Homebrew Channel would add the list a second time
@@ -34,6 +60,8 @@ export function HomebrewUpdates() {
   const listSent = useSyncExternalStore(homebrewListSent.subscribe, homebrewListSent.get);
   const [news, setNews] = useState<RepoNews>({ kind: 'none' });
   const [didNotOpen, setDidNotOpen] = useState(false);
+  const inApp = lgUpdatesShown();
+  const appStatus = useSyncExternalStore(lgUpdateStatus.subscribe, lgUpdateStatus.get);
   const [asking, setAsking] = useState(false);
   // A second OK while the TV is still opening Homebrew Channel opens nothing more.
   const opening = useRef(false);
@@ -48,6 +76,10 @@ export function HomebrewUpdates() {
     };
   }, []);
 
+  useEffect(() => {
+    if (inApp) checkLgUpdates();
+  }, [inApp]);
+
   const open = (how: HomebrewOpen) => {
     if (opening.current) return;
     opening.current = true;
@@ -59,15 +91,18 @@ export function HomebrewUpdates() {
       });
   };
 
+  const appLine = inApp ? inAppLine(appStatus, t) : '';
   const line = didNotOpen
     ? t('updates.didNotOpen')
-    : news.kind === 'ready'
-      ? t('updates.ready', { version: news.version })
-      : news.kind === 'latest'
-        ? t('updates.latest')
-        : news.kind === 'older'
-          ? t('updates.older', { version: news.version })
-          : '';
+    : appLine
+      ? appLine
+      : news.kind === 'ready'
+        ? t('updates.ready', { version: news.version })
+        : news.kind === 'latest'
+          ? t('updates.latest')
+          : news.kind === 'older'
+            ? t('updates.older', { version: news.version })
+            : '';
 
   return (
     <section className={styles.updates} aria-labelledby={TITLE_ID}>
@@ -80,7 +115,11 @@ export function HomebrewUpdates() {
           {t('updates.installed', { version: appinfo.version })}
         </div>
         <p
-          className={news.kind === 'ready' && !didNotOpen ? styles.ready : undefined}
+          className={
+            !didNotOpen && (appStatus.next !== null || (!appLine && news.kind === 'ready'))
+              ? styles.ready
+              : undefined
+          }
           role="status"
         >
           {line}
