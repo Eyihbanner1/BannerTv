@@ -251,9 +251,9 @@ describe('describeStream, tricky tokens', () => {
   });
 
   it('trusts the release name over a name tag that says 4k', () => {
-    const facts = read({ name: 'Brazuca\n4k', description: 'Interstelar.2014.1080p.BluRay' });
+    const facts = read({ name: 'Brazuca\n4k', description: 'Farlite.2014.1080p.BluRay' });
     expect(facts.resolution).toBe('1080p');
-    expect(read({ name: 'Brazuca\n4k', description: 'Interstelar 2014' }).resolution).toBe('2160p');
+    expect(read({ name: 'Brazuca\n4k', description: 'Farlite 2014' }).resolution).toBe('2160p');
     expect(
       read({
         name: 'Addon 4k',
@@ -278,9 +278,9 @@ describe('describeStream, tricky tokens', () => {
     expect(read({ description: 'Film HD-TS' }).resolution).toBeUndefined();
   });
 
-  it('does not take "TPB+" or "Ingles+Subs" for a cache marker', () => {
+  it('does not take "HBI+" or "Ingles+Subs" for a cache marker', () => {
     const facts = read({
-      name: 'TPB+',
+      name: 'HBI+',
       description: 'Film [DTS 5.1 Castellano DTS 5.1-Ingles+Subs]',
     });
     expect(facts.cached).toBeUndefined();
@@ -341,7 +341,7 @@ describe('describeStream, tricky tokens', () => {
 
   it('leaves cache state and service out for torrents', () => {
     const torrent = parseStream({
-      infoHash: 'e4f5d7a2f3dd6b7b1826bd77e316b6b5ba31eb72',
+      infoHash: '41798c2b59b919cb8bcd673a26e6972a5b8a2c53',
       name: '[RD+] Torrentio\n4k',
     })!;
     const facts = describeStream(torrent);
@@ -390,7 +390,7 @@ describe('describeStream, tricky tokens', () => {
   it('reads seeders with and without spaces', () => {
     expect(read({ description: '👤 47 💾 40.33 GB' }).seeders).toBe(47);
     expect(read({ description: '💾26.6 GB 👤0 🎥h265' }).seeders).toBe(0);
-    expect(read({ description: '💾2.1 GB 👥310 ⚙️yts' }).seeders).toBe(310);
+    expect(read({ description: '💾2.1 GB 👥310 ⚙️yfs' }).seeders).toBe(310);
     expect(read({ description: '📦 7.94 GB 🌱 230' }).seeders).toBe(230);
     expect(read({ description: 'Type: Torrent | Seeders: 77' }).seeders).toBe(77);
     expect(read({ description: 'S: 12' }).seeders).toBe(12);
@@ -451,7 +451,7 @@ describe('describeStream, tricky tokens', () => {
     ]);
     expect(read({ description: 'Film.MULTi.1080p' }).languages).toEqual(['multi']);
     expect(read({ description: 'Film [Dual Audio]' }).languages).toEqual(['multi']);
-    expect(read({ description: '👂EN FR ES ☁️1337x' }).languages).toEqual(['en', 'fr', 'es']);
+    expect(read({ description: '👂EN FR ES ☁️Index42' }).languages).toEqual(['en', 'fr', 'es']);
     expect(read({ description: '👤 76 💾 2.3 GB 🗣 SK/CZ' }).languages).toEqual(['sk', 'cs']);
     expect(read({ description: 'Languages: English, Italian' }).languages).toEqual(['en', 'it']);
     // Two-letter words outside a marked list stay unread: "IT" is also a word.
@@ -560,7 +560,7 @@ describe('describeStream, samples and release groups', () => {
       read({
         behaviorHints: {
           filename:
-            'Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv',
+            'Lanternfall.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv',
         },
       }).releaseGroup,
     ).toBe('framestor');

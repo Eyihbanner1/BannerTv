@@ -53,7 +53,7 @@ const RAW: Readonly<Record<Source, Record<string, unknown>>> = {
   url: { url: 'https://cdn.example.org/film.mkv' },
   youtube: { ytId: 'dQw4w9WgXcQ' },
   external: { externalUrl: 'https://example.org/watch' },
-  torrent: { infoHash: 'e4f5d7a2f3dd6b7b1826bd77e316b6b5ba31eb72' },
+  torrent: { infoHash: '41798c2b59b919cb8bcd673a26e6972a5b8a2c53' },
   proxy: {
     url: 'https://cdn.example.org/master.m3u8',
     behaviorHints: { proxyHeaders: { request: { Referer: 'https://example.org/' } } },

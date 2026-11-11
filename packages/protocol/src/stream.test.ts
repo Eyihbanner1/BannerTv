@@ -7,7 +7,7 @@ describe('parseStream', () => {
     const stream = parseStream({
       name: '[RD+] Torrentio\n4k DV | HDR',
       title:
-        'The.Movie.2023.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H.265\n👤 52 💾 18.2 GB ⚙️ ThePirateBay',
+        'The.Movie.2023.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H.265\n👤 52 💾 18.2 GB ⚙️ HarbourIndex',
       url: 'https://torrentio.strem.fun/realdebrid/KEY/abc/null/0/The.Movie.mkv',
       behaviorHints: {
         bingeGroup: 'torrentio|4k|DV|HDR',
@@ -24,7 +24,7 @@ describe('parseStream', () => {
       },
       name: '[RD+] Torrentio\n4k DV | HDR',
       description:
-        'The.Movie.2023.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H.265\n👤 52 💾 18.2 GB ⚙️ ThePirateBay',
+        'The.Movie.2023.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H.265\n👤 52 💾 18.2 GB ⚙️ HarbourIndex',
       subtitles: [],
       behaviorHints: {
         bingeGroup: 'torrentio|4k|DV|HDR',
