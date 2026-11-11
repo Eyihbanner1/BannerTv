@@ -1,3 +1,4 @@
+import { noticeText } from './notice';
 import type { StreamEntry } from './types';
 
 /** One stream the player opened that did not play, newest last. */
@@ -38,6 +39,11 @@ export type PlayProblem =
   | { kind: 'needs-helper'; count: number }
   /** Only links that open in a browser or YouTube. */
   | { kind: 'web-only'; count: number }
+  /**
+   * Only messages posing as streams: `addon` (empty when it has no name) said
+   * `text` instead of sending a video, e.g. "Streams temporarily unavailable".
+   */
+  | { kind: 'addon-notice'; addon: string; text: string }
   /** A stream needed the stream helper, and the helper didn't answer. */
   | { kind: 'helper-off'; tried: number }
   /** Every stream tried was a debrid link the service hasn't downloaded yet. */
@@ -72,6 +78,8 @@ export interface ProblemExplained {
    * service would make playable, from the addon that sent the most.
    */
   torrentsToo?: { addon: string; count: number };
+  /** A message an addon sent instead of a stream, beside streams that could not play. */
+  noticeToo?: { addon: string; text: string };
 }
 
 const HELPER_DETAIL = 'stream-helper-';
@@ -92,11 +100,28 @@ function topAddon(
   return { addon: name && name.trim() !== '' ? name : '', count: counts[best]! };
 }
 
-function unavailable(entries: readonly StreamEntry[], reason: 'torrent' | 'proxy-headers') {
+function unavailable(
+  entries: readonly StreamEntry[],
+  reason: 'torrent' | 'proxy-headers' | 'notice',
+) {
   return entries.filter((entry) => {
     const action = entry.assessment.action;
     return action.kind === 'unavailable' && action.reason === reason;
   });
+}
+
+/** The first message an addon sent instead of a stream, in its words, and the addon's name. */
+function firstNotice(
+  entries: readonly StreamEntry[],
+  asked: ProblemInput['asked'],
+): { addon: string; text: string } | undefined {
+  for (const entry of unavailable(entries, 'notice')) {
+    const text = noticeText(entry.stream);
+    if (text === '') continue;
+    const name = asked[entry.addonRank]?.manifest.name;
+    return { addon: name && name.trim() !== '' ? name : '', text };
+  }
+  return undefined;
 }
 
 /** Why there was nothing to start: no addon, no answer, no streams, or only streams that can't play here. */
@@ -116,7 +141,14 @@ function explainNothing(input: ProblemInput): PlayProblem {
   if (playable.length > 0) return { kind: 'failed-recently', count: playable.length };
   const torrents = unavailable(entries, 'torrent');
   const headers = unavailable(entries, 'proxy-headers');
-  const web = entries.length - torrents.length - headers.length;
+  const notices = unavailable(entries, 'notice');
+  // Only messages: the addon's own words say why better than anything BannerTV could.
+  if (notices.length === entries.length) {
+    const notice = firstNotice(entries, asked);
+    if (notice) return { kind: 'addon-notice', ...notice };
+  }
+  // Web and YouTube links. Messages beside them say their own words (explainProblem adds them).
+  const web = entries.length - torrents.length - headers.length - notices.length;
   if (torrents.length > 0 && torrents.length >= headers.length && torrents.length >= web) {
     const top = topAddon(torrents, asked);
     return { kind: 'torrents', addon: top?.addon ?? '', count: top?.count ?? torrents.length };
@@ -124,7 +156,9 @@ function explainNothing(input: ProblemInput): PlayProblem {
   if (headers.length > 0 && headers.length >= web) {
     return { kind: 'needs-helper', count: headers.length };
   }
-  return { kind: 'web-only', count: web };
+  // Messages with no words of their own, such as a bare settings page, are named as web links
+  // only when nothing else is left: they are not links the viewer can open.
+  return { kind: 'web-only', count: web || notices.length };
 }
 
 /** Why what was tried did not play: the helper, uncached links, or the last stream's own error. */
@@ -151,9 +185,17 @@ function explainFailed(input: ProblemInput): PlayProblem {
  * phone say the same.
  */
 export function explainProblem(input: ProblemInput): ProblemExplained {
-  if (input.nothing) return { problem: explainNothing(input) };
-  const problem = explainFailed(input);
-  const torrents = unavailable(input.entries, 'torrent');
-  const top = torrents.length > 0 ? topAddon(torrents, input.asked) : undefined;
-  return top ? { problem, torrentsToo: top } : { problem };
+  const problem = input.nothing ? explainNothing(input) : explainFailed(input);
+  const explained: ProblemExplained = { problem };
+  if (!input.nothing) {
+    const torrents = unavailable(input.entries, 'torrent');
+    const top = torrents.length > 0 ? topAddon(torrents, input.asked) : undefined;
+    if (top) explained.torrentsToo = top;
+  }
+  // An addon that said why it sent no video, beside other reasons: its words go last.
+  if (problem.kind !== 'addon-notice') {
+    const notice = firstNotice(input.entries, input.asked);
+    if (notice) explained.noticeToo = notice;
+  }
+  return explained;
 }

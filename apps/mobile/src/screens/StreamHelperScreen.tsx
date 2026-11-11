@@ -13,22 +13,25 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { type HelperToSend, type SendResult, sendHelperToTv } from '../data/helper-pairing';
 import {
   asksForNotifications,
   HELPER_POLL_MS,
   HELPER_SETTLE_MS,
   helperView,
 } from '../data/stream-helper-view';
+import { reportTyping } from '../runtime/whereabouts';
 import { Button, ListRow } from '../ui/Button';
 import { ScreenHeader } from '../ui/ScreenHeader';
 import { colors, radius, space, type } from '../ui/theme';
 
 /**
  * The stream helper for an LG on the home network (ADR 0005, decision 13), as the Android TV
- * app's Settings runs it (the TV's RunHelper): switch it on, then type the address and code shown
- * here on the LG once. It keeps running with the screen off until it is switched off here or
+ * app's Settings runs it (the TV's RunHelper): switch it on, then type the LG's short code here
+ * (PairWithTv), or type the address and code shown here on the LG once. It keeps running with the screen off until it is switched off here or
  * from its notification.
  */
 export function StreamHelperScreen() {
@@ -138,8 +141,12 @@ export function StreamHelperScreen() {
           <Text style={styles.note}>{t('phone.streamHelperNotificationsOff')}</Text>
         ) : null}
 
+        {view.pairing && state.address && state.port ? (
+          <PairWithTv helper={{ host: state.address, port: state.port, code: view.pairing.code }} />
+        ) : null}
         {view.pairing ? (
           <View style={styles.card} accessibilityLiveRegion="polite">
+            <Text style={styles.overline}>{t('phone.helperPair.orType')}</Text>
             <Text style={styles.lead}>{t('streamHelper.typeOnTv')}</Text>
             <Text style={styles.label}>{t('streamHelper.address')}</Text>
             <Text style={styles.address} selectable>
@@ -165,6 +172,69 @@ export function StreamHelperScreen() {
   );
 }
 
+const SENT_MESSAGES: Record<SendResult, string> = {
+  sent: 'phone.helperPair.sent',
+  'bad-code': 'phone.helperPair.badCode',
+  gone: 'phone.helperPair.gone',
+  used: 'phone.helperPair.used',
+  offline: 'phone.helperPair.offline',
+};
+
+/** "Pair with your TV": type the LG's short code, and the helper's address and code go to it. */
+function PairWithTv({ helper }: { helper: HelperToSend }) {
+  const { t } = useTranslation();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<SendResult | null>(null);
+
+  const send = async () => {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    const answer = await sendHelperToTv(typed, helper);
+    setBusy(false);
+    setResult(answer);
+    if (answer === 'sent') setTyped('');
+  };
+
+  return (
+    <View style={styles.card} accessibilityLiveRegion="polite">
+      <Text style={styles.overline}>{t('phone.helperPair.title')}</Text>
+      <Text style={styles.lead}>{t('phone.helperPair.lead')}</Text>
+      <TextInput
+        value={typed}
+        onChangeText={(next) => {
+          setTyped(next);
+          setResult(null);
+        }}
+        placeholder={t('phone.helperPair.placeholder')}
+        placeholderTextColor={colors.textSubtle}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        maxLength={8}
+        style={styles.input}
+        onFocus={() => reportTyping(true)}
+        onBlur={() => reportTyping(false)}
+        onSubmitEditing={() => void send()}
+        returnKeyType="send"
+        accessibilityLabel={t('phone.helperPair.tvCode')}
+      />
+      <Button
+        kind="primary"
+        label={t('phone.helperPair.send')}
+        onPress={() => void send()}
+        disabled={typed.trim() === ''}
+        busy={busy}
+      />
+      {result ? (
+        <Text style={result === 'sent' ? styles.lead : styles.problem}>
+          {t(SENT_MESSAGES[result])}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: space.l, gap: space.l, paddingBottom: space.xxl * 2 },
@@ -186,6 +256,18 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   label: { ...type.overline, color: colors.accent, marginTop: space.s },
+  overline: { ...type.overline, color: colors.text },
+  input: {
+    ...type.title,
+    color: colors.text,
+    backgroundColor: colors.surface3,
+    borderRadius: radius.m,
+    paddingHorizontal: space.l,
+    paddingVertical: space.m,
+    marginVertical: space.s,
+    letterSpacing: 2,
+  },
+  problem: { ...type.body, color: colors.danger },
   address: { ...type.title, color: colors.text },
   code: { ...type.display, fontSize: 44, lineHeight: 52, color: colors.prismTop, letterSpacing: 4 },
 });

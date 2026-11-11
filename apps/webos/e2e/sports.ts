@@ -203,6 +203,8 @@ export interface SportsOptions {
   update?: Promise<unknown>;
   /** Stored "Show in Sports" settings, by addon id. */
   settings?: Record<string, 'yes' | 'no'>;
+  /** What Test Sports answers for every match's streams, instead of its 1080p feed. */
+  streams?: unknown[];
 }
 
 export interface SportsRequests {
@@ -348,7 +350,7 @@ export async function mockSports(page: Page, options: SportsOptions = {}): Promi
     if (stream) {
       requests.streams.push(`sports ${stream[1]}/${stream[2]}`);
       return json(route, {
-        streams: [
+        streams: options.streams ?? [
           {
             name: 'Test Sports\n1080p',
             description: 'Match feed 1080p',

@@ -23,9 +23,26 @@ export function errorKind(message: string | undefined): PhoneErrorKind {
   return 'other';
 }
 
-/** An unknown link that may be an HLS playlist without ".m3u8" in its address (as PlayerErrors.mayBeHls). */
+/**
+ * An unknown link that may be an HLS playlist without ".m3u8" in its address: no extractor
+ * recognised it, Media3's words for ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED, the one code the
+ * TV app retries as HLS (PlayerErrors.mayBeHls). A bad link or a damaged file is not retried,
+ * which would only fetch the link again.
+ */
 export function mayBeHls(message: string | undefined): boolean {
-  return errorKind(message) === 'format';
+  return /could read the stream/i.test(message ?? '');
+}
+
+/**
+ * Which error to report after an unknown link was tried as HLS too: the HLS attempt's own,
+ * unless it also says the bytes are not a stream, when the first one describes the link better.
+ * So a playlist that answers 403 or times out is a network problem, not a format.
+ */
+export function errorAfterHlsRetry(
+  first: string | undefined,
+  retry: string | undefined,
+): string | undefined {
+  return first !== undefined && errorKind(retry) === 'format' ? first : retry;
 }
 
 /** The HTTP status in Media3's message, when it gives one ("Response code: 403"). */

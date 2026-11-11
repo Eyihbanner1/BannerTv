@@ -66,9 +66,15 @@ const PHONE = {
   sleepLeft_one: '{{count}} min left',
   sleepLeft_other: '{{count}} min left',
   speedNote: 'Another stream, or the next episode, starts at Normal.',
-  zoomToFill: 'Zoom to fill',
+  // The picture's size: More's switch and the note while two fingers pinch it.
+  pictureSize: 'Picture size',
+  pictureFit: 'Fit',
+  pictureFill: 'Fill',
+  pictureCustom: 'Custom',
   zoomedToFill: 'Zoomed to fill',
   fitToScreen: 'Fit to screen',
+  zoomedTo: 'Zoomed to {{percent}}%',
+  pictureMoves: 'Move it with two fingers',
   whoIsWatching: "Who's watching?",
   pinFor: 'Enter the PIN for {{name}}',
   addons: 'Addons',
@@ -155,6 +161,21 @@ const PHONE = {
   streamHelperSwitch: 'Use the stream helper',
   streamHelperNotificationsOff:
     'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
+  // Stream helper: send this phone's helper to the LG (data/helper-pairing.ts).
+  helperPair: {
+    title: 'Pair with your TV',
+    lead: 'On your LG, open Settings > Stream helper. Type the code it shows under Pair from your phone.',
+    tvCode: 'Code on the TV',
+    placeholder: 'For example K7M 2QX',
+    send: 'Pair',
+    sent: 'Sent. On your TV, press Pair to finish.',
+    badCode: 'That isn’t the TV’s code. It has six letters and numbers.',
+    gone: 'That code has run out. On the TV, choose New code and type the new one here.',
+    used: 'That code was already used. On the TV, choose New code.',
+    offline:
+      'Couldn’t reach BannerTV’s pairing service. Check this phone’s internet and try again.',
+    orType: 'Or type this on the TV',
+  },
   // Search: what only the phone's list needs.
   search: {
     /** The line that opens each addon's own results, under Top results. */
@@ -258,6 +279,8 @@ const OVERRIDES = {
         "The {{count}} streams found didn't play a moment ago. Try again to give them another go, or open Streams.",
       uncached:
         "Only uncached links: your debrid service hasn't downloaded this title yet. Try again later, or pick a cached stream in Streams.",
+      addonNoticeHelp:
+        "That's a message from the addon, not a video. Try again later, or check the addon's settings in Settings, Addons.",
     },
   },
 } as const;

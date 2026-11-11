@@ -413,6 +413,8 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
     setPanel(null);
     if (!session) return;
     if (state.entry && entryKey(entry) === entryKey(state.entry)) return;
+    // A torrent, a link that needs the helper or an addon's message: nothing this TV can open.
+    if (entry.assessment.action.kind !== 'play') return;
     session.play(entry, state.entry ? session.carryOn() : resumedAt, {
       chosen: true,
       handPicked: true,

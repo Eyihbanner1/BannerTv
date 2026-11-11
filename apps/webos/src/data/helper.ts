@@ -1,5 +1,5 @@
 import { isAndroid } from '../platform/android';
-import { setRequestHeaderRelay } from '../platform/capabilities';
+import { requestHeaderRelayChanged, setRequestHeaderRelay } from '../platform/capabilities';
 import { setHelperLink } from '../player/engines/helper';
 import { storage } from './storage';
 import { createStreamHelper } from './stream-helper';
@@ -14,6 +14,8 @@ export const streamHelper = createStreamHelper({ storage: storage.kv });
 export function startStreamHelper(): void {
   if (isAndroid()) return;
   setRequestHeaderRelay(() => streamHelper.get() !== null);
+  // Stream lists made before a pairing (or before it was read at launch) assess their streams again.
+  streamHelper.subscribe(requestHeaderRelayChanged);
   setHelperLink(streamHelper.link);
   void streamHelper.load();
 }

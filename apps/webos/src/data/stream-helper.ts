@@ -39,7 +39,9 @@ export class HelperUnavailable extends Error {
 function isHomeIpv4(host: string): boolean {
   const parts = host.split('.');
   if (parts.length !== 4) return false;
-  const bytes = parts.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : NaN));
+  // Plain decimal only: the browser reads a part with a leading zero ("010") as octal, so
+  // "010.0.0.1" would pass as 10/8 here but connect to 8.0.0.1.
+  const bytes = parts.map((part) => (/^(?:0|[1-9]\d{0,2})$/.test(part) ? Number(part) : NaN));
   if (bytes.some((byte) => !(byte >= 0 && byte <= 255))) return false;
   const [a, b] = bytes as [number, number];
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
@@ -56,6 +58,26 @@ export function parseHelperAddress(text: string): { host: string; port: number }
   const port = match[2] === undefined ? HELPER_PORT : Number(match[2]);
   if (!(port >= 1 && port <= 65535)) return null;
   return { host: match[1]!, port };
+}
+
+/**
+ * What a phone running the helper sends the TV through the pairing relay
+ * (services/pair), so nobody types on the TV: the helper's address and the
+ * code it shows now. The relay passes it on as it would an addon's address;
+ * only the TV's Stream helper screen reads it. The TV still pairs itself, so
+ * the key never leaves the home network.
+ */
+export function helperOffer(host: string, port: number, code: string): string {
+  return `http://${host}:${port}/pair?code=${code}`;
+}
+
+/** The address and code in a phone's offer, or null for anything else (an addon's address, say). */
+export function readHelperOffer(link: string): { address: string; code: string } | null {
+  const match = /^http:\/\/(\d{1,3}(?:\.\d{1,3}){3}:\d{1,5})\/pair\?code=(\d{6})$/.exec(
+    link.trim(),
+  );
+  if (!match || !parseHelperAddress(match[1]!)) return null;
+  return { address: match[1]!, code: match[2]! };
 }
 
 /** How Settings shows the address: without the port when it is the usual one. */

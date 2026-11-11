@@ -60,6 +60,54 @@ test('Sports: the Live sport row, the Sports tab, a match page and the match pla
   expect(errors).toEqual([]);
 });
 
+test("Sports: a match whose addon sends only a message says the addon's words, and plays nothing", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await page.clock.install({ time: SPORTS_NOW });
+  await mockAddons(page);
+  await seedSports(page);
+  // As Sports Streams answered for WWE Raw hours after the show: one "stream" that is a message.
+  await mockSports(page, {
+    streams: [
+      {
+        name: 'Test Sports',
+        description: 'Streams temporarily unavailable - try again shortly',
+        url: 'https://media.example.com/unavailable',
+      },
+    ],
+  });
+  const playback = await mockPlayback(page);
+  await page.route(/^http:\/\/localhost:8765\//, (route) => route.continue());
+  await page.goto('/');
+
+  // Home's Live sport row first, then the whole Sports tab, whose card for the match is the last.
+  await expect(page.getByText('Live sport', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Sports' }).click();
+  await expect(page.getByText('Starting 19:40')).toBeVisible();
+  await expect(page.getByText('Ended', { exact: true })).toBeVisible();
+  await page
+    .getByLabel(/^Arsenal v Brighton/)
+    .last()
+    .click();
+  await expect(page.getByText('Listed by Test Sports')).toBeVisible();
+  await page.getByRole('button', { name: /^Watch/ }).click();
+
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText('Test Sports says: “Streams temporarily unavailable - try again shortly”'),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "That's a message from the addon, not a video. Try again later, or check the addon's settings in Settings, Addons.",
+    ),
+  ).toBeVisible();
+  // Never "This phone can't play this stream's format": the message was not opened as a video.
+  await expect(page.getByText("This phone can't play this stream's format.")).toHaveCount(0);
+  expect(playback.media).not.toContain('/unavailable');
+  expect(errors).toEqual([]);
+});
+
 test('Sports: following a team puts its matches first, on Sports and in the Live sport row', async ({
   page,
 }) => {
