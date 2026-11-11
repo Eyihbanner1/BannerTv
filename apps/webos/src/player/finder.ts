@@ -28,7 +28,11 @@ import { preferences } from '../data/preferences';
 import { bandwidth, sourceMemory } from '../data/playback';
 import { itemSources } from '../data/sports';
 import { wantedAudio } from '../data/tracks';
-import { knownCapabilities, tvCapabilities } from '../platform/capabilities';
+import {
+  knownCapabilities,
+  subscribeRequestHeaderRelay,
+  tvCapabilities,
+} from '../platform/capabilities';
 import { tuning } from '../platform/tuning';
 import { playMark } from './play-marks';
 import { cancelProbes, holdProbes, probeStream, type ProbeResult } from './probe';
@@ -316,6 +320,8 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
         if (weighed() !== rankedWith) refresh();
       };
       unsubscribe.push(preferences.subscribe(reweigh), trackMemory.subscribe(reweigh));
+      // Pairing a stream helper makes streams that need request headers playable on the LG.
+      unsubscribe.push(subscribeRequestHeaderRelay(refresh));
       answers.forEach((answer) => answer.query.load());
       // Capabilities change the ranking, and arrive from the TV a moment after launch.
       void tvCapabilities().then(refresh);

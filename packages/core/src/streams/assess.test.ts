@@ -115,7 +115,7 @@ describe('assessStream actions', () => {
   });
 
   it('cannot play torrents without a streaming server', () => {
-    const torrent = parseStream({ infoHash: 'e4f5d7a2f3dd6b7b1826bd77e316b6b5ba31eb72' })!;
+    const torrent = parseStream({ infoHash: '41798c2b59b919cb8bcd673a26e6972a5b8a2c53' })!;
     expect(assessStream(torrent, facts(), UNKNOWN).action).toEqual({
       kind: 'unavailable',
       reason: 'torrent',

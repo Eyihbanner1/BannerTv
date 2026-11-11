@@ -88,6 +88,7 @@ async function detect(): Promise<TvCapabilities> {
 let relay: () => boolean = () => false;
 let lastIn: TvCapabilities | undefined;
 let lastOut: TvCapabilities | undefined;
+const relayListeners = new Set<() => void>();
 
 /**
  * Off Android, an addon's request headers can still be sent through the
@@ -97,6 +98,24 @@ let lastOut: TvCapabilities | undefined;
 export function setRequestHeaderRelay(paired: () => boolean): void {
   relay = paired;
   lastIn = undefined;
+  requestHeaderRelayChanged();
+}
+
+/** Says the stream helper was paired, unpaired or read from storage: `paired` may answer otherwise now. */
+export function requestHeaderRelayChanged(): void {
+  relayListeners.forEach((listener) => listener());
+}
+
+/**
+ * Called after the stream helper is paired or unpaired, so a stream list
+ * assesses its streams again: one kept from before the pairing would still
+ * call the streams that need request headers unplayable.
+ */
+export function subscribeRequestHeaderRelay(listener: () => void): () => void {
+  relayListeners.add(listener);
+  return () => {
+    relayListeners.delete(listener);
+  };
 }
 
 /** The capabilities with the stream helper's answer, the same object while nothing changed. */

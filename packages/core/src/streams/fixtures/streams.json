@@ -5,7 +5,8 @@
     "provenance": {
       "copied": "Verbatim from a captured real addon response (StremThru's extractor tests) or from the SDK docs. Account tokens were already replaced with x's by the source.",
       "derived": "Exact output format of that addon's current formatter code (linked), applied by hand to an invented release. Hashes, hosts and sizes are invented.",
-      "invented": "Shape from the SDK docs or stremio-core types; content invented."
+      "invented": "Shape from the SDK docs or stremio-core types; content invented.",
+      "renamed": "On 11 November 2026 every film and series title, torrent site name, IMDb id and info hash in the streams was replaced with an invented one, so no entry names a real release. Each addon's format, and every expect, is unchanged."
     },
     "expect": "Hand-labelled parse a good parser should produce from name + description/title + behaviorHints.filename. hdr uses DV, HDR10+, HDR10, HDR, SDR; audio uses atmos, truehd, dts-hd-ma, dts-x, dts, ddp, dd, aac; availability is cached | uncached | p2p | direct | external | youtube | usenet. size.bytes uses size.base. Review before treating as golden.",
     "_fixture": "Every stream carries a _fixture key; strip it before feeding a parser that rejects unknown keys.",
@@ -14,12 +15,12 @@
   "streams": [
     {
       "name": "Torrentio\n4k DV",
-      "title": "Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR\n👤 47 💾 40.33 GB ⚙️ TorrentGalaxy",
-      "infoHash": "e4f5d7a2f3dd6b7b1826bd77e316b6b5ba31eb72",
+      "title": "Lanternfall.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR\n👤 47 💾 40.33 GB ⚙️ StarTracker",
+      "infoHash": "41798c2b59b919cb8bcd673a26e6972a5b8a2c53",
       "fileIdx": 0,
       "behaviorHints": {
         "bingeGroup": "torrentio|4k|BluRay REMUX|hevc|DV",
-        "filename": "Deadpool.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv"
+        "filename": "Lanternfall.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR.mkv"
       },
       "_fixture": {
         "id": "torrentio-p2p-4k-dv-remux",
@@ -47,12 +48,12 @@
     },
     {
       "name": "Torrentio\nDVDRip",
-      "title": "A Simple Favor 2018 DVDRip x264 ESub [MW]\n👤 5 💾 864.57 MB ⚙️ ThePirateBay",
-      "infoHash": "387ccd318d583405bbadcec55b9b05029645dd1d",
+      "title": "A Quiet Errand 2018 DVDRip x264 ESub [MW]\n👤 5 💾 864.57 MB ⚙️ HarbourIndex",
+      "infoHash": "9b9981a38d33acd8e3d326a66b6a80ab0b99f83c",
       "fileIdx": 0,
       "behaviorHints": {
         "bingeGroup": "torrentio|DVDRip|x264",
-        "filename": "A Simple Favor 2018 DVDRip x264 ESub [MW].mkv"
+        "filename": "A Quiet Errand 2018 DVDRip x264 ESub [MW].mkv"
       },
       "_fixture": {
         "id": "torrentio-p2p-dvdrip-no-resolution",
@@ -81,12 +82,12 @@
     },
     {
       "name": "Torrentio\n1080p",
-      "title": "X-Men Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nX-Men Complete 13 Movie Collection 2000-2020/08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ TorrentGalaxy\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
-      "infoHash": "a6a80257d62e53e55c877a7067ea5055129b462c",
+      "title": "Starward Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nStarward Complete 13 Movie Collection 2000-2020/08 Lanternfall - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ StarTracker\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
+      "infoHash": "42634ccdd057d55407e4925a0ad78af7e2f6a908",
       "fileIdx": 89,
       "behaviorHints": {
         "bingeGroup": "torrentio|1080p|h264",
-        "filename": "08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
+        "filename": "08 Lanternfall - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
       },
       "_fixture": {
         "id": "torrentio-p2p-1080p-pack-multisubs",
@@ -115,8 +116,8 @@
     },
     {
       "name": "Torrentio\n720p",
-      "title": "Deadpool (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Downloadhub\n👤 3 💾 934.8 MB ⚙️ 1337x\nDual Audio / 🇬🇧 / 🇮🇳",
-      "infoHash": "f5d0ab292f5a244a4b38efac9ae1f8d311179588",
+      "title": "Lanternfall (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Filehub\n👤 3 💾 934.8 MB ⚙️ Index42\nDual Audio / 🇬🇧 / 🇮🇳",
+      "infoHash": "0ee34c3cc15ee3a01f09006e0a4b68bc7b2e4300",
       "behaviorHints": {
         "bingeGroup": "torrentio|720p|BluRay|x264"
       },
@@ -147,11 +148,11 @@
     },
     {
       "name": "[RD+] Torrentio\n4k DV | HDR",
-      "title": "Deadpool [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV]\n👤 16 💾 22.42 GB ⚙️ 1337x",
-      "url": "https://torrentio.strem.fun/realdebrid=KEY/c35ec8ad9f613d73782a898bece969efd6b98e0c/null/0/Deadpool%20%5B2016%5D%202160p%20Hybrid%20UHD%20BDRip%20DV%20HDR10%20x265%20TrueHD%20Atmos%207.1%20Kira%20%5BSEV%5D.mkv",
+      "title": "Lanternfall [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV]\n👤 16 💾 22.42 GB ⚙️ Index42",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/d971e9e893ca4541526925165922c1c200864162/null/0/Lanternfall%20%5B2016%5D%202160p%20Hybrid%20UHD%20BDRip%20DV%20HDR10%20x265%20TrueHD%20Atmos%207.1%20Kira%20%5BSEV%5D.mkv",
       "behaviorHints": {
         "bingeGroup": "torrentio|4k|BDRip|x265|10bit|DV|HDR",
-        "filename": "Deadpool [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV].mkv"
+        "filename": "Lanternfall [2016] 2160p Hybrid UHD BDRip DV HDR10 x265 TrueHD Atmos 7.1 Kira [SEV].mkv"
       },
       "_fixture": {
         "id": "torrentio-rd-cached-4k-dv-hdr",
@@ -180,11 +181,11 @@
     },
     {
       "name": "[RD+] Torrentio\n1080p",
-      "title": "X-Men Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nX-Men Complete 13 Movie Collection 2000-2020/08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ TorrentGalaxy\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
-      "url": "https://torrentio.strem.fun/realdebrid=KEY/a6a80257d62e53e55c877a7067ea5055129b462c/null/89/08%20Deadpool%20-%20Action%202016%20Eng%20Rus%20Multi-Subs%201080p%20%5BH264-mp4%5D.mp4",
+      "title": "Starward Complete 13 Movie Collection Sci-Fi 2000 - 2020 Eng Rus Multi-Subs 1080p [H264-mp4]\nStarward Complete 13 Movie Collection 2000-2020/08 Lanternfall - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4\n👤 20 💾 3.65 GB ⚙️ StarTracker\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇫🇮",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/42634ccdd057d55407e4925a0ad78af7e2f6a908/null/89/08%20Lanternfall%20-%20Action%202016%20Eng%20Rus%20Multi-Subs%201080p%20%5BH264-mp4%5D.mp4",
       "behaviorHints": {
         "bingeGroup": "torrentio|1080p|h264",
-        "filename": "08 Deadpool - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
+        "filename": "08 Lanternfall - Action 2016 Eng Rus Multi-Subs 1080p [H264-mp4].mp4"
       },
       "_fixture": {
         "id": "torrentio-rd-cached-1080p-pack",
@@ -212,8 +213,8 @@
     },
     {
       "name": "[RD download] Torrentio\n720p",
-      "title": "Deadpool (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Downloadhub\n👤 3 💾 934.8 MB ⚙️ 1337x\nDual Audio / 🇬🇧 / 🇮🇳",
-      "url": "https://torrentio.strem.fun/realdebrid=KEY/f5d0ab292f5a244a4b38efac9ae1f8d311179588/null/undefined/Deadpool%20(2016)%20720p%20BluRay%20x264%20%5BDual%20Audio%5D%20%5BHindi%20(Line%20Audio)%20-%20English%5D%20ESubs%20-%20Downloadhub",
+      "title": "Lanternfall (2016) 720p BluRay x264 [Dual Audio] [Hindi (Line Audio) - English] ESubs - Filehub\n👤 3 💾 934.8 MB ⚙️ Index42\nDual Audio / 🇬🇧 / 🇮🇳",
+      "url": "https://torrentio.strem.fun/realdebrid=KEY/0ee34c3cc15ee3a01f09006e0a4b68bc7b2e4300/null/undefined/Lanternfall%20(2016)%20720p%20BluRay%20x264%20%5BDual%20Audio%5D%20%5BHindi%20(Line%20Audio)%20-%20English%5D%20ESubs%20-%20Filehub",
       "behaviorHints": {
         "bingeGroup": "torrentio|720p|BluRay|x264"
       },
@@ -244,13 +245,13 @@
     },
     {
       "name": "[TORRENT🧲] Comet 1080p",
-      "description": "Deadpool 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv\n💿 BluRay|avc|DTS Lossy|AC3|3Li\n💾 7.29 GB 🔎 DMM\n🇪🇸",
-      "infoHash": "c359566eed1264fbe0482aae479cbe51c966d468",
+      "description": "Lanternfall 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv\n💿 BluRay|avc|DTS Lossy|AC3|3Li\n💾 7.29 GB 🔎 DMM\n🇪🇸",
+      "infoHash": "4f32c950accbf50fe43336ec029425bcd27833f6",
       "fileIdx": 0,
       "behaviorHints": {
-        "bingeGroup": "comet|c359566eed1264fbe0482aae479cbe51c966d468",
+        "bingeGroup": "comet|4f32c950accbf50fe43336ec029425bcd27833f6",
         "videoSize": 7826122416,
-        "filename": "Deadpool 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv"
+        "filename": "Lanternfall 2016 BluRay 1080p DTS-ES AC3 x264-3Li.mkv"
       },
       "_fixture": {
         "id": "comet-v1-p2p-1080p",
@@ -279,12 +280,12 @@
     },
     {
       "name": "[PM⚡] Comet 2160p",
-      "description": "Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv\n💿 BluRay|SDR|hevc|AC3|5.1|10bit|PeruGuy\n💾 8.14 GB 🔎 MediaFusion|Knightcrawler\n🇬🇧/🇮🇳",
-      "url": "https://comet.elfhosted.com/KEY/playback/74315dd5d8a0a4e2b229914ad729887acedc396f/0/0/n/n/Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv?name=deadpool",
+      "description": "Lanternfall (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv\n💿 BluRay|SDR|hevc|AC3|5.1|10bit|PeruGuy\n💾 8.14 GB 🔎 MediaFusion|Knightcrawler\n🇬🇧/🇮🇳",
+      "url": "https://comet.elfhosted.com/KEY/playback/5eac5c32f5c02d5b20a4d1ec2441d6dd0fd417df/0/0/n/n/Lanternfall (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv?name=lanternfall",
       "behaviorHints": {
-        "bingeGroup": "comet|74315dd5d8a0a4e2b229914ad729887acedc396f",
+        "bingeGroup": "comet|5eac5c32f5c02d5b20a4d1ec2441d6dd0fd417df",
         "videoSize": 8734893087,
-        "filename": "Deadpool (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv"
+        "filename": "Lanternfall (2016) 2160p [4K] BluRay SDR [HINDI-ENG-5.1] 10bit HEVC - PeruGuy.mkv"
       },
       "_fixture": {
         "id": "comet-v1-pm-cached-2160p-sdr",
@@ -313,12 +314,12 @@
     },
     {
       "name": "[PM⬇️] Comet 2160p",
-      "description": "Black Snow S01 MULTi HDR 2160p WEB H265-BraD\n💿 WEB|HDR|hevc|BraD\n👤 0 💾 27.93 GB 🔎 MediaFusion|Zilean DMM",
-      "url": "https://comet.elfhosted.com/KEY/playback/e3cd01e301c4bd3bc7888b189ba6a3b8e0ac152d/0/n/1/2/Black Snow S01 MULTi HDR 2160p WEB H265-BraD?name=black%20snow",
+      "description": "Grey Tide S01 MULTi HDR 2160p WEB H265-BraD\n💿 WEB|HDR|hevc|BraD\n👤 0 💾 27.93 GB 🔎 MediaFusion|Zilean DMM",
+      "url": "https://comet.elfhosted.com/KEY/playback/195fac90fb3d3160633a42238d819de9d3f75fe1/0/n/1/2/Grey Tide S01 MULTi HDR 2160p WEB H265-BraD?name=grey%20tide",
       "behaviorHints": {
-        "bingeGroup": "comet|e3cd01e301c4bd3bc7888b189ba6a3b8e0ac152d",
+        "bingeGroup": "comet|195fac90fb3d3160633a42238d819de9d3f75fe1",
         "videoSize": 29991714406,
-        "filename": "Black Snow S01 MULTi HDR 2160p WEB H265-BraD"
+        "filename": "Grey Tide S01 MULTi HDR 2160p WEB H265-BraD"
       },
       "_fixture": {
         "id": "comet-v1-pm-uncached-2160p-series-pack",
@@ -347,12 +348,12 @@
     },
     {
       "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 2160P",
-      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Torlock",
-      "infoHash": "a3d11f4d97121a79f3e94b18a43e5b3e2f1853e1",
+      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Lockbox",
+      "infoHash": "2961b2cf42128b677e21fb0866c8c939a5c1113e",
       "fileIdx": 2,
       "behaviorHints": {
         "bingeGroup": "MediaFusion-|-ElfHosted-🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc-2160P",
-        "filename": "Deadpool.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
+        "filename": "Lanternfall.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
         "videoSize": 37682583137
       },
       "_fixture": {
@@ -382,11 +383,11 @@
     },
     {
       "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 720P",
-      "description": "📺 BluRay 🎞️ avc \n📦 983.4 MB 👤 30\n🌐 English + Hindi\n🔗 TheRARBG",
-      "infoHash": "2decf5e42220711acf7a2515ed14ee78f13413fe",
+      "description": "📺 BluRay 🎞️ avc \n📦 983.4 MB 👤 30\n🌐 English + Hindi\n🔗 TheArchive",
+      "infoHash": "01fa66b334cdf3f3c59e72f6afc0b004b9985a57",
       "behaviorHints": {
         "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc-720P",
-        "filename": "Deadpool 2016 x264 720p BluRay Eng Subs Dual Audio Hindi 5 1 English 5 1 Downloadhub",
+        "filename": "Lanternfall 2016 x264 720p BluRay Eng Subs Dual Audio Hindi 5 1 English 5 1 Filehub",
         "videoSize": 1031169664
       },
       "_fixture": {
@@ -416,11 +417,11 @@
     {
       "name": "MediaFusion | ElfHosted 🧲 P2P ⏳ 1080P",
       "description": "📺 BluRay 🎞️ avc 🎵 Dolby Digital \n📦 2.43 GB / 33.48 GB \n🌐 English\n🔗 Zilean DMM",
-      "infoHash": "ce146cce125215f5e6615d2375ffa6a881c8eedd",
+      "infoHash": "10315428951243f381f2603d5be88c82d241ecf7",
       "fileIdx": 1,
       "behaviorHints": {
         "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc 🎵 Dolby Digital-1080P",
-        "filename": "Sherlock S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvCinemas.mkv",
+        "filename": "Holloway S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvHouse.mkv",
         "videoSize": 2608894683
       },
       "_fixture": {
@@ -450,11 +451,11 @@
     },
     {
       "name": "MediaFusion | ElfHosted 🧲 RD ⚡️ 2160P",
-      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Torlock",
-      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/a3d11f4d97121a79f3e94b18a43e5b3e2f1853e1",
+      "description": "🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc \n📦 35.09 GB \n🌐 English + Italian\n🔗 Lockbox",
+      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/2961b2cf42128b677e21fb0866c8c939a5c1113e",
       "behaviorHints": {
         "bingeGroup": "MediaFusion-|-ElfHosted-🎨 DV|HDR 📺 BluRay REMUX 🎞️ hevc-2160P",
-        "filename": "Deadpool.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
+        "filename": "Lanternfall.2016.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM.mkv",
         "videoSize": 37682583137
       },
       "_fixture": {
@@ -485,10 +486,10 @@
     {
       "name": "MediaFusion | ElfHosted 🧲 RD ⚡️ 1080P",
       "description": "📺 BluRay 🎞️ avc 🎵 Dolby Digital \n📦 2.43 GB / 33.48 GB \n🌐 English\n🔗 Zilean DMM",
-      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/ce146cce125215f5e6615d2375ffa6a881c8eedd/1/1/Sherlock%20S01%20E01%20BluRay%201080p%20English%20DD%205.1%20x264%20ESub%20-%20mkvCinemas.mkv",
+      "url": "https://mediafusion.elfhosted.com/streaming_provider/KEY/playback/rd/10315428951243f381f2603d5be88c82d241ecf7/1/1/Holloway%20S01%20E01%20BluRay%201080p%20English%20DD%205.1%20x264%20ESub%20-%20mkvHouse.mkv",
       "behaviorHints": {
         "bingeGroup": "MediaFusion-|-ElfHosted-📺 BluRay 🎞️ avc 🎵 Dolby Digital-1080P",
-        "filename": "Sherlock S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvCinemas.mkv",
+        "filename": "Holloway S01 E01 BluRay 1080p English DD 5.1 x264 ESub - mkvHouse.mkv",
         "videoSize": 2608894683
       },
       "_fixture": {
@@ -517,8 +518,8 @@
     },
     {
       "name": "Peerflix 🇪🇸 4K",
-      "title": "Deadpool [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
-      "infoHash": "31e585c52409430634139d915aeb4ea0f74be287",
+      "title": "Lanternfall [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
+      "infoHash": "1aede0375ba791fdbd323224260e13c381909d9a",
       "fileIdx": 0,
       "_fixture": {
         "id": "peerflix-p2p-4k-spanish",
@@ -547,8 +548,8 @@
     },
     {
       "name": "Peerflix 🇬🇧 720p",
-      "title": "Black Snow 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nBlack Snow 2023 S01E02 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 410.26 MB 🌐 Peerflix",
-      "infoHash": "fa7dfc675f81e573f5c99e776974df44e887ade5",
+      "title": "Grey Tide 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nGrey Tide 2023 S01E02 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 410.26 MB 🌐 Peerflix",
+      "infoHash": "7d9f2eed7f7d21511215454dedb5697aab3f94ae",
       "fileIdx": 5,
       "_fixture": {
         "id": "peerflix-p2p-720p-episode",
@@ -576,8 +577,8 @@
     },
     {
       "name": "[RD download] Peerflix 🇪🇸 4K",
-      "title": "Deadpool [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
-      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/31e585c52409430634139d915aeb4ea0f74be287/null/0/Deadpool%20%5B4K%20UHD%202160p%20HEVC%20X265%5D%5BDTS%205.1%20Castellano%20DTS%205.1-Ingles%2BSubs%5D%5BES-EN%5D",
+      "title": "Lanternfall [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix",
+      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/1aede0375ba791fdbd323224260e13c381909d9a/null/0/Lanternfall%20%5B4K%20UHD%202160p%20HEVC%20X265%5D%5BDTS%205.1%20Castellano%20DTS%205.1-Ingles%2BSubs%5D%5BES-EN%5D",
       "_fixture": {
         "id": "peerflix-rd-download-4k",
         "addon": "Peerflix",
@@ -604,8 +605,8 @@
     },
     {
       "name": "[RD+] Peerflix 🇬🇧 720p",
-      "title": "Black Snow 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nBlack Snow 2023 S01E01 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 381.53 MB 🌐 Peerflix",
-      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/fa7dfc675f81e573f5c99e776974df44e887ade5/null/0/Black%20Snow%202023%20S01E01%20720p%20WEB-DL%20HEVC%20x265%20BONE.mkv",
+      "title": "Grey Tide 2023 S01-S02 720p WEB-DL HEVC x265 BONE\nGrey Tide 2023 S01E01 720p WEB-DL HEVC x265 BONE.mkv\n  👤 89 💾 381.53 MB 🌐 Peerflix",
+      "url": "https://peerflix-addon.onrender.com/realdebrid/KEY/7d9f2eed7f7d21511215454dedb5697aab3f94ae/null/0/Grey%20Tide%202023%20S01E01%20720p%20WEB-DL%20HEVC%20x265%20BONE.mkv",
       "_fixture": {
         "id": "peerflix-rd-cached-720p-episode",
         "addon": "Peerflix",
@@ -632,8 +633,8 @@
     },
     {
       "name": "🪐 ORION 📺 4K",
-      "title": "Deadpool & Wolverine [2024] 2160p UHD BDRip DV HDR10 x265 TrueHD Atmos 7 1 Kira [SEV] mkv\n💾26.6 GB 👤0 🎥h265 🔊7.1\n👂EN ☁️torlock",
-      "infoHash": "f0b4ba9bf31960b8920e9335ab07037f295bbf67",
+      "title": "Lanternfall & Ember [2024] 2160p UHD BDRip DV HDR10 x265 TrueHD Atmos 7 1 Kira [SEV] mkv\n💾26.6 GB 👤0 🎥h265 🔊7.1\n👂EN ☁️lockbox",
+      "infoHash": "3c07918101e5180a10c671c52c7b2566655215b7",
       "_fixture": {
         "id": "orion-p2p-4k",
         "addon": "Orion",
@@ -661,7 +662,7 @@
     },
     {
       "name": "🚀 ORION\n[Offcloud]",
-      "title": "Deadpool.&.Wolverine.(2024).(2160p.BluRay.x265.10bit.DV.HDR.TrueHD.Atmos.7.1.English. French. Spanish.r00t) [QxR]\n📺4K 💾22.8 GB 🎥h265 🔊7.1\n👂EN FR ES ☁️1337x",
+      "title": "Lanternfall.&.Ember.(2024).(2160p.BluRay.x265.10bit.DV.HDR.TrueHD.Atmos.7.1.English. French. Spanish.r00t) [QxR]\n📺4K 💾22.8 GB 🎥h265 🔊7.1\n👂EN FR ES ☁️Index42",
       "url": "https://orionoid.com/stream/KEY",
       "behaviorHints": {
         "notWebReady": true
@@ -693,8 +694,8 @@
     },
     {
       "name": "[ED ⚡] \nDebridio 1080p",
-      "title": "Deadpool 2016 1080p BluRay x264 DTS-JYK\n⚡ 📺 1080p 💾 2.72 GB  ⚙️ ThePirateBay",
-      "url": "https://addon.debridio.com/play/movie/easydebrid/KEY/KEY/0f61c0478326c8e2f8a397f59d7917a0dc558718/Deadpool%202016%201080p%20BluRay%20x264%20DTS-JYK",
+      "title": "Lanternfall 2016 1080p BluRay x264 DTS-JYK\n⚡ 📺 1080p 💾 2.72 GB  ⚙️ HarbourIndex",
+      "url": "https://addon.debridio.com/play/movie/easydebrid/KEY/KEY/7f3f1caafb8c9bcd55a581ceff40ce6e91c708df/Lanternfall%202016%201080p%20BluRay%20x264%20DTS-JYK",
       "_fixture": {
         "id": "debridio-easydebrid-1080p",
         "addon": "Debridio",
@@ -722,11 +723,11 @@
     },
     {
       "name": "[ED ⚡] \nDebridio 4k",
-      "title": "Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv\n⚡ 📺 4k 💾 5.55 GB  ⚙️ RARBG\n🌐 🇬🇧|🇮🇹",
-      "url": "https://addon.debridio.com/play/serie/easydebrid/KEY/KEY/76a1fa8d28d4c04b201803ab7262d037d295134f/tt9288030/3/7/Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv",
+      "title": "Kestrel.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv\n⚡ 📺 4k 💾 5.55 GB  ⚙️ Archive\n🌐 🇬🇧|🇮🇹",
+      "url": "https://addon.debridio.com/play/serie/easydebrid/KEY/KEY/fb46efafdc31aae2bd60fb32673eab7e0165c009/tt9900001/3/7/Kestrel.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv",
       "behaviorHints": {
         "bingeGroup": "debridio-4k",
-        "filename": "Reacher.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv"
+        "filename": "Kestrel.S03E07.Si.va.a.Los.Angeles.ITA.ENG.2160p.AMZN.WEB-DL.DDP5.1.DV.HDR.H.265-MeM.GP.mkv"
       },
       "_fixture": {
         "id": "debridio-easydebrid-4k-episode",
@@ -754,12 +755,12 @@
       }
     },
     {
-      "name": "TPB+",
-      "description": "Interstellar.2014.UHD.BluRay.2160p.DTS-HD.MA.5.1.HEVC.REMUX-FraMeSToR\n📺 4k BluRay REMUX\n👤 99 💾 65.74 GB",
-      "infoHash": "0000000000000000000000000000000000000001",
+      "name": "HBI+",
+      "description": "Farlight.2014.UHD.BluRay.2160p.DTS-HD.MA.5.1.HEVC.REMUX-FraMeSToR\n📺 4k BluRay REMUX\n👤 99 💾 65.74 GB",
+      "infoHash": "643e89fa9df81aa075033fe2b406e895c0f731de",
       "_fixture": {
         "id": "tpb-plus-plain-name",
-        "addon": "TPB+",
+        "addon": "HBI+",
         "provenance": "copied",
         "source": "https://github.com/MunifTanjim/stremthru/blob/3472fd5ca11dfe4aa3f0c90f0280f2c8bec2f82a/internal/stremio/transformer/fallback_stream_extractor_test.go#L39-L40",
         "expect": {
@@ -778,14 +779,14 @@
           "availability": "p2p",
           "service": null,
           "languages": [],
-          "notes": "Source keeps only name/description; infoHash is a placeholder. '+' in 'TPB+' is part of the addon name, NOT a cache marker."
+          "notes": "Source keeps only name/description; infoHash is a placeholder. '+' in 'HBI+' is part of the addon name, NOT a cache marker."
         }
       }
     },
     {
       "name": "Brazuca\n4k",
-      "description": "Interstelar.2014.1080p.60fps.BluRay.H264.AC3.5.1.DUAL-RICKSZ\n👤 0 💾 24.42 GB ⚙️ OndeBaixa\nDual Audio / 🇺🇸 / 🇧🇷",
-      "infoHash": "0000000000000000000000000000000000000002",
+      "description": "Farlite.2014.1080p.60fps.BluRay.H264.AC3.5.1.DUAL-RICKSZ\n👤 0 💾 24.42 GB ⚙️ BaixaHub\nDual Audio / 🇺🇸 / 🇧🇷",
+      "infoHash": "f7e0962e0584c6f94cc23f29cfaade154d869ef1",
       "_fixture": {
         "id": "brazuca-name-disagrees-with-title",
         "addon": "Brazuca Torrents",
@@ -813,8 +814,8 @@
     },
     {
       "name": "SK/CZ Torrents\n1080p",
-      "description": "Hodina zmizení / Weapons (2025)(CZ)[1080p] = CSFD 76%\n👤 76 💾 2.3 GB 🗣 SK/CZ",
-      "infoHash": "0000000000000000000000000000000000000003",
+      "description": "Tichá hodina / Quiet Hour (2025)(CZ)[1080p] = CSFD 76%\n👤 76 💾 2.3 GB 🗣 SK/CZ",
+      "infoHash": "d778f7aab302397a1c64f78a3140e138838e5c29",
       "_fixture": {
         "id": "skcz-torrents-1080p",
         "addon": "SK/CZ Torrents",
@@ -865,17 +866,17 @@
     },
     {
       "name": "Torrentio\n4k HDR10+",
-      "title": "The.Bear.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb\n👤 212 💾 6.84 GB ⚙️ EZTV",
-      "infoHash": "9b1b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "title": "The.Kiln.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb\n👤 212 💾 6.84 GB ⚙️ ShowFeed",
+      "infoHash": "d363ce073a9bcba7ab94a5a5a621216e40233446",
       "fileIdx": 0,
       "sources": [
         "tracker:udp://tracker.opentrackr.org:1337/announce",
         "tracker:udp://open.stealth.si:80/announce",
-        "dht:9b1b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+        "dht:d363ce073a9bcba7ab94a5a5a621216e40233446"
       ],
       "behaviorHints": {
         "bingeGroup": "torrentio|4k|HDR10+|NTb",
-        "filename": "The.Bear.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb.mkv"
+        "filename": "The.Kiln.S03E01.Tomorrow.2160p.HULU.WEB-DL.DDP5.1.HDR10+.H.265-NTb.mkv"
       },
       "_fixture": {
         "id": "torrentio-p2p-4k-hdr10plus-web",
@@ -903,11 +904,11 @@
     },
     {
       "name": "[TB+] Torrentio\n1080p",
-      "title": "Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX\n👤 388 💾 2.91 GB ⚙️ TorrentGalaxy",
-      "url": "https://torrentio.strem.fun/resolve/torbox/KEY/5d41402abc4b2a76b9719d911017c592aaaaaaaa/null/0/Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv",
+      "title": "Corvan.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX\n👤 388 💾 2.91 GB ⚙️ StarTracker",
+      "url": "https://torrentio.strem.fun/resolve/torbox/KEY/ca3905e1e3c390b3fa6fee086fa900b7ea8420dd/null/0/Corvan.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv",
       "behaviorHints": {
         "bingeGroup": "torrentio|1080p|FLUX",
-        "filename": "Andor.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv"
+        "filename": "Corvan.S02E04.1080p.DSNP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.mkv"
       },
       "_fixture": {
         "id": "torrentio-tb-cached-1080p-web-atmos",
@@ -936,8 +937,8 @@
     },
     {
       "name": "Torrentio\nCAM",
-      "title": "Thunderbolts 2025 1080p CAMRip x264 AAC-NOGRP\n👤 1532 💾 1.42 GB ⚙️ 1337x",
-      "infoHash": "1f2e3d4c5b6a79881726354a4b5c6d7e8f901234",
+      "title": "Stormglass 2025 1080p CAMRip x264 AAC-NOGRP\n👤 1532 💾 1.42 GB ⚙️ Index42",
+      "infoHash": "c3397966100bb96c901b48e7a225a9cd09c32fe3",
       "behaviorHints": {
         "bingeGroup": "torrentio|CAM|x264"
       },
@@ -968,8 +969,8 @@
     },
     {
       "name": "Torrentio\nTeleSync",
-      "title": "Thunderbolts.2025.720p.HDTS.x264.AAC-GRP\n👤 640 💾 948.2 MB ⚙️ TorrentGalaxy",
-      "infoHash": "2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d",
+      "title": "Stormglass.2025.720p.HDTS.x264.AAC-GRP\n👤 640 💾 948.2 MB ⚙️ StarTracker",
+      "infoHash": "f64912173c6252d48c6b9ef70990c7af9693ec2b",
       "behaviorHints": {
         "bingeGroup": "torrentio|TeleSync|x264"
       },
@@ -1000,12 +1001,12 @@
     },
     {
       "name": "Torrentio\n480p",
-      "title": "Friends.S05E08.480p.DVDRip.x264.AAC2.0-mSD\n👤 41 💾 158.7 MB ⚙️ EZTV",
-      "infoHash": "3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+      "title": "Flatmates.S05E08.480p.DVDRip.x264.AAC2.0-mSD\n👤 41 💾 158.7 MB ⚙️ ShowFeed",
+      "infoHash": "c062c20b6545b948f4e090e89b44bedca0e214c9",
       "fileIdx": 0,
       "behaviorHints": {
         "bingeGroup": "torrentio|480p|mSD",
-        "filename": "Friends.S05E08.480p.DVDRip.x264.AAC2.0-mSD.mkv"
+        "filename": "Flatmates.S05E08.480p.DVDRip.x264.AAC2.0-mSD.mkv"
       },
       "_fixture": {
         "id": "torrentio-p2p-480p-sd",
@@ -1033,11 +1034,11 @@
     },
     {
       "name": "[PM+] Torrentio\n4k HDR",
-      "title": "Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP\n👤 57 💾 3.12 GB ⚙️ TorrentGalaxy",
-      "url": "https://torrentio.strem.fun/resolve/premiumize/KEY/4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f/null/0/Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv",
+      "title": "Glimmer.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP\n👤 57 💾 3.12 GB ⚙️ StarTracker",
+      "url": "https://torrentio.strem.fun/resolve/premiumize/KEY/a841baff1d99f88f1fd77373906341f0faabde77/null/0/Glimmer.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "torrentio|4k|HDR|GRP",
-        "filename": "Arcane.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv"
+        "filename": "Glimmer.S02E01.2160p.NF.WEB-DL.DDP5.1.HDR.AV1-GRP.mkv"
       },
       "_fixture": {
         "id": "torrentio-pm-cached-4k-av1",
@@ -1066,8 +1067,8 @@
     },
     {
       "name": "Torrentio\n1080p",
-      "title": "Dune.Part.Two.2024.MULTi.1080p.BluRay.DTS-HD.MA.7.1.x264-GRP\n👤 95 💾 18.06 GB ⚙️ YggTorrent\nMulti Audio / 🇬🇧 / 🇫🇷 / 🇩🇪",
-      "infoHash": "5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80",
+      "title": "Sandsea.Part.Two.2024.MULTi.1080p.BluRay.DTS-HD.MA.7.1.x264-GRP\n👤 95 💾 18.06 GB ⚙️ NordTracker\nMulti Audio / 🇬🇧 / 🇫🇷 / 🇩🇪",
+      "infoHash": "741d8c83490cc2aeca6b3ae9e687214a6fd44f95",
       "behaviorHints": {
         "bingeGroup": "torrentio|1080p|BluRay|x264"
       },
@@ -1097,8 +1098,8 @@
     },
     {
       "name": "[AD download] Torrentio\n4k DV | HDR",
-      "title": "Blade.Runner.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP\n👤 23 💾 71.9 GB ⚙️ TorrentGalaxy",
-      "url": "https://torrentio.strem.fun/resolve/alldebrid/KEY/6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091/null/undefined/Blade.Runner.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP",
+      "title": "Neon.Courier.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP\n👤 23 💾 71.9 GB ⚙️ StarTracker",
+      "url": "https://torrentio.strem.fun/resolve/alldebrid/KEY/8719795971c7989bcaca33241be6d06b6ca64d53/null/undefined/Neon.Courier.2049.2017.2160p.UHD.BluRay.REMUX.DoVi.HDR10.HEVC.DTS-X.7.1-GRP",
       "behaviorHints": {
         "bingeGroup": "torrentio|4k|BluRay REMUX|hevc|DV|HDR"
       },
@@ -1129,13 +1130,13 @@
     },
     {
       "name": "knightcrawler\n1080p",
-      "title": "The.Batman.2022.1080p.BluRay.DD5.1.x264-GRP\n💾 12.4 GB",
-      "infoHash": "7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2",
+      "title": "The.Nightwarden.2022.1080p.BluRay.DD5.1.x264-GRP\n💾 12.4 GB",
+      "infoHash": "f69d8f4e8fb9c2c258a23144e7eb971e8ff040d2",
       "fileIdx": 0,
       "sources": [
         "tracker:udp://tracker.opentrackr.org:1337/announce",
         "tracker:udp://open.stealth.si:80/announce",
-        "dht:7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2"
+        "dht:f69d8f4e8fb9c2c258a23144e7eb971e8ff040d2"
       ],
       "behaviorHints": {
         "bingeGroup": "knightcrawler|1080p|BluRay|x264"
@@ -1167,8 +1168,8 @@
     },
     {
       "name": "[RD+] knightcrawler\n4k DV | HDR10+",
-      "title": "Mad.Max.Fury.Road.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP\n💾 27.88 GB",
-      "url": "https://knightcrawler.example.org/realdebrid/KEY/8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3/null/0/Mad.Max.Fury.Road.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP.mkv",
+      "title": "Red.Road.Dust.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP\n💾 27.88 GB",
+      "url": "https://knightcrawler.example.org/realdebrid/KEY/25c4101a977acd287184c6776dafe8a45984f43e/null/0/Red.Road.Dust.2015.2160p.UHD.BluRay.x265.10bit.DV.HDR10+.TrueHD.Atmos.7.1-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "knightcrawler|4k|BluRay|x265|10bit|DV|HDR10+"
       },
@@ -1198,11 +1199,11 @@
     },
     {
       "name": "[RD⚡] Comet 2160p",
-      "description": "📄 Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP\n📹 hevc • DV • HDR | 🔊 Atmos • TrueHD • 7.1\n⭐ BluRay REMUX | 🏷️ GRP\n👤 87 💾 74.3 GB 🔎 TorrentGalaxy\n🇬🇧",
-      "url": "https://comet.example.org/KEY/playback/91a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4/0/0/n/n?torrent_name=Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP&name=Oppenheimer&media_id=tt15398776&media_type=movie",
+      "description": "📄 Fission.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP\n📹 hevc • DV • HDR | 🔊 Atmos • TrueHD • 7.1\n⭐ BluRay REMUX | 🏷️ GRP\n👤 87 💾 74.3 GB 🔎 StarTracker\n🇬🇧",
+      "url": "https://comet.example.org/KEY/playback/7038be7161aafc266e0b46e3fe745617ea7f90fb/0/0/n/n?torrent_name=Fission.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP&name=Fission&media_id=tt15398776&media_type=movie",
       "behaviorHints": {
-        "bingeGroup": "comet|realdebrid|91a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4",
-        "filename": "Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP",
+        "bingeGroup": "comet|realdebrid|7038be7161aafc266e0b46e3fe745617ea7f90fb",
+        "filename": "Fission.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP",
         "videoSize": 79778453094
       },
       "_fixture": {
@@ -1231,11 +1232,11 @@
     },
     {
       "name": "[TB⬇️] Comet 1080p",
-      "description": "📄 Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb\n📹 avc | 🔊 Dolby Digital Plus • 5.1\n⭐ WEB-DL | 🏷️ NTb\n👤 12 💾 2.6 GB 🔎 EZTV",
-      "url": "https://comet.example.org/KEY/playback/a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5/0/n/4/2?torrent_name=Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb&name=Slow%20Horses&media_id=tt5875444:4:2&media_type=series",
+      "description": "📄 Slow.Hounds.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb\n📹 avc | 🔊 Dolby Digital Plus • 5.1\n⭐ WEB-DL | 🏷️ NTb\n👤 12 💾 2.6 GB 🔎 ShowFeed",
+      "url": "https://comet.example.org/KEY/playback/ce9a11c8020603be6386eed08b1a5dce76e2e06c/0/n/4/2?torrent_name=Slow.Hounds.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb&name=Slow%20Hounds&media_id=tt9900002:4:2&media_type=series",
       "behaviorHints": {
-        "bingeGroup": "comet|torbox|a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
-        "filename": "Slow.Horses.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb",
+        "bingeGroup": "comet|torbox|ce9a11c8020603be6386eed08b1a5dce76e2e06c",
+        "filename": "Slow.Hounds.S04E02.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb",
         "videoSize": 2791728742
       },
       "_fixture": {
@@ -1265,16 +1266,16 @@
     },
     {
       "name": "[TORRENT🧲] Comet 720p",
-      "description": "📄 Severance.S02E03.720p.WEBRip.x265.AAC.2.0-GRP\n📹 hevc | 🔊 AAC • 2.0\n⭐ WEBRip | 🏷️ GRP\n👤 301 💾 412.5 MB 🔎 ThePirateBay\n🇬🇧/🇪🇸",
-      "infoHash": "b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6",
+      "description": "📄 Divide.S02E03.720p.WEBRip.x265.AAC.2.0-GRP\n📹 hevc | 🔊 AAC • 2.0\n⭐ WEBRip | 🏷️ GRP\n👤 301 💾 412.5 MB 🔎 HarbourIndex\n🇬🇧/🇪🇸",
+      "infoHash": "32aec9ea2e2725e3d4f78cb46eb47795fd3d39c2",
       "fileIdx": 0,
       "sources": [
         "tracker:udp://tracker.opentrackr.org:1337/announce",
         "tracker:udp://open.stealth.si:80/announce"
       ],
       "behaviorHints": {
-        "bingeGroup": "comet|torrent|b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6",
-        "filename": "Severance.S02E03.720p.WEBRip.x265.AAC.2.0-GRP",
+        "bingeGroup": "comet|torrent|32aec9ea2e2725e3d4f78cb46eb47795fd3d39c2",
+        "filename": "Divide.S02E03.720p.WEBRip.x265.AAC.2.0-GRP",
         "videoSize": 432537600
       },
       "_fixture": {
@@ -1303,13 +1304,13 @@
     },
     {
       "name": "MediaFusion 🧲 RD ⚡️ 4k",
-      "description": "🎨 Dolby Vision|HDR10 📺 WEB-DL 🎞️ hevc 🎵 Atmos|EAC3 🔊 5.1\n📦 18.62 GB 👤 154\n🌐 English + French\n🔗 TorrentGalaxy",
-      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/rd/c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7/Dune.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv",
+      "description": "🎨 Dolby Vision|HDR10 📺 WEB-DL 🎞️ hevc 🎵 Atmos|EAC3 🔊 5.1\n📦 18.62 GB 👤 154\n🌐 English + French\n🔗 StarTracker",
+      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/rd/23d7d4fba93ee5380f1a72a76ab77a50d1a705d9/Sandsea.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "MediaFusion-🎨 Dolby Vision|HDR10 📺 WEB-DL 🎞️ hevc 🎵 Atmos|EAC3-4K",
         "videoSize": 19993169592,
         "notWebReady": false,
-        "filename": "Dune.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv"
+        "filename": "Sandsea.Part.Two.2024.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-GRP.mkv"
       },
       "_fixture": {
         "id": "mediafusion-v2-rd-cached-4k-default",
@@ -1338,13 +1339,13 @@
     },
     {
       "name": "MediaFusion 🧲 TRB ⏳ 1080p",
-      "description": "📺 BluRay 🎞️ x264 🎵 DTS 🔊 5.1\n📦 9.87 GB / 41.20 GB 👤 18\n🌐 English\n🔗 1337x | 🧑‍💻 GRP",
-      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/torbox/d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708/1/1/The.Office.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv",
+      "description": "📺 BluRay 🎞️ x264 🎵 DTS 🔊 5.1\n📦 9.87 GB / 41.20 GB 👤 18\n🌐 English\n🔗 Index42 | 🧑‍💻 GRP",
+      "url": "https://mediafusion.example.org/streaming_provider/KEY/playback/torbox/c68075a0a9d1720cd5e63145b05b5ffd37f9ce1c/1/1/The.Desk.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "MediaFusion-📺 BluRay 🎞️ x264 🎵 DTS-1080P",
         "videoSize": 10597944197,
         "notWebReady": false,
-        "filename": "The.Office.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv"
+        "filename": "The.Desk.US.S01E01.1080p.BluRay.DTS.5.1.x264-GRP.mkv"
       },
       "_fixture": {
         "id": "mediafusion-v2-trb-uncached-1080p",
@@ -1373,12 +1374,12 @@
     },
     {
       "name": "⚡️ [RD]\nTorz\n2160p",
-      "description": "💿 BluRay REMUX 🎞️ HEVC\n📺 DV HDR10 🎧 TrueHD, Atmos | 7.1\n📦 61.2 GB 👤 45\n🌐 🇬🇧 🇫🇷\n⚙️ FraMeSToR 🔍 TorrentGalaxy\n📄 Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
-      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819/0/Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
+      "description": "💿 BluRay REMUX 🎞️ HEVC\n📺 DV HDR10 🎧 TrueHD, Atmos | 7.1\n📦 61.2 GB 👤 45\n🌐 🇬🇧 🇫🇷\n⚙️ FraMeSToR 🔍 StarTracker\n📄 Tidewalker.The.Deep.Path.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
+      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/72d1e658ed719d9b1bd6f464530c702701c8e570/0/Tidewalker.The.Deep.Path.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv",
       "behaviorHints": {
-        "bingeGroup": "torz:e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819",
+        "bingeGroup": "torz:72d1e658ed719d9b1bd6f464530c702701c8e570",
         "videoSize": 65712130867,
-        "filename": "Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv"
+        "filename": "Tidewalker.The.Deep.Path.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv"
       },
       "_fixture": {
         "id": "stremthru-torz-rd-cached-2160p",
@@ -1407,12 +1408,12 @@
     },
     {
       "name": "[TB]\nTorz\n1080p",
-      "description": "💿 WEB-DL 🎞️ AVC\n🎧 DD+ | 5.1\n💾 3.1 GB 📦 22.4 GB 👤 9\n⚙️ FLUX 🔍 TorrentGalaxy\n📄 The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
-      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a/3/The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "description": "💿 WEB-DL 🎞️ AVC\n🎧 DD+ | 5.1\n💾 3.1 GB 📦 22.4 GB 👤 9\n⚙️ FLUX 🔍 StarTracker\n📄 The.Final.Few.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
+      "url": "https://stremthru.example.org/stremio/torz/KEY/_/strem/693de29aaa65dd0342a95614dc5c6d3d1175ff93/3/The.Final.Few.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv",
       "behaviorHints": {
-        "bingeGroup": "torz:f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a",
+        "bingeGroup": "torz:693de29aaa65dd0342a95614dc5c6d3d1175ff93",
         "videoSize": 3328599654,
-        "filename": "The.Last.of.Us.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv"
+        "filename": "The.Final.Few.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX.mkv"
       },
       "_fixture": {
         "id": "stremthru-torz-tb-uncached-1080p",
@@ -1441,12 +1442,12 @@
     },
     {
       "name": "[RD+] Comet 2160p\nDV | HDR10 | 10bit",
-      "description": "Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv\n💾33.82 GiB 👤61 ⚙️TorrentGalaxy\n🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸",
-      "url": "https://aiostreams.example.org/api/v1/proxy/KEY/Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv",
+      "description": "High.Wing.Ace.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv\n💾33.82 GiB 👤61 ⚙️StarTracker\n🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸",
+      "url": "https://aiostreams.example.org/api/v1/proxy/KEY/High.Wing.Ace.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "com.aiostreams.viren070|realdebrid|2160p|BluRay|DV|HDR10",
         "videoSize": 36314065715,
-        "filename": "Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv"
+        "filename": "High.Wing.Ace.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP.mkv"
       },
       "_fixture": {
         "id": "aiostreams-torrentio-style-rd-cached",
@@ -1475,12 +1476,12 @@
     },
     {
       "name": "[TB⚡] TorBox 2160p",
-      "description": "🎥 WEB-DL 🎞️ HEVC 🏷️ FLUX 📡 AMZN\n📺 DV | HDR10+ 🎧 Atmos | DD+ 🔊 5.1\n📦 17.3 GB 👥 120 🔍 TorBox\n🌎 English | French📝 English\n📁 Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
-      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
+      "description": "🎥 WEB-DL 🎞️ HEVC 🏷️ FLUX 📡 AMZN\n📺 DV | HDR10+ 🎧 Atmos | DD+ 🔊 5.1\n📦 17.3 GB 👥 120 🔍 TorBox\n🌎 English | French📝 English\n📁 Kestrel.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Kestrel.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv",
       "behaviorHints": {
         "bingeGroup": "com.aiostreams.viren070|torbox|2160p|WEB-DL|DV|HDR10+",
         "videoSize": 17300000000,
-        "filename": "Reacher.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv"
+        "filename": "Kestrel.S03E01.2160p.AMZN.WEB-DL.DDP5.1.Atmos.DV.HDR10+.H.265-FLUX.mkv"
       },
       "_fixture": {
         "id": "aiostreams-gdrive-style-tb-cached",
@@ -1509,12 +1510,12 @@
     },
     {
       "name": "🚀 FHD",
-      "description": "🎬 Gladiator Ii (2024) \n🎥 WEB-DL 📺 HDR 🎞️ HEVC \n🎧 DD+ | Atmos 🔊 5.1 🗣️ 🇬🇧\n📦 7.94 GB 🌱 230 \n🏷️ GRP 📡 TorrentGalaxy \n❌ Not Ready (RD) 🔍Torrentio ",
-      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Gladiator.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv",
+      "description": "🎬 Arena Ii (2024) \n🎥 WEB-DL 📺 HDR 🎞️ HEVC \n🎧 DD+ | Atmos 🔊 5.1 🗣️ 🇬🇧\n📦 7.94 GB 🌱 230 \n🏷️ GRP 📡 StarTracker \n❌ Not Ready (RD) 🔍Torrentio ",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Arena.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "com.aiostreams.viren070|realdebrid|1080p|WEB-DL|HDR",
         "videoSize": 7940000000,
-        "filename": "Gladiator.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv"
+        "filename": "Arena.II.2024.1080p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-GRP.mkv"
       },
       "_fixture": {
         "id": "aiostreams-prism-style-uncached",
@@ -1544,10 +1545,10 @@
     {
       "name": "✨ 4K 🎫 \nBLURAY REMUX",
       "description": "🔆 DV • HDR10  🔊 TrueHD • Atmos\n📦 58.1 GB \n🌎 English • German",
-      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Interstellar.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Farlight.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv",
       "behaviorHints": {
         "videoSize": 58100000000,
-        "filename": "Interstellar.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv"
+        "filename": "Farlight.2014.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv"
       },
       "_fixture": {
         "id": "aiostreams-minimal-style-cached",
@@ -1576,8 +1577,8 @@
     },
     {
       "name": "[RD+] Jackettio 4K",
-      "title": "Furiosa.A.Mad.Max.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP\n💾16.42 GB 👥45 ⚙️yts 🇺🇸",
-      "url": "https://jackettio.example.org/KEY/download/movie/tt12037194/abc123/Furiosa.A.Mad.Max.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP.mkv",
+      "title": "Ember.A.Red.Road.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP\n💾16.42 GB 👥45 ⚙️yfs 🇺🇸",
+      "url": "https://jackettio.example.org/KEY/download/movie/tt9900003/abc123/Ember.A.Red.Road.Saga.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP.mkv",
       "_fixture": {
         "id": "jackettio-rd-cached-4k",
         "addon": "Jackettio",
@@ -1605,8 +1606,8 @@
     },
     {
       "name": "[AD] Jackettio 1080p",
-      "title": "Nosferatu.2024.1080p.WEBRip.x264.AAC5.1-GRP\n💾2.1 GB 👥310 ⚙️thepiratebay 🌎 🇫🇷\n⬇️ 42% 3.1 MB/s",
-      "url": "https://jackettio.example.org/KEY/download/movie/tt5040012/def456/Nosferatu.2024.1080p.WEBRip.x264.AAC5.1-GRP.mkv",
+      "title": "Nightshade.2024.1080p.WEBRip.x264.AAC5.1-GRP\n💾2.1 GB 👥310 ⚙️harbourindex 🌎 🇫🇷\n⬇️ 42% 3.1 MB/s",
+      "url": "https://jackettio.example.org/KEY/download/movie/tt9900004/def456/Nightshade.2024.1080p.WEBRip.x264.AAC5.1-GRP.mkv",
       "_fixture": {
         "id": "jackettio-ad-uncached-1080p-progress",
         "addon": "Jackettio",
@@ -1634,11 +1635,11 @@
     },
     {
       "name": "TorBox (Instant TB) (2160p)",
-      "description": "Quality: WEB-DL\nName: Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv\nSize: 8.4 GB | Source: TorrentGalaxy\nLanguages: English\nType: Torrent | Seeders: 77",
+      "description": "Quality: WEB-DL\nName: Divide.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv\nSize: 8.4 GB | Source: StarTracker\nLanguages: English\nType: Torrent | Seeders: 77",
       "url": "https://stremio.torbox.app/KEY/playback/movie/KEY",
       "behaviorHints": {
         "bingeGroup": "torbox|0123456789abcdef0123456789abcdef0123",
-        "filename": "Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
+        "filename": "Divide.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
       },
       "_fixture": {
         "id": "torbox-addon-instant-4k",
@@ -1667,7 +1668,7 @@
     },
     {
       "name": "TorBox (TB) (1080p)",
-      "description": "Quality: BluRay\nName: Heat.1995.1080p.BluRay.DTS.5.1.x264-GRP.mkv\nSize: 1,46 GB | Source: NZBgeek\nLanguages: English, Italian\nType: Usenet | Age: 412d",
+      "description": "Quality: BluRay\nName: Glow.1995.1080p.BluRay.DTS.5.1.x264-GRP.mkv\nSize: 1,46 GB | Source: NZBindex\nLanguages: English, Italian\nType: Usenet | Age: 412d",
       "url": "https://stremio.torbox.app/KEY/playback/usenet/WyJ4eHgiXQ==",
       "_fixture": {
         "id": "torbox-addon-usenet-1080p",
@@ -1696,8 +1697,8 @@
     },
     {
       "name": "[P2P] Torrentio 720p\n",
-      "description": "Shrinking.S02E05.720p.WEB.h264-ETHEL.mkv\n💾701.5 MiB 👤12 ⚙️EZTV",
-      "infoHash": "08192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+      "description": "Unwinding.S02E05.720p.WEB.h264-ETHEL.mkv\n💾701.5 MiB 👤12 ⚙️ShowFeed",
+      "infoHash": "fd9b98398a969d51a6faa4681dc27ca330004af6",
       "fileIdx": 0,
       "sources": [
         "tracker:udp://tracker.opentrackr.org:1337/announce",
@@ -1706,7 +1707,7 @@
       "behaviorHints": {
         "bingeGroup": "com.aiostreams.viren070|p2p|720p|WEB",
         "videoSize": 735576064,
-        "filename": "Shrinking.S02E05.720p.WEB.h264-ETHEL.mkv"
+        "filename": "Unwinding.S02E05.720p.WEB.h264-ETHEL.mkv"
       },
       "_fixture": {
         "id": "aiostreams-torrentio-style-p2p-mib",
@@ -1735,12 +1736,12 @@
     },
     {
       "name": "[RD⚡] Comet 2160p",
-      "description": "📁 Dune (2021)\n🎥 BluRay REMUX 🎞️ HEVC 🏷️ GRP\n📺 DV • HDR10 🎧 DTS:X 🔊 7.1\n📦 68.4 GB 🔍 TorrentGalaxy\n🌐 🇬🇧 / 🇮🇹📝 🇬🇧",
-      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Dune.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv",
+      "description": "📁 Sandsea (2021)\n🎥 BluRay REMUX 🎞️ HEVC 🏷️ GRP\n📺 DV • HDR10 🎧 DTS:X 🔊 7.1\n📦 68.4 GB 🔍 StarTracker\n🌐 🇬🇧 / 🇮🇹📝 🇬🇧",
+      "url": "https://aiostreams.example.org/api/v1/debrid/playback/KEY/Sandsea.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv",
       "behaviorHints": {
         "bingeGroup": "com.aiostreams.viren070|realdebrid|2160p|BluRay REMUX|DV|HDR10",
         "videoSize": 68400000000,
-        "filename": "Dune.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv"
+        "filename": "Sandsea.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.DTS-X.7.1-GRP.mkv"
       },
       "_fixture": {
         "id": "aiostreams-lightgdrive-style-dtsx",
@@ -1769,8 +1770,8 @@
     },
     {
       "name": "StreamHub\n1080p",
-      "description": "Nosferatu (2024)\nHLS · 1080p · AAC 2.0\n🇬🇧 English",
-      "url": "https://cdn.example.net/hls/nosferatu/master.m3u8",
+      "description": "Nightshade (2024)\nHLS · 1080p · AAC 2.0\n🇬🇧 English",
+      "url": "https://cdn.example.net/hls/nightshade/master.m3u8",
       "behaviorHints": {
         "notWebReady": true,
         "proxyHeaders": {
@@ -1804,11 +1805,11 @@
     },
     {
       "name": "MyServer 4K",
-      "description": "Arrival (2016) 2160p HDR10 HEVC DTS-HD MA 5.1\nSize: 52 GB",
-      "url": "https://media.example.net/movies/Arrival.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
+      "description": "Landfall (2016) 2160p HDR10 HEVC DTS-HD MA 5.1\nSize: 52 GB",
+      "url": "https://media.example.net/movies/Landfall.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
       "behaviorHints": {
         "notWebReady": true,
-        "filename": "Arrival.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
+        "filename": "Landfall.2016.2160p.UHD.BluRay.REMUX.HDR10.HEVC.DTS-HD.MA.5.1.mkv",
         "videoSize": 55834574848,
         "videoHash": "8e245d9679d31e12",
         "countryWhitelist": ["usa", "can"]
@@ -1917,7 +1918,7 @@
     },
     {
       "name": "[Usenet] NZB 1080p",
-      "description": "The.Penguin.S01E01.1080p.WEB-DL.DDP5.1.H.264-GRP\n💾 3.2 GB ⏱️ 41d",
+      "description": "The.Gannet.S01E01.1080p.WEB-DL.DDP5.1.H.264-GRP\n💾 3.2 GB ⏱️ 41d",
       "nzbUrl": "https://indexer.example.org/getnzb/abc123.nzb",
       "servers": ["nntps://user:pass@news.example.org:563/4"],
       "fileMustInclude": ["/.mkv$|.mp4$/i"],

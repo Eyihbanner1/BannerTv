@@ -11,10 +11,12 @@ import {
   type SubtitleTrack,
   type VideoPlayer,
   type VideoPlayerStatus,
+  type VideoTrack,
 } from 'expo-video';
 import { AppState, BackHandler, Linking, Platform } from 'react-native';
 import { window } from '../runtime/web-globals';
 import { errorAfterHlsRetry, errorKind, errorMessage, httpStatus, mayBeHls } from './errors';
+import { type Size, videoSizeOf } from './picture-fit';
 import { type ClockReading, readClock, STOPPED_CLOCK } from './player-clock';
 import { toAndroidTrack, trackId } from './tracks';
 import { videoSource } from './video-source';
@@ -54,6 +56,22 @@ export const pictureShown = createStore(false);
 
 /** Whether the film plays in a small window over other apps (picture-in-picture). */
 export const pictureInPicture = createStore(false);
+
+/**
+ * The picture's own size in pixels, as Android's player reads it from the stream open now, so
+ * the player screen can size the picture itself (picture-fit.ts). Null until it is known, and
+ * always on the web build, whose player knows no tracks.
+ */
+export const pictureSize = createStore<Size | null>(null);
+
+function notePictureSize(track: VideoTrack | null | undefined): void {
+  const size = track ? videoSizeOf(track.size.width, track.size.height) : null;
+  // A track without a size (or none, between streams) leaves what is known as it is.
+  if (!size) return;
+  pictureSize.set((known) =>
+    known && known.width === size.width && known.height === size.height ? known : size,
+  );
+}
 
 /**
  * How long a move to the background waits before it pauses. Android may report the app going to
@@ -253,6 +271,9 @@ function onSourceLoad(): void {
     return;
   }
   if (!textChosen) player.subtitleTrack = null;
+  // The track playing, or else the first the phone can play: the picture's shape is the same
+  // at every quality of a stream.
+  notePictureSize(player.videoTrack ?? video.find((track) => track.isSupported));
   emitTracks();
 }
 
@@ -319,6 +340,7 @@ function ensurePlayer(): VideoPlayer {
   created.addListener('audioTrackChange', emitTracks);
   created.addListener('availableSubtitleTracksChange', emitTracks);
   created.addListener('subtitleTrackChange', emitTracks);
+  created.addListener('videoTrackChange', ({ videoTrack }) => notePictureSize(videoTrack));
   watchCues(created);
   player = created;
   return created;
@@ -382,8 +404,9 @@ function load(command: Extract<AndroidPlayerCommand, { op: 'load' }>): void {
   textChosen = false;
   ended = false;
   wantPlay = true;
-  // Still until the player says it plays: nothing of the last stream's clock.
+  // Still until the player says it plays: nothing of the last stream's clock, nor its size.
   clock = { ...STOPPED_CLOCK, position: command.startAt, rate };
+  pictureSize.set(null);
   open(command.url, command.startAt, contentTypeFor(command.mime));
   pictureShown.set(true);
 }
@@ -399,6 +422,7 @@ function release(): void {
   audioTracks = [];
   textTracks = [];
   clock = STOPPED_CLOCK;
+  pictureSize.set(null);
   if (player) {
     player.pause();
     player.replace(null, true);

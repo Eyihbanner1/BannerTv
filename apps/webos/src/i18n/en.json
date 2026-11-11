@@ -949,7 +949,12 @@
   },
   "streamHelper": {
     "title": "Stream helper",
-    "leadTv": "Some add-on streams need extra request headers that this TV's player can't send. BannerTV on an Android phone or TV box on the same Wi-Fi can fetch them for the TV. Turn the helper on there, then type its address and code here.",
+    "leadTv": "Some add-on streams need extra request headers that this TV's player can't send. BannerTV on an Android phone or TV box on the same Wi-Fi can fetch them for the TV. Turn the helper on there, then pair it here once.",
+    "fromPhone": "Pair from your phone",
+    "fromPhoneSteps": "In BannerTV on your phone, open Settings > Your TV > Stream helper, turn it on, and type this code under Pair with your TV:",
+    "receivedFromPhone": "Your phone sent its helper. Check the address below, then press Pair.",
+    "notOffer": "Your phone sent something that isn't a stream helper. On the phone, use Settings > Your TV > Stream helper.",
+    "orType": "Or type the address and code the helper shows",
     "leadAndroid": "Some add-on streams need extra request headers that an LG TV's player can't send. While the helper is on, your LG can play them through this device. The video stays on your home Wi-Fi.",
     "turnOn": "Turn on",
     "turnOff": "Turn off",
