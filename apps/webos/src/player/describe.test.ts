@@ -119,8 +119,8 @@ describe('streamRowText for a message from an addon', () => {
     const stream = parseStream({
       name: 'Please reinstall the addon',
       title:
-        'We have updated our free addon to improve service quality.\nPlease visit sports.highfly.to/configure\nto get a new addon link.',
-      url: 'https://sports.highfly.to/configure',
+        'We have updated our free addon to improve service quality.\nPlease visit sports.example/configure\nto get a new addon link.',
+      url: 'https://sports.example/configure',
       behaviorHints: { notWebReady: true },
     })!;
     const facts = describeStream(stream);
@@ -143,7 +143,7 @@ describe('streamRowText for a message from an addon', () => {
     };
     expect(streamRowText(t, entry, { heavy: false })).toEqual({
       title:
-        'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.highfly.to to get a new addon link.',
+        'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.example to get a new addon link.',
       badges: [],
       playable: false,
       note: 'A message from the addon, not a video.',

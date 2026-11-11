@@ -16,8 +16,8 @@ function text(raw: Record<string, unknown>): string {
 const REINSTALL = {
   name: 'Please reinstall the addon',
   title:
-    'We have updated our free addon to improve service quality.\nPlease visit sports.highfly.to/configure\nto get a new addon link.',
-  url: 'https://sports.highfly.to/configure',
+    'We have updated our free addon to improve service quality.\nPlease visit sports.example/configure\nto get a new addon link.',
+  url: 'https://sports.example/configure',
   behaviorHints: { notWebReady: true },
 };
 
@@ -85,9 +85,7 @@ describe('isNoticeStream', () => {
     expect(notice({ ...UNAVAILABLE, url: 'https://cdn.example.org/sorry.mp4' })).toBe(false);
     expect(notice({ ...UNAVAILABLE, url: 'https://cdn.example.org/live/index.m3u8' })).toBe(false);
     expect(notice({ ...UNAVAILABLE, behaviorHints: { videoSize: 4_000_000_000 } })).toBe(false);
-    expect(notice({ ...UNAVAILABLE, behaviorHints: { filename: 'Raw.1746.720p.mkv' } })).toBe(
-      false,
-    );
+    expect(notice({ ...UNAVAILABLE, behaviorHints: { filename: 'Show.720p.mkv' } })).toBe(false);
     // A file name that says nothing about a video does not make the message one.
     expect(notice({ ...UNAVAILABLE, behaviorHints: { filename: 'unavailable' } })).toBe(true);
     // Torrentio's "subscription expired" film plays, and shows its message itself.
@@ -157,7 +155,7 @@ describe('isNoticeStream', () => {
 describe('noticeText', () => {
   it("reads the addon's message as sentences", () => {
     expect(text(REINSTALL)).toBe(
-      'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.highfly.to to get a new addon link.',
+      'Please reinstall the addon. We have updated our free addon to improve service quality. Please visit sports.example to get a new addon link.',
     );
     expect(text(UNAVAILABLE)).toBe('Streams temporarily unavailable - try again shortly');
   });
