@@ -15,12 +15,21 @@ They are test input for the parsers, matcher and grouping in
   bundled or shown to users.
 - **Never replace them with data from a configured or personal addon link.** A
   configured install address can hold a paid key or personal settings in its path.
-  To refresh a fixture, fetch the same public URL listed below again and record the
-  new time here.
+  To refresh a fixture, fetch the same path listed below from the addon's public base
+  address again, put it through the same renaming (below), and record the new time
+  here. The base addresses are kept in the project notes
+  (`sports-addons/fixture-sources.md`), not in this public repository.
 - **No streams.** No `/stream/` path was requested, and the files hold no stream links.
-- **Bodies are kept as served.** Each `.json` file is the response body exactly as the
-  addon returned it (minified, same key order, same escapes), plus one trailing
-  newline. Do not reformat or edit item content. Prettier would reformat them, so
+- **Bodies are kept as served, apart from three renamings.** Each `.json` file is the
+  response body as the addon returned it (minified, same key order, same escapes),
+  plus one trailing newline. On 11 November 2026, before the repository went public,
+  three things were replaced, and nothing else: every image address on an addon's own
+  servers is now an invented `https://images.example/<folder>/<hash>` one; every TV
+  channel's name and id is now `Sports Network NN` (`📺 Sports Network 01`,
+  `(FHD) : SPORTS NETWORK 03`, ids ending `network-NN`, the same channel getting the
+  same number in every file); and the Nuvio and MeteGol manifest descriptions are
+  shorter. Match names, teams, competitions, times, genres and the other ids are as
+  served. Do not reformat or edit item content otherwise. Prettier would reformat them, so
   `packages/core/src/sports/fixtures/` needs to be listed in the root
   `.prettierignore`.
 
@@ -40,30 +49,30 @@ because `:` is not allowed in Windows file names.
 
 ## Sports Streams (free tier)
 
-Base: `https://sports.highfly.dev` (manifest id `community.sports.fly`, version 1.3.0).
+Base: the addon's public address (manifest id `community.sports.fly`, version 1.3.0).
 Folder: `sports-streams/`.
 
-| File | Source URL | Fetched (UTC) | Items |
+| File | Path | Fetched (UTC) | Items |
 | --- | --- | --- | --- |
-| `manifest.json` | https://sports.highfly.dev/manifest.json | 03:59:30 | 17 catalogs |
-| `catalog__sport__sports_live.json` | https://sports.highfly.dev/catalog/sport/sports_live.json | 03:59:56 | 34 (18 channels, 16 events) |
-| `catalog__sport__sports_today.json` | https://sports.highfly.dev/catalog/sport/sports_today.json | 04:01:02 | 38 (18 channels, 20 events) |
-| `catalog__sport__sports_today__skip=20.json` | https://sports.highfly.dev/catalog/sport/sports_today/skip=20.json | 04:02:11 | 20 events |
-| `catalog__sport__sports_football.json` | https://sports.highfly.dev/catalog/sport/sports_football.json | 04:02:53 | 22 (2 channels, 20 events) |
-| `catalog__sport__sports_football__skip=20.json` | https://sports.highfly.dev/catalog/sport/sports_football/skip=20.json | 04:03:36 | 20 events |
-| `catalog__sport__sports_football__skip=40.json` | https://sports.highfly.dev/catalog/sport/sports_football/skip=40.json | 04:04:28 | 20 events |
-| `catalog__sport__sports_basketball.json` | https://sports.highfly.dev/catalog/sport/sports_basketball.json | 04:05:09 | 20 events |
-| `catalog__sport__sports_hockey.json` | https://sports.highfly.dev/catalog/sport/sports_hockey.json | 04:05:55 | 20 events |
-| `catalog__sport__sports_cricket.json` | https://sports.highfly.dev/catalog/sport/sports_cricket.json | 04:06:41 | 21 (1 channel, 20 events) |
-| `catalog__sport__sports_motor_sports.json` | https://sports.highfly.dev/catalog/sport/sports_motor_sports.json | 04:07:39 | 14 (2 channels, 12 sessions) |
-| `catalog__sport__sports_fight.json` | https://sports.highfly.dev/catalog/sport/sports_fight.json | 04:07:39 | 15 events |
-| `catalog__sport__sports_tennis.json` | https://sports.highfly.dev/catalog/sport/sports_tennis.json | 04:08:36 | 2 channels |
-| `catalog__sport__sports_rugby.json` | https://sports.highfly.dev/catalog/sport/sports_rugby.json | 04:08:36 | 22 (2 channels, 20 events) |
-| `catalog__sport__sports_other.json` | https://sports.highfly.dev/catalog/sport/sports_other.json | 04:08:36 | 0 |
-| `meta__sport__streamed%3Abasketball-los-angeles-lakers-portland-trail-blazers-20754.json` | https://sports.highfly.dev/meta/sport/streamed:basketball-los-angeles-lakers-portland-trail-blazers-20754.json | 04:09:28 | 1 (live) |
-| `meta__sport__streamed%3Acricket-ban-wi-t1d1.json` | https://sports.highfly.dev/meta/sport/streamed:cricket-ban-wi-t1d1.json | 04:09:28 | 1 (live) |
-| `meta__sport__streamed%3Afootball-manchester-city-brighton-and-hove-albion-20754.json` | https://sports.highfly.dev/meta/sport/streamed:football-manchester-city-brighton-and-hove-albion-20754.json | 04:09:28 | 1 (upcoming) |
-| `meta__sport__streamed%3Afootball-freiburg-wolfsburg-20754.json` | https://sports.highfly.dev/meta/sport/streamed:football-freiburg-wolfsburg-20754.json | 04:09:28 | 1 (upcoming) |
+| `manifest.json` | /manifest.json | 03:59:30 | 17 catalogs |
+| `catalog__sport__sports_live.json` | /catalog/sport/sports_live.json | 03:59:56 | 34 (18 channels, 16 events) |
+| `catalog__sport__sports_today.json` | /catalog/sport/sports_today.json | 04:01:02 | 38 (18 channels, 20 events) |
+| `catalog__sport__sports_today__skip=20.json` | /catalog/sport/sports_today/skip=20.json | 04:02:11 | 20 events |
+| `catalog__sport__sports_football.json` | /catalog/sport/sports_football.json | 04:02:53 | 22 (2 channels, 20 events) |
+| `catalog__sport__sports_football__skip=20.json` | /catalog/sport/sports_football/skip=20.json | 04:03:36 | 20 events |
+| `catalog__sport__sports_football__skip=40.json` | /catalog/sport/sports_football/skip=40.json | 04:04:28 | 20 events |
+| `catalog__sport__sports_basketball.json` | /catalog/sport/sports_basketball.json | 04:05:09 | 20 events |
+| `catalog__sport__sports_hockey.json` | /catalog/sport/sports_hockey.json | 04:05:55 | 20 events |
+| `catalog__sport__sports_cricket.json` | /catalog/sport/sports_cricket.json | 04:06:41 | 21 (1 channel, 20 events) |
+| `catalog__sport__sports_motor_sports.json` | /catalog/sport/sports_motor_sports.json | 04:07:39 | 14 (2 channels, 12 sessions) |
+| `catalog__sport__sports_fight.json` | /catalog/sport/sports_fight.json | 04:07:39 | 15 events |
+| `catalog__sport__sports_tennis.json` | /catalog/sport/sports_tennis.json | 04:08:36 | 2 channels |
+| `catalog__sport__sports_rugby.json` | /catalog/sport/sports_rugby.json | 04:08:36 | 22 (2 channels, 20 events) |
+| `catalog__sport__sports_other.json` | /catalog/sport/sports_other.json | 04:08:36 | 0 |
+| `meta__sport__streamed%3Abasketball-los-angeles-lakers-portland-trail-blazers-20754.json` | /meta/sport/streamed:basketball-los-angeles-lakers-portland-trail-blazers-20754.json | 04:09:28 | 1 (live) |
+| `meta__sport__streamed%3Acricket-ban-wi-t1d1.json` | /meta/sport/streamed:cricket-ban-wi-t1d1.json | 04:09:28 | 1 (live) |
+| `meta__sport__streamed%3Afootball-manchester-city-brighton-and-hove-albion-20754.json` | /meta/sport/streamed:football-manchester-city-brighton-and-hove-albion-20754.json | 04:09:28 | 1 (upcoming) |
+| `meta__sport__streamed%3Afootball-freiburg-wolfsburg-20754.json` | /meta/sport/streamed:football-freiburg-wolfsburg-20754.json | 04:09:28 | 1 (upcoming) |
 
 What these show, for writing tests:
 
@@ -87,20 +96,20 @@ What these show, for writing tests:
 
 ## Nuvio Live Sports
 
-Base: `https://nuviosports.xyz` (manifest id `community.nuvio.live-sports`, version
+Base: the addon's public address (manifest id `community.nuvio.live-sports`, version
 3.1.3). Folder: `nuvio-live-sports/`.
 
-| File | Source URL | Fetched (UTC) | Items |
+| File | Path | Fetched (UTC) | Items |
 | --- | --- | --- | --- |
-| `manifest.json` | https://nuviosports.xyz/manifest.json | 04:10:13 | 74 catalogs |
-| `catalog__tv__nuvio_sports_live.json` | https://nuviosports.xyz/catalog/tv/nuvio_sports_live.json | 04:11:18 (see note) | 100 (13 channels) |
-| `catalog__tv__nuvio_sports_football.json` | https://nuviosports.xyz/catalog/tv/nuvio_sports_football.json | 04:12:02 | 100 (97 channels, 3 live matches) |
-| `catalog__tv__nuvio_sports_basketball.json` | https://nuviosports.xyz/catalog/tv/nuvio_sports_basketball.json | 04:12:20 | 25 (9 channels, 16 games) |
+| `manifest.json` | /manifest.json | 04:10:13 | 74 catalogs |
+| `catalog__tv__nuvio_sports_live.json` | /catalog/tv/nuvio_sports_live.json | 04:11:18 (see note) | 100 (13 channels) |
+| `catalog__tv__nuvio_sports_football.json` | /catalog/tv/nuvio_sports_football.json | 04:12:02 | 100 (97 channels, 3 live matches) |
+| `catalog__tv__nuvio_sports_basketball.json` | /catalog/tv/nuvio_sports_basketball.json | 04:12:20 | 25 (9 channels, 16 games) |
 
 Note: the first request for the Live catalog was cut off by the tool's length limit
 and thrown away; the saved copy is the retry, made before 04:11:56.
 
-What these show: a `🏆 League: X` line in `description`, `lg=` in the poster URL,
+What these show: a `🏆 League: X` line in `description`, `lg=` in the poster URL (as served; the renamed image addresses no longer carry it),
 `team1`/`team2` and `cast`, `released` in ISO UTC, `releaseInfo` as a 12-hour clock
 with no date (this install's time zone setting defaults to UTC), name prefixes
 `🔴 LIVE: ` and `⏱️ `, channels marked by genre `NETWORKS` and `releaseInfo` `24/7`,
@@ -113,14 +122,14 @@ made of Unicode tag characters.
 
 ## MeteGol
 
-Base: `https://metegol-887.netlify.app` (manifest id `com.metegol.live.v5`, version
+Base: the addon's public address (manifest id `com.metegol.live.v5`, version
 1.8.3). Folder: `metegol/`. The addon has a single catalog, so only that one was
 saved.
 
-| File | Source URL | Fetched (UTC) | Items |
+| File | Path | Fetched (UTC) | Items |
 | --- | --- | --- | --- |
-| `manifest.json` | https://metegol-887.netlify.app/manifest.json | 04:10:13 | 1 catalog |
-| `catalog__tv__deportes.json` | https://metegol-887.netlify.app/catalog/tv/deportes.json | 04:15:03 | 4 |
+| `manifest.json` | /manifest.json | 04:10:13 | 1 catalog |
+| `catalog__tv__deportes.json` | /catalog/tv/deportes.json | 04:15:03 | 4 |
 
 What these show: `Competition: Home vs Away` names, an `EN VIVO · ` prefix, a clock
 time with no date in `releaseInfo` in the default zone Argentina (UTC-3): `23:00` is
@@ -129,15 +138,15 @@ time with no date in `releaseInfo` in the default zone Argentina (UTC-3): `23:00
 
 ## StremVerse
 
-Base: `https://stremverse1.alwaysdata.net` (manifest id `com.stremverse.org`, version
+Base: the addon's public address (manifest id `com.stremverse.org`, version
 3.0.0). Folder: `stremverse/`.
 
-| File | Source URL | Fetched (UTC) | Items |
+| File | Path | Fetched (UTC) | Items |
 | --- | --- | --- | --- |
-| `manifest.json` | https://stremverse1.alwaysdata.net/manifest.json | 04:10:13 | 5 catalogs |
-| `catalog__tv__stremverse_live_events.json` | https://stremverse1.alwaysdata.net/catalog/tv/stremverse_live_events.json | 04:15:48 | 120 |
-| `catalog__tv__stremverse_live_events__genre=Football.json` | https://stremverse1.alwaysdata.net/catalog/tv/stremverse_live_events/genre=Football.json | 04:15:48 | 79 |
-| `catalog__tv__stremverse_xtra_events.json` | https://stremverse1.alwaysdata.net/catalog/tv/stremverse_xtra_events.json | 04:15:48 | 100 |
+| `manifest.json` | /manifest.json | 04:10:13 | 5 catalogs |
+| `catalog__tv__stremverse_live_events.json` | /catalog/tv/stremverse_live_events.json | 04:15:48 | 120 |
+| `catalog__tv__stremverse_live_events__genre=Football.json` | /catalog/tv/stremverse_live_events/genre=Football.json | 04:15:48 | 79 |
+| `catalog__tv__stremverse_xtra_events.json` | /catalog/tv/stremverse_xtra_events.json | 04:15:48 | 100 |
 
 What these show: Live Events items have only `id`, `type`, `name`, `poster` and
 `background`, with no time and no genre. Some are named after the competition

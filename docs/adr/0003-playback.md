@@ -53,7 +53,7 @@ Phase 2 makes BannerTV play. The plan asked for a stream picker, a remote-driven
 
 ## Checked on the TV
 
-Codex ran the checks on the LG 65NANO766QA on 27 October 2026 with build e166786 (report: Agent Hub message 1253, saved as `phase2/tv-results.md` in the project files), using Torrentio with Real-Debrid and OpenSubtitles v3.
+Codex ran the checks on the LG 65NANO766QA on 27 October 2026 with build e166786 (report: Agent Hub message 1253, saved as `phase2/tv-results.md` in the project files), using a stream addon with a debrid account and OpenSubtitles v3.
 
 - **Passed.**
   - hls.js from `vendor/` played the Apple HLS with its English subtitle track drawn by BannerTV (the stream had no second audio track).
