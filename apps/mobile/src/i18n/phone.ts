@@ -160,7 +160,7 @@ const PHONE = {
     tvCode: 'Code on the TV',
     placeholder: 'For example K7M 2QX',
     send: 'Pair',
-    sent: 'Sent. Your TV pairs in a few seconds.',
+    sent: 'Sent. On your TV, press Pair to finish.',
     badCode: 'That isn’t the TV’s code. It has six letters and numbers.',
     gone: 'That code has run out. On the TV, choose New code and type the new one here.',
     used: 'That code was already used. On the TV, choose New code.',

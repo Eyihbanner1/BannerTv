@@ -1,5 +1,5 @@
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
@@ -94,7 +94,7 @@ function spaced(code: string): string {
 /**
  * "Pair from your phone": a short code for the pairing relay (services/pair).
  * The phone types it and sends its helper's address and code (helperOffer),
- * so nothing is typed with the remote. The TV then pairs as if they were typed.
+ * so nothing is typed with the remote: they fill in the form, and Pair confirms.
  */
 function PairFromPhone({ onOffer }: { onOffer: (link: string) => void }) {
   const { t } = useTranslation();
@@ -150,43 +150,28 @@ function PairWithHelper() {
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  // A pairing the phone started and one typed here never run at once.
-  const busyRef = useRef(false);
   const [result, setResult] = useState<PairResult | null>(null);
-  const [fromPhone, setFromPhone] = useState<'pairing' | 'notOffer' | null>(null);
+  const [fromPhone, setFromPhone] = useState<'received' | 'notOffer' | null>(null);
 
   useEffect(() => {
     void streamHelper.load().then(() => streamHelper.reachable(true));
   }, []);
   useScreenFocus(pairing ? 'helper-check' : 'helper-address');
 
-  // Only setters and the module's helper store, so the relay's handler can keep it.
-  const pairWith = useCallback((to: string, digits: string) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
+  // What the phone sends fills in the form, and the viewer still presses Pair on the TV:
+  // anyone who sees the code could send an address, as with addons (ADR 0002, decision 15).
+  const onOffer = useCallback((link: string) => {
+    const offer = readHelperOffer(link);
+    if (!offer) {
+      setFromPhone('notOffer');
+      return;
+    }
+    setAddress(offer.address);
+    setCode(offer.code);
     setResult(null);
-    void streamHelper.pair(to, digits).then((answer) => {
-      busyRef.current = false;
-      setBusy(false);
-      setResult(answer);
-      setFromPhone(null);
-      if (answer === 'paired') void setFocus('helper-check');
-    });
+    setFromPhone('received');
+    void setFocus('helper-pair');
   }, []);
-  const pair = () => pairWith(address, code);
-  const onOffer = useCallback(
-    (link: string) => {
-      const offer = readHelperOffer(link);
-      if (!offer) {
-        setFromPhone('notOffer');
-        return;
-      }
-      setFromPhone('pairing');
-      pairWith(offer.address, offer.code);
-    },
-    [pairWith],
-  );
 
   if (pairing) {
     const status =
@@ -222,12 +207,24 @@ function PairWithHelper() {
     );
   }
 
+  const pair = () => {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    setFromPhone(null);
+    void streamHelper.pair(address, code).then((answer) => {
+      setBusy(false);
+      setResult(answer);
+      if (answer === 'paired') void setFocus('helper-check');
+    });
+  };
+
   return (
     <div className={`${screen.column} ${styles.actions}`}>
       {PAIR_SERVICE ? <PairFromPhone onOffer={onOffer} /> : null}
       {fromPhone && (
         <p className={styles.note} role="status">
-          {t(fromPhone === 'pairing' ? 'streamHelper.pairingFromPhone' : 'streamHelper.notOffer')}
+          {t(fromPhone === 'received' ? 'streamHelper.receivedFromPhone' : 'streamHelper.notOffer')}
         </p>
       )}
       {PAIR_SERVICE ? <h2 className={styles.heading}>{t('streamHelper.orType')}</h2> : null}

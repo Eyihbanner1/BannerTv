@@ -5,7 +5,7 @@ import { APP_URL, expectFocus, openSection, press } from './tv';
 // The helper on a phone on the home network, played by the test.
 const HELPER = 'http://192.168.1.42:47020';
 
-test('Stream helper: the phone sends its helper through a short code, and the TV pairs with no typing', async ({
+test('Stream helper: the phone sends its helper through a short code, and the TV pairs with one press', async ({
   page,
 }) => {
   const { phone } = await mockAddons(page);
@@ -49,8 +49,17 @@ test('Stream helper: the phone sends its helper through a short code, and the TV
   await expect.poll(() => phone.codes.length).toBe(2);
   expect(pairedWith).toEqual([]);
 
+  // The phone's helper fills in the form; nothing pairs until Pair is pressed on the TV.
   phone.send(`${HELPER}/pair?code=123456`);
-  await expectFocus(page, 'helper-check');
+  await expectFocus(page, 'helper-pair');
+  await expect(page.getByText('Your phone sent its helper. Check the address below')).toBeVisible();
+  await expect(page.locator('[data-focus-key="helper-address"] input')).toHaveValue(
+    '192.168.1.42:47020',
+  );
+  await expect(page.locator('[data-focus-key="helper-code"] input')).toHaveValue('123456');
+  expect(pairedWith).toEqual([]);
+
+  await press(page, 'Enter', 'helper-check');
   await expect(page.getByText('Paired with the helper at 192.168.1.42.')).toBeVisible();
   await expect(page.getByText('The helper is on. Streams that need it will play.')).toBeVisible();
   expect(pairedWith).toEqual(['code=123456']);

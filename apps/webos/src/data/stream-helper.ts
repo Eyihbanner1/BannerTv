@@ -39,7 +39,9 @@ export class HelperUnavailable extends Error {
 function isHomeIpv4(host: string): boolean {
   const parts = host.split('.');
   if (parts.length !== 4) return false;
-  const bytes = parts.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : NaN));
+  // Plain decimal only: the browser reads a part with a leading zero ("010") as octal, so
+  // "010.0.0.1" would pass as 10/8 here but connect to 8.0.0.1.
+  const bytes = parts.map((part) => (/^(?:0|[1-9]\d{0,2})$/.test(part) ? Number(part) : NaN));
   if (bytes.some((byte) => !(byte >= 0 && byte <= 255))) return false;
   const [a, b] = bytes as [number, number];
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);

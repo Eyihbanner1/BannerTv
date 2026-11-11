@@ -62,6 +62,10 @@ describe('helper address', () => {
       '192.168.1.4:0',
       '192.168.1.4:70000',
       'helper.local',
+      // Leading zeros: the browser reads "010" as octal, so this would connect to 8.0.0.1.
+      '010.0.0.1',
+      '172.016.0.1',
+      '192.168.01.42',
       '',
     ]) {
       expect(parseHelperAddress(text)).toBeNull();
@@ -88,6 +92,7 @@ describe("a phone's offer", () => {
     expect(readHelperOffer('http://192.168.1.42:47020/pair?code=123456&x=1')).toBeNull();
     expect(readHelperOffer('https://192.168.1.42:47020/pair?code=123456')).toBeNull();
     expect(readHelperOffer('http://192.168.1.42:99999/pair?code=123456')).toBeNull();
+    expect(readHelperOffer('http://010.34.208.1:47020/pair?code=123456')).toBeNull();
   });
 });
 
