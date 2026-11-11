@@ -22,7 +22,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: '[RD+] Torrentio\n720p',
       description:
-        'The Office (US) Complete Series 720p WEB-DL [120 GB]\nThe.Office.US.S01E01.Pilot.720p.WEB-DL.DDP5.1.H.264-NTb.mkv\n👤 20 💾 350 MB ⚙️ 1337x',
+        'The Office (US) Complete Series 720p WEB-DL [120 GB]\nThe.Desk.US.S01E01.Pilot.720p.WEB-DL.DDP5.1.H.264-NTb.mkv\n👤 20 💾 350 MB ⚙️ Index42',
     });
     expect(facts).toMatchObject({
       resolution: '720p',
@@ -40,7 +40,7 @@ describe('describeStream, reviewed: addon formats', () => {
   it('reads Knightcrawler, lower-case and without seeders', () => {
     const facts = read({
       name: '[PM download] knightcrawler\n1080p',
-      description: 'The.Batman.2022.1080p.BluRay.DD5.1.x264-GRP\n💾 12.4 GB',
+      description: 'The.Nightwarden.2022.1080p.BluRay.DD5.1.x264-GRP\n💾 12.4 GB',
     });
     expect(facts).toMatchObject({ resolution: '1080p', cached: false, service: 'PM' });
     expect(facts.seeders).toBeUndefined();
@@ -50,7 +50,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: '[RD⚡] Comet 2160p',
       description:
-        '📄 Oppenheimer.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP\n📹 hevc • DV • HDR | 🔊 Atmos • TrueHD • 7.1\n⭐ BluRay REMUX | 🏷️ GRP\n👤 87 💾 74.3 GB 🔎 TorrentGalaxy\n🇬🇧',
+        '📄 Fission.2023.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.Atmos.7.1-GRP\n📹 hevc • DV • HDR | 🔊 Atmos • TrueHD • 7.1\n⭐ BluRay REMUX | 🏷️ GRP\n👤 87 💾 74.3 GB 🔎 StarTracker\n🇬🇧',
     });
     expect(facts).toMatchObject({
       resolution: '2160p',
@@ -72,7 +72,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: 'MEDIAFUSION | ELFHOSTED 🧲 TRB ⏳ 1080P',
       description:
-        '📺 BluRay 🎞️ x264 🎵 DTS 🔊 5.1\n📦 9.87 GB / 41.20 GB 👤 18\n🌐 English + Italian\n🔗 1337x',
+        '📺 BluRay 🎞️ x264 🎵 DTS 🔊 5.1\n📦 9.87 GB / 41.20 GB 👤 18\n🌐 English + Italian\n🔗 Index42',
     });
     expect(facts).toMatchObject({
       resolution: '1080p',
@@ -103,7 +103,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: '[RD+] Torrentio 2160p\nDV | HDR10',
       description:
-        'Top.Gun.Maverick.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP\n💾33.82 GiB / 💾120.5 GiB👤61 📅12d ⚙️TorrentGalaxy\n🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸',
+        'High.Wing.Ace.2022.2160p.UHD.BluRay.x265.10bit.DV.HDR10.DTS-HD.MA.7.1-GRP\n💾33.82 GiB / 💾120.5 GiB👤61 📅12d ⚙️StarTracker\n🇬🇧 / 🇫🇷 Subs / 🇬🇧 / 🇪🇸',
     });
     expect(facts).toMatchObject({
       resolution: '2160p',
@@ -130,7 +130,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: 'Comet (Instant RD) (2160p)',
       description:
-        'Quality: BluRay REMUX\nName: Dune.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv\nSize: 68.4 GB / 140 GB | Source: TorrentGalaxy\nLanguages: English, Italian | Subtitles: French, German',
+        'Quality: BluRay REMUX\nName: Sandsea.2021.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv\nSize: 68.4 GB / 140 GB | Source: StarTracker\nLanguages: English, Italian | Subtitles: French, German',
     });
     expect(facts).toMatchObject({
       resolution: '2160p',
@@ -149,7 +149,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const gdrive = read({
       name: '[RD⚡] Comet 2160p (Best)',
       description:
-        '🎥 BluRay REMUX 🎞️ HEVC 🏷️ FraMeSToR 📡 AMZN\n📺 DV | HDR10 🎧 TrueHD | Atmos 🔊 7.1\n📦 61.2 GB / 140 GB 👥 45 📅 3d 🔍 TorrentGalaxy\n🌎 English | French📝 English | German\n📁 Avatar.The.Way.of.Water.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv',
+        '🎥 BluRay REMUX 🎞️ HEVC 🏷️ FraMeSToR 📡 AMZN\n📺 DV | HDR10 🎧 TrueHD | Atmos 🔊 7.1\n📦 61.2 GB / 140 GB 👥 45 📅 3d 🔍 StarTracker\n🌎 English | French📝 English | German\n📁 Tidewalker.The.Deep.Path.2022.2160p.UHD.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.Atmos.7.1-FraMeSToR.mkv',
     });
     expect(gdrive).toMatchObject({
       resolution: '2160p',
@@ -169,7 +169,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const light = read({
       name: '[RD⏳] Comet 1080p',
       description:
-        '📁 Dune (2021)\n🎥 WEB-DL 🎞️ HEVC 🏷️ GRP\n📺 HDR10 🎧 DD+ | Atmos 🔊 5.1\n📦 9.8 GB 📅 3d 🔍 TorrentGalaxy\n🌐 🇬🇧 / 🇮🇹📝 🇬🇧 / 🇩🇪',
+        '📁 Sandsea (2021)\n🎥 WEB-DL 🎞️ HEVC 🏷️ GRP\n📺 HDR10 🎧 DD+ | Atmos 🔊 5.1\n📦 9.8 GB 📅 3d 🔍 StarTracker\n🌐 🇬🇧 / 🇮🇹📝 🇬🇧 / 🇩🇪',
     });
     expect(light).toMatchObject({
       resolution: '1080p',
@@ -208,7 +208,7 @@ describe('describeStream, reviewed: addon formats', () => {
 
   it('reads the AIOStreams prism template, "⚡Ready (RD)" and "❌ Not Ready (RD)"', () => {
     const description =
-      '🎬 Gladiator Ii (2024) \n🎥 WEB-DL 📺 HDR 🎞️ HEVC \n🎧 DD+ | Atmos 🔊 5.1 🗣️ 🇬🇧 / 🇮🇹📝 🇫🇷\n📦 7.94 GB 📊 12.5 Mbps \n🏷️ GRP 📡 TorrentGalaxy \n';
+      '🎬 Arena Ii (2024) \n🎥 WEB-DL 📺 HDR 🎞️ HEVC \n🎧 DD+ | Atmos 🔊 5.1 🗣️ 🇬🇧 / 🇮🇹📝 🇫🇷\n📦 7.94 GB 📊 12.5 Mbps \n🏷️ GRP 📡 StarTracker \n';
     const ready = read({ name: '🚀 FHD', description: description + '⚡Ready (RD) 🔍Torrentio ' });
     expect(ready).toMatchObject({
       resolution: '1080p',
@@ -244,7 +244,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: '   4K \u200d    \u200d\u200d\u200d\u200d⏳\u200d\u200b\n  〈Remux〉\u200d     ',
       description:
-        '✎  Dune (2021)\n▣  HEVC ✦ DV · HDR10  ♬ DTS-HD MA  ♯ 7.1\n◈ 61.2 / 140 GB · 98.5 Mbps ⇄ 12❦ · 3d\n⛉ [RD] Comet · FraMeSToR · TorrentGalaxy',
+        '✎  Sandsea (2021)\n▣  HEVC ✦ DV · HDR10  ♬ DTS-HD MA  ♯ 7.1\n◈ 61.2 / 140 GB · 98.5 Mbps ⇄ 12❦ · 3d\n⛉ [RD] Comet · FraMeSToR · StarTracker',
     });
     expect(facts).toMatchObject({
       resolution: '2160p',
@@ -265,7 +265,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: '[AD] Jackettio 1080p',
       description:
-        'Nosferatu.2024.1080p.WEBRip.x264.AAC5.1-GRP\n💾2.1 GB 👥310 ⚙️thepiratebay 🇫🇷\n⬇️ 42% 3.1 MB/s',
+        'Nightshade.2024.1080p.WEBRip.x264.AAC5.1-GRP\n💾2.1 GB 👥310 ⚙️harbourindex 🇫🇷\n⬇️ 42% 3.1 MB/s',
     });
     expect(facts).toMatchObject({
       resolution: '1080p',
@@ -284,7 +284,7 @@ describe('describeStream, reviewed: addon formats', () => {
     const facts = read({
       name: 'TorBox (Instant TB) (2160p)',
       description:
-        'Quality: WEB-DL\nName: Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv\nSize: 8.4 GB | Source: TorrentGalaxy\nLanguages: English\nType: Torrent | Seeders: 77',
+        'Quality: WEB-DL\nName: Divide.S02E10.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv\nSize: 8.4 GB | Source: StarTracker\nLanguages: English\nType: Torrent | Seeders: 77',
     });
     expect(facts).toMatchObject({
       resolution: '2160p',
@@ -302,7 +302,7 @@ describe('describeStream, reviewed: addon formats', () => {
       read({
         name: '[RD+] Peerflix 🇪🇸 4K',
         description:
-          'Deadpool [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix',
+          'Lanternfall [4K UHD 2160p HEVC X265][DTS 5.1 Castellano DTS 5.1-Ingles+Subs][ES-EN]\n  👤 1 💾 20.38 GB 🌐 Peerflix',
       }),
     ).toMatchObject({
       resolution: '2160p',
@@ -317,7 +317,7 @@ describe('describeStream, reviewed: addon formats', () => {
       read({
         name: '🚀 ORION\n[Offcloud]',
         description:
-          'Deadpool.&.Wolverine.(2024).(2160p.BluRay.x265.10bit.DV.HDR.TrueHD.Atmos.7.1.English. French. Spanish.r00t) [QxR]\n📺4K 💾22.8 GB 🎥h265 🔊7.1\n👂EN FR ES ☁️1337x',
+          'Lanternfall.&.Ember.(2024).(2160p.BluRay.x265.10bit.DV.HDR.TrueHD.Atmos.7.1.English. French. Spanish.r00t) [QxR]\n📺4K 💾22.8 GB 🎥h265 🔊7.1\n👂EN FR ES ☁️Index42',
       }),
     ).toMatchObject({
       resolution: '2160p',
@@ -383,7 +383,7 @@ describe('describeStream, reviewed: titles', () => {
   });
 
   it('does not read a year or a number in a title as the resolution', () => {
-    expect(read({ description: 'Blade.Runner.2049.2017.1080p.BluRay' }).resolution).toBe('1080p');
+    expect(read({ description: 'Neon.Courier.2049.2017.1080p.BluRay' }).resolution).toBe('1080p');
     expect(read({ description: 'Film.2160.2020.1080p' }).resolution).toBe('1080p');
     expect(read({ description: 'Room 1080 (2020) 720p' }).resolution).toBe('720p');
     expect(read({ description: 'Film 2160' }).resolution).toBeUndefined();
@@ -527,9 +527,9 @@ describe('describeStream, reviewed: sizes, seeders and cache marks', () => {
 
   it('reads seeders in every addon style', () => {
     expect(read({ description: '👤 47 💾 40.33 GB' }).seeders).toBe(47);
-    expect(read({ description: '💾33.82 GiB👤61 ⚙️TorrentGalaxy' }).seeders).toBe(61);
+    expect(read({ description: '💾33.82 GiB👤61 ⚙️StarTracker' }).seeders).toBe(61);
     expect(read({ description: '📦 61.2 GB 👥 45 📅 3d' }).seeders).toBe(45);
-    expect(read({ description: '💾2.1 GB 👥310 ⚙️yts' }).seeders).toBe(310);
+    expect(read({ description: '💾2.1 GB 👥310 ⚙️yfs' }).seeders).toBe(310);
     expect(read({ description: '📦 7.94 GB 🌱 230 ' }).seeders).toBe(230);
     expect(read({ description: '◈ 3.1 GB ⇄ 12❦' }).seeders).toBe(12);
     expect(read({ description: 'Type: Torrent | Seeders: 77' }).seeders).toBe(77);
@@ -553,7 +553,7 @@ describe('describeStream, reviewed: sizes, seeders and cache marks', () => {
     });
     expect(read({ name: '[P2P] Torrentio 720p' }).cached).toBeUndefined();
     expect(
-      read({ name: 'TPB+', description: 'Film [DTS 5.1-Ingles+Subs]' }).cached,
+      read({ name: 'HBI+', description: 'Film [DTS 5.1-Ingles+Subs]' }).cached,
     ).toBeUndefined();
   });
 });
