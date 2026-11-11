@@ -71,7 +71,7 @@ function FullSettings() {
   return (
     <div className={styles.screen}>
       <h1 className={styles.title}>{t('rail.settings')}</h1>
-      <p className={styles.lead}>{t('settings.lead')}</p>
+      <p className={`${styles.lead} ${settings.lead}`}>{t('settings.lead')}</p>
       <div className={`${styles.column} ${settings.left}`}>
         <h2 className={settings.heading}>{t('settings.playback')}</h2>
         <Button
@@ -101,6 +101,14 @@ function FullSettings() {
             value: t(prefs.stillWatching ? 'common.on' : 'common.off'),
           })}
           onPress={() => setPreference('stillWatching', !prefs.stillWatching)}
+        />
+        <Button
+          block
+          focusKey="settings-next-at-credits"
+          label={t('settings.nextAtCredits', {
+            value: t(prefs.nextAtCredits ? 'common.on' : 'common.off'),
+          })}
+          onPress={() => setPreference('nextAtCredits', !prefs.nextAtCredits)}
         />
         <Button
           block
@@ -171,10 +179,12 @@ function FullSettings() {
         {/* The app's own updates have their line in this part too, on the same TVs. */}
         {homebrewUpdatesShown() && <HomebrewUpdates />}
       </div>
-      <p className={styles.muted}>
-        {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
-      </p>
-      {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}
+      <div className={settings.about}>
+        <p className={styles.muted}>
+          {t('settings.about', { title: appinfo.title, version: appinfo.version, id: appinfo.id })}
+        </p>
+        {service.tmdb && prefs.tmdb && <p className={styles.muted}>{t('settings.tmdbCredit')}</p>}
+      </div>
       {open === 'streamChoice' && (
         <Menu
           focusKey="settings-stream-choice-menu"

@@ -2,6 +2,19 @@ import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { APP_URL, expectFocus, press, pressBack } from './tv';
 
+/**
+ * Whether a season tab sits wholly inside the row that clips it. Playwright's
+ * own visibility checks miss a tab slid out of its row, which still draws on
+ * the page, only hidden by the row's overflow.
+ */
+function tabInsideItsRow(page: Page, index: number): Promise<boolean> {
+  return page.locator(`[data-focus-key="details-season-${index}"]`).evaluate((tab) => {
+    const row = tab.parentElement!.parentElement!.getBoundingClientRect();
+    const box = tab.getBoundingClientRect();
+    return box.left >= row.left && box.right <= row.right;
+  });
+}
+
 test('Home builds Netflix-style rows from Cinemeta', async ({ page }) => {
   const requests = await mockAddons(page);
   await page.goto(APP_URL);
@@ -109,11 +122,14 @@ test('a series opens on season 1, and seasons switch as focus moves', async ({ p
   await press(page, 'ArrowUp', 'details-episodes-5');
   for (let n = 4; n >= 0; n--) await press(page, 'ArrowUp', `details-episodes-${n}`);
   await press(page, 'ArrowUp', 'details-season-0');
+  await expect.poll(() => tabInsideItsRow(page, 0)).toBe(true);
   await press(page, 'ArrowRight', 'details-season-1');
   await expect(page.getByText('1. Season 2 episode 1')).toBeVisible();
+  await expect.poll(() => tabInsideItsRow(page, 1)).toBe(true);
   await press(page, 'ArrowRight', 'details-season-2');
   await expect(page.getByText('1. Behind the scenes')).toBeVisible();
   await expect(page.locator('[data-focus-key="details-season-2"]')).toHaveText('Specials');
+  await expect.poll(() => tabInsideItsRow(page, 2)).toBe(true);
 
   await press(page, 'ArrowDown', 'details-episodes-0');
   // No stream addon is installed, so the player says so.

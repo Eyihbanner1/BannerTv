@@ -1,0 +1,359 @@
+import { expect, type Page, test } from '@playwright/test';
+import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
+import { mockPlayback, type PlaybackOptions, readKv, seedStreamAddon } from './play';
+import { mockServices, traktSignIn } from './services';
+import {
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  focusedKey,
+  openSection,
+  press,
+  pressBack,
+  railSections,
+} from './tv';
+
+/** The first episode of the series on Home, as Stremio names it, and the one after it. */
+const EPISODE = 'tt8000001:1:1';
+const NEXT_EPISODE = 'tt8000001:1:2';
+
+/** A 10 minute file, so an intro skipped early on is far from Up Next. */
+const LONG_EPISODE = [
+  {
+    name: 'Test Streams\n1080p',
+    description: 'Open Movie 1080p WEB-DL x264\n💾 1.4 GB ⚡ Cached',
+    path: '/long-episode-1080p.webm',
+  },
+];
+
+/**
+ * IntroDB's end credits for the 40 s file: from 4 s to its end, so they
+ * start well before Up Next's last 30 seconds, and fit this very release.
+ */
+const CREDITS: PlaybackOptions['skips'] = { [EPISODE]: { outro: [4, 40] } };
+
+/** What the player's video element is doing. */
+function video(page: Page) {
+  return page.locator('video:not([aria-hidden])').evaluate((element: HTMLVideoElement) => ({
+    playing: !element.paused && element.currentTime > 0,
+    time: element.currentTime,
+  }));
+}
+
+/** Plays the series' first episode from its page, as the viewer would. */
+async function playFirstEpisode(page: Page) {
+  await page.goto(APP_URL);
+  await playFirstEpisodeFromHome(page);
+}
+
+/** The same, from Home's first tile, with no reload. */
+async function playFirstEpisodeFromHome(page: Page) {
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await press(page, 'ArrowDown', `${SERIES_ROW}-tile-0`);
+  await press(page, 'Enter', 'details-episodes-0');
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+}
+
+const focused = (page: Page) => page.locator('[data-focused="true"]');
+
+test('as the credits start, Up Next offers the next episode or Watch credits, and never starts it by itself', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, { skips: CREDITS });
+  await playFirstEpisode(page);
+
+  const card = page.getByRole('dialog', { name: 'Up next' });
+  const playNow = page.locator('[data-focus-key="player-upnext-play"]');
+  const dismiss = page.locator('[data-focus-key="player-upnext-dismiss"]');
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+  // Before the last 30 seconds it counts nothing: the ending is the viewer's to see.
+  expect((await video(page)).time).toBeLessThan(10);
+  await expect(card.getByText('Next episode', { exact: true })).toBeVisible();
+  await expect(card.getByText('S1:E2', { exact: true })).toBeVisible();
+  await expect(playNow).toHaveAttribute('aria-label', 'Play now. Next episode');
+  await expect(dismiss).toHaveText('Watch credits');
+
+  // Watch credits: the card goes and the credits play on.
+  await press(page, 'ArrowRight', 'player-upnext-dismiss');
+  await press(page, 'Enter', 'player-surface');
+  await expect(card).toHaveCount(0);
+  expect((await video(page)).playing).toBe(true);
+
+  // The last 30 seconds count down to the real end, as ever, with Keep watching.
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+  await expect(card.getByText(/^Next episode in \d+ s$/)).toBeVisible();
+  await expect(dismiss).toHaveText('Keep watching');
+  // The same episode played on: nothing started by itself at the credits.
+  expect((await video(page)).time).toBeGreaterThan(9);
+});
+
+test('left in the credits, the episode counts as watched and Continue Watching offers the next one', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, { skips: CREDITS });
+  await playFirstEpisode(page);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+
+  // Back on the card watches the credits; Back again leaves.
+  await pressBack(page);
+  await expect(page.getByRole('dialog', { name: 'Up next' })).toHaveCount(0);
+  await pressBack(page);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', /^details-/);
+
+  // Kept at its end, as Mark as watched keeps it, so it never resumes in the credits.
+  await expect
+    .poll(async () => {
+      const saved = (await readKv(page, 'progress')) as Array<{
+        videoId: string;
+        position: number;
+        duration: number;
+        watched: boolean;
+      }>;
+      const entry = saved.find((item) => item.videoId === EPISODE);
+      return entry && { watched: entry.watched, atEnd: entry.position === entry.duration };
+    })
+    .toEqual({ watched: true, atEnd: true });
+
+  await page.goto(APP_URL);
+  await expectFocus(page, 'home-continue-tile-0');
+  await expectFocusLabel(page, 'Morevna Project, Next: S1:E2');
+});
+
+test('closed in the credits, Trakt hears that the episode was seen', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { kv: { trakt: traktSignIn() } });
+  await mockPlayback(page, { skips: CREDITS });
+  const { trakt } = await mockServices(page, { trakt: true });
+  await playFirstEpisode(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/start').length).toBe(1);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+
+  // A few seconds into the 40 s file, but past where the credits start: 100%, not about 15%.
+  await pressBack(page);
+  await pressBack(page);
+  await expect.poll(() => trakt.callsTo('/scrobble/stop').length).toBe(1);
+  expect(trakt.callsTo('/scrobble/stop')[0]!.body!.progress).toBe(100);
+});
+
+test('with "Start next at credits" on, the card counts ten seconds from the credits and plays the next episode', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const mock = await mockPlayback(page, { skips: CREDITS });
+
+  // Off until turned on, in Settings under "Still watching?".
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  await press(page, 'ArrowDown', 'settings-probing');
+  await press(page, 'ArrowDown', 'settings-subtitle-style');
+  await press(page, 'ArrowDown', 'settings-still-watching');
+  await press(page, 'ArrowDown', 'settings-next-at-credits');
+  const setting = page.locator('[data-focus-key="settings-next-at-credits"]');
+  await expect(setting).toHaveAttribute('aria-label', 'Start next episode at the credits: Off');
+  await page.keyboard.press('Enter');
+  await expect(setting).toHaveAttribute('aria-label', 'Start next episode at the credits: On');
+
+  // Back to Home by the rail, as the viewer goes: a reload just after the change can lose
+  // its write to storage on a busy machine (as search.spec.ts and streams-filter.spec.ts say).
+  await press(page, 'ArrowLeft', 'rail-settings');
+  const sections = await railSections(page);
+  for (const item of sections.slice(0, sections.indexOf('settings')).reverse()) {
+    await press(page, 'ArrowUp', `rail-${item}`);
+  }
+  await page.keyboard.press('Enter');
+  await playFirstEpisodeFromHome(page);
+  const card = page.getByRole('dialog', { name: 'Up next' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+  const label = card.getByText(/^Next episode in \d+ s$/);
+  await expect(label).toBeVisible();
+  const count = Number(/(\d+)/.exec((await label.textContent()) ?? '')?.[1]);
+  const { time } = await video(page);
+  // Ten seconds from where the credits came up (4 s), not the 30 left to the end.
+  expect(count).toBeLessThanOrEqual(10);
+  expect(Math.abs(count - (14 - time))).toBeLessThanOrEqual(1.5);
+  await expect(page.locator('[data-focus-key="player-upnext-dismiss"]')).toHaveText(
+    'Watch credits',
+  );
+
+  // The next episode starts as the count runs out, long before the file's end.
+  let latest = 0;
+  await expect
+    .poll(
+      async () => {
+        const now = (await video(page)).time;
+        if (now >= latest) latest = now;
+        return mock.streams.includes(`series/${NEXT_EPISODE}`) && now < latest;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(true);
+  expect(latest).toBeLessThan(20);
+});
+
+/** Presses `key` until `focusKey` has focus, a few times at most. */
+async function pressUntil(page: Page, key: string, focusKey: string) {
+  for (let i = 0; i < 8 && (await focusedKey(page)) !== focusKey; i++) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(150);
+  }
+  await expectFocus(page, focusKey);
+}
+
+test('with "Start next at credits" on, a sleep timer set to stop at this end stops the count for good, even once turned off', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { nextAtCredits: true } });
+  const mock = await mockPlayback(page, { skips: CREDITS });
+  await playFirstEpisode(page);
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-upnext-play', {
+    timeout: 10000,
+  });
+  await expect(
+    page.getByRole('dialog', { name: 'Up next' }).getByText(/^Next episode in \d+ s$/),
+  ).toBeVisible();
+
+  // Paused, nothing counts. In Info the sleep timer is set to the end of the episode, then off.
+  await page.keyboard.press('Pause');
+  await expectFocus(page, 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await pressUntil(page, 'ArrowRight', 'player-info-button');
+  await press(page, 'Enter', 'player-info-about');
+  await press(page, 'ArrowUp', 'player-info-tab-about');
+  await press(page, 'ArrowRight', 'player-info-tab-sleep');
+  const tab = page.locator('[data-focus-key="player-info-tab-sleep"]');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Off');
+  await press(page, 'ArrowDown', 'player-info-sleep-off');
+  await pressUntil(page, 'ArrowRight', 'player-info-sleep-end');
+  await page.keyboard.press('Enter');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, End of episode');
+  await pressUntil(page, 'ArrowLeft', 'player-info-sleep-off');
+  await page.keyboard.press('Enter');
+  await expect(tab).toHaveAttribute('aria-label', 'Sleep timer, Off');
+
+  // Playing again, the episode plays on through its credits: the count does not come back.
+  await pressBack(page);
+  await pressBack(page);
+  await expectFocus(page, 'player-info-button');
+  await press(page, 'ArrowUp', 'player-play');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // Its streams are fetched ahead, as always, but it never starts: the time only goes on.
+  let latest = 0;
+  let restarted = false;
+  await expect
+    .poll(
+      async () => {
+        const now = (await video(page)).time;
+        if (now < latest - 1) restarted = true;
+        latest = Math.max(latest, now);
+        return latest;
+      },
+      { timeout: 20000 },
+    )
+    .toBeGreaterThan(20);
+  expect(restarted).toBe(false);
+  expect(mock.streams).toContain(`series/${NEXT_EPISODE}`);
+});
+
+test('a skip by hand over the intro is learned, and the next episode offers Skip intro there', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  // IntroDB has no timings for either episode.
+  await mockPlayback(page, { streams: { [EPISODE]: LONG_EPISODE, [NEXT_EPISODE]: LONG_EPISODE } });
+  await playFirstEpisode(page);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
+
+  // Six presses of Right add up to a minute, landing once.
+  const from = (await video(page)).time;
+  for (let press = 0; press < 6; press++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 55);
+  const landed = (await video(page)).time;
+  expect(await readKv(page, 'learnedIntros')).toBeUndefined();
+
+  // Once it has played on past where it landed, the skip was the intro.
+  await expect
+    .poll(
+      async () =>
+        (await readKv(page, 'learnedIntros')) as Record<string, { start: number; end: number }>,
+      { timeout: 25000 },
+    )
+    .toMatchObject({ tt8000001: { start: expect.any(Number), end: expect.any(Number) } });
+  const learned = (
+    (await readKv(page, 'learnedIntros')) as Record<string, { start: number; end: number }>
+  )['tt8000001']!;
+  expect(Math.abs(learned.start - from)).toBeLessThan(1);
+  expect(Math.abs(learned.end - landed)).toBeLessThan(2);
+
+  // The next episode offers Skip intro at the same place, and OK skips it.
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowRight', 'player-fwd10');
+  await press(page, 'ArrowRight', 'player-next');
+  await page.keyboard.press('Enter');
+  const skip = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(skip).toBeVisible({ timeout: 10000 });
+  expect((await video(page)).time).toBeLessThan(learned.end);
+  await expectFocus(page, 'player-skip-button');
+  await page.keyboard.press('Enter');
+  await expect(skip).toHaveCount(0);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(learned.end - 1);
+});
+
+test('a skip undone at once teaches nothing', async ({ page }) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, { streams: { [EPISODE]: LONG_EPISODE } });
+  await playFirstEpisode(page);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(1);
+
+  const from = (await video(page)).time;
+  for (let press = 0; press < 6; press++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 55);
+  // Straight back: the viewer wanted the intro after all.
+  for (let press = 0; press < 6; press++) await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(from + 10);
+  await expect
+    .poll(async () => (await video(page)).time, { timeout: 20000 })
+    .toBeGreaterThan(from + 16);
+  expect(await readKv(page, 'learnedIntros')).toBeUndefined();
+});
+
+test('a skip by hand in an episode whose intro IntroDB times teaches nothing', async ({ page }) => {
+  test.slow();
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page, {
+    streams: { [EPISODE]: LONG_EPISODE },
+    skips: { [EPISODE]: { intro: [1, 6] } },
+  });
+  await playFirstEpisode(page);
+  // Past IntroDB's intro, the viewer passes over a scene.
+  await expect.poll(async () => (await video(page)).time, { timeout: 15000 }).toBeGreaterThan(7);
+  const from = (await video(page)).time;
+  for (let press = 0; press < 6; press++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(from + 55);
+  await expect
+    .poll(async () => (await video(page)).time, { timeout: 25000 })
+    .toBeGreaterThan(from + 60 + 16);
+  expect(await readKv(page, 'learnedIntros')).toBeUndefined();
+});

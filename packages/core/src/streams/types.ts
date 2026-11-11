@@ -121,8 +121,12 @@ export type StreamAction =
   | { kind: 'external' }
   | {
       kind: 'unavailable';
-      /** torrent: needs a streaming server. proxy-headers: needs headers the player can't send. */
-      reason: 'torrent' | 'proxy-headers';
+      /**
+       * torrent: needs a streaming server. proxy-headers: needs headers the
+       * player can't send. notice: the addon's message posing as a stream
+       * ("Streams temporarily unavailable"), with no video behind it.
+       */
+      reason: 'torrent' | 'proxy-headers' | 'notice';
     };
 
 export interface StreamAssessment {

@@ -36,6 +36,11 @@ export interface Preferences {
   tmdb: boolean;
   /** The third episode in a row to start by itself asks "Still watching?" first. */
   stillWatching: boolean;
+  /**
+   * Up Next starts the next episode a few seconds into the credits, where
+   * IntroDB marks them, instead of at the end. Off: it only offers it there.
+   */
+  nextAtCredits: boolean;
   // Languages and picture (Settings > Languages and picture, improvements list PL6).
   /**
    * always: subtitles in subtitleLanguage show for every title. foreign: only
@@ -65,6 +70,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subtitleStyle: { size: 'medium', colour: 'white', background: 'outline', position: 'bottom' },
   tmdb: true,
   stillWatching: true,
+  nextAtCredits: false,
   subtitleWhen: 'always',
   maxResolution: null,
   avoidHdr: false,
@@ -138,6 +144,8 @@ export function readPreferences(raw: string | null): Preferences {
     tmdb: typeof stored.tmdb === 'boolean' ? stored.tmdb : d.tmdb,
     stillWatching:
       typeof stored.stillWatching === 'boolean' ? stored.stillWatching : d.stillWatching,
+    nextAtCredits:
+      typeof stored.nextAtCredits === 'boolean' ? stored.nextAtCredits : d.nextAtCredits,
     subtitleWhen: pick(stored.subtitleWhen, ['always', 'foreign'] as const, d.subtitleWhen),
     maxResolution:
       stored.maxResolution === null

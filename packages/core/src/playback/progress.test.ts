@@ -122,6 +122,34 @@ describe('createProgressStore', () => {
     expect(rewatch.position).toBe(40);
   });
 
+  it('counts an episode watched from its credits, kept at its end so it never resumes in them', async () => {
+    const progress = createProgressStore({ storage: memoryKeyValueStore(), now: () => 0 });
+    await progress.load();
+    const episode = (position: number, creditsAt?: number): ProgressUpdate => ({
+      metaId: 'tt2',
+      type: 'series',
+      videoId: 'tt2:1:1',
+      position,
+      duration: 2600,
+      ...(creditsAt !== undefined ? { creditsAt } : {}),
+    });
+    // Long credits start well before the watched share.
+    expect(progress.record(episode(2199, 2200))).toMatchObject({ position: 2199, watched: false });
+    expect(progress.record(episode(2200, 2200))).toMatchObject({ position: 2600, watched: true });
+    expect(progress.resumeAt('tt2:1:1')).toBeUndefined();
+    // Back before the credits, it stays watched and resumes there, as any rewatch does.
+    expect(progress.record(episode(1500, 2200))).toMatchObject({ position: 1500, watched: true });
+    expect(progress.resumeAt('tt2:1:1')).toBe(1500);
+    // A mark that makes no sense for the file changes nothing.
+    for (const creditsAt of [0, -5, 2600, 3000, NaN]) {
+      expect(
+        progress.record({ ...episode(2300, creditsAt), videoId: `x${creditsAt}` }),
+      ).toMatchObject({ position: 2300, watched: false });
+    }
+    // Nor is the mark saved.
+    expect(progress.get('tt2:1:1')).not.toHaveProperty('creditsAt');
+  });
+
   it('keeps a video off Continue Watching while it is recorded so, across launches too', async () => {
     const storage = memoryKeyValueStore();
     const progress = createProgressStore({ storage, now: () => 1000 });

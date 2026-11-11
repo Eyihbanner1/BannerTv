@@ -622,6 +622,38 @@ test('with only torrents, the player names the addon and says to set up a debrid
   ).toBeVisible();
 });
 
+test("with only the addon's message instead of a stream, the player shows its words and opens nothing", async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  const playback = await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [
+        {
+          name: 'Test Streams',
+          description: 'Streams temporarily unavailable - try again shortly',
+          path: '/unavailable',
+        },
+      ],
+    },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-problem-streams');
+  await expect(page.getByText('No stream could play')).toBeVisible();
+  await expect(
+    page.getByText('Test Streams says: “Streams temporarily unavailable - try again shortly”'),
+  ).toBeVisible();
+  await expect(
+    page.getByText("That's a message from the addon, not a video.", { exact: false }),
+  ).toBeVisible();
+  // The message was never handed to the player as if it were a video.
+  expect(playback.media).not.toContain('/unavailable');
+  // All streams lists it, and says what it is.
+  await press(page, 'Enter', 'streams-item-0');
+  await expect(page.getByText('A message from the addon, not a video.')).toBeVisible();
+});
+
 test('Play passes over a dub for a release in the language wanted, and Audio can switch back to it', async ({
   page,
 }) => {
@@ -720,6 +752,7 @@ test('Languages and picture in Settings: the highest picture keeps Play within i
     'settings-probing',
     'settings-subtitle-style',
     'settings-still-watching',
+    'settings-next-at-credits',
     'settings-diagnostics',
     'settings-lab',
     'settings-stream-helper',

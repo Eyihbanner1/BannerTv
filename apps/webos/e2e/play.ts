@@ -218,9 +218,20 @@ export interface PlaybackOptions {
   subtitleGates?: Readonly<Record<string, Promise<unknown>>>;
   /** OpenSubtitles answers once this settles, so a test decides when. Default at once. */
   subtitlesGate?: Promise<unknown>;
-  /** IntroDB's timings, in seconds, by video id (tt…:season:episode). Others have none. */
+  /**
+   * IntroDB's timings, in seconds, by video id (tt…:season:episode): the
+   * intro, recap, end credits (outro) and a scene after them. Others have none.
+   */
   skips?: Readonly<
-    Record<string, { intro?: readonly [number, number]; recap?: readonly [number, number] }>
+    Record<
+      string,
+      {
+        intro?: readonly [number, number];
+        recap?: readonly [number, number];
+        outro?: readonly [number, number];
+        postCredits?: readonly [number, number];
+      }
+    >
   >;
 }
 
@@ -493,7 +504,12 @@ export async function mockPlayback(
     const timed = options.skips?.[id];
     const segment = (span?: readonly [number, number]) =>
       span ? { start_sec: span[0], end_sec: span[1], start_ms: span[0] * 1000 } : null;
-    return json(route, { intro: segment(timed?.intro), recap: segment(timed?.recap), outro: null });
+    return json(route, {
+      intro: segment(timed?.intro),
+      recap: segment(timed?.recap),
+      outro: segment(timed?.outro),
+      post_credits: segment(timed?.postCredits),
+    });
   });
 
   await page.route(/^https:\/\/subs\.example\.com\//, async (route) => {

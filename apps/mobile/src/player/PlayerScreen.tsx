@@ -3,7 +3,15 @@ import {
   BACK_TO_MS,
   bingeEntry,
   bingeHint,
+  type CreditsCard,
+  creditsCardAt,
+  creditsCount,
+  creditsCue,
   endAction,
+  guessIntro,
+  guessSettles,
+  introKnown,
+  type IntroGuess,
   inLastStretch,
   languageName,
   nextVideo,
@@ -21,13 +29,15 @@ import {
   skipRearms,
   type StreamEntry,
   UP_NEXT_AFTER_END_S,
+  UP_NEXT_BEFORE_END_S,
+  upNextStage,
 } from '@bannertv/core';
 import type { MetaDetail, MetaPreview, Video } from '@bannertv/protocol';
 import { addonClient } from '@tv/data/addons';
 import { addonsDidntAnswer } from '@tv/data/describe';
 import { playedVideos, progress, releaseMemory, rememberedRelease } from '@tv/data/playback';
 import { preferences } from '@tv/data/preferences';
-import { useSkipSegments } from '@tv/data/skips';
+import { learnedIntros, useEpisodeMarks } from '@tv/data/skips';
 import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
@@ -47,7 +57,7 @@ import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { motion } from '@brand/tokens/design';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import { VideoView } from 'expo-video';
+import type { VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -55,11 +65,13 @@ import {
   AppState,
   BackHandler,
   type GestureResponderEvent,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack, openPlayer, type PlayerRoute, remembersPlace } from '../nav/routes';
@@ -84,11 +96,20 @@ import {
 } from './phone-host';
 import { ScenePreview, sceneFrames } from './ScenePreview';
 import { SeekBar } from './SeekBar';
+import { Picture, PictureNote, noteScreen, pictureNow } from './Picture';
 import {
-  contentFitFor,
-  type PictureFit,
+  ASSUMED_VIDEO,
+  fingersOf,
+  movePinch,
+  type Pinch,
+  pictureChoice,
+  type PictureFrame,
+  type PictureKind,
   pictureFitStore,
-  pinchFit,
+  sameFrame,
+  snapOf,
+  startPinch,
+  switchedFrame,
   touchSpread,
 } from './picture-fit';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
@@ -125,8 +146,16 @@ const BACK_TO_TOP = space.m + touch.min + space.s;
 const FIT_NOTE_MS = 1500;
 const noop = () => () => undefined;
 
-/** Whole picture or filling the screen: this phone's choice for each title (picture-fit.ts). */
+/** The picture's size and place: this phone's choice for each title (picture-fit.ts). */
 const pictureFits = pictureFitStore(localStorage);
+
+/**
+ * In a browser (the web build) fingers on the player are the player's, as on the phone, where
+ * nothing else takes them: two would otherwise zoom the whole page instead of the picture.
+ * React Native has no such style, so its types do not know it; React Native for Web does.
+ */
+const ownTouches =
+  Platform.OS === 'web' ? ({ touchAction: 'none' } as unknown as ViewStyle) : undefined;
 
 type Panel =
   | 'tracks'
@@ -171,9 +200,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const pip = useSyncExternalStore(pictureInPicture.subscribe, pictureInPicture.get);
   const videoView = useRef<VideoView>(null);
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
-  // A series' episodes share the show's choice: the route's metaId is the show's for each.
-  const pictureFit = useMemo(() => pictureFits.title(metaId), [metaId]);
-  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
 
   // The title's full record, for the episode list and the Continue Watching card. A sports
   // event's page comes from the addon that listed it, never another one.
@@ -233,6 +259,15 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   useEffect(() => reportScreen('player'), []);
 
+  // A series' episodes share the show's choice: the route's metaId is the show's for each. A
+  // title never chosen for opens as the last of its kind was left: a match or a live channel
+  // (Stremio's tv type, or any stream that turns out to be live) as the last broadcast, a film
+  // or series as the last film.
+  const pictureKind: PictureKind =
+    sportsEvent || titleType === 'tv' || state.live ? 'live' : 'film';
+  const pictureFit = useMemo(() => pictureFits.title(metaId, pictureKind), [metaId, pictureKind]);
+  const fit = useSyncExternalStore(pictureFit.subscribe, pictureFit.get);
+
   const waiting = !nothing && (state.status === 'idle' || state.status === 'loading');
   const problem = nothing || state.status === 'failed';
   const problemWords = problem ? problemText(t, playProblem(nothing, finderState, state)) : null;
@@ -289,6 +324,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     void videoView.current?.startPictureInPicture();
   };
 
+  // What IntroDB marks in this episode, as on the TV: the intro and recap (with an intro
+  // learned from the viewer's own skips where it has none) and the end credits, for Up Next
+  // when its mark fits this file. Never for sports.
+  const marks = useEpisodeMarks(titleType, metaId, videoId, !sportsEvent);
+  const cue = state.clip || state.live ? undefined : creditsCue(marks.credits, state.duration);
+
   const subtitles = useSubtitles(
     titleType,
     videoId,
@@ -305,7 +346,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     { type: titleType, metaId, videoId },
     finder.runtimeSeconds,
     finder.knownRuntimeSeconds,
+    cue?.start,
   );
+  // The progress saved counts the episode watched from the credits.
+  const creditsAt = cue?.start;
+  useEffect(() => session?.markCredits(creditsAt), [session, creditsAt]);
 
   // The language the viewer chose before, once per stream and engine.
   const audioDecided = useRef('');
@@ -342,6 +387,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   );
   const current = meta?.videos.find((video) => video.id === videoId);
   const offersNext = !!next && !state.live && !state.clip;
+  // As long before the credits pill as before the last 30 seconds' count.
+  const toCredits = cue ? cue.start - state.position : Infinity;
   // The sleep timer, as on the TV: as it runs out it closes what is open and pauses.
   const sleep = useSleepTimer(metaId, session, state, offersNext, pip, () => {
     setPanel(null);
@@ -350,10 +397,14 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const keepSleep = sleep.carryOn;
   useEffect(() => {
     if (!next) return;
-    if (ended || (state.duration > 0 && state.duration - state.position <= PREFETCH_NEXT_S)) {
+    if (
+      ended ||
+      (state.duration > 0 && state.duration - state.position <= PREFETCH_NEXT_S) ||
+      toCredits <= PREFETCH_NEXT_S - UP_NEXT_BEFORE_END_S
+    ) {
       streamFinder(titleType, next.id).start();
     }
-  }, [next, ended, state.duration, state.position, titleType]);
+  }, [next, ended, state.duration, state.position, titleType, toCredits]);
 
   const playEpisode = useCallback(
     (target: Video) => {
@@ -382,13 +433,80 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const [askAtEnd, setAskAtEnd] = useState<boolean | null>(null);
   const [afterEnd, setAfterEnd] = useState<number | null>(null);
   const [countSeen, setCountSeen] = useState(false);
-  const held = panel !== null || waiting || problem || scrubbing || sleep.asleep;
+  // A skip still adding up (the 10 s buttons, double taps, below) holds Up Next as a sheet
+  // does, as on the TV: a count does not run out under it and start the next episode.
+  const [pending, setPending] = useState<PendingSkip | null>(null);
+  const held =
+    panel !== null || waiting || problem || scrubbing || pending !== null || sleep.asleep;
   const inStretch = offersNext && inLastStretch(state.position, state.duration, state.rate);
   // Not when the sleep timer stops at this end.
   const counting = inStretch && !dismissed && !held && !sleep.sleepsHere;
+  // As the credits start, the pill offers the next episode or Watch credits; with "Start next
+  // at credits" on and a mark for this very release, it counts a few seconds and plays it,
+  // unless "Still watching?" is due. Otherwise the last 30 seconds count down as before.
+  // Neither when the sleep timer stops at this end, as on the TV.
+  const stage = offersNext
+    ? upNextStage(state.position, state.duration, state.rate, cue?.start)
+    : 'none';
+  const [creditsCard, setCreditsCard] = useState<CreditsCard | null>(null);
+  if (!waiting) {
+    const counts = () =>
+      prefs.nextAtCredits &&
+      !!cue?.startsNext &&
+      !sleep.sleepsHere &&
+      !(
+        prefs.stillWatching &&
+        askStillWatching({ autoplaysSinceInput: autoplaysSinceInput(), sinceInputMs: sinceInput() })
+      );
+    let card =
+      offersNext && !ended ? creditsCardAt(creditsCard, state.position, cue?.start, counts) : null;
+    // On a stream the mark is not exact for, or once the sleep timer stops at this end, the count
+    // stops for good: back on the marked one, or with the timer off or put off, the pill only
+    // offers, never starting the next episode at once.
+    if (card && card.counts && (!cue?.startsNext || sleep.sleepsHere)) {
+      card = { ...card, counts: false };
+    }
+    if (card !== creditsCard) setCreditsCard(card);
+  }
+  // Only while the file playing is the release marked: another stream cut a little
+  // differently stops the count, and the ending plays out.
+  const creditsCounts =
+    !!creditsCard &&
+    creditsCard.counts &&
+    !!cue?.startsNext &&
+    !creditsCard.gone &&
+    !dismissed &&
+    !sleep.sleepsHere;
+  const creditsUp =
+    !!creditsCard &&
+    !creditsCard.gone &&
+    !ended &&
+    !held &&
+    !sleep.sleepsHere &&
+    playing &&
+    (stage === 'credits' || creditsCounts);
+  const creditsLeft =
+    creditsCard && creditsCounts
+      ? creditsCount(creditsCard, state.position, state.duration, state.rate)
+      : null;
+  // Run out while something held it: it counts no more, and the ending plays out.
+  if (creditsCard && creditsCounts && creditsLeft === 0 && !creditsUp && !waiting) {
+    setCreditsCard({ ...creditsCard, counts: false });
+  }
+  const creditsDue = creditsUp && creditsCounts && creditsLeft === 0;
+  useEffect(() => {
+    if (!creditsDue || !next) return;
+    countAutoplay();
+    playEpisode(next);
+    // Only the count running out matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditsDue]);
   const count = ended
     ? (afterEnd ?? UP_NEXT_AFTER_END_S)
     : (secondsToEnd(state.position, state.duration, state.rate) ?? 0);
+  // What Next episode counts with the controls up: to the next episode at the credits, or to
+  // the end, or nothing over credits it only offers it over.
+  const nextCount = creditsUp ? creditsLeft : counting ? count : null;
   if (dismissed && !waiting && !ended && rearms(state.position, state.duration, state.rate)) {
     setDismissed(false);
   }
@@ -456,6 +574,12 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         setPanel(null);
         return true;
       }
+      // Over the credits pill (the controls hide it), or a Next episode count it stops: Watch
+      // credits. With the controls up over a pill that only offers, Back leaves, as before.
+      if (creditsUp && (!controls || creditsCounts)) {
+        setCreditsCard((card) => card && { ...card, gone: true });
+        return true;
+      }
       if (counting || (ended && decision === 'hold')) {
         setDismissed(true);
         return true;
@@ -467,7 +591,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       return false;
     });
     return () => subscription.remove();
-  }, [panel, counting, ended, decision, warningUp, dismissSleepWarning]);
+  }, [
+    panel,
+    counting,
+    ended,
+    decision,
+    creditsUp,
+    controls,
+    creditsCounts,
+    warningUp,
+    dismissSleepWarning,
+  ]);
 
   // Back to: after a jump of two minutes or more, whichever way it was made, a pill offers for
   // a few seconds to go back to where the viewer was. A new big jump replaces the offer, and
@@ -478,15 +612,41 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     const timer = setTimeout(() => setBackTo(null), BACK_TO_MS);
     return () => clearTimeout(timer);
   }, [backTo]);
-  /** Goes to `to` from `from`: where the video was, trusted, as the jump began. */
+  // A skip by hand that looks like the intro, until playback shows it was (learned-intros.ts):
+  // one of an intro's length early in an episode is learned once playback goes on from where
+  // it landed, and the series' next episode offers Skip intro at the same place, as on the TV.
+  const introGuess = useRef<IntroGuess | null>(null);
+  const learnsIntro = titleType === 'series' && !sportsEvent && !state.live && !state.clip;
+  /**
+   * Goes to `to` from `from`: where the video was, trusted, as the jump began. `byHand`: a tap,
+   * swipe or the bar, which may be the intro skipped; not Skip intro or Skip recap.
+   */
   const jump = useCallback(
-    (from: number, to: number) => {
+    (from: number, to: number, byHand = true) => {
       if (!session) return;
       session.seek(to);
       if (!session.get().live && offersBackTo(from, to)) setBackTo({ at: from });
+      if (!byHand) return;
+      // A jump from inside IntroDB's recap is that recap's.
+      const inRecap = marks.segments.some(
+        (segment) => segment.kind === 'recap' && from >= segment.start && from < segment.end,
+      );
+      // Nor in an episode whose intro IntroDB times or says it has none.
+      if (!learnsIntro || introKnown(marks)) introGuess.current = null;
+      else if (!inRecap) introGuess.current = guessIntro(introGuess.current, from, to);
     },
-    [session],
+    [session, marks, learnsIntro],
   );
+  const position = state.position;
+  useEffect(() => {
+    const guess = introGuess.current;
+    if (!guess || waiting) return;
+    const verdict = guessSettles(guess, position);
+    if (verdict === 'wait') return;
+    introGuess.current = null;
+    // IntroDB may have answered since the skip: its own word wins.
+    if (verdict === 'learn' && !introKnown(marks)) learnedIntros.learn(metaId, guess);
+  }, [position, waiting, metaId, marks]);
 
   // Taps: one shows or hides the controls; two on a side start a skip of ten seconds, and each
   // tap after that adds ten more (tap-skip.ts). The 10 s buttons add to the same total. It
@@ -497,7 +657,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // go: what it counted from is no longer playing, or the viewer has chosen another way.
   const lastTap = useRef<{ at: number; side: TapSide } | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [pending, setPending] = useState<PendingSkip | null>(null);
   const skipsAddUp =
     !!session && !waiting && !problem && !state.live && panel === null && !scrubbing;
   if (pending && !skipsAddUp) setPending(null);
@@ -608,29 +767,49 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       touchSpread(event.nativeEvent.touches) !== null,
   };
 
-  // Zoom to fill: the whole frame (fit), or the picture covering the screen with what overhangs
-  // cut off (fill), so a wide film kept in a TV-shaped frame with its black bars fills the
-  // phone's width. Two fingers spreading on the picture fill it and closing them fits it, as
-  // other phone players do; More has the same switch. The phone keeps the choice for the title.
-  const [fitNote, setFitNote] = useState<PictureFit | null>(null);
+  // The picture's size and place (picture-fit.ts): anything from the whole frame (fit) through
+  // covering the screen (fill) to a little beyond, so a wide film kept in a TV-shaped frame with
+  // its black bars fills the phone's width. Two fingers pinch it to size as they move, landing
+  // on fit and fill with a light buzz, and where it overhangs, moving them together moves it, so
+  // the viewer chooses what is cut off: the score at the top of a match, say. More has a switch
+  // between fit and fill. The phone keeps the choice for the title as the fingers lift.
+  const picture = useMemo(() => pictureNow(), []);
+  // The note says how the picture is while the fingers move it (held), and for a moment after.
+  const [fitNote, setFitNote] = useState<{ held: boolean } | null>(null);
   useEffect(() => {
-    if (!fitNote) return;
+    if (!fitNote || fitNote.held) return;
     const timer = setTimeout(() => setFitNote(null), FIT_NOTE_MS);
     return () => clearTimeout(timer);
   }, [fitNote]);
-  const changeFit = (next: PictureFit) => {
-    if (next === pictureFit.get()) return;
+  const changeFit = (next: PictureFrame) => {
+    if (sameFrame(next, pictureFit.get())) return;
     pictureFit.set(next);
-    setFitNote(next);
+    setFitNote({ held: false });
   };
-  const zoomValue = t(fit === 'fill' ? 'common.on' : 'common.off');
-  // How far apart the fingers were as the pinch began; null once it has decided. One change a
-  // pinch, so fingers settling or lifting at the end never undo it.
-  const pinchFrom = useRef<number | null>(null);
+  const choice = pictureChoice(fit);
+  const pictureValue = t(
+    choice === 'fit'
+      ? 'phone.pictureFit'
+      : choice === 'fill'
+        ? 'phone.pictureFill'
+        : 'phone.pictureCustom',
+  );
+  // The pinch under way, from two fingers down to the first lifting; null otherwise.
+  const pinch = useRef<Pinch | null>(null);
   // Not while a stream opens or fails, a panel is open or the film is in its small window.
   const pinchAllowed = shown && !waiting && !problem && !pip && panel === null;
   const wantsPinch = (event: GestureResponderEvent) =>
     pinchAllowed && touchSpread(event.nativeEvent.touches) !== null;
+  // Keeps what the fingers made as the first of them lifts, once, rather than at every move.
+  const endPinch = () => {
+    const ended = pinch.current;
+    pinch.current = null;
+    if (!ended) return;
+    if (!sameFrame(ended.frame, ended.from)) pictureFit.set(ended.frame);
+    picture.set((now) => (now.moving ? { ...now, moving: null } : now));
+    // The note stays a moment longer, then goes.
+    setFitNote((note) => (note?.held ? { held: false } : note));
+  };
   // On the whole screen, so a pinch takes over from whatever the first finger was on: a tap, a
   // swipe or a button, none of which then goes ahead. The seek bar alone keeps its finger.
   const pinchHandlers = {
@@ -640,31 +819,32 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       noteInput();
       clearTimeout(tapTimer.current);
       lastTap.current = null;
-      pinchFrom.current = touchSpread(event.nativeEvent.touches);
+      const fingers = fingersOf(event.nativeEvent.touches);
+      pinch.current = fingers
+        ? startPinch(picture.get().moving ?? pictureFit.get(), fingers)
+        : null;
     },
+    // Each move draws the picture alone (Picture.tsx), not this screen: the frame goes to its
+    // store, and the note is held up once, as the picture first changes.
     onResponderMove: (event: GestureResponderEvent) => {
-      const from = pinchFrom.current;
-      const spread = touchSpread(event.nativeEvent.touches);
-      // Decided already, ended by a lifted finger, or down to one finger.
-      if (from === null || spread === null) return;
-      const wanted = pinchFit(from, spread);
-      if (!wanted) return;
-      pinchFrom.current = null;
-      if (wanted === pictureFit.get()) return;
-      changeFit(wanted);
-      Haptics.selectionAsync().catch(() => undefined);
+      const from = pinch.current;
+      const fingers = fingersOf(event.nativeEvent.touches);
+      const { screen, video } = picture.get();
+      // Ended by a lifted finger, down to one finger, or not measured yet.
+      if (!from || !fingers || !screen) return;
+      const next = movePinch(from, fingers, screen, video ?? ASSUMED_VIDEO);
+      pinch.current = next;
+      if (next.frame === from.frame) return;
+      if (sameFrame(from.frame, from.from)) setFitNote({ held: true });
+      picture.set((now) => ({ ...now, moving: next.frame }));
+      const snap = snapOf(next.frame);
+      if (snap && snap !== snapOf(from.frame)) Haptics.selectionAsync().catch(() => undefined);
     },
-    // A finger lifting ends the pinch, decided or not: one set down again, or the next two of
-    // three, would otherwise be measured against fingers no longer there.
-    onResponderEnd: () => {
-      pinchFrom.current = null;
-    },
-    onResponderRelease: () => {
-      pinchFrom.current = null;
-    },
-    onResponderTerminate: () => {
-      pinchFrom.current = null;
-    },
+    // A finger lifting ends the pinch: one set down again, or the next two of three, would
+    // otherwise be measured against fingers no longer there.
+    onResponderEnd: endPinch,
+    onResponderRelease: endPinch,
+    onResponderTerminate: endPinch,
     // The fingers left on the glass after a pinch never become a swipe or a tap.
     onResponderTerminationRequest: () => false,
   };
@@ -676,7 +856,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.
   // It only offers; it never skips by itself. Never over a clip, a broadcast or sports.
-  const skips = useSkipSegments(titleType, videoId, !sportsEvent);
+  const skips = marks.segments;
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
   // The intro or recap the pill was for, and where it first showed.
@@ -698,7 +878,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     noteInput();
     // A skip still adding up would undo it.
     setPending(null);
-    jump(session.trustedPosition() ?? state.position, skipping.end);
+    jump(session.trustedPosition() ?? state.position, skipping.end, false);
+    // A learned intro skipped can be corrected as the skip it was learned from.
+    introGuess.current = skipping.learned ? { start: skipping.start, end: skipping.end } : null;
   };
   const goBackTo = () => {
     if (!session || !backTo) return;
@@ -706,6 +888,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setPending(null);
     setBackTo(null);
     session.seek(backTo.at);
+    // Going back is not playback going on from a skip: no intro is learned from it.
+    introGuess.current = null;
   };
 
   // The scene preview, for a swipe or a finger on the bar, names the intro or recap it lands in.
@@ -795,11 +979,11 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const clock = useCallback(() => playerClock() ?? element.currentTime, [element]);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
+  // The picture's note, just changed, goes first; never over what the screen says while a
+  // stream opens. It draws itself as the fingers move (Picture.tsx).
+  const pictureNoteUp = !!fitNote && !waiting;
   const toast = (() => {
-    // Just chosen, so first; never over what the screen says while a stream opens.
-    if (fitNote && !waiting) {
-      return t(fitNote === 'fill' ? 'phone.zoomedToFill' : 'phone.fitToScreen');
-    }
+    if (pictureNoteUp) return undefined;
     if (switching && waiting && state.entry === switching.entry) {
       return switching.label
         ? t('player.switchingTo', { quality: switching.label })
@@ -848,19 +1032,23 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   return (
     <View
-      style={styles.screen}
+      style={[styles.screen, ownTouches]}
       onLayout={(event) => {
-        surfaceWidth.current = event.nativeEvent.layout.width;
+        const { width, height } = event.nativeEvent.layout;
+        surfaceWidth.current = width;
+        noteScreen(picture, { width, height });
       }}
       {...pinchHandlers}
     >
       <StatusBar hidden />
       {shown ? (
-        <VideoView
-          ref={videoView}
+        <Picture
+          now={picture}
+          kept={fit}
+          pip={pip}
+          live={pictureKind === 'live'}
+          viewRef={videoView}
           player={phonePlayer()}
-          style={styles.video}
-          contentFit={contentFitFor(fit)}
           nativeControls={false}
           allowsPictureInPicture
           // Home or a swipe away while a film plays keeps it going in a small window.
@@ -1076,8 +1264,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                           style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
                         >
                           <Text style={styles.pillText}>
-                            {counting
-                              ? t('phone.nextIn', { seconds: count })
+                            {nextCount !== null
+                              ? t('phone.nextIn', { seconds: nextCount })
                               : t('phone.nextEpisode')}
                           </Text>
                         </Pressable>
@@ -1157,7 +1345,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       !problem &&
       !pip &&
       !sleep.asleep &&
-      ((counting && playing) || (ended && decision === 'hold')) &&
+      (creditsUp || (counting && playing) || (ended && decision === 'hold')) &&
       next ? (
         <View style={[styles.upNext, { right: Math.max(insets.right, space.xl) }]}>
           <Text style={styles.upNextTitle}>{t('phone.upNext')}</Text>
@@ -1167,10 +1355,21 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
           <View style={styles.upNextButtons}>
             <Button
               kind="primary"
-              label={`${t('phone.playNow')} (${count})`}
+              label={
+                creditsUp && creditsLeft === null
+                  ? t('phone.playNow')
+                  : `${t('phone.playNow')} (${creditsUp ? creditsLeft : count})`
+              }
               onPress={() => playEpisode(next)}
             />
-            <Button label={t('phone.keepWatching')} onPress={() => setDismissed(true)} />
+            {creditsUp ? (
+              <Button
+                label={t('phone.watchCredits')}
+                onPress={() => setCreditsCard((card) => card && { ...card, gone: true })}
+              />
+            ) : (
+              <Button label={t('phone.keepWatching')} onPress={() => setDismissed(true)} />
+            )}
           </View>
         </View>
       ) : null}
@@ -1205,9 +1404,18 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         </View>
       ) : null}
 
-      {toast && !waiting && !pip ? (
+      {(pictureNoteUp || toast) && !waiting && !pip ? (
         <View style={styles.toast} pointerEvents="none">
-          <Text style={styles.toastText}>{toast}</Text>
+          {pictureNoteUp ? (
+            <PictureNote
+              now={picture}
+              kept={fit}
+              textStyle={styles.toastText}
+              hintStyle={styles.toastHint}
+            />
+          ) : (
+            <Text style={styles.toastText}>{toast}</Text>
+          )}
         </View>
       ) : null}
 
@@ -1300,14 +1508,17 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
               ) : null}
               <SleepRow timer={sleep.timer} episode={!!current} onPress={() => setPanel('sleep')} />
               {shown ? (
+                // Fit or Fill, or Custom once pinched to another size or moved. A tap switches
+                // fit to fill centred, and anything else back to the whole picture
+                // (switchedFrame), the one choice that never cuts anything off.
                 <PanelOption
-                  label={t('phone.zoomToFill')}
-                  detail={zoomValue}
-                  accessibilityLabel={`${t('phone.zoomToFill')}, ${zoomValue}`}
+                  label={t('phone.pictureSize')}
+                  detail={pictureValue}
+                  accessibilityLabel={`${t('phone.pictureSize')}, ${pictureValue}`}
                   wrap
                   onPress={() => {
                     setPanel(null);
-                    changeFit(fit === 'fill' ? 'fit' : 'fill');
+                    changeFit(switchedFrame(fit));
                   }}
                 />
               ) : null}
@@ -1441,8 +1652,6 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 }
 
 const styles = StyleSheet.create({
-  // Sized as well as placed: the web build draws a <video>, which keeps its own size otherwise.
-  video: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
   screen: { flex: 1, backgroundColor: colors.playerBg },
   dim: { backgroundColor: 'rgba(0,0,0,0.6)' },
   centre: {
@@ -1554,6 +1763,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.l,
     paddingVertical: space.s,
   },
-  toastText: { ...type.label, color: colors.text },
+  toastText: { ...type.label, color: colors.text, textAlign: 'center' },
+  toastHint: { ...type.small, color: colors.textMuted, textAlign: 'center' },
   sheetNote: { ...type.small, color: colors.textMuted, padding: space.m },
 });

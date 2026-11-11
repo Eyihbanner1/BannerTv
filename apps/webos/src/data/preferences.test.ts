@@ -19,6 +19,7 @@ describe('readPreferences', () => {
         subtitleStyle: { size: 'huge', colour: 'pink', background: 'box' },
         tmdb: 'yes',
         stillWatching: 'no',
+        nextAtCredits: 'yes',
       }),
     );
     expect(prefs).toEqual({
@@ -31,6 +32,7 @@ describe('readPreferences', () => {
       subtitleStyle: { size: 'huge', colour: 'white', background: 'box', position: 'bottom' },
       tmdb: true,
       stillWatching: true,
+      nextAtCredits: false,
       subtitleWhen: 'always',
       maxResolution: null,
       avoidHdr: false,
@@ -78,6 +80,10 @@ describe('readPreferences', () => {
 
   it('keeps "Still watching?" turned off', () => {
     expect(readPreferences(JSON.stringify({ stillWatching: false })).stillWatching).toBe(false);
+  });
+
+  it('keeps "Start next at credits" turned on', () => {
+    expect(readPreferences(JSON.stringify({ nextAtCredits: true })).nextAtCredits).toBe(true);
   });
 
   it('keeps the stream filter part by part, and none when it is not one', () => {

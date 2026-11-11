@@ -103,8 +103,11 @@ function SeasonTabs({
                   onSelect(index);
                   const track = trackRef.current;
                   if (track) {
+                    // x is the tab's place in the track; left is its place on the page,
+                    // which, the panel being on the right, always looked like overflow
+                    // and slid every tab out of view.
                     const overflow =
-                      layout.left + layout.width - (track.parentElement!.offsetWidth - 48);
+                      layout.x + layout.width - (track.parentElement!.offsetWidth - 48);
                     track.style.transform = overflow > 0 ? `translateX(${-overflow}px)` : '';
                   }
                 }}

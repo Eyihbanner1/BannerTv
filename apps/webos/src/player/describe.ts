@@ -1,5 +1,6 @@
 import {
   languageName,
+  noticeText,
   type ProblemExplained,
   type Resolution,
   SEVERE_WARNINGS,
@@ -98,7 +99,10 @@ export function streamRowText(
     const reason = t(
       `streams.cannot.${action.kind === 'unavailable' ? action.reason : action.kind}`,
     );
-    return { title: streamTitle(entry), badges, playable, note: reason, notes: [reason] };
+    // An addon's message reads in full: its first line alone may not say what it means.
+    const notice = action.kind === 'unavailable' && action.reason === 'notice';
+    const title = (notice && noticeText(entry.stream)) || streamTitle(entry);
+    return { title, badges, playable, note: reason, notes: [reason] };
   }
   const note =
     notes[0] &&
@@ -121,6 +125,17 @@ export function streamsStatus(
       : t('streams.count', { count });
 }
 
+/** "Sports Streams says: …", in the addon's words, or "Your addon says: …" when it has no name. */
+function addonSays(
+  t: TFunction,
+  notice: { addon: string; text: string },
+  key: 'addonNotice' | 'addonNoticeToo',
+): string {
+  return notice.addon
+    ? t(`player.problem.${key}`, { addon: notice.addon, text: notice.text })
+    : t(`player.problem.${key}Unnamed`, { text: notice.text });
+}
+
 /** The problem box's words: a title and one or more plain sentences. */
 export interface ProblemText {
   title: string;
@@ -133,7 +148,7 @@ export interface ProblemText {
  * One stream tried says only why it stopped, as before.
  */
 export function problemText(t: TFunction, explained: ProblemExplained): ProblemText {
-  const { problem, torrentsToo } = explained;
+  const { problem, torrentsToo, noticeToo } = explained;
   const lines: string[] = [];
   let tried = 0;
   switch (problem.kind) {
@@ -169,6 +184,10 @@ export function problemText(t: TFunction, explained: ProblemExplained): ProblemT
     case 'web-only':
       lines.push(t('player.problem.webOnly', { count: problem.count }));
       break;
+    case 'addon-notice':
+      lines.push(addonSays(t, problem, 'addonNotice'));
+      lines.push(t('player.problem.addonNoticeHelp'));
+      break;
     case 'helper-off':
       tried = problem.tried;
       lines.push(t('player.problem.helperOff'));
@@ -189,6 +208,7 @@ export function problemText(t: TFunction, explained: ProblemExplained): ProblemT
       t('player.problem.torrentsToo', { addon: torrentsToo.addon, count: torrentsToo.count }),
     );
   }
+  if (noticeToo) lines.push(addonSays(t, noticeToo, 'addonNoticeToo'));
   const nothing =
     problem.kind !== 'helper-off' && problem.kind !== 'uncached' && problem.kind !== 'tried';
   const title =

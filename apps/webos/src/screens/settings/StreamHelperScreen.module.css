@@ -27,3 +27,18 @@
   font: var(--bt-text-title);
   letter-spacing: 0.04em;
 }
+
+.heading {
+  font: var(--bt-text-label);
+  color: var(--bt-text);
+}
+
+.fromPhone {
+  margin-bottom: 16px;
+}
+
+.phoneCode {
+  margin-top: 8px;
+  font: var(--bt-text-display);
+  letter-spacing: 0.08em;
+}

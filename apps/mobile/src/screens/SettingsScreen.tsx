@@ -261,6 +261,11 @@ export function SettingsScreen() {
               value={prefs.stillWatching}
               onChange={(next) => setPreference('stillWatching', next)}
             />
+            <Toggle
+              title={t('phone.nextAtCreditsSetting')}
+              value={prefs.nextAtCredits}
+              onChange={(next) => setPreference('nextAtCredits', next)}
+            />
           </Section>
 
           <LanguagesSection />
