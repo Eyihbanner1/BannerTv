@@ -7,6 +7,7 @@ import android.text.Spanned
 import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
 import android.view.View
+import android.view.ViewTreeObserver
 import androidx.annotation.OptIn
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -16,7 +17,6 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.video.player.VideoPlayer
 import java.lang.ref.WeakReference
-import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * in the profile's subtitle style. expo-video plays through Media3 but tells JS nothing of its
  * cues, so this listens on the ExoPlayer inside expo-video's VideoPlayer, and hides Media3's own
  * subtitle view while the page draws the lines. Picture subtitles (PGS, DVB) stay with Media3,
- * kept inside the screen when the picture is zoomed to fill it.
+ * kept on the screen whatever the picture's size and place (ScreenFit).
  */
 @OptIn(markerClass = [UnstableApi::class])
 class BannerCuesModule : Module() {
@@ -42,17 +42,45 @@ class BannerCuesModule : Module() {
     }
   }
 
-  /** The subtitle view keepOnScreen listens on. */
+  /** The subtitle view keepOnScreen fits, while it follows one. */
   private var fitted: WeakReference<View>? = null
 
-  // Zoomed to fill the screen (the player's contentFit "cover"), Media3's content frame, and
-  // the subtitle view inside it, is larger than the screen, so a picture subtitle near the
-  // frame's edge would be cut off. Padding the subtitle view down to the whole frame fitted in
-  // the screen draws Media3's subtitles where they are with the picture fitted: on the screen,
-  // and never stretched. With the picture fitted the padding is none. Measured again whenever
-  // the view is laid out, as it is when the fit changes; after that layout, not during it.
-  private val fitOnLayout =
-    View.OnLayoutChangeListener { view, _, _, _, _, _, _, _, _ -> view.post { fitInScreen(view) } }
+  /** Where a view is on the window, read into at each measure (on the main thread only). */
+  private val location = IntArray(2)
+
+  // Media3's subtitle view covers the picture's whole frame, so past fit it runs off the screen,
+  // and moved, it sits off centre; ScreenFit says how to pad it so picture subtitles stay on the
+  // screen. Measured again just before the window draws each frame, not only as the subtitle
+  // view is laid out: moving the picture lays its view out in a new place but leaves the
+  // subtitle view where it was inside it, so nothing of the subtitle view's own changes. Whatever
+  // moves the frame is drawn, though: a move, a pinch, turning the phone, picture-in-picture.
+  // Android's SurfaceView, which the video is drawn on, keeps up with its place on the screen the
+  // same way. It costs a few reads a frame. The padding is set after the frame, not during it,
+  // and only when the answer changes, so the layout that setting it causes ends there.
+  private val fitBeforeDraw = ViewTreeObserver.OnPreDrawListener {
+    val view = fitted?.get()
+    val padding = view?.let { screenPadding(it) }
+    if (view != null && padding != null && !hasPadding(view, padding)) {
+      view.removeCallbacks(fitLater)
+      view.post(fitLater)
+    }
+    true
+  }
+
+  private val fitLater = Runnable { fitted?.get()?.let { fitInScreen(it) } }
+
+  // fitBeforeDraw is on the tree of the window the subtitle view is in, so it comes off as the
+  // view leaves a window and goes on again as it joins one: for a moment as expo-video moves the
+  // player into picture-in-picture and back, and for good as the player screen closes.
+  private val fitOnAttach = object : View.OnAttachStateChangeListener {
+    override fun onViewAttachedToWindow(view: View) {
+      view.viewTreeObserver.addOnPreDrawListener(fitBeforeDraw)
+    }
+
+    override fun onViewDetachedFromWindow(view: View) {
+      view.viewTreeObserver.removeOnPreDrawListener(fitBeforeDraw)
+    }
+  }
 
   override fun definition() = ModuleDefinition {
     Name("BannerCues")
@@ -82,8 +110,10 @@ class BannerCuesModule : Module() {
     OnDestroy {
       val video = watched?.get()
       watched = null
-      if (video != null) {
-        Handler(Looper.getMainLooper()).post { video.player.removeListener(listener) }
+      // The player and the subtitle view are used on the main thread only.
+      Handler(Looper.getMainLooper()).post {
+        video?.player?.removeListener(listener)
+        unfollow()
       }
     }
   }
@@ -92,6 +122,8 @@ class BannerCuesModule : Module() {
     val current = watched?.get()
     if (current === video) return
     current?.player?.removeListener(listener)
+    // The subtitle view the last player was shown on is not this one's to fit.
+    unfollow()
     watched = WeakReference(video)
     video.player.addListener(listener)
   }
@@ -102,27 +134,65 @@ class BannerCuesModule : Module() {
   private fun keepOnScreen() {
     val view: View = subtitleView() ?: return
     if (fitted?.get() !== view) {
-      fitted?.get()?.removeOnLayoutChangeListener(fitOnLayout)
-      view.addOnLayoutChangeListener(fitOnLayout)
+      unfollow()
+      view.addOnAttachStateChangeListener(fitOnAttach)
+      if (view.isAttachedToWindow) view.viewTreeObserver.addOnPreDrawListener(fitBeforeDraw)
       fitted = WeakReference(view)
     }
     fitInScreen(view)
   }
 
+  /** Stops fitting the subtitle view followed until now, and takes every listener off it. */
+  private fun unfollow() {
+    val view = fitted?.get()
+    fitted = null
+    if (view == null) return
+    view.removeOnAttachStateChangeListener(fitOnAttach)
+    if (view.isAttachedToWindow) view.viewTreeObserver.removeOnPreDrawListener(fitBeforeDraw)
+    view.removeCallbacks(fitLater)
+  }
+
   private fun fitInScreen(view: View) {
-    // The subtitle view fills the content frame, which sits centred in the player view.
-    val screen = (view.parent as? View)?.parent as? View ?: return
-    val width = view.width
-    val height = view.height
-    if (width <= 0 || height <= 0 || screen.width <= 0 || screen.height <= 0) return
-    val scale = minOf(1f, screen.width.toFloat() / width, screen.height.toFloat() / height)
-    val x = (width * (1f - scale) / 2f).roundToInt()
-    val y = (height * (1f - scale) / 2f).roundToInt()
-    if (view.paddingLeft != x || view.paddingTop != y ||
-      view.paddingRight != x || view.paddingBottom != y
-    ) {
-      view.setPadding(x, y, x, y)
+    val padding = screenPadding(view) ?: return
+    if (!hasPadding(view, padding)) {
+      view.setPadding(padding.left, padding.top, padding.right, padding.bottom)
     }
+  }
+
+  private fun hasPadding(view: View, padding: ScreenFit.Padding) =
+    view.paddingLeft == padding.left && view.paddingTop == padding.top &&
+      view.paddingRight == padding.right && view.paddingBottom == padding.bottom
+
+  /**
+   * The padding that keeps the picture subtitles `view` draws on the screen, or null while it
+   * cannot be measured: out of a window, or not laid out yet.
+   */
+  private fun screenPadding(view: View): ScreenFit.Padding? {
+    if (!view.isAttachedToWindow) return null
+    val screen = screenOf(view)
+    view.getLocationInWindow(location)
+    val frame = ScreenFit.Box(location[0], location[1], view.width, view.height)
+    screen.getLocationInWindow(location)
+    return ScreenFit.padding(
+      frame,
+      ScreenFit.Box(location[0], location[1], screen.width, screen.height),
+    )
+  }
+
+  /**
+   * What the viewer sees of the window `view` is in: its content view, which the app's views
+   * fill (or the window's root view, if it has none). The player screen fills it too, drawn edge
+   * to edge with the system bars hidden, so it is the screen the player measures to fit the
+   * picture, and the frame fitted in it is the frame the viewer sees at fit. Not the player's own
+   * view, which past fit is the picture's whole frame; not the decor view, which can also take in
+   * the place of a system bar the app draws nothing under; and not the part the system bars leave
+   * clear, which changes as they show for a moment over the picture. In picture-in-picture
+   * expo-video moves the player into this same view, which Android then lays out as the small
+   * window, so the frame fits there.
+   */
+  private fun screenOf(view: View): View {
+    val root = view.rootView
+    return root.findViewById<View>(android.R.id.content) ?: root
   }
 
   private fun send(cueGroup: CueGroup) {
