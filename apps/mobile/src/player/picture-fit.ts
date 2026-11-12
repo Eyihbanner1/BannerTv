@@ -344,6 +344,10 @@ export function pictureRect(screen: Size, video: Size, frame: PictureFrame): Rec
  * subtitles Media3 draws itself (picture subtitles, PGS and DVB) stay on the screen where they
  * would be with the picture fitted: modules/banner-cues fits them to the screen as the window
  * shows it, not to the picture's view, and again whenever the picture changes size or moves.
+ * Where Media3's frame inside the rectangle is not the rectangle's shape (a picture shownShape
+ * leaves at its stored size with pixels that are not square or turned on its side, or any
+ * picture before its size is known), they show smaller in the part of the frame on the screen,
+ * never stretched.
  */
 export interface PictureLayout {
   contentFit: 'contain' | 'cover';
