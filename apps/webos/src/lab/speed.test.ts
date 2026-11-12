@@ -153,6 +153,24 @@ describe('the Lab speed test', () => {
     expect(asked).toEqual([1.25, 1.5]);
   });
 
+  it('measures a speed again once in all: a hitch as it took hold, then one in its window, leaves it unmeasured', async () => {
+    const { video, asked, test } = setup();
+    const hitch = async () => {
+      video.dispatchEvent(new Event('waiting'));
+      await vi.advanceTimersByTimeAsync(5);
+      video.dispatchEvent(new Event('playing'));
+    };
+    // As 0.75× takes hold, then in the window it gets again from there.
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + 100);
+    await hitch();
+    await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS * 2);
+    await hitch();
+    await finish();
+    const verdicts = await test.done;
+    expect(verdicts).toContainEqual(expect.objectContaining({ rate: 0.75, why: 'unsteady' }));
+    expect(asked).toEqual([1.25, 1.5]);
+  });
+
   it('waits for a video a new speed stopped to play on, for longer than its moment to take hold', async () => {
     const { video, asked, test } = setup();
     await vi.advanceTimersByTimeAsync(SPEED_SETTLE_MS + SPEED_WINDOW_MS + 100);
