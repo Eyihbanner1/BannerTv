@@ -31,6 +31,7 @@ import {
 import { catalogAccepts, type ManifestCatalog, type MetaPreview } from '@bannertv/protocol';
 import { SPORTS_IN_BUILD } from '../app/features';
 import { addonClient, addonCollection, allAddons } from './addons';
+import { loadAppScript } from '../platform/shell';
 import { SPORTS_DATA_SCRIPT } from './sports-data-script';
 import { profileKv, storage } from './storage';
 import { storeNow } from './sync-clock';
@@ -473,35 +474,33 @@ function loadMatcher(): void {
   if (matcherRequested) return;
   matcherRequested = true;
   markMatcher('matcher:load');
-  const script = document.createElement('script');
-  script.src = `./${SPORTS_DATA_SCRIPT.file}`;
-  script.onload = () => {
-    markMatcher('matcher:script');
-    const holder = window as unknown as Record<string, unknown>;
-    const data = readData(holder[SPORTS_DATA_SCRIPT.global]);
-    delete holder[SPORTS_DATA_SCRIPT.global];
-    script.remove();
-    if (!data) return;
-    // Its maps take a moment to build on a TV: out of the key press that got here.
-    window.setTimeout(() => {
-      let matcher: Matcher | undefined;
-      markMatcher('matcher:start');
-      try {
-        matcher = createMatcher(data);
-      } catch {
-        return;
-      }
-      markMatcher('matcher:end');
-      sportsMatcher.set(matcher);
-      sportsFeed.setMatcher(matcher);
-    }, 0);
-  };
-  script.onerror = () => {
-    script.remove();
-    // Tried again the next time a sports catalog turns up.
-    matcherRequested = false;
-  };
-  document.head.appendChild(script);
+  // Through the loader, so an update that carries newer data runs its own.
+  loadAppScript(SPORTS_DATA_SCRIPT.file).then(
+    () => {
+      markMatcher('matcher:script');
+      const holder = window as unknown as Record<string, unknown>;
+      const data = readData(holder[SPORTS_DATA_SCRIPT.global]);
+      delete holder[SPORTS_DATA_SCRIPT.global];
+      if (!data) return;
+      // Its maps take a moment to build on a TV: out of the key press that got here.
+      window.setTimeout(() => {
+        let matcher: Matcher | undefined;
+        markMatcher('matcher:start');
+        try {
+          matcher = createMatcher(data);
+        } catch {
+          return;
+        }
+        markMatcher('matcher:end');
+        sportsMatcher.set(matcher);
+        sportsFeed.setMatcher(matcher);
+      }, 0);
+    },
+    () => {
+      // Tried again the next time a sports catalog turns up.
+      matcherRequested = false;
+    },
+  );
 }
 
 interface Claim {

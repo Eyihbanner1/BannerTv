@@ -75,6 +75,20 @@ Homebrew Channel never looks for updates by itself, and its Update button is on 
 
 None of this shows in the Android app or in a browser. `HOMEBREW_UPDATES_IN_BUILD` in `apps/webos/src/app/features.ts` turns it off for an LG Content Store build, where the store updates the app.
 
+### Updates inside the app
+
+A BannerTV built on main with the LG update key committed (`apps/webos/certs/lg-updates.pem`) also updates itself, with no Homebrew Channel and no button. A minute after it starts, every three hours, and each time Settings opens, it asks the updates Worker for a newer build of main, downloads it in the background and checks its signature and every file. It starts it:
+
+- on **Settings**, where Updates says "BannerTV 0.1.12 is ready. Starting it now…" and the app starts again 2.5 seconds later, back on Home;
+- or after it has been off screen for a minute;
+- or the next time BannerTV starts.
+
+Never on Home, a details page or the player: a restart under the person is seen by the whole room. While a build downloads, the line says "Downloading BannerTV 0.1.12…".
+
+A build that goes wrong as it starts (it throws, or has not drawn within 30 seconds, or started twice without drawing) is put aside for good, and the TV runs the build Homebrew Channel or `ares-install` put there. Settings then says "BannerTV 0.1.12 didn't start on this TV, so it runs the build installed here." Publish a fix: the next build is taken as usual.
+
+To have it, install once, from Homebrew Channel, a build published after the key was committed. A pull request's `.ipk`, the combined test build and a laptop build never update themselves, so what is being tested stays on the TV. A new `.ipk` from Homebrew Channel is still needed now and then, for the few changes an update cannot carry (the loader, `index.html` or `appinfo.json`): until then the TV keeps the builds it can take. Details in `services/updates/README.md`, "In-app updates on the LG".
+
 ## 5. Run the spikes
 
 All three spikes live under **Settings** in the app. Take a photo of each result screen, or copy the console lines from `pnpm tv:inspect`.

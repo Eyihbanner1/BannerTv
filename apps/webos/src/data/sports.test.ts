@@ -508,10 +508,16 @@ describe('the team and league data', () => {
     });
   });
 
+  /** Lets the script's promise settle: it is loaded through platform/shell.ts. */
+  const settle = async () => {
+    for (let tick = 0; tick < 3; tick++) await Promise.resolve();
+  };
+
   /** The data script arriving, and the maps built from it. */
-  function arrive() {
+  async function arrive() {
     (globalThis as Record<string, unknown>).__BANNERTV_SPORTS_DATA__ = EMPTY_DATA;
     scripts[0]!.onload!();
+    await settle();
     vi.runOnlyPendingTimers();
   }
 
@@ -530,7 +536,7 @@ describe('the team and league data', () => {
     expect(scripts.map((script) => script.src)).toEqual(['./data/sports-data.js']);
     expect(traced).toEqual(['matcher:load']);
 
-    arrive();
+    await arrive();
     expect(traced).toEqual(['matcher:load', 'matcher:script', 'matcher:start', 'matcher:end']);
     expect(sports.sportsMatcher.get()?.built).toBe('2026-10-28');
     expect('__BANNERTV_SPORTS_DATA__' in globalThis).toBe(false);
@@ -580,6 +586,7 @@ describe('the team and league data', () => {
     collection.set({ ready: true, addons: [addon] });
     expect(scripts).toHaveLength(1);
     scripts[0]!.onerror!();
+    await settle();
     sports.wantSportsMatcher();
     expect(scripts).toHaveLength(1);
   });

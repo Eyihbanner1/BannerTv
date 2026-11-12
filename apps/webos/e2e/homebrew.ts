@@ -16,8 +16,12 @@ export interface LgTvOptions {
 
 /**
  * Makes the page an LG TV's: webOS's PalmSystem, and a service bridge that
- * notes every Luna call and answers each at once, a launch as the
- * application manager does. Every other call answers with plain success.
+ * answers every Luna call at once, a launch as the application manager does,
+ * and notes each call as it answers it. Every other call answers with plain
+ * success. A call is noted in the same task that hands the page its answer,
+ * so once a journey sees it, the page has had the answer: the TV's input
+ * runs ahead of timers, and a press read as the answer was still on its way
+ * found the button still busy with the press before.
  */
 export async function openAsLgTv(page: Page, options: LgTvOptions = {}): Promise<void> {
   await page.addInitScript((missing: string[]) => {
@@ -46,8 +50,10 @@ export async function openAsLgTv(page: Page, options: LgTvOptions = {}): Promise
         onservicecallback: ((message: string) => void) | null = null;
         call(uri: string, payload: string) {
           const params = JSON.parse(payload) as Record<string, unknown>;
-          calls.push({ uri, params });
-          setTimeout(() => this.onservicecallback?.(JSON.stringify(answer(uri, params))), 0);
+          setTimeout(() => {
+            calls.push({ uri, params });
+            this.onservicecallback?.(JSON.stringify(answer(uri, params)));
+          }, 0);
         }
         cancel() {}
       },
@@ -55,7 +61,7 @@ export async function openAsLgTv(page: Page, options: LgTvOptions = {}): Promise
   }, options.missing ?? []);
 }
 
-/** Every Luna call the page has sent, oldest first. */
+/** Every Luna call the page has sent and had answered, oldest first. */
 export function lunaCalls(page: Page): Promise<LunaCall[]> {
   return page.evaluate(() => (window as unknown as { lunaCalls: LunaCall[] }).lunaCalls);
 }

@@ -5,12 +5,14 @@ import {
   memoryCacheStore,
   memoryKeyValueStore,
 } from '@bannertv/core';
+import { APP_DB_VERSION } from '../shell/runtime-inputs';
 import { afterLaunch } from './launch';
 import { bootMark } from './marks';
 import { tuning } from './tuning';
 
 const DB_NAME = 'bannertv';
-const DB_VERSION = 1;
+// Part of the runtime version of in-app updates: raising it needs a new .ipk.
+const DB_VERSION = APP_DB_VERSION;
 const KV = 'kv';
 const CACHE = 'cache';
 const BY_STORED_AT = 'storedAt';

@@ -20,6 +20,7 @@ import {
   traceSportsMatcher,
   wantSportsMatcher,
 } from './data/sports';
+import { startLgUpdates } from './data/lg-updates';
 import { startSync } from './data/sync';
 import { startTrakt } from './data/trakt';
 import { startWatchNext } from './data/watch-next';
@@ -31,6 +32,7 @@ import { startFrameMeter } from './platform/frame-meter';
 import { initInputMode } from './platform/input-mode';
 import { afterLaunch } from './platform/launch';
 import { bootMark, mark } from './platform/marks';
+import { noteAppStarted } from './platform/shell';
 import { applyTuning, changedTuning, tuning } from './platform/tuning';
 import { initLifecycle, isWebOS } from './platform/webos';
 import { readPlayMarks } from './player/play-marks';
@@ -90,6 +92,7 @@ function start() {
   }
   void startSports();
   startSync();
+  startLgUpdates();
   const publishWatchNext = androidWatchNext();
   if (publishWatchNext) startWatchNext(publishWatchNext);
   // After the reads above have started, so watching them changes no order.
@@ -103,6 +106,8 @@ function start() {
   );
   console.info('[BannerTV] started', bootInfo, 'tuning', changedTuning());
   bootMark('boot:start-end');
+  // Last: the loader counts a stored update as started only once its script has run to here.
+  noteAppStarted();
 }
 
 start();

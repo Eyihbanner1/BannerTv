@@ -176,6 +176,7 @@ function FullSettings() {
             onPress={() => setPreference('tmdb', !prefs.tmdb)}
           />
         )}
+        {/* The app's own updates have their line in this part too, on the same TVs. */}
         {homebrewUpdatesShown() && <HomebrewUpdates />}
       </div>
       <div className={settings.about}>

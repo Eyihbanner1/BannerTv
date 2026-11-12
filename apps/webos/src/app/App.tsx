@@ -4,6 +4,7 @@ import { RASTER_AHEAD, warmBoxRef } from '../components/decode-ahead';
 import { Rail } from '../components/Rail';
 import { activeProfileId, profileSwitcher } from '../data/profiles';
 import { welcomed } from '../data/welcome';
+import { noteAppDrawn } from '../platform/shell';
 import { platformBack } from '../platform/webos';
 import { useBack } from '../navigation/use-back';
 import { AddonsScreen } from '../screens/addons/AddonsScreen';
@@ -224,6 +225,9 @@ export function App() {
     focusKey: 'content',
     saveLastFocusedChild: true,
   });
+
+  // The first draw is half of a start that went well (platform/shell.ts).
+  useEffect(() => noteAppDrawn(), []);
 
   useBack('router', () => {
     if (back()) return true;

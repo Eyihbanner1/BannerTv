@@ -15,9 +15,14 @@
  *                            or no package before the first publish
  *   GET /webos/ipk/<sha256>.ipk, GET /webos/icon/<sha256>.png
  *                            the .ipk and icon the repository names, by their SHA-256
+ *   GET /webos/update?channel=&runtime=
+ *                            the LG app's in-app update: the signed manifest or directive main
+ *                            last published for that runtime version, or 204 for none
+ *   GET /webos/file/<sha256> a script an in-app update names, by its SHA-256
  *   GET /status              for the workflows: whether storage is bound, with ?channel,
- *                            platform and runtimeVersion what that runtime version is served, and
- *                            with ?channel and platform=webos what the LG repository offers
+ *                            platform and runtimeVersion what that runtime version is served,
+ *                            with ?channel and platform=webos what the LG repository offers, and
+ *                            with ?channel, platform=webos and runtime the in-app update served
  *
  * The LG routes are written by the "Publish LG update" workflow, which builds the .ipk and the
  * repository's index; Homebrew Channel checks each .ipk against the SHA-256 the index gives.
@@ -254,9 +259,9 @@ async function webosRepo(env: Env): Promise<Response> {
 }
 
 /**
- * An .ipk or icon, read whole rather than streamed so that it is sent with its length: Homebrew
- * Channel shows its download's progress from content-length. The largest value KV keeps is
- * 25 MiB, and the .ipk is about 1.3 MB.
+ * An .ipk, icon or in-app update script, read whole rather than streamed so that it is sent with
+ * its length: Homebrew Channel shows its download's progress from content-length. The largest
+ * value KV keeps is 25 MiB; the .ipk is about 1.3 MB, the app's script about 1.2 MB.
  */
 async function webosFile(key: string, type: string, env: Env): Promise<Response> {
   const kv = env.UPDATES;
@@ -279,18 +284,69 @@ async function webosFile(key: string, type: string, env: Env): Promise<Response>
   }
 }
 
-/** /status?channel=main&platform=webos: the build the LG repository offers, read from its index. */
+/**
+ * The LG app's in-app update for its channel and runtime version, exactly as the workflow stored
+ * it: the loader checks its signature itself. 204 when nothing was published for that runtime.
+ */
+async function webosApp(url: URL, env: Env): Promise<Response> {
+  const channel = url.searchParams.get('channel') ?? '';
+  const runtime = url.searchParams.get('runtime') ?? '';
+  if (!isChannel(channel) || !webos.isWebosRuntime(runtime)) {
+    return webosError('bad-request', 400);
+  }
+  const kv = env.UPDATES;
+  if (!kv) return webosError('unconfigured', 503);
+  const headers = { ...WEBOS_HEADERS, 'cache-control': webos.APP_CACHE };
+  try {
+    const stored = await kv.get(webos.appKey(channel, runtime), 'text');
+    if (stored === null) return new Response(null, { status: 204, headers });
+    return new Response(stored, {
+      status: 200,
+      headers: { ...headers, 'content-type': webos.REPO_TYPE },
+    });
+  } catch {
+    return webosError('storage', 503);
+  }
+}
+
+/** /status?channel=main&platform=webos&runtime=…: the in-app update served to that runtime. */
+async function webosAppStatus(
+  channel: string,
+  runtime: string,
+  kv: KVNamespace,
+): Promise<Response> {
+  const answer = webos.readAppAnswer(await kv.get(webos.appKey(channel, runtime), 'text'));
+  return plain(
+    {
+      storage: true,
+      protocol: Number(PROTOCOL_VERSION),
+      update: answer ?? null,
+      serving: answer ? answer.type : 'none',
+    },
+    200,
+  );
+}
+
+/**
+ * /status?channel=main&platform=webos: the build the LG repository offers, read from its index;
+ * with &runtime=, the in-app update served to the app's loader for that runtime version.
+ */
 async function webosStatus(
   params: URLSearchParams,
   kv: KVNamespace | undefined,
 ): Promise<Response> {
   const channel = params.get('channel') ?? '';
-  // An LG build has no runtime version: the .ipk carries everything.
+  const runtime = params.get('runtime');
+  // The .ipk has no runtimeVersion of Expo's kind: the loader's is `runtime`.
   if (!isChannel(channel) || params.has('runtimeVersion')) {
+    return plain({ error: 'bad-request' }, 400);
+  }
+  if (runtime !== null && !webos.isWebosRuntime(runtime)) {
     return plain({ error: 'bad-request' }, 400);
   }
   if (!kv) return plain({ storage: false, protocol: Number(PROTOCOL_VERSION) }, 503);
   try {
+    if (runtime !== null) return await webosAppStatus(channel, runtime, kv);
     const update = webos.readRepoIndex(await kv.get(webos.repoKey(channel), 'text'));
     return plain(
       {
@@ -309,6 +365,7 @@ async function webosStatus(
 const ASSETS = '/expo/assets/';
 const WEBOS_IPK = /^\/webos\/ipk\/([0-9a-f]{64})\.ipk$/;
 const WEBOS_ICON = /^\/webos\/icon\/([0-9a-f]{64})\.png$/;
+const WEBOS_APP_FILE = /^\/webos\/file\/([0-9a-f]{64})$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -324,6 +381,9 @@ export default {
       if (ipk) return webosFile(webos.ipkKey(ipk), webos.IPK_TYPE, env);
       const icon = WEBOS_ICON.exec(path)?.[1];
       if (icon) return webosFile(webos.iconKey(icon), webos.ICON_TYPE, env);
+      if (path === '/webos/update') return webosApp(url, env);
+      const file = WEBOS_APP_FILE.exec(path)?.[1];
+      if (file) return webosFile(webos.appFileKey(file), webos.APP_FILE_TYPE, env);
     }
     return plain({ error: 'not-found' }, 404);
   },

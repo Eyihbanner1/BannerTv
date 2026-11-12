@@ -11,11 +11,19 @@
  *     --package <package.json>
  *   node scripts/webos.mjs describe-build --ipk <file> --version <x.y.z> --commit <sha> \
  *     --out <build.json>
+ *   node scripts/webos.mjs describe-update --dist <apps/webos/dist> --version <x.y.z> \
+ *     --commit <sha> --out <dir>
+ *   LG_UPDATES_PRIVATE_KEY=… node scripts/webos.mjs sign-update --update <dir> \
+ *     --public-key <lg-updates.pem> --out <signed.json>
+ *   LG_UPDATES_PRIVATE_KEY=… node scripts/webos.mjs sign-rollback --history <file> \
+ *     --keys <list> --public-key <lg-updates.pem> --out <signed.json>
  *   node scripts/webos.mjs publish --ipk <file> --build <build.json> --version <x.y.z> \
- *     --commit <sha> --history <file> --history-now <file> --keys <list> --out <dir>
+ *     --commit <sha> --history <file> --history-now <file> --keys <list> \
+ *     [--update <dir> --signed <signed.json> --public-key <lg-updates.pem>] --out <dir>
  *   node scripts/webos.mjs rollback-previous --history <file> --history-now <file> \
- *     --keys <list> --out <dir>
+ *     --keys <list> [--signed <signed.json> --public-key <lg-updates.pem>] --out <dir>
  *   node scripts/webos.mjs offers --index <served repo.json> --summary <summary.json>
+ *   node scripts/webos.mjs serves-app --plan <dir> --served <served answer>
  *   node scripts/webos.mjs summary --summary <summary.json> --result <job status>
  *
  * --keys is a `wrangler kv key list --prefix webos/` answer, and --history a `wrangler kv key get
@@ -28,28 +36,45 @@
  * take. stamp rewrites the two files in place. describe-build checks the .ipk Build made and
  * writes what it is, for Upload to check again.
  *
+ * describe-update reads the in-app update in Build's bundle from index.html's shell config, checks
+ * every script against it, and writes, in --out, update.json and each script under files/ by its
+ * SHA-256. sign-update signs it, and sign-rollback what a roll back sends TVs that run in-app
+ * updates, each with the key in LG_UPDATES_PRIVATE_KEY, held to the committed public key; both
+ * write signed.json, which says it is off, with the reason, when there is nothing to sign.
+ *
  * publish and rollback-previous write, in --out (which must not exist yet): content-1.json and on
- * (the .ipk and icon, uploaded first; none for a roll back), history.json (the history, uploaded
- * next), repo.json (the index, uploaded last), index.json (the index's exact text) and
- * summary.json. offers exits 0 when the served index offers the build in the summary, and
- * summary prints the run's summary in Markdown.
+ * (the .ipk, icon and in-app scripts, uploaded first; none for a roll back), history.json (the
+ * history, uploaded next), app.json (the in-app update's signed answer, when there is one, next),
+ * repo.json (the index, uploaded last), index.json (the index's exact text) and summary.json.
+ * offers exits 0 when the served index offers the build in the summary, serves-app when the
+ * Worker serves app.json's answer byte for byte, and summary prints the run's summary in Markdown.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { chunkEntries, readKeyList } from './lib/update.mjs';
 import {
   checkRollback,
+  checkUpdateFiles,
   describeBuild,
+  describeUpdate,
   ipkUrl,
+  KEY_SECRET,
   nextVersion,
   offers,
   planPublish,
   planRollbackPrevious,
+  PUBLIC_KEY_PATH,
   readHistory,
+  readLgPublicKey,
+  readLgSigningKey,
   readStoredHistory,
   REPO_URL,
   runSummary,
+  servesApp,
+  signedOff,
+  signRollback,
+  signUpdate,
   stampVersion,
 } from './lib/webos.mjs';
 
@@ -59,9 +84,13 @@ const COMMANDS = [
   'check-rollback',
   'stamp',
   'describe-build',
+  'describe-update',
+  'sign-update',
+  'sign-rollback',
   'publish',
   'rollback-previous',
   'offers',
+  'serves-app',
   'summary',
 ];
 
@@ -103,7 +132,35 @@ function summarise(plan) {
     // What the TV was offered before this run: the build a roll back undoes, or the last publish.
     before: previous ? { version: previous.version, commit: previous.commit ?? null } : null,
     files: plan.files,
+    inApp: plan.inApp,
   };
+}
+
+const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
+
+/** The committed public key, when there is one. */
+function publicKeyAt(path) {
+  return path !== undefined && existsSync(path)
+    ? readLgPublicKey(readFileSync(path, 'utf8'))
+    : null;
+}
+
+/** The private key from the environment, held to the committed public key. */
+function signingKey(publicKey) {
+  if (!publicKey) fail(`${PUBLIC_KEY_PATH} is not committed, so nothing can be signed.`);
+  const pem = process.env[KEY_SECRET];
+  if (!pem) {
+    fail(
+      `Add the repository secret ${KEY_SECRET} first (services/updates/README.md, "In-app updates on the LG"): ${PUBLIC_KEY_PATH} is committed, so the TV app takes only updates signed with its private half.`,
+    );
+  }
+  return readLgSigningKey(pem, publicKey);
+}
+
+function writeSigned(out, signed) {
+  writeJson(out, signed);
+  if (signed.off) console.log(`::notice::No in-app update this run. ${signed.reason}`);
+  else console.log(JSON.stringify({ ...signed.update, files: undefined }));
 }
 
 function writePlan(out, plan) {
@@ -113,6 +170,7 @@ function writePlan(out, plan) {
     writeFileSync(join(out, `content-${index + 1}.json`), JSON.stringify(entries));
   });
   writeFileSync(join(out, 'history.json'), JSON.stringify([plan.history]));
+  if (plan.app) writeFileSync(join(out, 'app.json'), JSON.stringify([plan.app]));
   writeFileSync(join(out, 'repo.json'), JSON.stringify([plan.repo]));
   writeFileSync(join(out, 'index.json'), plan.repo.value);
   const summary = summarise(plan);
@@ -137,6 +195,12 @@ function main() {
       index: { type: 'string' },
       summary: { type: 'string' },
       result: { type: 'string' },
+      dist: { type: 'string' },
+      update: { type: 'string' },
+      signed: { type: 'string' },
+      'public-key': { type: 'string' },
+      plan: { type: 'string' },
+      served: { type: 'string' },
       out: { type: 'string' },
     },
   });
@@ -191,8 +255,69 @@ function main() {
     console.log(JSON.stringify(build));
     return;
   }
+  if (command === 'describe-update') {
+    need(values, 'dist', 'version', 'commit', 'out');
+    if (existsSync(values.out)) fail(`${values.out} exists already: give a new folder.`);
+    const description = describeUpdate({
+      html: readFileSync(join(values.dist, 'index.html'), 'utf8'),
+      readFile: (path) => readFileSync(join(values.dist, path)),
+      version: values.version,
+      commit: values.commit,
+    });
+    mkdirSync(join(values.out, 'files'), { recursive: true });
+    for (const [path, file] of Object.entries(description.files)) {
+      copyFileSync(join(values.dist, path), join(values.out, 'files', file.sha256));
+    }
+    writeJson(join(values.out, 'update.json'), description);
+    console.log(JSON.stringify({ ...description, files: Object.keys(description.files) }));
+    return;
+  }
+  if (command === 'sign-update') {
+    need(values, 'update', 'public-key', 'out');
+    const description = readJson(join(values.update, 'update.json'));
+    if (!description.updates) {
+      writeSigned(
+        values.out,
+        signedOff(
+          existsSync(values['public-key'])
+            ? 'This build takes no in-app updates: LG_UPDATES_IN_BUILD is off in apps/webos/src/app/features.ts.'
+            : `This build takes no in-app updates: ${PUBLIC_KEY_PATH} is not committed yet (services/updates/README.md, "In-app updates on the LG").`,
+        ),
+      );
+      return;
+    }
+    const publicKey = publicKeyAt(values['public-key']);
+    const privateKey = signingKey(publicKey);
+    // What Build handed on is held to its own description before anything is signed.
+    checkUpdateFiles(description.files, (_path, file) =>
+      readFileSync(join(values.update, 'files', file.sha256)),
+    );
+    writeSigned(values.out, signUpdate({ description, privateKey, publicKey, now: new Date() }));
+    return;
+  }
+  if (command === 'sign-rollback') {
+    need(values, 'keys', 'public-key', 'out');
+    const stored = keys();
+    const read = readStoredHistory(readText(values.history), { stored });
+    checkRollback({ history: read, stored });
+    if (!read.publishes[0].update) {
+      writeSigned(values.out, signRollback({ history: read, stored }));
+      return;
+    }
+    const publicKey = publicKeyAt(values['public-key']);
+    const privateKey = signingKey(publicKey);
+    writeSigned(
+      values.out,
+      signRollback({ history: read, stored, privateKey, publicKey, now: new Date() }),
+    );
+    return;
+  }
+  // What Sign wrote, and the key Upload checks it with.
+  const signed = () => (values.signed === undefined ? undefined : readJson(values.signed));
+  const publicKey = () => publicKeyAt(values['public-key']) ?? undefined;
   if (command === 'publish') {
     need(values, 'ipk', 'build', 'version', 'commit', 'out');
+    const update = values.update;
     writePlan(
       values.out,
       planPublish({
@@ -204,6 +329,12 @@ function main() {
         historyNow: historyNow(),
         stored: keys(),
         now: new Date(),
+        signed: signed(),
+        publicKey: publicKey(),
+        appFiles: (sha256) => {
+          const path = update === undefined ? undefined : join(update, 'files', sha256);
+          return path !== undefined && existsSync(path) ? readFileSync(path) : undefined;
+        },
       }),
     );
     return;
@@ -217,9 +348,16 @@ function main() {
         historyNow: historyNow(),
         stored: keys(),
         now: new Date(),
+        signed: signed(),
+        publicKey: publicKey(),
       }),
     );
     return;
+  }
+  if (command === 'serves-app') {
+    need(values, 'plan', 'served');
+    const app = JSON.parse(readFileSync(join(values.plan, 'app.json'), 'utf8'))[0];
+    process.exit(servesApp(readText(values.served) ?? '', app) ? 0 : 1);
   }
   need(values, 'summary');
   const summary = JSON.parse(readFileSync(values.summary, 'utf8'));
