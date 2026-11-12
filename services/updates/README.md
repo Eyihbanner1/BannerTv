@@ -4,17 +4,18 @@ A Cloudflare Worker that sends the phone app new JavaScript over the air, so mos
 
 The Worker holds no key and cannot write. The **Publish phone update** workflow exports the app's JavaScript and images, signs the manifest with a private key only GitHub holds, and uploads it all to Workers KV with wrangler. The Worker serves the manifest and its signature exactly as uploaded, and the phone checks the signature against the certificate built into the app, so a phone runs only what CI signed. It keeps no logs (observability, traces and log pushes are off in `wrangler.toml`), and it never reads the per-install id expo-updates sends (`eas-client-id`).
 
-The same Worker also serves the LG TV's updates, for the rooted test TV only, as a Homebrew Channel repository: see [LG TV updates through Homebrew Channel](#lg-tv-updates-through-homebrew-channel).
+The same Worker also serves the LG TV's updates, for the rooted test TV only: a Homebrew Channel repository ([LG TV updates through Homebrew Channel](#lg-tv-updates-through-homebrew-channel)), and signed updates the app takes by itself ([In-app updates on the LG](#in-app-updates-on-the-lg)).
 
 | Path | What it is |
 | --- | --- |
 | `src/protocol.ts` | The protocol's rules: reading a request, the multipart answer, the signature header, the KV keys |
-| `src/webos.ts` | The LG repository's rules: its KV keys, cache headers, and reading an index for `/status` |
+| `src/webos.ts` | The LG repository's and in-app updates' rules: their KV keys, cache headers, and reading an index or an answer for `/status` |
 | `src/worker.ts` | The routes, the phone's and the LG TV's |
 | `scripts/publish.mjs` | Builds and signs a phone publish or a roll back, as `wrangler kv bulk put` files (the workflow runs it) |
 | `scripts/lib/update.mjs` | What it does: the manifest, hashes, signing, the history |
 | `scripts/runtime-version.mjs`, `scripts/lib/runtime.mjs` | Checks the runtime version expo-updates works out before a publish uses it |
-| `scripts/webos.mjs`, `scripts/lib/webos.mjs` | The LG publish's steps: the version, the checks on the .ipk, the index, and the `wrangler kv bulk put` files for a publish or a roll back |
+| `scripts/webos.mjs`, `scripts/lib/webos.mjs` | The LG publish's steps: the version, the checks on the .ipk, the index, the in-app update and its signature, and the `wrangler kv bulk put` files for a publish or a roll back |
+| `scripts/lg-key.mjs` | Makes the LG update key pair, once, on the laptop |
 | `../../.github/workflows/deploy-updates.yml` | Deploys the Worker and makes its KV namespace |
 | `../../.github/workflows/publish-phone-update.yml` | Publishes to phones, or rolls back |
 | `../../.github/workflows/publish-lg-update.yml` | Publishes to the LG test TV, or rolls back |
@@ -155,7 +156,7 @@ The fingerprint hashes what the Android build reads, but not everything CI treat
 
 ## LG TV updates through Homebrew Channel
 
-On 9 November 2026 Eyitayo chose to update the LG app over the air through [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) first, for his rooted test TV only: the LG 65NANO766QA (webOS 22, Chromium 87), where BannerTV is a Developer Mode install of `com.bannertv.app` that Homebrew Channel sees and can install over. Signed updates from inside the app come later, as separate work ([ADR 0001](../../docs/adr/0001-react-norigin-classic-bundle.md), decision 10).
+On 9 November 2026 Eyitayo chose to update the LG app over the air through [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) first, for his rooted test TV only: the LG 65NANO766QA (webOS 22, Chromium 87), where BannerTV is a Developer Mode install of `com.bannertv.app` that Homebrew Channel sees and can install over. Signed updates from inside the app followed on 11 November ([In-app updates on the LG](#in-app-updates-on-the-lg), [ADR 0001](../../docs/adr/0001-react-norigin-classic-bundle.md), decisions 10 and 11).
 
 So the Worker also serves a Homebrew Channel repository: an index listing one package, BannerTV, at the build main last published, and that build's `.ipk` and icon. The **Publish LG update** workflow builds the app, gives the build a version of its own, and uploads it.
 
@@ -224,7 +225,8 @@ Actions, **Publish LG update**, Run workflow, on main, action `publish`. A run s
 
 1. **Read the store** lists everything under `webos/` and reads the history, then chooses the version (below), so a version that cannot be had stops the run before anything is built.
 2. **Build** stamps that version into `apps/webos/webos-meta/appinfo.json` and `apps/webos/package.json` in its own checkout and holds them to `tools/scripts/check-version.mjs`, then runs the TV app's typecheck and unit tests, builds it, runs the webOS 5.0 check (`pnpm check:bundle`), packages it (`pnpm package`, ares-package) and works out the SHA-256 of the `.ipk` and of its 130 px icon. The journeys are not run again: they ran on the pull request's full build before it merged.
-3. **Upload** reads the history again and stops if it changed since step 1. It checks the `.ipk` once more (its SHA-256 is the one Build gave, and its control file and its `appinfo.json` both say `com.bannertv.app` at this version), uploads the `.ipk` and icon, then the history, and the index last. It waits up to three minutes for `https://updates.bannertv.workers.dev/webos/repo.json` to offer the new version, then downloads the `.ipk` from it as Homebrew Channel will and checks its SHA-256.
+3. **Sign** signs the in-app update, when the build takes them ([In-app updates on the LG](#in-app-updates-on-the-lg)), and otherwise signs nothing.
+4. **Upload** reads the history again and stops if it changed since step 1. It checks the `.ipk` once more (its SHA-256 is the one Build gave, and its control file and its `appinfo.json` both say `com.bannertv.app` at this version), uploads the `.ipk` and icon, then the history, and the index last. It waits up to three minutes for `https://updates.bannertv.workers.dev/webos/repo.json` to offer the new version, then downloads the `.ipk` from it as Homebrew Channel will and checks its SHA-256.
 
 The run's summary gives the version, commit, SHA-256 and size, and what the TV was offered before. It takes a few minutes: no journeys and no Gradle.
 
@@ -286,3 +288,89 @@ KV is eventually consistent ("up to 60 seconds or more", [how KV works](https://
 - **Homebrew Channel says "Invalid file checksum".** The `.ipk` it downloaded is not the one the index names. That should not happen, since an `.ipk`'s address is its hash; publish again.
 
 `pnpm --filter @bannertv/updates test` covers the LG routes over an in-memory KV, reading `.ipk` files laid out as ares-package writes them, the version scheme, the scripts, and a publish, roll back and publish served end to end and installed as Homebrew Channel would (the SHA-256 checked against the index, the version read back from the `.ipk`).
+
+## In-app updates on the LG
+
+On 11 November 2026 Eyitayo asked for the LG app to update itself, without Update in Homebrew Channel. So the app's `index.html` runs a loader (`apps/webos/src/shell`), which starts the app's script from the `.ipk` or from a signed update it downloaded, and the **Publish LG update** workflow signs every publish as such an update, beside the `.ipk` it puts in the Homebrew Channel repository. One publish reaches the TV both ways: Homebrew Channel for a new `.ipk`, the app for its scripts.
+
+### What an update is
+
+The scripts of a build of main, nothing else: the app's script (`assets/index-<hash>.js`, about 1.2 MB, every image and font inlined into it), the players (`vendor/hls.min.js`, `vendor/shaka-player.dash.js`) and the sports data (`data/sports-data.js`). `index.html` carries the shell config, which names each by its SHA-256 and size; the manifest names the same.
+
+```json
+{
+  "type": "bannertv-lg-update",
+  "id": "7b0d0f5e-…",
+  "createdAt": "2026-11-11T12:00:00.000Z",
+  "channel": "main",
+  "platform": "webos",
+  "runtime": "webos-1-0123456789abcdef",
+  "version": "0.1.12",
+  "commit": "ed387a1228288492187ba32540e721775a2f3292",
+  "launch": "assets/index-a1b2c3d4.js",
+  "files": { "assets/index-a1b2c3d4.js": { "sha256": "…", "size": 1150895 }, "…": {} }
+}
+```
+
+**The runtime version** (`webos-1-` and 16 hex digits) is a hash of everything an update cannot change: the loader, `index.html` around the config, `appinfo.json` but its version, the app's IndexedDB version and the update key. An update reaches only the `.ipk`s built with the same; any change to those needs a new `.ipk` through Homebrew Channel, and the TV keeps the last update it could take until then.
+
+**Going back** is a signed directive instead of a manifest (`"type": "bannertv-lg-built-in"`, with `createdAt`, `channel`, `platform` and `runtime`): TVs that run an update of that runtime go back to their `.ipk`'s own code.
+
+### What the TV asks
+
+As for Homebrew Channel, every answer carries `access-control-allow-origin: *` (the app runs from `file://`) and `x-content-type-options: nosniff`, and the loader sends plain GETs with no header of its own, so there is no preflight.
+
+| Route | Answer |
+| --- | --- |
+| `GET /webos/update?channel=main&runtime=<runtime>` | `{"manifest": "<text>", "sig": "<base64>", "keyid": "lg-<16 hex>"}` (or `"directive"` for going back), exactly as the workflow stored it, `cache-control: no-store`. 204 when nothing was published for that runtime. 400 for another channel's form or a runtime that is not `webos-<n>-<16 hex>` |
+| `GET /webos/file/<sha256>` | A script, `application/octet-stream` with its length, cached for a year (`immutable`): its address is its hash. 404 with `no-store` when it is not there (yet) |
+| `GET /status?channel=main&platform=webos&runtime=<runtime>` | `{"storage": true, "protocol": 1, "update": {type, id, version, commit, createdAt, keyId} or null, "serving": "update", "built-in" or "none"}` |
+
+### What the TV does with it
+
+- **When it asks**: a minute after the app starts (so the launch has the network to itself), then every three hours while it runs, and each time Settings opens. Never more than once a minute.
+- **What it takes**: an answer whose signature verifies with the key in its own `index.html` and whose key id is that key's, for its own channel, platform and runtime, published after its `.ipk` was built and after anything it took before (by the Worker's and CI's clocks, never the TV's), and not one it put aside. It downloads only the files its `.ipk` does not have, checks each one's size and SHA-256, and keeps them in an IndexedDB database of its own (`bannertv-ota`), never the app's.
+- **When it starts it**: on Settings, 2.5 seconds after saying so; after the app has been off screen for a minute; or at the next start. Never on another screen.
+- **Every start**: the signature and every file's SHA-256 are checked again before anything runs. A failed check runs the `.ipk`'s code in the same start.
+- **A bad update**: one whose script throws before its end, that has not drawn and settled within 30 seconds of running, or that started twice without that (the TV turned off, say), is put aside for good, and the page starts again from the `.ipk`'s code. Settings says "BannerTV 0.1.12 didn't start on this TV, so it runs the build installed here."
+- **A new `.ipk`** (from Homebrew Channel or `ares-install`) drops what an earlier one stored, and runs its own code until a newer update comes.
+- **Its state** (what runs, what waits, what was put aside) is in `localStorage` (`bannertv-ota:state`) with a copy in its database, which it waits for before any start again it makes: desktop Chromium has been seen to lose `localStorage` writes on `file://` across `location.reload()`, and a TV short of space may clear it.
+
+### Once: the LG update key
+
+Updates stay off until the key's public half is committed: with none, every build has `"updates": null` in its config and never asks.
+
+1. On the laptop, from the repository's root: `node services/updates/scripts/lg-key.mjs`. It writes `apps/webos/certs/lg-updates.pem` (the public key, to commit) and `lg-updates-private.pem` in a `bannertv-update-keys` folder beside the repository, outside it. It refuses to write over either.
+2. Add the private key as a repository secret: GitHub, the repository, Settings, Secrets and variables, Actions, New repository secret. Name `LG_UPDATES_PRIVATE_KEY`, value the whole of `lg-updates-private.pem`, from `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----`.
+3. Keep a copy of the private key somewhere safe (a password manager), then delete the file. Losing it means a new pair, and a new `.ipk` on the TV, since the public key is part of the runtime version.
+4. Commit `apps/webos/certs/lg-updates.pem` on main, after the secret is there: from then on every publish is signed, and Sign stops when the secret is missing or is another key's.
+5. Publish, and install that build once from Homebrew Channel. Later publishes reach the TV by themselves.
+
+### Publishing and rolling back
+
+Nothing changes in how the workflow is run. A publish's **Build** describes the update from `apps/webos/dist` (`describe-update`: the shell config, every script checked against its file); **Sign**, the only job with `LG_UPDATES_PRIVATE_KEY`, with no install and no cache, holds the secret to the committed public key and the scripts to Build's description, and signs a manifest dated now; **Upload** checks the signature against the committed public key again, stores the scripts the store lacks, the history (each entry now names its update), the signed answer, and the index last, then waits up to three minutes for `/webos/update` to serve the answer byte for byte and each script with its SHA-256.
+
+A **`rollback-previous`** also sends TVs back: Sign signs the build before again, with a new id and time so TVs take it, when it was an update of the same runtime whose scripts are still stored; otherwise a directive, and TVs go back to their own `.ipk`'s code. A TV that installed the undone `.ipk` itself runs it until Update is pressed in Homebrew Channel.
+
+The run's summary has an **In-app update** line: the version, runtime and id, or why nothing was signed.
+
+### Only main's builds
+
+As for the phone, only a build of main on GitHub Actions asks (`apps/webos/build/shell.ts`, `GITHUB_ACTIONS` and `GITHUB_REF=refs/heads/main`): a pull request's `.ipk` (CI's artifact), the combined test build and a laptop build run their own code, and main's next publish never replaces them without a word. The LG Content Store build turns updates off with `LG_UPDATES_IN_BUILD` in `apps/webos/src/app/features.ts`. The Android TV app shows the same files and never asks.
+
+### What the store keeps for it
+
+- `webos/file/<sha256>`: each script, as built. Written once; a publish uploads only those not stored (about 1.2 MB a publish, the app's script; the first publish about 3 MB);
+- `webos/app/main/<runtime>`: the signed answer for that runtime, exactly as served. Written after the history and before the index; a roll back writes it again.
+
+A publish writes one more key than before (the answer) and the scripts the store lacks, usually one. Nothing is deleted: a script no longer in the history can be deleted by hand.
+
+### If it goes wrong
+
+- **"Add the repository secret LG_UPDATES_PRIVATE_KEY first" at Sign.** The public key is committed and the secret is not there: add it (above). Nothing was uploaded.
+- **"LG_UPDATES_PRIVATE_KEY does not belong to apps/webos/certs/lg-updates.pem".** The secret is another key's. Put the right one in, or make a new pair and commit its public key (which needs a new `.ipk` on the TV).
+- **"The build carries the key …, but apps/webos/certs/lg-updates.pem is …".** The build read another key than the one committed: build again.
+- **"No in-app update this run" notice.** No public key is committed, or `LG_UPDATES_IN_BUILD` is off: the publish went to Homebrew Channel only.
+- **The TV keeps running its own build.** On Settings, see the Updates line; `https://updates.bannertv.workers.dev/status?channel=main&platform=webos&runtime=<runtime>` says what is served for a runtime (the runtime is in the TV's `index.html`, and in the diagnostics). A TV on an `.ipk` of another runtime needs that publish's `.ipk` from Homebrew Channel once.
+
+`pnpm --filter @bannertv/updates test` covers the routes, the describing, signing and checks, and a publish, roll back and publish served end to end and read by the TV's own reader (`apps/webos/src/shell/signed.ts`) with Web Crypto. The loader has its own unit tests (`apps/webos/src/shell`), and `apps/webos/e2e/lg-updates.spec.ts` runs the built app with a test key: an update taken on Settings and kept, one that throws put aside, one signed by another key refused.

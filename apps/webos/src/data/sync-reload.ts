@@ -20,14 +20,32 @@ export interface Whereabouts {
  */
 const SAFE_SCREENS: readonly string[] = ['home', 'settings', 'account'];
 
+/** Where a start again is safe: which screens, and whether off screen counts. */
+export interface SafePlaces {
+  screens: readonly string[];
+  hidden: boolean;
+}
+
+const JOIN_PLACES: SafePlaces = { screens: SAFE_SCREENS, hidden: true };
+
+/** Whether starting the app again now loses the person nothing, by `places`. */
+export function safeNow(where: Whereabouts, places: SafePlaces = JOIN_PLACES): boolean {
+  if (where.hidden()) return places.hidden;
+  return !where.busy() && places.screens.indexOf(where.screen()) !== -1;
+}
+
 /**
  * Runs `run` once starting the app again loses the person nothing: the next
  * time the app is off screen, or while Home, Settings or the account screen
- * shows with no text box open. At once when it already is.
+ * shows with no text box open (or the screens `places` names). At once when
+ * it already is.
  */
-export function whenSafe(where: Whereabouts, run: () => void): void {
-  const safe = () =>
-    where.hidden() || (!where.busy() && SAFE_SCREENS.indexOf(where.screen()) !== -1);
+export function whenSafe(
+  where: Whereabouts,
+  run: () => void,
+  places: SafePlaces = JOIN_PLACES,
+): void {
+  const safe = () => safeNow(where, places);
   if (safe()) {
     run();
     return;
@@ -47,7 +65,7 @@ function typing(): boolean {
 }
 
 /** The app as the router, the page and "Who's watching?" have it. */
-const app: Whereabouts = {
+export const appWhereabouts: Whereabouts = {
   screen: () => topRoute().name,
   hidden: () => document.hidden,
   busy: () => profileSwitcher.get() || typing(),
@@ -72,5 +90,5 @@ const app: Whereabouts = {
  * the account's screen, once that throws nobody out of what they are doing.
  */
 export function reloadWhenSafe(run: () => void): void {
-  whenSafe(app, run);
+  whenSafe(appWhereabouts, run);
 }

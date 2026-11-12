@@ -82,3 +82,62 @@ export function readRepoIndex(stored: string | null): WebosUpdate | undefined {
     return undefined;
   }
 }
+
+// In-app updates (apps/webos/src/shell): the app's loader asks for the newest signed update for
+// its channel and runtime version, and downloads the scripts it names by their SHA-256. The
+// Worker serves the answer exactly as the workflow stored it: the TV checks the signature with
+// the key in its own index.html, so nothing here is trusted.
+
+/** The signed answer for one runtime version: an update's manifest, or a directive to go back. */
+export const appKey = (channel: string, runtime: string): string =>
+  `webos/app/${channel}/${runtime}`;
+/** A script an update names, by its SHA-256. */
+export const appFileKey = (sha256: string): string => `webos/file/${sha256}`;
+
+/** What apps/webos/build/shell.ts names a runtime version: webos-<contract>-<16 hex digits>. */
+const RUNTIME = /^webos-\d{1,4}-[0-9a-f]{16}$/;
+export const isWebosRuntime = (value: string): boolean => RUNTIME.test(value);
+
+/** The loader asks at most once a minute, and a publish must reach it on the next ask. */
+export const APP_CACHE = 'no-store';
+/** Read as bytes and checked against the manifest before the TV runs it: never a page's script. */
+export const APP_FILE_TYPE = 'application/octet-stream';
+
+/** What /status says of the answer stored for a runtime version. */
+export interface WebosAppAnswer {
+  /** update: a build to start; built-in: go back to the .ipk's own code. */
+  type: 'update' | 'built-in';
+  id: string | null;
+  version: string | null;
+  commit: string | null;
+  createdAt: string | null;
+  keyId: string | null;
+}
+
+/** The stored answer's outline, or undefined when there is none or it cannot be read. Only for /status. */
+export function readAppAnswer(stored: string | null): WebosAppAnswer | undefined {
+  if (stored === null) return undefined;
+  try {
+    const body = JSON.parse(stored) as Record<string, unknown> | null;
+    const signed = typeof body?.manifest === 'string' ? body.manifest : body?.directive;
+    if (typeof signed !== 'string') return undefined;
+    const value = JSON.parse(signed) as Record<string, unknown> | null;
+    const type =
+      value?.type === 'bannertv-lg-update'
+        ? 'update'
+        : value?.type === 'bannertv-lg-built-in'
+          ? 'built-in'
+          : undefined;
+    if (!type) return undefined;
+    return {
+      type,
+      id: text(value?.id),
+      version: text(value?.version),
+      commit: text(value?.commit),
+      createdAt: text(value?.createdAt),
+      keyId: text(body?.keyid),
+    };
+  } catch {
+    return undefined;
+  }
+}

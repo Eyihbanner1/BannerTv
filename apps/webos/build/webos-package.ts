@@ -14,9 +14,11 @@ interface Options {
 /**
  * Turns Vite's output into a webOS app folder that `ares-package` accepts.
  *
- * - The entry script becomes a classic deferred script. Chromium can block
- *   module scripts loaded from file://, which is where packaged apps run.
- * - `crossorigin` attributes go too, since file:// has no CORS.
+ * - No module script is left: the shell plugin (build/shell.ts) swaps the
+ *   entry for the loader, a classic script, as Chromium can block module
+ *   scripts loaded from file://, which is where packaged apps run. Any other
+ *   module script fails the build.
+ * - `crossorigin` attributes and module preloads go, since file:// has no CORS.
  * - appinfo.json, the launcher icons and the splash land next to index.html.
  */
 export function webosPackage({ metaDir, brandDir, extraFiles = {} }: Options): Plugin {
@@ -50,14 +52,12 @@ export function webosPackage({ metaDir, brandDir, extraFiles = {} }: Options): P
 }
 
 export function toClassicScripts(html: string): string {
+  if (/<script\b[^>]*\btype="module"/.test(html)) {
+    throw new Error(
+      'index.html still has a module script: the shell plugin should have swapped it.',
+    );
+  }
   return html
-    .replace(/<script\b([^>]*)>/g, (tag: string, attrs: string) => {
-      if (!/\btype="module"/.test(attrs)) return tag;
-      const rest = attrs
-        .replace(/\s*\btype="module"/, '')
-        .replace(/\s*\bcrossorigin(="[^"]*")?/, '');
-      return `<script defer${rest}>`;
-    })
     .replace(/<link\b[^>]*\brel="modulepreload"[^>]*>\s*/g, '')
-    .replace(/(<link\b[^>]*?)\s+crossorigin(="[^"]*")?/g, '$1');
+    .replace(/(<(?:link|script)\b[^>]*?)\s+crossorigin(="[^"]*")?/g, '$1');
 }

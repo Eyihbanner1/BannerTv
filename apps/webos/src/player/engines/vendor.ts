@@ -1,3 +1,5 @@
+import { loadAppScript } from '../../platform/shell';
+
 /**
  * hls.js and Shaka ship as their own classic scripts next to index.html, so
  * the start-up bundle stays small and the TV only parses them when a stream
@@ -18,16 +20,10 @@ const loading: Partial<Record<VendorScript, Promise<void>>> = {};
 export function loadVendorScript(name: VendorScript): Promise<void> {
   const existing = loading[name];
   if (existing) return existing;
-  const promise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = `./${VENDOR_SCRIPTS[name].file}`;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      script.remove();
-      delete loading[name];
-      reject(new Error(`Could not load the ${name} player`));
-    };
-    document.head.appendChild(script);
+  // Through the loader, so an update that carries a newer player runs its own.
+  const promise = loadAppScript(VENDOR_SCRIPTS[name].file).catch(() => {
+    delete loading[name];
+    throw new Error(`Could not load the ${name} player`);
   });
   loading[name] = promise;
   return promise;

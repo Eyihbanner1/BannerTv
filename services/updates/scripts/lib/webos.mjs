@@ -7,13 +7,15 @@
  * the store with wrangler, hands it in as files, and uploads what comes out. The Worker
  * (src/webos.ts) reads the same keys; the round-trip test checks the two agree.
  *
- * Nothing here signs. Homebrew Channel installs an .ipk only when the file it downloads has the
- * SHA-256 the index gives, and the index comes over HTTPS from our Worker. Signed in-app updates
- * are later work.
+ * Homebrew Channel installs an .ipk only when the file it downloads has the SHA-256 the index
+ * gives, and the index comes over HTTPS from our Worker: nothing of that is signed. In-app
+ * updates are (apps/webos/src/shell): the same publish also signs the scripts of its build with
+ * the LG update key, which only the Sign job holds, and the app's loader checks that signature
+ * with the public key in its own index.html before it stores or runs anything.
  */
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { MAX_VALUE_BYTES, UPDATE_URL } from './update.mjs';
+import { asciiJson, MAX_VALUE_BYTES, signText, UPDATE_URL, verifyText } from './update.mjs';
 
 /** Where the Worker answers: https://updates.bannertv.workers.dev. */
 export const ORIGIN = new URL(UPDATE_URL).origin;
@@ -82,6 +84,8 @@ const maxVersion = (versions) =>
 
 function checkEntry(entry) {
   check(entry !== null && typeof entry === 'object', 'A history entry is not an object.');
+  if (entry.update !== undefined && entry.update !== null)
+    checkAppUpdate(entry.update, entry.version);
   parseVersion(entry.version, 'A history entry’s version');
   check(isSha256Hex(entry.sha256), `History entry ${entry.version} has no .ipk SHA-256.`);
   check(isSha256Hex(entry.iconSha256), `History entry ${entry.version} has no icon SHA-256.`);
@@ -359,6 +363,357 @@ export function describeBuild(bytes, { version, commit, ipkName }) {
   };
 }
 
+// In-app updates, as the app's loader takes them (apps/webos/src/shell/signed.ts reads them) and
+// the Worker serves them (src/webos.ts).
+
+export const UPDATE_TYPE = 'bannertv-lg-update';
+export const BUILT_IN_TYPE = 'bannertv-lg-built-in';
+export const PLATFORM = 'webos';
+/** The repository secret that holds the private half of apps/webos/certs/lg-updates.pem. */
+export const KEY_SECRET = 'LG_UPDATES_PRIVATE_KEY';
+export const PUBLIC_KEY_PATH = 'apps/webos/certs/lg-updates.pem';
+/** Where the loader asks, as apps/webos/build/shell.ts builds it into index.html. */
+export const APP_BASE_URL = `${ORIGIN}/webos/`;
+
+export const appKey = (runtime, channel = CHANNEL) => `webos/app/${channel}/${runtime}`;
+export const appFileKey = (sha256) => `webos/file/${sha256}`;
+export const appUrl = (runtime, { origin = ORIGIN, channel = CHANNEL } = {}) =>
+  `${origin}/webos/update?channel=${channel}&runtime=${runtime}`;
+export const appFileUrl = (sha256, origin = ORIGIN) => `${origin}/webos/file/${sha256}`;
+
+/** What apps/webos/build/shell.ts names a runtime version. */
+const RUNTIME = /^webos-\d{1,4}-[0-9a-f]{16}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const KEY_ID = /^lg-[0-9a-f]{16}$/;
+// The loader's own limits (apps/webos/src/shell/signed.ts): it refuses anything past them.
+const APP_FILE = /^(assets|vendor|data)\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.js$/;
+const MAX_APP_FILES = 16;
+const MAX_APP_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_APP_BYTES = 32 * 1024 * 1024;
+const SHELL_CONFIG = /<script id="bannertv-shell" type="application\/json">([^<]*)<\/script>/;
+
+/** An update's files, as the loader holds them: scripts by a plain path, each by SHA-256 and size. */
+function checkAppFiles(files, what) {
+  check(
+    files !== null && typeof files === 'object' && !Array.isArray(files),
+    `${what} names no files.`,
+  );
+  const paths = Object.keys(files);
+  check(
+    paths.length > 0 && paths.length <= MAX_APP_FILES,
+    `${what} names ${paths.length} files, not 1 to ${MAX_APP_FILES}.`,
+  );
+  let total = 0;
+  for (const path of paths) {
+    check(
+      APP_FILE.test(path) && !path.includes('..'),
+      `${what} names ${path}, not a script it can carry.`,
+    );
+    const file = files[path];
+    check(isSha256Hex(file?.sha256), `${what} gives ${path} no SHA-256.`);
+    check(
+      Number.isInteger(file.size) && file.size > 0 && file.size <= MAX_APP_FILE_BYTES,
+      `${what} gives ${path} a size the TV refuses.`,
+    );
+    total += file.size;
+  }
+  check(total <= MAX_APP_BYTES, `${what}'s files come to ${total} bytes, more than the TV takes.`);
+}
+
+/** What a history entry, a signed folder or a plan says of the in-app update it carries. */
+function checkAppUpdate(update, version) {
+  const what = `The in-app update of ${version}`;
+  check(update !== null && typeof update === 'object', `${what} is not an object.`);
+  check(update.kind === 'update' || update.kind === 'built-in', `${what} is neither kind.`);
+  check(RUNTIME.test(update.runtime ?? ''), `${what} has no runtime version.`);
+  check(KEY_ID.test(update.keyId ?? ''), `${what} names no key.`);
+  check(
+    typeof update.createdAt === 'string' && !Number.isNaN(Date.parse(update.createdAt)),
+    `${what} has no time.`,
+  );
+  if (update.kind === 'built-in') return;
+  check(UUID.test(update.id ?? ''), `${what} has no id.`);
+  parseVersion(update.version, `${what}'s version`);
+  check(update.commit === null || COMMIT.test(update.commit ?? ''), `${what} has no commit.`);
+  checkAppFiles(update.files, what);
+  check(
+    typeof update.launch === 'string' &&
+      update.launch.startsWith('assets/') &&
+      update.files[update.launch],
+    `${what} launches ${update.launch}, not a script it names in assets/.`,
+  );
+}
+
+/** Every script an update names, read by its path and held to its SHA-256 and size. */
+export function checkUpdateFiles(files, readFile) {
+  for (const [path, file] of Object.entries(files)) {
+    let bytes;
+    try {
+      bytes = readFile(path, file);
+    } catch {
+      throw new Error(`${path} is not in the build.`);
+    }
+    check(
+      bytes.length === file.size && sha256Hex(bytes) === file.sha256,
+      `${path} is not the file the shell config names.`,
+    );
+  }
+}
+
+/** The shell config a built index.html carries (apps/webos/build/shell.ts writes it). */
+export function readShellConfig(html) {
+  const text = SHELL_CONFIG.exec(html)?.[1];
+  check(text !== undefined, 'index.html carries no shell config: was it built with the loader?');
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('The shell config in index.html is not JSON.');
+  }
+}
+
+/** The LG update key's public half, from apps/webos/certs/lg-updates.pem. */
+export function readLgPublicKey(pem) {
+  let key;
+  try {
+    key = createPublicKey(pem);
+  } catch {
+    throw new Error(`${PUBLIC_KEY_PATH} is not a PEM public key.`);
+  }
+  check(
+    key.asymmetricKeyType === 'rsa',
+    `${PUBLIC_KEY_PATH} must be an RSA key (rsa-v1_5-sha256).`,
+  );
+  return key;
+}
+
+/** The key's id as the build names it (apps/webos/build/shell.ts): 16 hex digits of the SPKI's SHA-256. */
+export function lgKeyId(publicKey) {
+  return `lg-${sha256Hex(publicKey.export({ type: 'spki', format: 'der' })).slice(0, 16)}`;
+}
+
+/** The private key from the secret, checked against the committed public key. */
+export function readLgSigningKey(pem, publicKey) {
+  let key;
+  try {
+    key = createPrivateKey(pem);
+  } catch {
+    // The message could quote the key, so it is not passed on.
+    throw new Error(`${KEY_SECRET} is not a PEM private key.`);
+  }
+  check(key.asymmetricKeyType === 'rsa', `${KEY_SECRET} must be an RSA key (rsa-v1_5-sha256).`);
+  const der = (k) => k.export({ type: 'spki', format: 'der' });
+  check(
+    der(createPublicKey(key)).equals(der(publicKey)),
+    `${KEY_SECRET} does not belong to ${PUBLIC_KEY_PATH}: TVs would refuse every update.`,
+  );
+  return key;
+}
+
+/**
+ * What Build says the in-app update in its bundle is, from index.html's shell config, with every
+ * script it names checked against the file in the build folder. `updates` is null when the build
+ * takes none (no key committed, or LG_UPDATES_IN_BUILD off), and then nothing is signed.
+ */
+export function describeUpdate({ html, readFile, version, commit }) {
+  const config = readShellConfig(html);
+  check(config.contract === 1, `The shell config is contract ${config.contract}, not 1.`);
+  check(RUNTIME.test(config.runtime ?? ''), `The shell config has no runtime version.`);
+  check(
+    config.build?.version === version && config.build.commit === commit,
+    `The build is ${config.build?.version} of ${config.build?.commit}, not ${version} of ${commit}: was the version stamped before the build?`,
+  );
+  check(
+    typeof config.build.builtAt === 'string' && !Number.isNaN(Date.parse(config.build.builtAt)),
+    'The shell config has no build time.',
+  );
+  checkAppFiles(config.files, 'The build');
+  check(
+    typeof config.launch === 'string' &&
+      config.launch.startsWith('assets/') &&
+      config.files[config.launch],
+    `The build launches ${config.launch}, not a script it names in assets/.`,
+  );
+  checkUpdateFiles(config.files, readFile);
+  const updates = config.updates;
+  if (updates !== null) {
+    check(updates?.channel === CHANNEL, `The build follows ${updates?.channel}, not ${CHANNEL}.`);
+    check(updates.url === APP_BASE_URL, `The build asks ${updates.url}, not ${APP_BASE_URL}.`);
+    check(KEY_ID.test(updates.keyId ?? ''), 'The build names no update key.');
+  }
+  return {
+    runtime: config.runtime,
+    version,
+    commit,
+    builtAt: config.build.builtAt,
+    launch: config.launch,
+    files: config.files,
+    updates: updates === null ? null : { channel: updates.channel, keyId: updates.keyId },
+  };
+}
+
+/** A manifest's text as signed: ASCII only, so its bytes are the same wherever it is read. */
+export function appManifestText(update, channel = CHANNEL) {
+  return asciiJson({
+    type: UPDATE_TYPE,
+    id: update.id,
+    createdAt: update.createdAt,
+    channel,
+    platform: PLATFORM,
+    runtime: update.runtime,
+    version: update.version,
+    commit: update.commit,
+    launch: update.launch,
+    files: update.files,
+  });
+}
+
+/** A directive's text: TVs on this runtime go back to their own .ipk's code. */
+export function directiveText(update, channel = CHANNEL) {
+  return asciiJson({
+    type: BUILT_IN_TYPE,
+    createdAt: update.createdAt,
+    channel,
+    platform: PLATFORM,
+    runtime: update.runtime,
+  });
+}
+
+const textOf = (update) =>
+  update.kind === 'update' ? appManifestText(update) : directiveText(update);
+
+/** The Worker's answer, exactly as it serves it: the signed text, its signature and the key's id. */
+function answerText(update, privateKey) {
+  const text = textOf(update);
+  const field = update.kind === 'update' ? 'manifest' : 'directive';
+  return JSON.stringify({ [field]: text, sig: signText(text, privateKey), keyid: update.keyId });
+}
+
+/**
+ * Signs the update Build described, in Sign (the one job with the key). Its time is now, after
+ * the build, so TVs on an earlier .ipk of the same runtime take it; a TV on this very .ipk sees
+ * its own files and takes nothing.
+ */
+export function signUpdate({ description, privateKey, publicKey, now, id = randomUUID() }) {
+  check(description.updates, 'This build takes no in-app updates, so there is nothing to sign.');
+  const keyId = lgKeyId(publicKey);
+  check(
+    description.updates.keyId === keyId,
+    `The build carries the key ${description.updates.keyId}, but ${PUBLIC_KEY_PATH} is ${keyId}.`,
+  );
+  const createdAt = now.toISOString();
+  check(
+    Date.parse(createdAt) > Date.parse(description.builtAt),
+    `The build says it was made at ${description.builtAt}, after now (${createdAt}).`,
+  );
+  const update = {
+    kind: 'update',
+    runtime: description.runtime,
+    keyId,
+    id,
+    createdAt,
+    version: description.version,
+    commit: description.commit,
+    launch: description.launch,
+    files: description.files,
+  };
+  checkAppUpdate(update, description.version);
+  return { off: false, update, body: answerText(update, privateKey) };
+}
+
+/** Why a run signs nothing, for the summary. */
+export const signedOff = (reason) => ({ off: true, reason });
+
+/**
+ * What a roll back sends TVs that run in-app updates, signed in Sign: the build before the
+ * current one again, with a new id and time so TVs take it, when it was an update of the same
+ * runtime whose scripts are still stored; otherwise a directive that sends TVs on the current
+ * runtime back to their own .ipk's code. Nothing when the current build took no in-app update.
+ */
+export function signRollback({ history, stored, privateKey, publicKey, now, id = randomUUID() }) {
+  const previous = checkRollback({ history, stored });
+  const current = history.publishes[0].update;
+  if (!current) {
+    return signedOff(
+      `${history.publishes[0].version} went out through Homebrew Channel only, so there is no in-app update to undo.`,
+    );
+  }
+  const keyId = lgKeyId(publicKey);
+  const createdAt = now.toISOString();
+  const back = previous.update;
+  const again =
+    back?.kind === 'update' &&
+    back.runtime === current.runtime &&
+    Object.values(back.files).every((file) => stored.has(appFileKey(file.sha256)));
+  const update = again
+    ? { ...back, keyId, id, createdAt }
+    : { kind: 'built-in', runtime: current.runtime, keyId, createdAt };
+  checkAppUpdate(update, previous.version);
+  return { off: false, update, body: answerText(update, privateKey) };
+}
+
+/**
+ * A signed folder from Sign, checked in Upload as data: its signature against the committed
+ * public key, and its text against what it says it is.
+ */
+export function checkSigned(signed, publicKey) {
+  check(signed !== null && typeof signed === 'object', 'Sign wrote no signed.json.');
+  if (signed.off) return null;
+  const { update, body } = signed;
+  checkAppUpdate(update, update?.version ?? 'this run');
+  check(
+    update.keyId === lgKeyId(publicKey),
+    `Sign used the key ${update.keyId}, not ${PUBLIC_KEY_PATH}'s.`,
+  );
+  let answer;
+  try {
+    answer = JSON.parse(body);
+  } catch {
+    throw new Error('The signed answer is not JSON.');
+  }
+  const field = update.kind === 'update' ? 'manifest' : 'directive';
+  check(
+    answer?.[field] === textOf(update) && answer.keyid === update.keyId,
+    'The signed answer is not the update Sign says it signed.',
+  );
+  check(
+    typeof answer.sig === 'string' && verifyText(answer[field], answer.sig, publicKey),
+    `The signed answer does not verify with ${PUBLIC_KEY_PATH}.`,
+  );
+  return { update, body };
+}
+
+/**
+ * The upload entries of an in-app update: its scripts not stored already, from the files Build
+ * handed on (by SHA-256), and the answer itself, which goes after the history.
+ */
+function appParts({ signed, appFiles, stored, channel }) {
+  const files = Object.values(signed.update.kind === 'update' ? signed.update.files : {});
+  const content = [];
+  let skipped = 0;
+  for (const file of files) {
+    const key = appFileKey(file.sha256);
+    if (stored.has(key)) {
+      skipped++;
+      continue;
+    }
+    const bytes = appFiles?.(file.sha256);
+    check(bytes, `Build handed on no script with SHA-256 ${file.sha256}.`);
+    check(
+      bytes.length === file.size && sha256Hex(bytes) === file.sha256,
+      `The script ${file.sha256} Build handed on is not the one the update names.`,
+    );
+    content.push({ key, value: bytes.toString('base64'), base64: true });
+  }
+  return {
+    content,
+    skipped,
+    app: { key: appKey(signed.update.runtime, channel), value: signed.body },
+  };
+}
+
+/** Whether the Worker serves the answer a run uploaded, byte for byte. */
+export const servesApp = (served, app) => served === app.value;
+
 /** The line Homebrew Channel shows on BannerTV's page, so the TV says which build it offers. */
 export function describeEntry(entry) {
   const at = (iso) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
@@ -427,10 +782,30 @@ function pointer(channel, history, entry, options) {
   };
 }
 
+/** What the summary says of a run's in-app update. */
+function appSummary(signed, app, parts) {
+  if (!app) return { off: true, reason: signed?.reason ?? 'Nothing was signed.' };
+  const { update } = app;
+  return {
+    off: false,
+    kind: update.kind,
+    runtime: update.runtime,
+    id: update.id ?? null,
+    version: update.version ?? null,
+    createdAt: update.createdAt,
+    url: appUrl(update.runtime),
+    files: update.kind === 'update' ? Object.values(update.files).map((file) => file.sha256) : [],
+    uploaded: parts.content.length,
+  };
+}
+
 /**
- * A publish of the .ipk the build job made: the .ipk and its icon (unless stored already) to
- * upload first, then the history with this build at its head, then the index, last, so the TV
- * is never offered a build before its files are there.
+ * A publish of the .ipk the build job made: the .ipk and its icon (unless stored already) and the
+ * in-app update's scripts to upload first, then the history with this build at its head, then the
+ * in-app update's signed answer, then the index, last, so neither the app nor Homebrew Channel is
+ * offered a build before its files are there. `signed` is what Sign wrote (none, or off, when the
+ * build takes no in-app updates), `publicKey` the committed LG key, and `appFiles` gives the
+ * scripts Build handed on by their SHA-256.
  */
 export function planPublish(options) {
   const {
@@ -444,6 +819,9 @@ export function planPublish(options) {
     now,
     origin = ORIGIN,
     channel = CHANNEL,
+    signed,
+    publicKey,
+    appFiles,
   } = options;
   if (historyNow !== undefined) checkUnchanged(history, historyNow);
   parseVersion(version);
@@ -474,6 +852,17 @@ export function planPublish(options) {
     commit,
     publishedAt: now.toISOString(),
   };
+  const app = signed === undefined ? null : checkSigned(signed, publicKey);
+  if (app) {
+    check(
+      app.update.kind === 'update' &&
+        app.update.version === version &&
+        app.update.commit === commit,
+      `Sign signed ${app.update.version ?? 'a directive'} of ${app.update.commit}, not ${version} of ${commit}.`,
+    );
+    entry.update = app.update;
+  }
+  const parts = app ? appParts({ signed: app, appFiles, stored, channel }) : null;
   const files = [
     {
       key: ipkKey(sha256),
@@ -483,11 +872,12 @@ export function planPublish(options) {
     },
     { key: iconKey(iconSha256), value: icon.bytes.toString('base64'), base64: true },
   ];
-  const content = files.filter((file) => !stored.has(file.key));
+  const content = [...files.filter((file) => !stored.has(file.key)), ...(parts?.content ?? [])];
   const next = {
     highest: version,
     publishes: [entry, ...history.publishes].slice(0, HISTORY_LENGTH),
   };
+  const all = files.length + (parts ? parts.content.length + parts.skipped : 0);
   return {
     action: 'publish',
     channel,
@@ -495,7 +885,9 @@ export function planPublish(options) {
     previous: history.publishes[0] ?? null,
     content,
     ...pointer(channel, next, entry, { origin }),
-    files: { uploaded: content.length, skipped: files.length - content.length },
+    app: parts?.app ?? null,
+    inApp: appSummary(signed, app, parts),
+    files: { uploaded: content.length, skipped: all - content.length },
   };
 }
 
@@ -528,10 +920,34 @@ export function checkRollback({ history, stored = new Set() }) {
  * Update all the same, since it differs from the one installed.
  */
 export function planRollbackPrevious(options) {
-  const { history, historyNow, stored, now, origin = ORIGIN, channel = CHANNEL } = options;
+  const {
+    history,
+    historyNow,
+    stored = new Set(),
+    now,
+    origin = ORIGIN,
+    channel = CHANNEL,
+    signed,
+    publicKey,
+  } = options;
   if (historyNow !== undefined) checkUnchanged(history, historyNow);
   const previous = checkRollback({ history, stored });
   const entry = { ...previous, restoredAt: now.toISOString() };
+  const app = signed === undefined ? null : checkSigned(signed, publicKey);
+  if (app) {
+    const current = history.publishes[0].update;
+    check(
+      current && app.update.runtime === current.runtime,
+      `Sign signed a roll back for ${app.update.runtime}, not the runtime of ${history.publishes[0].version}.`,
+    );
+    check(
+      app.update.kind === 'built-in' || app.update.version === previous.version,
+      `Sign signed ${app.update.version}, not ${previous.version}, the build gone back to.`,
+    );
+    entry.update = app.update;
+  }
+  // The scripts of an update offered again are stored already: Sign checked them all.
+  const parts = app ? appParts({ signed: app, stored, channel }) : null;
   const next = {
     highest: history.highest,
     publishes: [entry, ...history.publishes.slice(2)],
@@ -543,7 +959,9 @@ export function planRollbackPrevious(options) {
     previous: history.publishes[0],
     content: [],
     ...pointer(channel, next, entry, { origin }),
-    files: { uploaded: 0, skipped: 0 },
+    app: parts?.app ?? null,
+    inApp: appSummary(signed, app, parts),
+    files: { uploaded: 0, skipped: parts?.skipped ?? 0 },
   };
 }
 
@@ -577,6 +995,14 @@ export function readStoredHistory(text, { stored, channel = CHANNEL }) {
 const code = (text) => `\`${text}\``;
 const shortCommit = (commit) => (commit ? `, commit ${code(commit.slice(0, 7))}` : '');
 
+function inAppLine(inApp) {
+  if (!inApp) return '-';
+  if (inApp.off) return `none: ${inApp.reason}`;
+  if (inApp.kind === 'built-in')
+    return `back to each TV's own .ipk, runtime ${code(inApp.runtime)}`;
+  return `${code(inApp.version)}, runtime ${code(inApp.runtime)}, id ${code(inApp.id)}, ${inApp.uploaded} of ${inApp.files.length} scripts uploaded`;
+}
+
 /** The run's summary in Markdown, for the workflow's summary page, with what to do on the TV. */
 export function runSummary(summary, { result }) {
   const done = result === 'success';
@@ -595,6 +1021,7 @@ export function runSummary(summary, { result }) {
     ],
     ['Files uploaded', `${summary.files.uploaded} (${summary.files.skipped} stored already)`],
     ['Repository', summary.repoUrl],
+    ['In-app update', inAppLine(summary.inApp)],
   ];
   const lines = ['| | |', '| --- | --- |', ...rows.map((row) => `| ${row.join(' | ')} |`)];
   if (done) {
@@ -608,6 +1035,15 @@ export function runSummary(summary, { result }) {
       lines.push(
         '',
         `The build offered again keeps its own version, ${code(summary.version)}, lower than ${before ? code(before.version) : 'the one installed'}. Homebrew Channel offers Update all the same, as the two differ. If the TV refuses to put the lower version over the higher one, revert the change on main and publish instead: a publish always goes up.`,
+      );
+    }
+    const inApp = summary.inApp;
+    if (inApp && !inApp.off) {
+      lines.push(
+        '',
+        inApp.kind === 'update'
+          ? `**Without Homebrew Channel.** A TV running a BannerTV that takes in-app updates (runtime ${code(inApp.runtime)}) downloads ${code(inApp.version)} by itself within a minute of starting, or every three hours, or when Settings opens, and starts it on Settings, after a minute off screen, or the next time BannerTV starts. Settings says when it is downloading and starting.`
+          : `**Without Homebrew Channel.** A TV running an in-app update of runtime ${code(inApp.runtime)} goes back to the code of the .ipk installed on it, on Settings, after a minute off screen, or the next time BannerTV starts. A TV that installed the undone .ipk itself runs it until Update is pressed in Homebrew Channel.`,
       );
     }
   }
