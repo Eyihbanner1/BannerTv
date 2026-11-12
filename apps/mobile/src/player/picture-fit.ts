@@ -338,12 +338,12 @@ export function pictureRect(screen: Size, video: Size, frame: PictureFrame): Rec
  * reliably, so the picture is sized by its layout and never scaled; growing past the screen is
  * what fill does inside expo-video anyway.
  *
- * Fit, and fill centred, draw across the screen as they always have. That also keeps the
- * subtitles Media3 draws itself (picture subtitles, PGS and DVB) on the screen at fill:
- * modules/banner-cues fits them into the screen only when the picture's view covers it. At any
- * other size they sit on the picture, and are cut off with it where it overhangs. Any other
- * size or place is laid out as its rectangle, taking the picture to be 16:9 until its own size
- * is known, and the view covers the screen until the screen has been measured.
+ * Fit, and fill centred, draw across the screen as they always have. Any other size or place
+ * is laid out as its rectangle, taking the picture to be 16:9 until its own size is known, and
+ * the view covers the screen until the screen has been measured. At every size and place the
+ * subtitles Media3 draws itself (picture subtitles, PGS and DVB) stay on the screen where they
+ * would be with the picture fitted: modules/banner-cues fits them to the screen as the window
+ * shows it, not to the picture's view, and again whenever the picture changes size or moves.
  */
 export interface PictureLayout {
   contentFit: 'contain' | 'cover';
