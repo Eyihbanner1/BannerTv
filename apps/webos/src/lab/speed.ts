@@ -93,12 +93,15 @@ export function runSpeedTest(
   /**
    * Sets `rate`, gives it a moment to take hold, then reads a window. A wait
    * while it takes hold breaks the window as much as one during it, unless
-   * the video plays on within a few seconds: a TV that hitches at each new
-   * speed gets the moment again from there, once.
+   * the video plays on within a few seconds: a TV that hitches at a new speed
+   * gets the moment again from there, once. A hitch just after the moment,
+   * in the window, gets it too: a slow TV can take longer than the moment to
+   * hitch.
    */
   async function at(rate: number): Promise<Omit<SpeedMeasurement, 'asked' | 'baseline'>> {
     let interrupted = false;
     let held = false;
+    let again = true;
     const onBreak = () => {
       interrupted = true;
       held = true;
@@ -106,20 +109,28 @@ export function runSpeedTest(
     const onPlaying = () => {
       held = false;
     };
+    /** After a hitch, the first only: whether the video played on within a few seconds. */
+    const goAgain = async () => {
+      if (!interrupted || !again) return false;
+      again = false;
+      for (let waited = 0; held && waited < SPEED_HOLD_MS; waited += SPEED_SAMPLE_MS) {
+        await wait(SPEED_SAMPLE_MS);
+      }
+      if (held || video.paused) return false;
+      interrupted = false;
+      return true;
+    };
     BREAKS.forEach((type) => video.addEventListener(type, onBreak));
     video.addEventListener('playing', onPlaying);
     try {
       video.playbackRate = rate;
-      await wait(SPEED_SETTLE_MS);
-      for (let waited = 0; held && waited < SPEED_HOLD_MS; waited += SPEED_SAMPLE_MS) {
-        await wait(SPEED_SAMPLE_MS);
-      }
-      if (interrupted && !held && !video.paused) {
-        interrupted = false;
+      for (;;) {
         await wait(SPEED_SETTLE_MS);
+        if (await goAgain()) continue;
+        const window = await measure();
+        if (await goAgain()) continue;
+        return { ...window, interrupted: interrupted || video.paused };
       }
-      const window = await measure();
-      return { ...window, interrupted: interrupted || video.paused };
     } finally {
       BREAKS.forEach((type) => video.removeEventListener(type, onBreak));
       video.removeEventListener('playing', onPlaying);
