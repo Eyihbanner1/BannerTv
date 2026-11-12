@@ -323,6 +323,62 @@ test('with the pointer showing, OK held down brings up Skip intro once, and only
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 });
 
+test('OK held on Skip recap skips only the recap, though the intro starts where it ends', async ({
+  page,
+}) => {
+  await playEpisode(page, { recap: [3, 20], intro: [20, 40] });
+  await expect(page.getByRole('dialog', { name: 'Skip recap' })).toBeVisible({ timeout: 10000 });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+  await page.keyboard.down('Enter');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(19.5);
+  // Skip intro comes at once, on the same button: OK still held does not press it.
+  const intro = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(intro).toBeVisible({ timeout: 10000 });
+  for (let repeat = 0; repeat < 4; repeat += 1) {
+    await page.keyboard.down('Enter');
+    await page.waitForTimeout(100);
+  }
+  await page.keyboard.up('Enter');
+  await page.waitForTimeout(300);
+  expect((await video(page)).time).toBeLessThan(30);
+  await expect(intro).toBeVisible();
+  // A new OK skips it.
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(39.5);
+});
+
+test('a rewind with the controls up brings back Skip intro that Back let go, once they hide', async ({
+  page,
+}) => {
+  test.slow();
+  await playEpisode(page, { intro: [3, 60] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  // Controls up through the start of the intro, so its card first shows later.
+  await press(page, 'ArrowUp', 'player-play');
+  while ((await video(page)).time < 10) {
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(700);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(700);
+  }
+  await expect(card).toBeVisible({ timeout: 10000 });
+  const shownAt = (await video(page)).time;
+  await pressBack(page);
+  await expect(card).toHaveCount(0);
+  // Back 10 s from a few seconds on: inside the intro, before where the card
+  // showed, and the controls hide only once playback is past that again.
+  await expect
+    .poll(async () => (await video(page)).time, { timeout: 10000 })
+    .toBeGreaterThanOrEqual(shownAt + 5.5);
+  await press(page, 'ArrowUp', 'player-skip-chrome');
+  await press(page, 'ArrowDown', 'player-seek');
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await video(page)).time).toBeLessThan(shownAt - 1);
+  await expect(card).toBeVisible({ timeout: 10000 });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+  expect((await video(page)).time).toBeLessThan(45);
+});
+
 test('Skip intro the pointer only went over leaves a click beside it to hide the controls', async ({
   page,
 }) => {

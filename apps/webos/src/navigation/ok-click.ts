@@ -77,6 +77,15 @@ function letGo(): void {
   okDownOn = null;
 }
 
+/**
+ * Whether the OK being held went down before `time` (the page's clock,
+ * `performance.now()`): a hold from before something showed, which its
+ * repeats must not press, though it has the focus key of what was there.
+ */
+export function okDownBefore(time: number): boolean {
+  return okDowns > 0 && okDownAt < time;
+}
+
 /** The focus key that had focus when the OK being held went down. */
 export function okWentDownOn(): string | null {
   return okDownOn;

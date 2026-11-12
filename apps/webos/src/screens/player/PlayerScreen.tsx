@@ -492,6 +492,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const key = skipKey(offered);
     const fresh = !skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position);
     if (fresh && skipCardFree) setSkipShown({ key, at: state.position, gone: false });
+    // Rewound, or another intro or recap, while the card cannot show: it
+    // starts afresh once it can, as if it had never shown.
+    else if (fresh && skipShown !== null) setSkipShown(null);
   } else if (!waiting && skipShown && skipRearms(skipShown.at, state.position)) {
     // Back before the intro or recap: it shows again when playback reaches it,
     // even after OK or Back let it go.
@@ -510,6 +513,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // With the controls up during an intro or recap, Skip intro waits above the
   // bar, whatever became of the card: the controls never leave it out.
   const skipInControls = chrome && !!offered;
+  // Each intro or recap has a card of its own (see SkipCard's held OK).
+  const skipCardKey = offered ? skipKey(offered) : undefined;
 
   const subtitles = useSubtitles(
     type,
@@ -1122,17 +1127,20 @@ export function PlayerScreen(props: PlayerScreenProps) {
   onOkFirst.current = (event) => {
     if (event.keyCode !== KeyCode.Ok) return;
     if (!event.repeat) okFirstHere.current = false;
-    if (inputMode.get() !== 'pointer') return;
+    const pointer = inputMode.get() === 'pointer';
     // A held OK's repeats press nothing its first press brought up: not Skip
-    // intro the controls came up on, nor a card that showed as they hid.
+    // intro the controls came up on, nor a card that showed as they hid. Even
+    // once the pointer hides mid-hold: spatial navigation never saw a first
+    // press taken here, and would take the next repeat for one.
     if (event.repeat) {
-      if (okFirstHere.current || okWentDownOn() !== focusedKey()) {
+      if (okFirstHere.current || (pointer && okWentDownOn() !== focusedKey())) {
         event.preventDefault();
         event.stopPropagation();
         answeredOk();
       }
       return;
     }
+    if (!pointer) return;
     // A control the pointer rests on is the picture while the controls are hidden.
     if (chrome && (pointerOnControl.current || wheelMovedFocus.current)) return;
     // A corner card's focused button takes the OK wherever the pointer rests,
@@ -1845,6 +1853,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       )}
       {skipUp && offered && (
         <SkipCard
+          key={skipCardKey}
           kind={offered.kind}
           onSkip={skipSegment}
           onDismiss={letSkipGo}
