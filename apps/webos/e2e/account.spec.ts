@@ -1434,6 +1434,11 @@ test('Diagnostics says whether this is a secure context and Web Crypto gives the
 }) => {
   const errors = watchErrors(page);
   await mockAddons(page);
+  // Its Skip timings check asks IntroDB itself too. Answered here as for a
+  // browser IntroDB lets read, so the browser logs no refusal of its own.
+  await page.route(/^https:\/\/api\.introdb\.app\//, (route) =>
+    route.fulfill({ json: { intro: null }, headers: { 'access-control-allow-origin': '*' } }),
+  );
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await openSettings(page);
@@ -1447,5 +1452,6 @@ test('Diagnostics says whether this is a secure context and Web Crypto gives the
     page.locator('div', { has: page.getByText(label, { exact: true }) }).last();
   await expect(row('Secure context')).toContainText('yes');
   await expect(row('Web Crypto')).toContainText('works');
+  await expect(row('IntroDB itself')).toContainText('reads timings');
   expect(errors).toEqual([]);
 });

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { API_SERVICE } from '../src/data/api-service';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
 
@@ -113,6 +114,16 @@ test('a press made before an opened screen draws its first frame stays where it 
 });
 
 test('Back closes screens, goes Home, returns to the first row, then exits', async ({ page }) => {
+  // IntroDB answers only its own website, as it really does; BannerTV's service passes it on.
+  await page.route(/^https:\/\/api\.introdb\.app\//, (route) =>
+    route.fulfill({
+      json: { intro: null },
+      headers: { 'access-control-allow-origin': 'https://introdb.app' },
+    }),
+  );
+  await page.route(`${API_SERVICE}/introdb/**`, (route) =>
+    route.fulfill({ json: { intro: null } }),
+  );
   await page.goto(APP_URL);
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await page.evaluate(() => {
@@ -132,6 +143,10 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
   await press(page, 'ArrowDown', 'settings-diagnostics');
   await press(page, 'Enter', 'diagnostics-refresh');
   await expect(page.getByText('classic script')).toBeVisible();
+  // Whether the TV can read IntroDB itself, and through BannerTV's service.
+  const skips = page.locator('section', { hasText: 'Skip timings' });
+  await expect(skips).toContainText('IntroDB itselfno answer (blocked or offline)');
+  await expect(skips).toContainText('Via BannerTVreads timings');
 
   await pressBack(page);
   await expectFocus(page, 'settings-diagnostics');

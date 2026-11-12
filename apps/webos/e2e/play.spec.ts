@@ -1131,7 +1131,7 @@ test('Up or Down on the Up Next card brings the controls up in its place, counti
   await expectCountToEnd(page, nextButton, /^Next in (\d+) s$/);
 });
 
-test('Up Next says what plays next and when, the pointer picks its buttons, and a click beside it brings the controls', async ({
+test('Up Next says what plays next and when, the pointer picks its buttons, and a click beside it presses the one with focus', async ({
   page,
 }) => {
   await mockAddons(page);
@@ -1170,12 +1170,45 @@ test('Up Next says what plays next and when, the pointer picks its buttons, and 
   await expect(card).toBeVisible();
   await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
 
-  // A click on the picture beside it brings the controls in its place, still playing.
+  // A click on the picture beside it presses the button with focus, as OK
+  // does: the pointer wakes as the remote is picked up, wherever it was. Here
+  // Keep watching, so the card goes and the episode plays on, with no controls.
+  await page.mouse.move(keep.x + keep.width / 2, keep.y + keep.height / 2, { steps: 4 });
+  await expectFocus(page, 'player-upnext-dismiss');
   await page.mouse.move(400, 300, { steps: 4 });
   await page.mouse.click(400, 300);
-  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
   await expect(card).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
   expect((await video(page)).playing).toBe(true);
+});
+
+test('with the pointer showing, OK on Play now plays the next episode, wherever the pointer rests', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page);
+  await mockPlayback(page);
+  await playFirstEpisode(page);
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'data-focus-key',
+    'player-upnext-play',
+    { timeout: 15000 },
+  );
+  // The remote picked up: its pointer wakes over the picture, away from the card.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: true } })),
+  );
+  await page.mouse.move(300, 200);
+  await page.mouse.move(400, 300, { steps: 3 });
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expectFocus(page, 'player-upnext-play');
+
+  // OK as a key press, then the click that comes with it where the pointer is.
+  await page.keyboard.press('Enter');
+  await page.mouse.click(400, 300);
+  await expect.poll(async () => (await video(page)).time, { timeout: 10000 }).toBeLessThan(5);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect(await episodePlaying(page)).toMatch(/^S1:E2/);
 });
 
 /**

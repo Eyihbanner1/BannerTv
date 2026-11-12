@@ -32,7 +32,9 @@ export const LANDING_MODES: readonly LandingMode[] = ['measure', 'again', 'learn
  * landing, so it cannot do much harm. Its first jump on each stream still
  * lands as today: that is the case 'again' would mend, and Skip recap is often
  * the first jump of an episode. 'again' mends every miss, at the cost of a
- * second picture.
+ * second picture. Skip intro and Skip recap falling short are mended in
+ * every mode: a few seconds of the theme or recap playing on after the
+ * button reads as the button not working.
  */
 export const LANDING_DEFAULT: LandingMode = 'measure';
 
@@ -320,6 +322,8 @@ interface Watched {
   /** When the element was sent, and when it said it had finished. */
   at: number;
   seekedAt?: number;
+  /** A jump to a mark (the end of an intro or recap), mended after a miss whatever the mode. */
+  toMark: boolean;
   /** The viewer's jump that this second one makes up for, logged once the second lands. */
   first?: Landing;
 }
@@ -329,13 +333,19 @@ export interface LandingWatch {
   readonly mode: LandingMode;
   /** Where to send the element for a viewer's jump to `wanted` from `from`. */
   aim(wanted: number, from: number, bounds: LandingBounds): number;
-  /** The viewer jumped from `from`: this jump is watched, and one still to land is let go. */
+  /**
+   * The viewer jumped from `from`: this jump is watched, and one still to land
+   * is let go. `toMark`: a jump to the end of an intro or recap, which must
+   * not land inside it, so one that falls short is jumped once more as in
+   * 'again', whatever the mode.
+   */
   jumped(jump: {
     wanted: number;
     aimed: number;
     from: number;
     paused: boolean;
     stream: LandingStream;
+    toMark?: boolean;
   }): void;
   /** The element finished a jump. True for the watched jump's first. */
   seeked(): boolean;
@@ -380,7 +390,7 @@ export function createLandingWatch(
 
     jumped(jump) {
       letGo();
-      watched = { ...jump, at: now() };
+      watched = { ...jump, toMark: jump.toMark === true, at: now() };
     },
 
     seeked() {
@@ -428,7 +438,7 @@ export function createLandingWatch(
         secondReadMs: null,
       };
       const second =
-        sure && mode === 'again'
+        sure && (mode === 'again' || (jump.toMark && reading < jump.wanted - LANDING_SLACK_S))
           ? againFor(jump.wanted, jump.aimed, reading, jump.from, bounds)
           : undefined;
       if (second === undefined) {

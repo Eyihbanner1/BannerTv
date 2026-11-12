@@ -243,8 +243,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const pointerOnChrome = useRef(false);
   // Whether it rests on a control, whose OK is that control's; elsewhere it is the picture's.
   const pointerOnControl = useRef(false);
-  // Whether it rests on a corner card (Up Next, Skip intro, the sleep timer's warning).
-  const pointerOnCard = useRef(false);
+  // Whether Skip intro in the controls has focus because a press over the
+  // picture brought them up on it, not because the pointer went over it.
+  const skipFocusFromRemote = useRef(false);
   // Whether the wheel has moved focus since the pointer last moved: OK is then the focused control's.
   const wheelMovedFocus = useRef(false);
   const lastAutoHide = useRef(0);
@@ -473,24 +474,33 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const skips = marks.segments;
   const skipping =
     state.clip || state.live ? undefined : skipAt(skips, state.position, state.duration);
+  // The intro or recap skipped last. A skip that lands a keyframe short is
+  // still inside it: neither the card nor the controls offer it again while
+  // the second jump mends it, nor at all if that falls short too, until
+  // playback goes back to its start or the viewer jumps (seekByViewer).
+  const [skipped, setSkipped] = useState<{ key: string; start: number } | null>(null);
+  if (skipped && !waiting && state.position <= skipped.start) setSkipped(null);
+  const offered = skipping && skipped?.key !== skipKey(skipping) ? skipping : undefined;
   // The intro or recap the card was for, where it first showed, and whether it was let go.
   const [skipShown, setSkipShown] = useState<{ key: string; at: number; gone: boolean } | null>(
     null,
   );
-  if (skipping && !waiting) {
-    const key = skipKey(skipping);
-    if (!skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position)) {
-      setSkipShown({ key, at: state.position, gone: false });
-    }
+  // Its seconds start once it can show: controls or a sheet up as the intro
+  // starts do not use them up, or the card would never come.
+  const skipCardFree = !chrome && !held && !cardUp && !warns;
+  if (offered && !waiting) {
+    const key = skipKey(offered);
+    const fresh = !skipShown || skipShown.key !== key || skipRearms(skipShown.at, state.position);
+    if (fresh && skipCardFree) setSkipShown({ key, at: state.position, gone: false });
   } else if (!waiting && skipShown && skipRearms(skipShown.at, state.position)) {
     // Back before the intro or recap: it shows again when playback reaches it,
     // even after OK or Back let it go.
     setSkipShown(null);
   }
   const skipUp =
-    !!skipping &&
+    !!offered &&
     skipShown !== null &&
-    skipShown.key === skipKey(skipping) &&
+    skipShown.key === skipKey(offered) &&
     !skipShown.gone &&
     !skipCardDone(skipShown.at, state.position, state.rate) &&
     !chrome &&
@@ -499,7 +509,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     !warns;
   // With the controls up during an intro or recap, Skip intro waits above the
   // bar, whatever became of the card: the controls never leave it out.
-  const skipInControls = chrome && !!skipping;
+  const skipInControls = chrome && !!offered;
 
   const subtitles = useSubtitles(
     type,
@@ -671,6 +681,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     armHide();
   }
   function hide() {
+    skipFocusFromRemote.current = false;
     clearTimeout(hideTimer.current);
     setControls(false);
     void setFocus('player-surface');
@@ -758,10 +769,15 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Back to live from behind it reads where live is now; from live, it stays.
     if (kept && current.target >= kept.live - Math.max(0, kept.slack)) {
       if (!atLive) session.goToLive();
-    } else session.seek(current.target);
+    } else seekByViewer(current.target);
     offerBackTo(current.origin, current.target);
     noteJump(current.origin, current.target);
     return true;
+  }
+  /** The viewer's own jump: an intro or recap skipped before can be offered again. */
+  function seekByViewer(position: number) {
+    setSkipped(null);
+    session?.seek(position);
   }
   function cancelScrub(): boolean {
     if (!scrub.current) return false;
@@ -796,7 +812,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       if (!atLive) session.goToLive();
     } else if (session) {
       const from = session.trustedPosition() ?? state.position;
-      session.seek(seconds);
+      seekByViewer(seconds);
       offerBackTo(from, seconds);
       noteJump(from, seconds);
     }
@@ -835,14 +851,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
     cancelScrub();
     clearTimeout(undoTimer.current);
     if (undo !== null) {
-      session.seek(undo);
+      seekByViewer(undo);
       setUndo(null);
       // Going back is not playback going on from a skip: no intro is learned from it.
       introGuess.current = null;
       return;
     }
     const from = session.trustedPosition() ?? state.position;
-    session.seek(0);
+    seekByViewer(0);
     if (from < UNDO_FROM_S) return;
     setUndo(from);
     undoTimer.current = window.setTimeout(() => setUndo(null), BACK_TO_MS);
@@ -889,7 +905,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       if (waiting) return false;
       if (direction === 'left' || direction === 'right') {
         scrubBy(direction === 'left' ? -1 : 1, (details.pressedKeys[direction] ?? 1) - 1);
-      } else show('player-play');
+      } else showOverPicture();
       return false;
     },
     onEnterPress: (_props, details) => {
@@ -901,6 +917,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
         return;
       }
       if (commitScrub()) return;
+      // During an intro or recap on offer, OK brings up Skip intro, and the
+      // picture plays on: a second OK skips, as on the corner card.
+      if (offered && state.status !== 'paused') {
+        showOverPicture();
+        return;
+      }
       session?.togglePlay();
       show('player-play');
     },
@@ -980,9 +1002,10 @@ export function PlayerScreen(props: PlayerScreenProps) {
     const target = event.target instanceof Element ? event.target : null;
     pointerOnChrome.current = target?.closest('[data-player-chrome]') != null;
     pointerOnControl.current = target?.closest(CONTROL) != null;
-    pointerOnCard.current = target?.closest(CARD) != null;
     if (event.movementX === 0 && event.movementY === 0) return;
     wheelMovedFocus.current = false;
+    // Skip intro the pointer went over has focus from the pointer, not the remote's press.
+    if (pointerOnControl.current) skipFocusFromRemote.current = false;
     // Behind the problem box, or while a stream opens, the controls would not
     // show; nor under a sheet, which they make way for. Nor over Up Next,
     // which would go from under the pointer heading for it.
@@ -1015,8 +1038,14 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // Brought up by the pointer, the controls leave focus on the picture: a notch takes it to Pause.
     if (chrome && at !== 'player-surface') {
       armHide();
-      // Up stops at the bar, as the arrow does: the back arrow above it is the pointer's.
-      if (event.deltaY < 0 && at === 'player-seek') event.stopPropagation();
+      // Up stops at the bar, as the arrow does: the back arrow above it is the
+      // pointer's. Skip intro waiting above the bar is as far as Up goes.
+      if (event.deltaY < 0 && at === 'player-seek' && skipInControls) {
+        event.stopPropagation();
+        wheelMovedFocus.current = true;
+        void setFocus('player-skip-chrome');
+      } else if (event.deltaY < 0 && (at === 'player-seek' || at === 'player-skip-chrome'))
+        event.stopPropagation();
       else wheelMovedFocus.current = true;
       return;
     }
@@ -1036,13 +1065,42 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // A click on the picture shows the controls, or hides them. A click on a
   // control is that control's, and so is a click after the wheel moved focus
   // to one: the Magic Remote sends its OK as a click alone while the pointer shows.
-  // A corner card (Up Next, Skip intro, the sleep timer's warning) gives way
-  // to the controls a click on the picture beside it brings, as Up does; the
-  // pointer only moving leaves it where it is, under the pointer heading for it.
+  // A corner card (Up Next, Skip intro, the sleep timer's warning) has its
+  // button focused from the moment it shows, and that button takes the click
+  // wherever the pointer rests, as it takes OK from the arrows: the pointer
+  // wakes as the remote is picked up, so OK on Skip intro or Play now must not
+  // bring the controls instead. Skip intro the controls came up on takes it
+  // the same way. The pointer only moving leaves a card where it is.
   const picturePressable = () => !problem && !waiting && !panel && !asleep && !asking;
+  /**
+   * Whether a press on the picture belongs to the corner card, or to Skip
+   * intro the controls came up on. Not Skip intro the pointer only went over:
+   * once it leaves, a click beside it hides the controls, as beside any other.
+   */
+  const offerTakesPress = () =>
+    card ||
+    (chrome &&
+      skipInControls &&
+      skipFocusFromRemote.current &&
+      focusedKey() === 'player-skip-chrome');
+  /**
+   * The controls over the picture: on Skip intro while one is on offer, so
+   * the next OK skips (its corner card may have gone, or never had its
+   * moment), else on Pause.
+   */
+  function showOverPicture() {
+    if (!offered) {
+      show('player-play');
+      return;
+    }
+    // Skip intro is drawn with the controls: they show first, so focus has it to land on.
+    flushSync(() => setControls(true));
+    show('player-skip-chrome');
+    skipFocusFromRemote.current = true;
+  }
   function pressPicture() {
     if (controls) hide();
-    else show('player-play');
+    else showOverPicture();
   }
   const onPictureClick = (event: MouseEvent) => {
     if (clickCameWithOk()) return;
@@ -1050,7 +1108,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // A corner card's own edge, picture or words are the card's, not the picture's.
     if (event.target instanceof Element && event.target.closest(CARD)) return;
     if (!picturePressable()) return;
-    if (chrome && wheelMovedFocus.current) pressFocused();
+    if (offerTakesPress() || (chrome && wheelMovedFocus.current)) pressFocused();
     else pressPicture();
   };
 
@@ -1059,18 +1117,31 @@ export function PlayerScreen(props: PlayerScreenProps) {
   // focus takes it: Pause, or a chip, which would open its sheet. A skip under way
   // lands on it, as OK lands one everywhere else.
   const onOkFirst = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  // Whether this took the OK being held as it went down.
+  const okFirstHere = useRef(false);
   onOkFirst.current = (event) => {
-    if (event.keyCode !== KeyCode.Ok || inputMode.get() !== 'pointer') return;
+    if (event.keyCode !== KeyCode.Ok) return;
+    if (!event.repeat) okFirstHere.current = false;
+    if (inputMode.get() !== 'pointer') return;
+    // A held OK's repeats press nothing its first press brought up: not Skip
+    // intro the controls came up on, nor a card that showed as they hid.
+    if (event.repeat) {
+      if (okFirstHere.current || okWentDownOn() !== focusedKey()) {
+        event.preventDefault();
+        event.stopPropagation();
+        answeredOk();
+      }
+      return;
+    }
     // A control the pointer rests on is the picture while the controls are hidden.
     if (chrome && (pointerOnControl.current || wheelMovedFocus.current)) return;
-    // A corner card under the pointer is the card's: its button has focus
-    // from the pointer, or keeps the focus it had, and takes the OK.
-    if (card && (pointerOnControl.current || pointerOnCard.current)) return;
-    if (!picturePressable()) return;
+    // A corner card's focused button takes the OK wherever the pointer rests,
+    // and so does Skip intro the controls came up on (see onPictureClick).
+    if (!picturePressable() || offerTakesPress()) return;
     event.preventDefault();
     event.stopPropagation();
     answeredOk();
-    if (event.repeat) return;
+    okFirstHere.current = true;
     if (commitScrub()) armHide();
     else pressPicture();
   };
@@ -1166,22 +1237,30 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setCreditsCard((card) => card && { ...card, gone: true });
   }
 
-  /** Skip intro or Skip recap: to its end, and the card goes. */
+  /**
+   * Skip intro or Skip recap: to its end, and the card goes. On the TV's own
+   * player the jump can land on the keyframe a few seconds before: it is
+   * jumped once more then, and the skip is not offered again meanwhile.
+   */
   function skipSegment() {
+    const skipping = offered;
     if (!session || !skipping) return;
     // A skip still to land would undo it.
     cancelScrub();
     const from = session.trustedPosition() ?? state.position;
-    session.seek(skipping.end);
+    session.seek(skipping.end, { toMark: true });
+    setSkipped({ key: skipKey(skipping), start: skipping.start });
     // A long recap skipped offers the way back, as any big jump does.
     offerBackTo(from, skipping.end);
     // A learned intro skipped can be corrected as the skip it was learned from.
     introGuess.current = skipping.learned ? { start: skipping.start, end: skipping.end } : null;
     setSkipShown((shown) => shown && { ...shown, gone: true });
   }
-  /** Skip intro from the controls: the controls go with it, back to the picture. */
+  /** Skip intro from the controls: the controls go with it, back to the picture, which plays. */
   function skipSegmentFromControls() {
     skipSegment();
+    // Paused, it would leave a still picture with nothing on it.
+    if (state.status === 'paused') session?.resume();
     hide();
   }
   function letSkipGo() {
@@ -1730,9 +1809,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
         onSeekTo={seekTo}
         onLeave={back}
         skip={
-          skipInControls && skipping
+          skipInControls && offered
             ? {
-                label: t(skipping.kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap'),
+                label: t(offered.kind === 'intro' ? 'player.skipIntro' : 'player.skipRecap'),
                 onPress: skipSegmentFromControls,
               }
             : undefined
@@ -1764,9 +1843,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
           onControls={() => show('player-play')}
         />
       )}
-      {skipUp && skipping && (
+      {skipUp && offered && (
         <SkipCard
-          kind={skipping.kind}
+          kind={offered.kind}
           onSkip={skipSegment}
           onDismiss={letSkipGo}
           onControls={() => show('player-play')}

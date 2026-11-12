@@ -1,9 +1,10 @@
 import { SPEED_KINDS, type SpeedResults } from '@bannertv/core';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../app/use-screen-focus';
 import { Button } from '../components/Button';
 import { speedMemory } from '../data/playback';
+import { checkSkipTimings } from '../data/skips';
 import {
   collectDiagnostics,
   type DiagnosticRow,
@@ -14,7 +15,9 @@ import screenStyles from './Screen.module.css';
 import styles from './DiagnosticsScreen.module.css';
 
 // Sections per column, so the whole report fits on one 1920x1080 screen.
-const COLUMNS = [[0, 1], [2, 4], [3]];
+const COLUMNS = [[0, 1], [2, 4, 5], [3]];
+
+const CHECKING = 'checking…';
 
 /** What the Lab's speed test settled for each kind of stream, and when. */
 function speedSection(results: SpeedResults): DiagnosticSection {
@@ -40,8 +43,18 @@ function speedSection(results: SpeedResults): DiagnosticSection {
 export function DiagnosticsScreen() {
   const { t } = useTranslation();
   const [sections, setSections] = useState<DiagnosticSection[] | null>(null);
+  // Whether this screen reads IntroDB's skip timings, filled in once both
+  // answer (up to a few seconds), so the rest of the report never waits on it.
+  const [skipCheck, setSkipCheck] = useState({ direct: CHECKING, service: CHECKING });
+  const checks = useRef(0);
 
   const refresh = useCallback(() => {
+    const check = ++checks.current;
+    void checkSkipTimings().then((result) => {
+      if (check !== checks.current) return;
+      console.info('[BannerTV diagnostics] skip timings:', JSON.stringify(result));
+      setSkipCheck(result);
+    });
     void Promise.all([collectDiagnostics(), speedMemory.load()]).then(([report]) => {
       const full = [...report, speedSection(speedMemory.results())];
       console.info('[BannerTV diagnostics]', JSON.stringify(full, null, 2));
@@ -50,22 +63,38 @@ export function DiagnosticsScreen() {
   }, []);
 
   useEffect(refresh, [refresh]);
+  const refreshAll = () => {
+    setSkipCheck({ direct: CHECKING, service: CHECKING });
+    refresh();
+  };
   useScreenFocus('diagnostics-refresh');
+  const skipSection: DiagnosticSection = {
+    title: 'Skip timings',
+    rows: [
+      ['IntroDB itself', skipCheck.direct],
+      ['Via BannerTV', skipCheck.service],
+    ],
+  };
+  const shown = sections && [...sections, skipSection];
 
   return (
     <div className={screenStyles.screen}>
       <h1 className={screenStyles.title}>{t('settings.diagnostics')}</h1>
       <div className={styles.actions}>
-        <Button focusKey="diagnostics-refresh" label={t('diagnostics.refresh')} onPress={refresh} />
+        <Button
+          focusKey="diagnostics-refresh"
+          label={t('diagnostics.refresh')}
+          onPress={refreshAll}
+        />
       </div>
-      {sections === null ? (
+      {shown === null ? (
         <p className={screenStyles.lead}>{t('diagnostics.loading')}</p>
       ) : (
         <div className={styles.columns}>
           {COLUMNS.map((indexes) => (
             <div key={indexes.join()} className={styles.column}>
               {indexes.map((index) => {
-                const section = sections[index];
+                const section = shown[index];
                 if (!section) return null;
                 return (
                   <section key={section.title} className={styles.section}>

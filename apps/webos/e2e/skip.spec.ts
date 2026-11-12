@@ -216,3 +216,176 @@ test('a jump of two minutes or more offers for a moment to go back: Skip recap, 
   await expect.poll(async () => (await video(page)).time).toBeGreaterThan(250);
   await expect(restart).toHaveText(/^Back to 0:[01]\d$/);
 });
+
+/** The Magic Remote picked up: its pointer wakes and moves over the picture, away from any card. */
+async function wakePointer(page: Page) {
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: true } })),
+  );
+  await page.mouse.move(300, 200);
+  await page.mouse.move(400, 300, { steps: 3 });
+}
+
+test('with the pointer showing, OK on Skip recap or Skip intro skips, wherever the pointer rests', async ({
+  page,
+}) => {
+  await playEpisode(page, { recap: [3, 20], intro: [22, 40] });
+  const recap = page.getByRole('dialog', { name: 'Skip recap' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await wakePointer(page);
+  // The pointer moving brings no controls over the card, and the card keeps focus.
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+
+  // OK as a key press, then the click that comes with it where the pointer is.
+  await page.keyboard.press('Enter');
+  await page.mouse.click(400, 300);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(19.5);
+  await expect(recap).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+
+  // OK as a click alone, as the TV also sends it: Skip intro takes it too.
+  const intro = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(intro).toBeVisible({ timeout: 10000 });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+  await page.mouse.move(420, 320, { steps: 2 });
+  await page.mouse.click(420, 320);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(39.5);
+  await expect(intro).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+});
+
+test('OK over an intro whose card went brings up Skip intro, still playing, and OK again skips', async ({
+  page,
+}) => {
+  await playEpisode(page, { intro: [3, 60] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await pressBack(page);
+  await expect(card).toHaveCount(0);
+  await expectFocus(page, 'player-surface');
+
+  // OK on the picture: the controls come up on Skip intro, and the intro plays on.
+  await press(page, 'Enter', 'player-skip-chrome');
+  await expect(page.locator('[data-focus-key="player-skip-chrome"]')).toHaveText('Skip intro');
+  await page.waitForTimeout(300);
+  expect((await video(page)).playing).toBe(true);
+  // Back hides them, and Up brings them on Skip intro too.
+  await pressBack(page);
+  await expectFocus(page, 'player-surface');
+  await press(page, 'ArrowUp', 'player-skip-chrome');
+
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(59);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expectFocus(page, 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+});
+
+test('with the pointer showing, OK held down brings up Skip intro once, and only a new OK skips', async ({
+  page,
+}) => {
+  await playEpisode(page, { intro: [3, 60] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await pressBack(page);
+  await expect(card).toHaveCount(0);
+  await wakePointer(page);
+  // The pointer brought the controls up; Back hides them, and the pointer still shows.
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeVisible();
+  await pressBack(page);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await expectFocus(page, 'player-surface');
+
+  // Held: the first press brings the controls up on Skip intro; its repeats,
+  // and the click as it comes up, press nothing.
+  await page.keyboard.down('Enter');
+  await expectFocus(page, 'player-skip-chrome');
+  await page.keyboard.down('Enter');
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await page.mouse.click(400, 300);
+  await page.waitForTimeout(300);
+  expect((await video(page)).time).toBeLessThan(30);
+  await expectFocus(page, 'player-skip-chrome');
+
+  // A new OK skips.
+  await page.keyboard.press('Enter');
+  await page.mouse.click(400, 300);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(59);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+});
+
+test('Skip intro the pointer only went over leaves a click beside it to hide the controls', async ({
+  page,
+}) => {
+  await playEpisode(page, { intro: [3, 60] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await pressBack(page);
+  await expect(card).toHaveCount(0);
+  await press(page, 'Enter', 'player-skip-chrome');
+  await wakePointer(page);
+  // Over Pause, then over Skip intro, which takes focus as the pointer goes over it.
+  const pause = await page.locator('[data-focus-key="player-play"]').boundingBox();
+  const skip = await page.locator('[data-focus-key="player-skip-chrome"]').boundingBox();
+  if (!pause || !skip) throw new Error('controls not drawn');
+  await page.mouse.move(pause.x + pause.width / 2, pause.y + pause.height / 2, { steps: 3 });
+  await page.mouse.move(skip.x + skip.width / 2, skip.y + skip.height / 2, { steps: 3 });
+  await expectFocus(page, 'player-skip-chrome');
+  // Off it, onto the picture: a click there is the picture's.
+  await page.mouse.move(400, 300, { steps: 3 });
+  await page.mouse.click(400, 300);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+  await page.waitForTimeout(300);
+  expect((await video(page)).time).toBeLessThan(30);
+  expect((await video(page)).playing).toBe(true);
+});
+
+test('Skip intro from the paused controls plays on from the end of the intro', async ({ page }) => {
+  await playEpisode(page, { intro: [3, 60] });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button', {
+    timeout: 10000,
+  });
+  await press(page, 'ArrowUp', 'player-play');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).playing).toBe(false);
+  await press(page, 'ArrowUp', 'player-seek');
+  await press(page, 'ArrowUp', 'player-skip-chrome');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThanOrEqual(59);
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect(page.locator('[data-focus-key="player-play"]')).toBeHidden();
+});
+
+test('Skip intro has its few seconds once it can show: controls up as the intro starts do not use them up', async ({
+  page,
+}) => {
+  test.slow();
+  await playEpisode(page, { intro: [6, 60] });
+  const card = page.getByRole('dialog', { name: 'Skip intro' });
+  // The controls up before the intro, and kept up by the arrows through more
+  // than its card's few seconds.
+  await press(page, 'ArrowUp', 'player-play');
+  while ((await video(page)).time < 19) {
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(700);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(700);
+  }
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-skip-chrome"]')).toBeVisible();
+  // Once they hide by themselves, the card comes, with focus.
+  await expect(card).toBeVisible({ timeout: 10000 });
+  await expect(focused(page)).toHaveAttribute('data-focus-key', 'player-skip-button');
+  expect((await video(page)).time).toBeLessThan(45);
+});
