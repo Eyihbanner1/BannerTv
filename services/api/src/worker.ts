@@ -7,8 +7,10 @@
  * The TV posts Trakt calls to /trakt as a plain-text JSON body and gets
  * Trakt's status and data back as JSON; it asks TMDB through /tmdb/<path>,
  * and Search asks /search/<route> (search.ts), which answers with titles by
- * IMDb id. Only the paths BannerTV uses are passed on, and TMDB's answers
- * are cached for a day at the edge. Requests carry viewers' Trakt tokens, so nothing
+ * IMDb id. It also reads IntroDB's timings for the TV at /introdb/segments,
+ * since IntroDB's own answers are open only to its website. Only the paths
+ * BannerTV uses are passed on; TMDB's answers are cached for a day at the
+ * edge, and IntroDB's for a few hours. Requests carry viewers' Trakt tokens, so nothing
  * here logs, and no answer repeats a secret, a token or a request body.
  *
  * A Worker module may export only its handler and Durable Object classes (and
@@ -16,8 +18,12 @@
  */
 import pkg from '../package.json';
 import {
+  INTRODB_CACHE_SECONDS,
+  introDbCacheKey,
+  introDbRequest,
   isJson,
   MAX_BODY_BYTES,
+  readIntroDbCall,
   readRetryAfter,
   readTmdbCall,
   readTraktCall,
@@ -53,6 +59,7 @@ export interface Context {
 const USER_AGENT = `BannerTV/${pkg.version}`;
 const JSON_TYPE = 'application/json; charset=utf-8';
 const CACHED = `public, max-age=${TMDB_CACHE_SECONDS}`;
+const INTRODB_CACHED = `public, max-age=${INTRODB_CACHE_SECONDS}`;
 
 // The TV app runs from file://, so its calls are cross-origin. They are simple
 // requests (GET, or POST with a text body), so browsers send no preflight.
@@ -111,7 +118,7 @@ interface Upstream {
   headers: Headers;
 }
 
-/** Trakt's or TMDB's answer, or undefined when none came within the timeout. */
+/** Trakt's, TMDB's or IntroDB's answer, or undefined when none came within the timeout. */
 async function send(request: UpstreamRequest): Promise<Upstream | undefined> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
@@ -235,6 +242,32 @@ async function tmdb(request: Request, env: Env, ctx: Context): Promise<Response>
   return answer(upstream.text, 200, CACHED);
 }
 
+/**
+ * IntroDB's timings for one episode, as IntroDB gave them. It needs no key;
+ * the Worker only adds an origin the TV's browser accepts, and the edge cache.
+ */
+async function introdb(request: Request, ctx: Context): Promise<Response> {
+  const url = new URL(request.url);
+  const call = readIntroDbCall(url.search);
+  if (!call) return json({ error: 'path' }, 400);
+
+  const cache = edgeCache();
+  const cacheKey = new Request(introDbCacheKey(url.origin, call));
+  const hit = await cached(cache, cacheKey);
+  if (hit !== undefined) return answer(hit, 200, INTRODB_CACHED);
+
+  const upstream = await send(introDbRequest(call, USER_AGENT));
+  if (!upstream || !isJson(upstream.text)) return json({ error: 'upstream' }, 502);
+  if (upstream.status !== 200) return answer(upstream.text, upstream.status);
+  if (cache) {
+    const copy = new Response(upstream.text, {
+      headers: { 'Cache-Control': INTRODB_CACHED, 'Content-Type': JSON_TYPE },
+    });
+    ctx.waitUntil(cache.put(cacheKey, copy).catch(() => undefined));
+  }
+  return answer(upstream.text, 200, INTRODB_CACHED);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: Context): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -266,6 +299,7 @@ export default {
     if (request.method === 'GET' && pathname.startsWith('/search/')) {
       return search(request, env, ctx);
     }
+    if (request.method === 'GET' && pathname === '/introdb/segments') return introdb(request, ctx);
     return json({ error: 'not-found' }, 404);
   },
 };

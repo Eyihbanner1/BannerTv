@@ -1,6 +1,6 @@
 # BannerTV API
 
-A Cloudflare Worker that lets the TV use Trakt and TMDB without their keys in the app package or in this repository. See ADR 0004, items 9 and 13 (since 6 November 2026 Search may ask TMDB; Home and Discover still never do).
+A Cloudflare Worker that lets the TV use Trakt and TMDB without their keys in the app package or in this repository, and read IntroDB's skip timings, which IntroDB does not open to browsers. See ADR 0004, items 9 and 13 (since 6 November 2026 Search may ask TMDB; Home and Discover still never do).
 
 The Trakt client ID (and client secret, for a Trakt app old enough to have one) and the TMDB key are Worker secrets. The TV calls the Worker with simple requests (GET, or POST with a plain-text body), so browsers never send a preflight, and every answer carries `Access-Control-Allow-Origin: *`. The Worker passes on only the Trakt and TMDB calls BannerTV makes, adds the keys, and caches TMDB's answers for a day at the edge. Requests carry viewers' Trakt tokens, so it keeps no logs (observability is off in `wrangler.toml`), and no answer repeats a secret, a token or a request body.
 
@@ -85,6 +85,12 @@ Search's rows from TMDB, answered with titles by IMDb id so the app opens them o
 The words are folded (trimmed, single spaces, lower case) and at most 100 characters. Anything else is 400 `{"error":"path"}`; without a key 503 `{"error":"unconfigured"}`; when TMDB fails 502 `{"error":"upstream"}`. Whole answers are cached for a day like TMDB's own; an answer missing some titles (a lookup failed) carries `"partial": true`, is served with `Cache-Control: no-store` and is not cached, so the next search asks again. A row needing some genres and one of several others (Comedy, and Family or Kids) is asked of TMDB once for each of those others, since one call cannot say both, and the lists are merged.
 
 `TMDB_API_KEY` can be a v3 API key, which goes in the query as `api_key`, or a v4 read access token (it starts `eyJ`), which goes in `Authorization: Bearer`.
+
+### `GET /introdb/segments?imdb_id=<id>&season=<n>&episode=<n>`
+
+IntroDB's timings for one episode (its intro, recap, end credits and scene after them), for Skip intro, Skip recap and Up Next. IntroDB's reads need no key, but its answers name only `https://introdb.app` in `Access-Control-Allow-Origin`, so the TV's browser throws them away; the Worker asks `GET https://api.introdb.app/segments` with the same three parameters and answers with IntroDB's status and JSON body as they are, open to any origin. It needs no secret, so it answers whatever keys are set.
+
+The query must hold exactly `imdb_id` (`tt` and 1 to 10 digits), `season` (1 to 4 digits, from 1) and `episode` (1 to 5 digits, from 1); anything else is 400 `{"error":"path"}`. When IntroDB does not answer within 30 seconds, or answers with something that is not JSON, it is 502 `{"error":"upstream"}`. IntroDB's 200 answers are cached for six hours at the edge under the Worker's own address with the query sorted, and served with `Cache-Control: public, max-age=21600`, since timings are added and corrected; its other answers are not cached. The app asks IntroDB itself when the Worker has no answer, which a phone can read.
 
 ## Deploy
 

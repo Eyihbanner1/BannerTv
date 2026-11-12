@@ -107,4 +107,57 @@ describe('createIntroDbClient', () => {
       { timeoutMs: INTRODB_TIMEOUT_MS },
     );
   });
+
+  describe("through BannerTV's service", () => {
+    const PROXIED =
+      'https://api.example.workers.dev/introdb/segments?imdb_id=tt0903747&season=2&episode=1';
+
+    function proxied(answer: (url: string) => Promise<unknown>) {
+      const fetchJson = vi.fn((url: string) => answer(url));
+      const client = createIntroDbClient({
+        proxyUrl: 'https://api.example.workers.dev/introdb/',
+        fetchJson,
+        queries: createQueryCache(),
+      });
+      const query = client.marks('series', 'tt0903747:2:1');
+      query.load();
+      return { query, fetchJson };
+    }
+
+    it('asks the service, which a browser can read, and not IntroDB', async () => {
+      const { query, fetchJson } = proxied(() =>
+        Promise.resolve({ intro: { start_sec: 61, end_sec: 92 } }),
+      );
+      await flush();
+      expect(fetchJson.mock.calls).toEqual([[PROXIED, { timeoutMs: INTRODB_TIMEOUT_MS }]]);
+      expect(query.get().data).toMatchObject({
+        segments: [{ kind: 'intro', start: 61, end: 92 }],
+      });
+    });
+
+    it('asks IntroDB itself when the service has no answer: too old for the route, or down', async () => {
+      for (const failure of [
+        new HttpError('status', 'The addon answered 404', 404),
+        new HttpError('status', 'The addon answered 502', 502),
+        new HttpError('timeout', 'No answer after 8 s'),
+      ]) {
+        const { query, fetchJson } = proxied((url) =>
+          url === PROXIED
+            ? Promise.reject(failure)
+            : Promise.resolve({ recap: { start_sec: 0, end_sec: 40 } }),
+        );
+        await flush();
+        expect(fetchJson.mock.calls.map(([url]) => url)).toEqual([PROXIED, EPISODE]);
+        expect(query.get().data).toMatchObject({
+          segments: [{ kind: 'recap', start: 0, end: 40 }],
+        });
+      }
+    });
+
+    it('fails only when IntroDB fails too, as it does in a browser', async () => {
+      const { query } = proxied(() => Promise.reject(new HttpError('network', 'offline')));
+      await flush();
+      expect(query.get().status).toBe('error');
+    });
+  });
 });

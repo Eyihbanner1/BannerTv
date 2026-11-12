@@ -8,16 +8,24 @@ import {
 import { useMemo, useSyncExternalStore } from 'react';
 import { fetchJson } from '../platform/http';
 import { queryCache } from './addons';
+import { API_SERVICE } from './api-service';
 import { profileKv } from './storage';
 import { storeNow } from './sync-clock';
 import { useQuery } from './use-query';
 
 /**
  * Intro, recap and end credits timings from IntroDB, for Skip intro, Skip
- * recap and Up Next. Not behind the addon request limiter: it is one small
- * request to its own host, and an intro starts within a minute or two.
+ * recap and Up Next. Asked through BannerTV's service: IntroDB's own answers
+ * are open only to its website, so the TV's browser throws them away. IntroDB
+ * itself is asked when the service has no answer, which only a phone can
+ * read. Not behind the addon request limiter: it is one small request, and an
+ * intro starts within a minute or two.
  */
-export const skipTimings = createIntroDbClient({ fetchJson, queries: queryCache });
+export const skipTimings = createIntroDbClient({
+  proxyUrl: API_SERVICE ? `${API_SERVICE}/introdb` : undefined,
+  fetchJson,
+  queries: queryCache,
+});
 
 /**
  * Intros learned from the viewer's own skips, by series, for series IntroDB
