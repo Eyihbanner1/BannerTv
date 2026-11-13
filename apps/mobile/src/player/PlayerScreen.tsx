@@ -754,6 +754,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       setScrubbing(true);
       setControls(false);
       setSwipe({ origin, target: origin });
+      sceneFrames.ahead(origin, state.duration);
     },
     onResponderMove: (event: GestureResponderEvent) => {
       if (!swipe) return;
@@ -852,6 +853,14 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   const frameKey =
     shown && state.entry && !state.live ? `${entryKey(state.entry)}|${state.engine ?? ''}` : null;
   useEffect(() => sceneFrames.reset(frameKey), [frameKey]);
+  // Each frame takes a second or more over the network, so a few either side of the place
+  // playing are taken as the controls come up, ready for a swipe or a drag soon after. Once as
+  // they come up: the video moves on too little while they show to need more.
+  const framesAhead = frameKey !== null && controls && (playing || state.status === 'paused');
+  useEffect(() => {
+    const at = framesAhead ? session?.trustedPosition() : undefined;
+    if (at !== undefined) sceneFrames.ahead(at, state.duration);
+  }, [framesAhead, session, state.duration]);
 
   // Skip intro and Skip recap, from IntroDB's timings as on the TV: a pill in the corner for a
   // few seconds as the intro or recap starts, and again whenever the controls are up during it.

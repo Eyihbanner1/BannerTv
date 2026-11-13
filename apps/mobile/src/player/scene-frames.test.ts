@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createFrameSource, FRAME_LIMIT, FRAME_STEP_S, frameSlot } from './scene-frames';
+import { AHEAD_S, createFrameSource, FRAME_LIMIT, FRAME_STEP_S, frameSlot } from './scene-frames';
 
 async function flush() {
   for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -110,6 +110,79 @@ describe('createFrameSource', () => {
     }
     expect(frames.near(0)?.at).not.toBe(0);
     expect(frames.near(FRAME_LIMIT * FRAME_STEP_S)?.frame).toBe(`f${FRAME_LIMIT * FRAME_STEP_S}`);
+  });
+
+  it('takes frames either side ahead of a swipe, nearest first, one at a time', async () => {
+    const { grab, pending } = manualGrab();
+    const frames = createFrameSource(grab);
+    frames.reset('a');
+    frames.ahead(1164, 3489);
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([1180]);
+    for (let i = 0; i < AHEAD_S.length; i++) {
+      pending[i]!.resolve(`f${pending[i]!.at}`);
+      await flush();
+    }
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([1180, 1150, 1210, 1120, 1240, 1090]);
+    // No gap from 100 s back to 100 s on.
+    for (let at = 1164 - 100; at <= 1164 + 100; at += 1) expect(frames.near(at)).toBeDefined();
+  });
+
+  it('puts a wish before the frames ahead', async () => {
+    const { grab, pending } = manualGrab();
+    const frames = createFrameSource(grab);
+    frames.reset('a');
+    frames.ahead(600, 3000);
+    frames.want(900);
+    pending[0]!.resolve('f615');
+    await flush();
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([615, 900]);
+    pending[1]!.resolve('f900');
+    await flush();
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([615, 900, 585]);
+  });
+
+  it('keeps the frames ahead inside the file, and skips those already taken', async () => {
+    const grab = vi.fn((at: number) => Promise.resolve(`f${at}`));
+    const frames = createFrameSource(grab);
+    frames.reset('a');
+    frames.ahead(20, 100);
+    await flush();
+    // 20 - 45 and 20 - 75 are both the start; the last second is 99, so 95 is the end.
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([35, 5, 65, 0, 95]);
+    frames.ahead(30, 100);
+    await flush();
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([35, 5, 65, 0, 95, 45, 15, 75]);
+  });
+
+  it('lets another call replace what is left of the last, and a new stream drop it', async () => {
+    const { grab, pending } = manualGrab();
+    const frames = createFrameSource(grab);
+    frames.reset('a');
+    frames.ahead(600, 3000);
+    frames.ahead(1200, 3000);
+    pending[0]!.resolve('f615');
+    await flush();
+    expect(grab.mock.calls.map(([at]) => at)).toEqual([615, 1215]);
+    frames.reset('b');
+    pending[1]!.resolve('old');
+    await flush();
+    expect(grab).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes nothing ahead before a stream plays or once it gives no frames', async () => {
+    const { grab, pending } = manualGrab();
+    const frames = createFrameSource(grab);
+    frames.ahead(600, 3000);
+    expect(grab).not.toHaveBeenCalled();
+    frames.reset('hls');
+    frames.want(10);
+    pending[0]!.reject();
+    await flush();
+    frames.want(20);
+    pending[1]!.reject();
+    await flush();
+    frames.ahead(600, 3000);
+    expect(grab).toHaveBeenCalledTimes(2);
   });
 
   it('tells listeners when a frame comes', async () => {
