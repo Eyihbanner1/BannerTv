@@ -1,12 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
+import { API_SERVICE } from '../src/data/api-service';
 
 /**
  * A fake stream addon, subtitle files and media for the playback journeys.
  * Every media link serves the same 40 s of blank VP8, which the test
  * Chromium plays (it has no H.264), unless a test makes it fail.
  */
+
+/** IntroDB's timings as BannerTV's service passes them on, the way the TV asks for them. */
+const INTRODB_THROUGH_SERVICE = new RegExp(
+  `^${API_SERVICE.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&')}/introdb/segments\\?`,
+);
 
 // 40 s of blank VP8 (a WebM) with byte-range support.
 const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.webm'));
@@ -497,7 +503,8 @@ export async function mockPlayback(
     });
   });
 
-  await page.route(/^https:\/\/api\.introdb\.app\/segments/, (route) => {
+  // The TV asks IntroDB through BannerTV's service: IntroDB's own answers are not open to it.
+  await page.route(INTRODB_THROUGH_SERVICE, (route) => {
     const asked = new URL(route.request().url()).searchParams;
     const id = ['imdb_id', 'season', 'episode'].map((name) => asked.get(name)).join(':');
     mock.skips.push(id);

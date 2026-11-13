@@ -8,6 +8,7 @@ import {
   judgeReading,
   LANDING_DEFAULT,
   LANDING_KEY,
+  LANDING_MODES,
   type Landing,
   type LandingBounds,
   type LandingMode,
@@ -322,6 +323,46 @@ describe('a landing watch', () => {
       readMs: 650,
       secondReadMs: 650,
     });
+  });
+
+  it('mends a jump to a mark (Skip intro, Skip recap) once in every mode, and only that jump', () => {
+    for (const mode of LANDING_MODES) {
+      kept.mockClear();
+      const w = watch(mode);
+      w.jumped({ ...jump(94, 94, false, 80), toMark: true });
+      expect(land(w, 90)).toBe(98);
+      expect(land(w, 93.5)).toBeUndefined();
+      expect(kept).toHaveBeenCalledTimes(1);
+      expect(kept.mock.calls[0]![0]).toMatchObject({
+        mode,
+        wanted: 94,
+        landed: 90,
+        corrected: true,
+        secondAimed: 98,
+        secondLanded: 93.5,
+      });
+      // A jump of the viewer's own, by the arrows, is left as the mode says.
+      w.jumped(jump(1800));
+      expect(land(w, 1796)).toBe(mode === 'again' ? 1804 : undefined);
+    }
+  });
+
+  it('leaves a jump to a mark that landed well alone', () => {
+    const w = watch('measure');
+    w.jumped({ ...jump(94, 94, false, 80), toMark: true });
+    expect(land(w, 93.6)).toBeUndefined();
+    expect(kept).toHaveBeenCalledTimes(1);
+    expect(kept.mock.calls[0]![0]).toMatchObject({ corrected: false });
+  });
+
+  it('leaves a jump to a mark that landed past it alone, but where the mode chases both ways', () => {
+    for (const mode of LANDING_MODES) {
+      kept.mockClear();
+      const w = watch(mode);
+      w.jumped({ ...jump(94, 94, false, 80), toMark: true });
+      // Past the end of the intro is out of it: going back would only show some of it again.
+      expect(land(w, 98)).toBe(mode === 'again' ? 90 : undefined);
+    }
   });
 
   it('keeps a second jump that never landed as far as it got, when the viewer jumps again or leaves', () => {

@@ -1115,6 +1115,102 @@ describe('search', () => {
   });
 });
 
+describe('introdb', () => {
+  const MARKS =
+    '{"imdb_id":"tt0903747","season":1,"episode":2,"intro":{"start_sec":60,"end_sec":95},"recap":null,"outro":null,"no_intro":false}';
+
+  it("passes IntroDB's answer on as it is, open to the TV, and caches it for six hours", async () => {
+    const cache = fakeCache();
+    const sent = fakeUpstream(() =>
+      reply(MARKS, 200, { 'Access-Control-Allow-Origin': 'https://introdb.app' }),
+    );
+    const first = await call('GET', '/introdb/segments?season=1&episode=2&imdb_id=tt0903747');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe(
+      'https://api.introdb.app/segments?episode=2&imdb_id=tt0903747&season=1',
+    );
+    expect(sent[0]!.method).toBe('GET');
+    expect(sent[0]!.headers.get('User-Agent')).toBe(`BannerTV/${pkg.version}`);
+    expect(first.status).toBe(200);
+    expect(first.text).toBe(MARKS);
+    expect(first.headers.get('Cache-Control')).toBe('public, max-age=21600');
+    expect(first.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+
+    const key = `${ORIGIN}/introdb/segments?episode=2&imdb_id=tt0903747&season=1`;
+    expect(Array.from(cache.keys())).toEqual([key]);
+    expect(cache.get(key)!.headers.get('Cache-Control')).toBe('public, max-age=21600');
+
+    // The same episode asked in another order comes from the cache.
+    const again = await call('GET', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2');
+    expect(sent).toHaveLength(1);
+    expect(again.text).toBe(MARKS);
+    expect(again.headers.get('Cache-Control')).toBe('public, max-age=21600');
+  });
+
+  it('refuses anything but an IMDb id, a season and an episode, without asking IntroDB', async () => {
+    fakeCache();
+    const sent = fakeUpstream(() => reply(MARKS));
+    for (const query of [
+      '',
+      '?imdb_id=tt0903747&season=1',
+      '?imdb_id=tt0903747&season=1&episode=2&api_key=x',
+      '?imdb_id=tt0903747&season=1&episode=2&episode=3',
+      '?imdb_id=0903747&season=1&episode=2',
+      '?imdb_id=tt0903747&season=0&episode=2',
+      '?imdb_id=tt0903747&season=01&episode=2',
+      '?imdb_id=tt0903747&season=1&episode=-2',
+      '?imdb_id=tt0903747&season=1&episode=2%26is_movie=true',
+      '?imdb_id=tt0903747&season=1&episode=123456',
+    ]) {
+      const response = await call('GET', `/introdb/segments${query}`);
+      expect(response.status, query).toBe(400);
+      expect(response.json()).toEqual({ error: 'path' });
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it("passes IntroDB's errors on as they are, and does not cache them", async () => {
+    const cache = fakeCache();
+    const limited = '{"error":"Rate limit reached"}';
+    const sent = fakeUpstream(() => reply(limited, 429));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await call('GET', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2');
+      expect(response.status).toBe(429);
+      expect(response.text).toBe(limited);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+    }
+    expect(sent).toHaveLength(2);
+    expect(cache.size).toBe(0);
+  });
+
+  it('answers 502 when IntroDB cannot be reached or answers nonsense', async () => {
+    const cache = fakeCache();
+    let next: () => Response = () => {
+      throw new TypeError('fetch failed');
+    };
+    fakeUpstream(() => next());
+    const unreachable = await call('GET', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2');
+    expect(unreachable.status).toBe(502);
+    expect(unreachable.json()).toEqual({ error: 'upstream' });
+
+    next = () => new Response('<html>Bad gateway</html>', { status: 200 });
+    expect(
+      (await call('GET', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2')).status,
+    ).toBe(502);
+    expect(cache.size).toBe(0);
+  });
+
+  it('needs no key: it answers without TMDB or Trakt set up', async () => {
+    fakeCache();
+    fakeUpstream(() => reply(MARKS));
+    const response = await call('GET', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2', {
+      env: {},
+    });
+    expect(response.status).toBe(200);
+    expect(response.text).toBe(MARKS);
+  });
+});
+
 describe('routes', () => {
   it('answers 404 for anything else', async () => {
     const sent = fakeUpstream(() => reply('{}'));
@@ -1127,6 +1223,9 @@ describe('routes', () => {
       ['POST', '/tmdb/movie/603'],
       ['GET', '/tmdb'],
       ['GET', '/3/movie/603'],
+      ['GET', '/introdb'],
+      ['GET', '/introdb/intro?imdb_id=tt0903747&season=1&episode=2'],
+      ['POST', '/introdb/segments?imdb_id=tt0903747&season=1&episode=2'],
     ] as const) {
       const response = await call(method, path);
       expect(response.status, `${method} ${path}`).toBe(404);

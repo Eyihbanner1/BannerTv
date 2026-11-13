@@ -6,8 +6,10 @@ import type { CachePolicy, Query, QueryCache, QueryState } from '../../query';
 /**
  * IntroDB (https://introdb.app): where viewers mark the intro, recap and end
  * credits of TV episodes, by IMDb id, season and episode. Reading it needs no
- * key and no account, and it answers web apps across origins, so the TV asks
- * it directly. BannerTV only reads; it never sends timings.
+ * key and no account, but its answers name only its own website as an origin
+ * that may read them, so a browser, the TV's included, throws them away. The
+ * TV asks through BannerTV's service instead (`proxyUrl`), which passes the
+ * same answer on. BannerTV only reads; it never sends timings.
  */
 export const INTRODB_URL = 'https://api.introdb.app';
 
@@ -32,8 +34,15 @@ export const INTRODB_POLICY: CachePolicy = {
 const KEY = 'introdb:2';
 
 export interface IntroDbClientOptions {
-  /** IntroDB's address; INTRODB_URL unless a test or a proxy says otherwise. */
+  /** IntroDB's address; INTRODB_URL unless a test says otherwise. */
   baseUrl?: string;
+  /**
+   * An address that answers as IntroDB does (BannerTV's service), asked
+   * first. IntroDB itself is asked when it has no answer: a service from
+   * before its IntroDB route, or one that is down. A phone reads IntroDB as
+   * well as the service; a browser cannot.
+   */
+  proxyUrl?: string;
   fetchJson: FetchJson;
   queries: QueryCache;
   limiter?: Limiter;
@@ -80,12 +89,24 @@ function isNotFound(error: unknown): boolean {
 export function createIntroDbClient(options: IntroDbClientOptions): IntroDbClient {
   const { fetchJson, queries, limiter } = options;
   const base = (options.baseUrl ?? INTRODB_URL).replace(/\/+$/, '');
+  const proxy = options.proxyUrl?.replace(/\/+$/, '');
+
+  async function ask(from: string, query: string): Promise<EpisodeMarks> {
+    const request = () => fetchJson(`${from}/segments?${query}`, { timeoutMs: INTRODB_TIMEOUT_MS });
+    return readEpisodeMarks(await (limiter ? limiter.run(request) : request()));
+  }
 
   async function lookUp(imdbId: string, season: number, episode: number) {
-    const url = `${base}/segments?imdb_id=${imdbId}&season=${season}&episode=${episode}`;
-    const request = () => fetchJson(url, { timeoutMs: INTRODB_TIMEOUT_MS });
+    const query = `imdb_id=${imdbId}&season=${season}&episode=${episode}`;
+    if (proxy) {
+      try {
+        return await ask(proxy, query);
+      } catch {
+        // IntroDB itself, below.
+      }
+    }
     try {
-      return readEpisodeMarks(await (limiter ? limiter.run(request) : request()));
+      return await ask(base, query);
     } catch (error) {
       if (isNotFound(error)) return NONE;
       throw error;

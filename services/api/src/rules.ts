@@ -11,6 +11,14 @@ export const TRAKT_ORIGIN = 'https://api.trakt.tv';
 /** Trakt takes every OAuth call (device codes, tokens, refresh, revoke) here, not on the API host. */
 export const TRAKT_AUTH_ORIGIN = 'https://auth.trakt.tv';
 export const TMDB_BASE = 'https://api.themoviedb.org/3';
+/**
+ * IntroDB, where viewers mark the intro, recap and end credits of episodes.
+ * Its reads are open, but its answers name only its own website as an origin
+ * that may read them, so the TV's browser throws them away: the TV asks here.
+ */
+export const INTRODB_BASE = 'https://api.introdb.app';
+/** IntroDB's answers are kept at the edge for a few hours: timings are added and corrected. */
+export const INTRODB_CACHE_SECONDS = 6 * 60 * 60;
 /** The redirect URI of a Trakt app without a web page, as registered with BannerTV's. */
 export const TRAKT_REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob';
 
@@ -282,6 +290,42 @@ export function tmdbRequest(call: TmdbCall, key: string, userAgent: string): Ups
 /** Where a TMDB answer is cached: the Worker's own address for the call, so never the key. */
 export function tmdbCacheKey(origin: string, call: TmdbCall): string {
   return `${origin}/tmdb/${call.path}${call.query ? `?${call.query}` : ''}`;
+}
+
+/** An episode the TV asks IntroDB about. */
+export interface IntroDbCall {
+  /** The checked query in name order, without the `?`: imdb_id, season and episode. */
+  query: string;
+}
+
+const INTRODB_QUERY = new Map<string, Check>([
+  ['imdb_id', (value) => /^tt\d{1,10}$/.test(value)],
+  // Season 0 holds specials, which IntroDB does not time; numbers start at 1, without a 0 first.
+  ['season', (value) => /^[1-9]\d{0,3}$/.test(value)],
+  ['episode', (value) => /^[1-9]\d{0,4}$/.test(value)],
+]);
+
+/**
+ * The IntroDB call for `/introdb/segments` and its query (with or without its
+ * `?`), or undefined unless it holds exactly an IMDb id, a season and an episode.
+ */
+export function readIntroDbCall(search: string): IntroDbCall | undefined {
+  const params = readQuery(search, INTRODB_QUERY);
+  if (!params || params.size !== INTRODB_QUERY.size) return undefined;
+  return { query: queryString(params) };
+}
+
+export function introDbRequest(call: IntroDbCall, userAgent: string): UpstreamRequest {
+  return {
+    method: 'GET',
+    url: `${INTRODB_BASE}/segments?${call.query}`,
+    headers: { Accept: 'application/json', 'User-Agent': userAgent },
+  };
+}
+
+/** Where an IntroDB answer is cached: the Worker's own address for the call. */
+export function introDbCacheKey(origin: string, call: IntroDbCall): string {
+  return `${origin}/introdb/segments?${call.query}`;
 }
 
 /** Retry-After in seconds, from seconds or an HTTP date; undefined when missing or unreadable. */

@@ -159,8 +159,12 @@ export interface PlaybackSession {
   togglePlay(): void;
   pause(): void;
   resume(): void;
-  /** Seconds. Clamped to the video, and on a broadcast to what it keeps, up to live. */
-  seek(position: number): void;
+  /**
+   * Seconds. Clamped to the video, and on a broadcast to what it keeps, up to
+   * live. `toMark`: the jump is to a marked place (the end of an intro or
+   * recap), and a landing a keyframe short is jumped once more.
+   */
+  seek(position: number, how?: { toMark?: boolean }): void;
   /** On a broadcast, back to where the engine plays live. */
   goToLive(): void;
   /** Plays at this speed, until another stream opens at normal speed. */
@@ -1081,7 +1085,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       video.play().catch(() => undefined);
     },
 
-    seek(position) {
+    seek(position, how) {
       const duration = isFinite(video.duration) ? video.duration : Infinity;
       const kept = liveWindow();
       const wanted = kept ? clampToWindow(rewindWindow(kept), position) : position;
@@ -1109,6 +1113,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           from,
           paused: video.paused,
           stream: landingStream(engine?.name ?? null, state.get().entry?.facts),
+          toMark: how?.toMark === true,
         });
       }
       engine?.seeked?.();

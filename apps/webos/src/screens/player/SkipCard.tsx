@@ -1,8 +1,9 @@
 import type { SkipKind } from '@bannertv/core';
 import { FocusContext, setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/Button';
+import { okDownBefore } from '../../navigation/ok-click';
 import { useBack } from '../../navigation/use-back';
 import { cardArrows } from './card-arrows';
 import styles from './PlayerScreen.module.css';
@@ -35,7 +36,17 @@ export function SkipCard({ kind, onSkip, onDismiss, onControls, onScrub }: SkipC
     isFocusBoundary: true,
     preferredChildFocusKey: 'player-skip-button',
   });
-  useEffect(() => void setFocus('player-skip-button'), []);
+  // When it showed. An OK held since before then, on the card for the recap
+  // just skipped, would press this one too (the same button, a new intro):
+  // its repeats press nothing here. The player gives each intro or recap a card of its own.
+  const shownAt = useRef(Infinity);
+  useEffect(() => {
+    shownAt.current = performance.now();
+    void setFocus('player-skip-button');
+  }, []);
+  const skip = () => {
+    if (!okDownBefore(shownAt.current)) onSkip();
+  };
   useBack('overlay', () => {
     onDismiss();
     return true;
@@ -55,7 +66,7 @@ export function SkipCard({ kind, onSkip, onDismiss, onControls, onScrub }: SkipC
           focusKey="player-skip-button"
           variant="primary"
           label={label}
-          onPress={onSkip}
+          onPress={skip}
           onArrowPress={onArrowPress}
         />
       </div>

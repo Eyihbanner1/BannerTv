@@ -315,8 +315,20 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
     );
   }
   // IntroDB has no intro or recap timings for any title unless mockPlayback gives some.
+  // The TV asks through BannerTV's service; IntroDB itself answers as it really does, open
+  // only to its own website, so the TV's browser throws its answer away.
+  if (API_SERVICE) {
+    await page.route(`${API_SERVICE}/introdb/**`, (route) =>
+      json(route, { intro: null, recap: null, outro: null }),
+    );
+  }
   await page.route(/^https:\/\/api\.introdb\.app\//, (route) =>
-    json(route, { intro: null, recap: null, outro: null }),
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': 'https://introdb.app' },
+      body: JSON.stringify({ intro: null, recap: null, outro: null }),
+    }),
   );
   // The BannerTV account's service not set up yet: its address answers, but not as the
   // service, so Settings leaves the account out. mockSync puts the service there.
