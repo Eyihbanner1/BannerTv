@@ -1,9 +1,19 @@
 import { formatTime } from '@tv/player/media';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { VideoThumbnail } from 'expo-video';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Platform,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { colors, radius, space, type } from '../ui/theme';
 import { phonePlayer } from './phone-host';
 import { createFrameSource } from './scene-frames';
@@ -11,6 +21,8 @@ import { createFrameSource } from './scene-frames';
 /** The largest frame asked for: enough for a sharp card, small enough to come quickly. */
 const FRAME_MAX_W = 320;
 const FRAME_MAX_H = 180;
+/** One pass of the shimmer over an empty frame. */
+const SHIMMER_MS = 1100;
 
 /**
  * Frames of the stream playing, taken by Android from the file itself (expo-video's thumbnails,
@@ -83,7 +95,9 @@ export function ScenePreview({
                 transition={90}
                 cachePolicy="none"
               />
-            ) : null}
+            ) : (
+              <FrameShimmer width={frameWidth} />
+            )}
             {tag ? <Text style={styles.tag}>{tag}</Text> : null}
           </View>
         ) : null}
@@ -114,6 +128,50 @@ export function ScenePreview({
   );
 }
 
+/**
+ * What an empty frame shows while its picture is on its way: a soft light sweeping across, so
+ * it reads as coming rather than broken. Still, with Android's remove animations on.
+ */
+function FrameShimmer({ width }: { width: number }) {
+  const [sweep] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    let live = true;
+    let loop: Animated.CompositeAnimation | undefined;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((still) => {
+        if (!live || still) return;
+        loop = Animated.loop(
+          Animated.timing(sweep, {
+            toValue: 1,
+            duration: SHIMMER_MS,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        );
+        loop.start();
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+      loop?.stop();
+    };
+  }, [sweep]);
+  const band = Math.round(width * 0.6);
+  const translateX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-band, width] });
+  return (
+    <View style={[StyleSheet.absoluteFill, styles.shimmer]}>
+      <Animated.View style={[styles.shimmerBand, { width: band, transform: [{ translateX }] }]}>
+        <LinearGradient
+          colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.09)', 'rgba(255,255,255,0)']}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   layer: {
     position: 'absolute',
@@ -136,6 +194,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.barBuffer,
   },
+  // A little lighter than the player's black, so the empty frame reads as a place for a picture.
+  shimmer: { backgroundColor: colors.surface2, overflow: 'hidden' },
+  shimmerBand: { position: 'absolute', top: 0, bottom: 0, left: 0 },
   tag: {
     position: 'absolute',
     left: space.s,
