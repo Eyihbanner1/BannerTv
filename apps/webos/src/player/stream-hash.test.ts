@@ -42,19 +42,37 @@ function file(size: number): Uint8Array {
   return bytes;
 }
 
-/** A server for one file: byte ranges, and whether a cross-origin page may read Content-Range. */
+/**
+ * An answer as a browser's fetch gives it: where it landed, and its type ('basic' with every
+ * header readable, 'cors' filtered for a page on another origin, 'default' from React Native).
+ */
+function answer(response: Response, landed: string, type: ResponseType = 'basic'): Response {
+  Object.defineProperty(response, 'url', { value: landed });
+  Object.defineProperty(response, 'type', { value: type });
+  return response;
+}
+
+/**
+ * A server for one file: byte ranges, and whether a cross-origin page may read Content-Range
+ * (with it hidden, the answers are CORS-filtered ones, whose Content-Length still comes through).
+ */
 function serve(bytes: Uint8Array, options: { ranges?: boolean; showRange?: boolean } = {}) {
   const asked: string[] = [];
+  const type: ResponseType = options.showRange === false ? 'cors' : 'basic';
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const range = (init?.headers as Record<string, string> | undefined)?.Range;
     asked.push(range ?? 'whole');
     const match = range ? /bytes=(\d+)-(\d+)/.exec(range) : null;
     if (!match || options.ranges === false) {
       return Promise.resolve(
-        new Response(bytes.slice(0, 16), {
-          status: 200,
-          headers: { 'content-length': String(bytes.length) },
-        }),
+        answer(
+          new Response(bytes.slice(0, 16), {
+            status: 200,
+            headers: { 'content-length': String(bytes.length) },
+          }),
+          url,
+          type,
+        ),
       );
     }
     const start = Number(match[1]);
@@ -62,7 +80,9 @@ function serve(bytes: Uint8Array, options: { ranges?: boolean; showRange?: boole
     const headers: Record<string, string> = { 'content-length': String(end - start + 1) };
     if (options.showRange !== false)
       headers['content-range'] = `bytes ${start}-${end}/${bytes.length}`;
-    return Promise.resolve(new Response(bytes.slice(start, end + 1), { status: 206, headers }));
+    return Promise.resolve(
+      answer(new Response(bytes.slice(start, end + 1), { status: 206, headers }), url, type),
+    );
   });
   return asked;
 }
@@ -189,5 +209,245 @@ describe('reading the hash of a stream', () => {
     expect(JSON.stringify(refused)).not.toContain('example');
     serve(file(4 * HASH_CHUNK));
     expect(await readStreamHash(url)).toMatchObject({ found: { videoSize: 4 * HASH_CHUNK } });
+  });
+});
+
+describe('reading the hash through a link that redirects twice', () => {
+  // As on the TV: the addon's resolve link, 302 to the debrid service, 307 to its CDN.
+  const LINK = 'https://resolve.example.com/resolve/debrid/KEY/abc/Film.2023.2160p.WEB-DL.mkv';
+  const API = 'https://api.example.com/dl';
+  const CDN = 'https://cdn.example.com/f/1/Film.2023.2160p.WEB-DL.mkv';
+  const size = 6 * HASH_CHUNK + 321;
+  const bytes = file(size);
+  const expected = reference(size, bytes.slice(0, HASH_CHUNK), bytes.slice(size - HASH_CHUNK));
+  const head = `bytes=0-${HASH_CHUNK - 1}`;
+  const tail = `bytes=${size - HASH_CHUNK}-${size - 1}`;
+
+  interface Chain {
+    /** The answers' type: 'cors' behind CORS, 'basic' with the checks off (webOS), 'default' RN. */
+    type?: ResponseType;
+    /** Content-Range can be read behind CORS (the host exposes it). */
+    showRange?: boolean;
+    /** A 206's own Content-Length can be read behind CORS (Chromium 76 and later). */
+    showLength?: boolean;
+    /** Each CDN link works once: a second read straight to it is refused (403). */
+    oneUse?: boolean;
+    /** The fetch can't say where it landed (an old fetch polyfill): its url is ''. */
+    noUrl?: boolean;
+  }
+
+  /**
+   * Serves the chain, a new CDN token for each walk through it, and logs every hop of every
+   * request with its range.
+   */
+  function serveChain(chain: Chain = {}) {
+    const asked: Array<{ url: string; range: string }> = [];
+    let minted = 0;
+    const used = new Set<string>();
+    const cors = chain.type === 'cors';
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw new DOMException('', 'AbortError');
+      const range = (init?.headers as Record<string, string> | undefined)?.Range ?? 'whole';
+      let at = url;
+      for (;;) {
+        asked.push({ url: at, range });
+        if (at === LINK) at = API;
+        else if (at === API) at = `${CDN}?token=t${++minted}`;
+        else break;
+      }
+      if (!at.startsWith(CDN)) throw new TypeError('Failed to fetch');
+      const landed = chain.noUrl ? '' : at;
+      if (chain.oneUse && used.has(at)) {
+        return answer(new Response('', { status: 403 }), landed, chain.type);
+      }
+      used.add(at);
+      const match = /bytes=(\d+)-(\d+)/.exec(range);
+      if (!match) {
+        const headers: Record<string, string> =
+          cors && !chain.showLength ? {} : { 'content-length': String(bytes.length) };
+        return answer(
+          new Response(bytes.slice(0, 16), { status: 200, headers }),
+          landed,
+          chain.type,
+        );
+      }
+      const start = Number(match[1]);
+      const end = Math.min(Number(match[2]), bytes.length - 1);
+      const headers: Record<string, string> = {};
+      if (!cors || chain.showLength) headers['content-length'] = String(end - start + 1);
+      if (!cors || chain.showRange) headers['content-range'] = `bytes ${start}-${end}/${size}`;
+      return answer(
+        new Response(bytes.slice(start, end + 1), { status: 206, headers }),
+        landed,
+        chain.type,
+      );
+    });
+    return asked;
+  }
+
+  /** The requests that started at the stream's own link: each one walks both redirects. */
+  const walks = (asked: ReadonlyArray<{ url: string }>) =>
+    asked.filter((hop) => hop.url === LINK).length;
+  /** The ranges asked straight of the CDN, or at the end of a walk. */
+  const toCdn = (asked: ReadonlyArray<{ url: string; range: string }>) =>
+    asked.filter((hop) => hop.url.startsWith(CDN)).map((hop) => hop.range);
+
+  it('walks the redirects once, and reads the end straight from where they led', async () => {
+    const asked = serveChain({ type: 'basic' });
+    const reading = await readStreamHash(LINK);
+    expect(reading).toEqual({
+      found: { videoHash: expected, videoSize: size },
+      ms: expect.any(Number),
+      walks: 1,
+    });
+    expect(walks(asked)).toBe(1);
+    // Four HTTP exchanges: the walk's three hops, then the end from the CDN.
+    expect(asked.map((hop) => hop.url.replace(/\?.*$/, ''))).toEqual([LINK, API, CDN, CDN]);
+    expect(toCdn(asked)).toEqual([head, tail]);
+    // The end was read with the token the walk was given: one link at the CDN, not two.
+    expect(new Set(asked.filter((hop) => hop.url.startsWith(CDN)).map((hop) => hop.url)).size).toBe(
+      1,
+    );
+  });
+
+  it('asks the size there too when CORS hides Content-Range but lets Content-Length through', async () => {
+    const asked = serveChain({ type: 'cors', showLength: true });
+    expect((await readStreamHash(LINK)).found).toEqual({ videoHash: expected, videoSize: size });
+    expect(walks(asked)).toBe(1);
+    expect(toCdn(asked)).toEqual([head, 'whole', tail]);
+    expect(asked).toHaveLength(5);
+  });
+
+  it('needs no size read where CORS lets Content-Range through', async () => {
+    const asked = serveChain({ type: 'cors', showRange: true });
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(toCdn(asked)).toEqual([head, tail]);
+  });
+
+  it('does not ask the size where the page could not read it either (Chromium 68 behind CORS)', async () => {
+    const asked = serveChain({ type: 'cors' });
+    expect(await readStreamHash(LINK)).toMatchObject({ failed: 'no size', step: 'size', walks: 1 });
+    expect(toCdn(asked)).toEqual([head]);
+    // Unless the addon said the size.
+    forgetHashes();
+    const sized = serveChain({ type: 'cors' });
+    expect((await readStreamHash(LINK, size)).found?.videoHash).toBe(expected);
+    expect(toCdn(sized)).toEqual([head, tail]);
+    expect(walks(sized)).toBe(1);
+  });
+
+  it('never asks the size through React Native’s fetch, which would wait for the whole film', async () => {
+    // React Native reads every header, so Content-Range is there.
+    const asked = serveChain({ type: 'default' });
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(toCdn(asked)).toEqual([head, tail]);
+    // Even where the answer has no size to give: 'no size' at once, with no plain request.
+    forgetHashes();
+    const hidden = serveChain({ type: 'default' });
+    vi.stubGlobal(
+      'fetch',
+      ((real: typeof fetch) => async (url: string, init?: RequestInit) => {
+        const response = await real(url, init);
+        const bare = new Response(await response.arrayBuffer(), { status: response.status });
+        return answer(bare, response.url, 'default');
+      })(globalThis.fetch),
+    );
+    expect(await readStreamHash(LINK)).toMatchObject({ failed: 'no size', step: 'size' });
+    expect(toCdn(hidden)).not.toContain('whole');
+  });
+
+  it('goes back through the stream’s link once when the link it led to refuses a second read', async () => {
+    const asked = serveChain({ type: 'basic', oneUse: true });
+    const reading = await readStreamHash(LINK);
+    expect(reading).toMatchObject({ found: { videoHash: expected }, fellBack: true, walks: 2 });
+    expect(walks(asked)).toBe(2);
+    // Start, the end refused at the first walk's link, then the end through a second walk.
+    expect(toCdn(asked)).toEqual([head, tail, tail]);
+  });
+
+  it('gives up after that one try, saying which read failed', async () => {
+    const asked = serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const range = (init?.headers as Record<string, string> | undefined)?.Range ?? '';
+      return range.startsWith('bytes=0-')
+        ? chain(url, init)
+        : Promise.reject(new TypeError('Failed to fetch'));
+    });
+    expect(await readStreamHash(LINK)).toMatchObject({ failed: 'refused', step: 'end', walks: 2 });
+    expect(walks(asked)).toBe(1);
+  });
+
+  it('says the start read failed when the first one is refused, and walks no more', async () => {
+    const asked = serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      await chain(url, init);
+      return answer(new Response('', { status: 403 }), `${CDN}?token=t1`, 'basic');
+    });
+    expect(await readStreamHash(LINK)).toMatchObject({
+      failed: 'refused',
+      step: 'start',
+      walks: 1,
+    });
+    expect(walks(asked)).toBe(1);
+  });
+
+  it('reads both ends through the stream’s link when the fetch can’t say where it landed', async () => {
+    const asked = serveChain({ type: 'basic', noUrl: true });
+    expect(await readStreamHash(LINK)).toMatchObject({
+      found: { videoHash: expected },
+      walks: 2,
+    });
+    expect(walks(asked)).toBe(2);
+  });
+
+  it('never says the link, nor where it led', async () => {
+    serveChain({ type: 'basic', oneUse: true });
+    const found = JSON.stringify(await readStreamHash(LINK));
+    forgetHashes();
+    serveChain({ type: 'cors' });
+    const failed = JSON.stringify(await readStreamHash(LINK));
+    for (const said of [found, failed]) {
+      for (const secret of ['example', 'token', 'KEY', 'http', 'mkv']) {
+        expect(said).not.toContain(secret);
+      }
+    }
+  });
+
+  it('keeps a hash by the stream’s link, and reads it again for none of its walks', async () => {
+    const asked = serveChain({ type: 'basic' });
+    await readStreamHash(LINK);
+    await readStreamHash(LINK);
+    expect(walks(asked)).toBe(1);
+  });
+
+  it('says which read it was at when the time ran out', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', globalThis);
+    let calls = 0;
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      calls++;
+      if (calls === 1) {
+        const response = new Response(bytes.slice(0, HASH_CHUNK), {
+          status: 206,
+          headers: { 'content-range': `bytes 0-${HASH_CHUNK - 1}/${size}` },
+        });
+        return Promise.resolve(answer(response, `${CDN}?token=t1`, 'basic'));
+      }
+      return new Promise((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('', 'AbortError'))),
+      );
+    });
+    const slow = readStreamHash(LINK);
+    await vi.advanceTimersByTimeAsync(HASH_TIMEOUT_MS - 1);
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(slow).resolves.toMatchObject({
+      failed: 'timed out',
+      step: 'end',
+      ms: HASH_TIMEOUT_MS,
+      walks: 1,
+    });
   });
 });
