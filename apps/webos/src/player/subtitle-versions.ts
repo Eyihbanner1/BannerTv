@@ -207,7 +207,8 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
  * what reading it found (its text in another script, signs only, part of the
  * video, longer than it) or its names or its addon say (another episode),
  * that its drift was fixed by itself, that the player lined it up against
- * the video itself (synced), that its addon
+ * the video itself (synced) or found it in step with other files for the
+ * video that agree with each other (agreed), that its addon
  * found it by the video's hash with no name saying otherwise (linked to it)
  * or its release name is the same as the video's with enough to confirm it
  * (a guess), and that it is for the hard of hearing.
@@ -223,6 +224,7 @@ export type VersionNote =
   | 'long'
   | 'driftFixed'
   | 'synced'
+  | 'agreed'
   | 'linked'
   | 'sameRelease'
   | 'hearing';
@@ -239,6 +241,7 @@ export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
   long: 'player.versionLong',
   driftFixed: 'player.versionDriftFixed',
   synced: 'player.versionSynced',
+  agreed: 'player.versionAgreed',
   linked: 'player.versionLinked',
   sameRelease: 'player.versionSameRelease',
   hearing: 'player.versionHearing',
@@ -277,7 +280,8 @@ export function versionNotes(
   if (status === 'failed') return [selected ? 'failed' : 'skipped'];
   const notes: VersionNote[] = [];
   if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
-  if (check?.synced) notes.push('synced');
+  if (check?.synced === 'video') notes.push('synced');
+  else if (check?.synced === 'files') notes.push('agreed');
   else if (check?.autoDrift) notes.push('driftFixed');
   const file = {
     label: version.release,
@@ -286,7 +290,7 @@ export function versionNotes(
   };
   const match = fileReleaseMatch(file, video);
   if (check?.synced) {
-    // In step with the video says more than linked to it or named for it.
+    // In step with the video, or with files that agree, says more than linked to it or named for it.
   } else if (linkedToVideo(file, video)) notes.push('linked');
   else if (match === 'exact' || match === 'group') notes.push('sameRelease');
   if (check?.hearing) notes.push('hearing');
@@ -375,17 +379,46 @@ const SYNC_WORDS: Readonly<Record<SubtitleSync['state'], string>> = {
   checking: 'player.syncChecking',
   unmatched: 'player.syncUnmatched',
   yours: 'player.syncYours',
+  // Only ever against files that agree, with how far they would move the lines.
+  picked: 'player.syncYours',
   late: 'player.syncLate',
   unchecked: 'player.syncUnchecked',
+  disagree: 'player.syncDisagree',
+};
+
+/** The same against files that agree with each other: never stretched, so no rate words. */
+const FILES_WORDS: Readonly<Partial<Record<SubtitleSync['state'], string>>> = {
+  moved: 'player.syncMovedFiles',
+  inStep: 'player.syncInStepFiles',
+  reference: 'player.syncReferenceFiles',
+  checking: 'player.syncCheckingFiles',
+  unmatched: 'player.syncUnmatchedFiles',
+  yours: 'player.syncYoursFiles',
+  picked: 'player.syncPickedFiles',
+  late: 'player.syncLateFiles',
 };
 
 /**
  * What the Timing tab says of lining the file showing up against the video,
  * as a key in the strings and its amount ("+2.3 s"); none for a track, or
- * with subtitles off. A move that also stretched the lines says so.
+ * with subtitles off. A move that also stretched the lines says so. Against
+ * files that agree with each other (`basis: 'files'`) it says so, and lines
+ * left as the viewer set or picked them say how far BannerTV would move them.
  */
 export function syncLine(sync: SubtitleSync | null): { key: string; amount?: string } | null {
   if (!sync) return null;
+  if (sync.basis === 'files') {
+    const offset = 'offset' in sync ? sync.offset : undefined;
+    if (offset !== undefined) {
+      return {
+        key: FILES_WORDS[sync.state] ?? SYNC_WORDS[sync.state],
+        amount: formatOffset(offset),
+      };
+    }
+    // Words that say how far need an amount.
+    if (sync.state === 'yours' || sync.state === 'picked') return { key: SYNC_WORDS.yours };
+    return { key: FILES_WORDS[sync.state] ?? SYNC_WORDS[sync.state] };
+  }
   if (sync.state === 'moved') {
     return {
       key: sync.rate === 1 ? SYNC_WORDS.moved : 'player.syncMovedRate',

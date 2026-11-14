@@ -3,6 +3,7 @@ import { profileSubtitles } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
 import { driftInUse } from './drift';
 import {
+  agreedSwitchAllowed,
   fitsIn,
   lastResort,
   type PickContext,
@@ -470,6 +471,47 @@ describe('planSubtitlePick', () => {
       hold: false,
       switched: true,
     });
+  });
+});
+
+describe('files that agree with each other', () => {
+  const offered = [file('today'), file('second'), file('theirs'), file('gone')];
+  const agreed = { agreed: { key: 'theirs' }, current: 'today' };
+
+  it('take over to the file they would show in the hold, and say why', () => {
+    expect(plan(offered, {}, agreed)).toEqual({
+      pick: 'theirs',
+      read: [],
+      hold: false,
+      switched: false,
+      agreed: true,
+    });
+  });
+
+  it('take over once lines show only before they have, while switches are left', () => {
+    const after = { ...agreed, holding: false };
+    expect(plan(offered, {}, { ...after, linesShown: false })).toMatchObject({
+      pick: 'theirs',
+      switched: true,
+      agreed: true,
+    });
+    expect(plan(offered, {}, { ...after, linesShown: true }).pick).toBe('today');
+    expect(plan(offered, {}, { ...after, linesShown: false, switchesLeft: 0 }).pick).toBe('today');
+    expect(
+      agreedSwitchAllowed({ holding: false, switchesLeft: 2, linesShown: true }) ||
+        agreedSwitchAllowed({ holding: false, switchesLeft: 0, linesShown: false }),
+    ).toBe(false);
+  });
+
+  it('never take over to a file that could not be read, or the one showing', () => {
+    expect(
+      plan(
+        offered,
+        {},
+        { ...agreed, agreed: { key: 'gone' }, broken: (url) => url.includes('gone') },
+      ).agreed,
+    ).toBeUndefined();
+    expect(plan(offered, {}, { ...agreed, current: 'theirs' }).agreed).toBeUndefined();
   });
 });
 

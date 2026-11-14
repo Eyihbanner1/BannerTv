@@ -138,10 +138,15 @@ describe('subtitle versions', () => {
     expect(versionNotes(matching, false, undefined, video)).toEqual(['sameRelease']);
     // Lined up against the video: in step, which says more than the names do, and the drift
     // with it.
-    const synced = { hearing: true, synced: true, autoDrift: true };
+    const synced = { hearing: true, synced: 'video', autoDrift: true } as const;
     expect(versionNotes(matching, true, undefined, video, synced)).toEqual(['synced', 'hearing']);
-    expect(versionNotes(other, false, undefined, video, { hearing: false, synced: true })).toEqual([
-      'synced',
+    expect(
+      versionNotes(other, false, undefined, video, { hearing: false, synced: 'video' }),
+    ).toEqual(['synced']);
+    // In step with files that agree with each other: said so, in place of the drift and names.
+    expect(versionNotes(matching, true, undefined, video, { ...synced, synced: 'files' })).toEqual([
+      'agreed',
+      'hearing',
     ]);
     expect(versionNotes(other, false, undefined, video)).toEqual([]);
     expect(versionNotes(matching, false, undefined, {})).toEqual([]);
@@ -458,5 +463,49 @@ describe('syncLine', () => {
     expect(syncLine({ state: 'unchecked' })).toEqual({ key: 'player.syncUnchecked' });
     expect(syncLine({ state: 'reference' })).toEqual({ key: 'player.syncReference' });
     expect(syncLine(null)).toBeNull();
+  });
+});
+
+describe('syncLine against files that agree with each other', () => {
+  it('says the lines were matched to other subtitles for the video', () => {
+    expect(syncLine({ state: 'moved', offset: -8.73, rate: 1, basis: 'files' })).toEqual({
+      key: 'player.syncMovedFiles',
+      amount: '−8.7 s',
+    });
+    expect(syncLine({ state: 'inStep', basis: 'files' })).toEqual({
+      key: 'player.syncInStepFiles',
+    });
+    expect(syncLine({ state: 'reference', basis: 'files' })).toEqual({
+      key: 'player.syncReferenceFiles',
+    });
+    expect(syncLine({ state: 'checking', basis: 'files' })).toEqual({
+      key: 'player.syncCheckingFiles',
+    });
+    expect(syncLine({ state: 'unmatched', basis: 'files' })).toEqual({
+      key: 'player.syncUnmatchedFiles',
+    });
+    expect(syncLine({ state: 'late', basis: 'files' })).toEqual({ key: 'player.syncLateFiles' });
+    // Nothing else of theirs to say: step B's words.
+    expect(syncLine({ state: 'unchecked', basis: 'files' })).toEqual({
+      key: 'player.syncUnchecked',
+    });
+  });
+
+  it('says how far BannerTV would move lines left as the viewer set or picked them', () => {
+    expect(syncLine({ state: 'picked', offset: -3, basis: 'files' })).toEqual({
+      key: 'player.syncPickedFiles',
+      amount: '−3.0 s',
+    });
+    expect(syncLine({ state: 'yours', offset: 1.25, basis: 'files' })).toEqual({
+      key: 'player.syncYoursFiles',
+      amount: '+1.3 s',
+    });
+    // With no amount, the words that need none.
+    expect(syncLine({ state: 'yours', basis: 'files' })).toEqual({ key: 'player.syncYours' });
+    expect(syncLine({ state: 'yours' })).toEqual({ key: 'player.syncYours' });
+  });
+
+  it('says when other subtitles for the video do not agree', () => {
+    expect(syncLine({ state: 'disagree' })).toEqual({ key: 'player.syncDisagree' });
   });
 });

@@ -21,13 +21,15 @@ import type { PickableSubtitle, PlayingRelease } from './subtitle-pick';
  * any language (its lines come in step with the picture); a file the addon
  * found by the video's hash with no name saying otherwise; a file named for
  * the video's release, with the group confirming it. A file is a reference
- * only once it has been read as whole, with no drift. A group of files that
- * agree with each other is never one: they may all be for another cut. With
- * no reference, nothing is moved.
+ * only once it has been read as whole, with no drift. Last, files that agree
+ * with each other, chosen by what their names say of the video's source and
+ * service (`agreement.ts`): only with a clear winner, confirmed by a wider
+ * read, and never over the viewer's own choice. With no reference, nothing
+ * is moved.
  */
 
-/** What the files are lined up against. */
-export type ReferenceKind = 'track' | 'linked' | 'release';
+/** What the files are lined up against: last, the first of the files that agree (`agreed`). */
+export type ReferenceKind = 'track' | 'linked' | 'release' | 'agreed';
 
 export interface Reference {
   kind: ReferenceKind;
@@ -51,7 +53,7 @@ export const MIN_REFERENCE_LINES = 40;
  */
 const GROWING_STAGES = [20, 40];
 /** A reference that covers the video: no more of it is coming. */
-const COMPLETE = GROWING_STAGES.length + 1;
+export const COMPLETE = GROWING_STAGES.length + 1;
 /**
  * A stream track covers the video once its lines reach this share of the
  * video's length (the end credits have no lines)...
@@ -185,6 +187,8 @@ export interface ReferenceInput<T extends PickableSubtitle> {
   lines: (url: string) => readonly LineTiming[] | undefined;
   broken: (url: string) => boolean;
   video: PlayingRelease;
+  /** The first file of those that agree, once they decided (`subtitle-agreement`). */
+  agreed?: { id: string; lines: readonly LineTiming[] } | null;
 }
 
 /**
@@ -192,7 +196,8 @@ export interface ReferenceInput<T extends PickableSubtitle> {
  * once its lines cover the video (`trackComplete`); a file read whole and linked to the video
  * by its hash (`linkedToVideo`); one read whole and named for its release
  * (the same name, or the group confirming it); else the stream's track while
- * its lines still arrive, once it has enough of them. The reference used
+ * its lines still arrive, once it has enough of them; last, the first of the
+ * files that agree, where they decided. The reference used
  * before (`previous`) stays while it still is one and nothing of a better
  * kind has come, so files are not lined up against one and then another.
  */
@@ -222,6 +227,13 @@ export function findReference<T extends PickableSubtitle>(
     found.push({
       rank: kind === 'linked' ? 1 : 2,
       reference: { kind, id: option.url, lines, growing: false },
+    });
+  }
+  const { agreed } = input;
+  if (agreed && !found.some((entry) => entry.reference.id === agreed.id)) {
+    found.push({
+      rank: 4,
+      reference: { kind: 'agreed', id: agreed.id, lines: agreed.lines, growing: false },
     });
   }
   if (found.length === 0) return null;
@@ -259,6 +271,12 @@ export interface AlignRecord {
   ms: number;
   /** No later run will change it. */
   final: boolean;
+  /**
+   * Handed over by the files that agree, against their first file: `within`
+   * when the file is in step with it already (kept, or shown instead), and
+   * `via` its own pair with it, or its place among them (a shift).
+   */
+  agreed?: { within: boolean; via: 'pair' | 'group' };
 }
 
 /**
@@ -267,7 +285,9 @@ export interface AlignRecord {
  * nothing while unclear or still to be looked at again.
  */
 export function syncedOf(record: AlignRecord | undefined): SubtitleFit['synced'] {
-  if (!record) return undefined;
+  // Lined up against files that agree, a file ranks as it would unchecked: the planner never
+  // takes over by itself for that.
+  if (!record || record.reference === 'agreed') return undefined;
   if (record.alignment.confidence === 'sure') return 'sure';
   return record.alignment.confidence === 'none' && record.final ? 'none' : undefined;
 }
@@ -283,7 +303,7 @@ export function withSync(
 
 /** The move a sure answer makes on a file's lines. */
 export function moveOf(record: AlignRecord | undefined): LineMove | null {
-  if (!record || record.alignment.confidence !== 'sure') return null;
+  if (!record || record.alignment.confidence !== 'sure' || record.agreed?.within) return null;
   return { offset: record.alignment.offset, rate: record.alignment.rate };
 }
 
@@ -321,6 +341,13 @@ export interface SubtitleAligner {
   subscribe(listener: () => void): () => void;
   /** Told of every run as it ends, for Diagnostics. */
   outcomes(listener: (outcome: AlignOutcome) => void): () => void;
+  /**
+   * Keeps a record made elsewhere (the files that agree) as the file's run,
+   * telling listeners as a run does: no run against that reference replaces it.
+   */
+  seed(url: string, record: AlignRecord): void;
+  /** Whether files wait to be lined up, or one is being. */
+  busy(): boolean;
   /** Forgets every answer and stops: for another stream of the video. */
   reset(): void;
 }
@@ -333,13 +360,30 @@ export const PAGE_SLICING: Slicing = {
 };
 
 /**
+ * Each kind of reference by how far it is trusted, best first. SEAM(hash-path): its
+ * change reads the rest of the ladder from here; files that agree come last.
+ */
+const RANK: Readonly<Record<ReferenceKind, number>> = {
+  track: 0,
+  linked: 1,
+  release: 2,
+  agreed: 4,
+};
+
+/**
  * Whether a file still needs lining up against this reference: not when its
  * answer is final, nor when it was lined up against as much of this
- * reference already, nor after MAX_RUNS.
+ * reference already, nor after MAX_RUNS. A record against files that agree,
+ * sure or not, gives way to any better kind of reference.
  */
-function needsRun(record: AlignRecord | undefined, reference: Reference, stage: number): boolean {
+export function needsRun(
+  record: AlignRecord | undefined,
+  reference: Reference,
+  stage: number,
+): boolean {
   if (stage === 0) return false;
   if (!record) return true;
+  if (record.reference === 'agreed' && RANK[reference.kind] < RANK.agreed) return true;
   if (record.final || record.runs >= MAX_RUNS) return false;
   if (record.referenceId !== reference.id) return true;
   return stage > record.stage;
@@ -350,12 +394,16 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
   const told = new Set<(outcome: AlignOutcome) => void>();
   const queue: Array<{ file: AlignFile; reference: Reference; stage: number }> = [];
   let running: string | null = null;
+  // The file being lined up now, once its run has left the queue.
+  let inFlight: string | null = null;
   let generation = 0;
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((listener) => listener());
 
   async function run(): Promise<void> {
     const mine = generation;
+    // Whether the last run ended without telling anyone (so the end of the queue still does).
+    let quiet = false;
     while (queue.length > 0 && mine === generation) {
       const job = queue[0]!;
       running = job.file.url;
@@ -363,7 +411,13 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
       // own work as it hands the track's lines over).
       await slicing.pause();
       if (mine !== generation) break;
+      // A record handed over meanwhile took this run's place.
+      if (queue[0] !== job) {
+        quiet = true;
+        continue;
+      }
       queue.shift();
+      inFlight = job.file.url;
       let paused = 0;
       const started = slicing.now();
       const alignment = await alignSubtitlesInSlices(
@@ -381,6 +435,12 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
       );
       if (mine !== generation) break;
       const before = results.get(job.file.url);
+      // A record handed over meanwhile against the same reference stands.
+      if (before?.agreed && before.referenceId === job.reference.id) {
+        inFlight = null;
+        quiet = true;
+        continue;
+      }
       const runs = (before?.referenceId === job.reference.id ? before.runs : 0) + 1;
       const record: AlignRecord = {
         alignment,
@@ -393,16 +453,22 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
       };
       results = new Map(results).set(job.file.url, record);
       running = null;
+      inFlight = null;
+      quiet = false;
       told.forEach((listener) => listener({ url: job.file.url, record }));
       changed();
     }
-    if (mine === generation) running = null;
+    if (mine === generation) {
+      running = null;
+      inFlight = null;
+      if (quiet) changed();
+    }
   }
 
   return {
     result: (url) => results.get(url),
     results: () => results,
-    pending: (url) => running === url || queue.some((job) => job.file.url === url),
+    pending: (url) => inFlight === url || queue.some((job) => job.file.url === url),
     request(files, reference) {
       const stage = referenceStage(reference);
       const idle = running === null && queue.length === 0;
@@ -417,7 +483,7 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
           waiting.stage = stage;
           continue;
         }
-        if (running === file.url) continue;
+        if (inFlight === file.url) continue;
         queue.push({ file, reference, stage });
         added = true;
       }
@@ -435,10 +501,22 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
         told.delete(listener);
       };
     },
+    seed(url, record) {
+      for (let at = queue.length - 1; at >= 0; at--) {
+        if (queue[at]!.file.url === url && queue[at]!.reference.id === record.referenceId) {
+          queue.splice(at, 1);
+        }
+      }
+      results = new Map(results).set(url, record);
+      told.forEach((listener) => listener({ url, record }));
+      changed();
+    },
+    busy: () => running !== null || queue.length > 0,
     reset() {
       generation++;
       queue.length = 0;
       running = null;
+      inFlight = null;
       if (results.size > 0) {
         results = new Map();
         changed();
@@ -499,8 +577,11 @@ export const MAX_LATE_MOVES = 2;
 /** What is done with a sure answer from lining a file up: its lines moved, or left, and why. */
 export interface MoveDecision {
   move: LineMove | null;
-  /** Left as they showed: already in step, set by the viewer first, or too late in the stream. */
-  left?: 'inStep' | 'yours' | 'late';
+  /**
+   * Left as they showed: already in step, set by the viewer first, too late in the stream, or a
+   * version they picked, which files that agree never move.
+   */
+  left?: 'inStep' | 'yours' | 'late' | 'picked';
   /** Moved after its lines had started to show. */
   late?: boolean;
 }
@@ -511,7 +592,9 @@ export interface MoveDecision {
  * before the move came: theirs stands. Before its first line shows
  * (`early`), the move is made; after, only when it puts the lines at least
  * LATE_MOVE_S from where they show (`before`, against `after`), and only
- * while fewer than MAX_LATE_MOVES such moves were made in the stream.
+ * while fewer than MAX_LATE_MOVES such moves were made in the stream. Never
+ * on a version picked by hand, by files that agree (`picked`): the weakest
+ * evidence leaves the viewer's choice as it is.
  */
 export function decideMove(input: {
   move: LineMove;
@@ -521,8 +604,11 @@ export function decideMove(input: {
   early: boolean;
   touched: boolean;
   lateMoves: number;
+  /** A version picked by hand, lined up against files that agree. */
+  picked?: boolean;
 }): MoveDecision {
   if (input.touched) return { move: null, left: 'yours' };
+  if (input.picked) return { move: null, left: 'picked' };
   if (input.early) return { move: input.move };
   if (moveSize(input.before, input.after, input.lines) < LATE_MOVE_S) {
     return { move: null, left: 'inStep' };

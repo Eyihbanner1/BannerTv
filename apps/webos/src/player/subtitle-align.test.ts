@@ -1,12 +1,16 @@
 import { fileReleaseMatch, type LineTiming, type SubtitleFit } from '@bannertv/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type AlignRecord,
+  COMPLETE,
   createSubtitleAligner,
   decideMove,
   findReference,
   isFinal,
   moveCues,
+  moveOf,
   moveSize,
+  needsRun,
   readableTrack,
   readsWhole,
   type Reference,
@@ -169,6 +173,27 @@ describe('findReference', () => {
     expect(
       findReference({ ...both, track: { id: 'fr', lines } }, { kind: 'release', id: second.url }),
     ).toMatchObject({ kind: 'track' });
+  });
+
+  it('takes the first of the files that agree last, and gives it up for any better kind', () => {
+    const agreed = { id: 'https://subs.example/leader.srt', lines };
+    expect(findReference({ ...base, offered: [plain], agreed })).toEqual({
+      kind: 'agreed',
+      id: agreed.id,
+      lines,
+      growing: false,
+    });
+    // Kept before, it still gives way to a file named for the release once that is read.
+    expect(
+      findReference(
+        { ...base, offered: [plain, named], agreed },
+        { kind: 'agreed', id: agreed.id },
+      ),
+    ).toMatchObject({ kind: 'release', id: named.url });
+    const arriving = { id: 'fr', lines: lines.filter((line) => line.end < 900) };
+    expect(findReference({ ...base, offered: [plain], track: arriving, agreed })).toMatchObject({
+      kind: 'track',
+    });
   });
 
   it('takes a whole file over the stream’s track while its lines still arrive, then the track alone', () => {
@@ -361,6 +386,71 @@ describe('createSubtitleAligner', () => {
   });
 });
 
+describe('records handed over by files that agree', () => {
+  const lines = film(3600, 7);
+  const leader = 'https://subs.example/leader.srt';
+  const agreed: Reference = { kind: 'agreed', id: leader, lines, growing: false };
+  const record = (within: boolean, offset = -8): AlignRecord => ({
+    alignment: {
+      offset,
+      rate: 1,
+      score: 0,
+      matched: 0,
+      chance: 0,
+      spread: 0,
+      prominence: 0,
+      confidence: 'sure',
+      windows: [],
+      drift: 0,
+      covered: 0,
+      coveredShare: 1,
+    },
+    reference: 'agreed',
+    referenceId: leader,
+    stage: COMPLETE,
+    runs: 1,
+    ms: 40,
+    final: true,
+    agreed: { within, via: 'pair' },
+  });
+
+  it('rank the file as unchecked, and move it only when it is not in step already', () => {
+    expect(syncedOf(record(false))).toBeUndefined();
+    expect(moveOf(record(false))).toEqual({ offset: -8, rate: 1 });
+    expect(moveOf(record(true, 0.2))).toBeNull();
+  });
+
+  it('are kept as a run, and lined up again only against a better kind of reference', async () => {
+    const aligner = createSubtitleAligner(testSlicing());
+    const told: string[] = [];
+    aligner.outcomes(({ url, record }) => told.push(`${url} ${record.reference}`));
+    const url = 'https://subs.example/today.srt';
+    aligner.request([{ url, lines: shifted(lines, 8) }], agreed);
+    aligner.seed(url, record(false));
+    expect(aligner.pending(url)).toBe(false);
+    expect(aligner.result(url)).toEqual(record(false));
+    // The run it took the place of ends without lining anything up, and says so.
+    await new Promise<void>((resolve) => {
+      const stop = aligner.subscribe(() => {
+        if (aligner.busy()) return;
+        stop();
+        resolve();
+      });
+    });
+    expect(aligner.result(url)).toEqual(record(false));
+    expect(told).toEqual([`${url} agreed`]);
+    expect(needsRun(record(false), agreed, COMPLETE)).toBe(false);
+    for (const kind of ['track', 'linked', 'release'] as const) {
+      expect(needsRun(record(true), { ...agreed, kind, id: 'other' }, COMPLETE)).toBe(true);
+    }
+    aligner.request([{ url, lines: shifted(lines, 8) }], { ...agreed, kind: 'linked', id: 'l' });
+    expect(aligner.busy()).toBe(true);
+    const rerun = await settled(aligner, url);
+    expect(rerun).toMatchObject({ reference: 'linked', referenceId: 'l' });
+    expect(rerun!.agreed).toBeUndefined();
+  });
+});
+
 describe('isFinal', () => {
   const lines = film(3600, 5);
   const track = (growing: boolean, from = lines): Reference => ({
@@ -430,6 +520,16 @@ describe('decideMove', () => {
   it('leaves lines whose timing the viewer set first', () => {
     expect(decideMove({ ...base, early: true, touched: true })).toEqual({
       move: null,
+      left: 'yours',
+    });
+  });
+
+  it('leaves a version picked by hand where files that agree would move it', () => {
+    expect(decideMove({ ...base, early: true, picked: true })).toEqual({
+      move: null,
+      left: 'picked',
+    });
+    expect(decideMove({ ...base, early: true, picked: true, touched: true })).toMatchObject({
       left: 'yours',
     });
   });

@@ -222,6 +222,8 @@ export interface Agreement {
   aligned(candidate: string, reference: string, answer: PairAnswer): void;
   /** Files read and lined up so far. */
   counts(): AgreementCounts;
+  /** 1 while the first files are read, 2 once the wider read has begun. */
+  stage(): 1 | 2;
 }
 
 interface Relation {
@@ -594,7 +596,7 @@ export function createAgreement(input: AgreementInput): Agreement {
   return {
     next: step,
     wanted() {
-      if (decision) return [];
+      if (decision || !video.source || RECORDINGS.indexOf(video.source) !== -1) return [];
       const out: string[] = [];
       let triedSoFar = tried;
       let usableSoFar = usable;
@@ -625,5 +627,6 @@ export function createAgreement(input: AgreementInput): Agreement {
       alignedCount++;
     },
     counts,
+    stage: () => stage,
   };
 }

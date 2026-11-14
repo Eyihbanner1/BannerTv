@@ -49,6 +49,8 @@ const CACHE_SIZE = 6;
 export class SubtitleLoadError extends Error {}
 
 const cache = new Map<string, Promise<Cue[]>>();
+/** Files being read and not to be kept, so a second ask while one is read shares its download. */
+const passing = new Map<string, Promise<Cue[]>>();
 
 function isGzip(bytes: Uint8Array): boolean {
   return bytes[0] === 0x1f && bytes[1] === 0x8b;
@@ -120,9 +122,15 @@ async function download(url: string, lang: string): Promise<Cue[]> {
 
 /**
  * Downloads and reads a subtitle file once, without the adverts and credits
- * subtitle sites add; a failed one can be tried again.
+ * subtitle sites add; a failed one can be tried again. `keep: false` reads
+ * one without keeping it among the parsed files (the files that agree read
+ * dozens, which would push out those the viewer switches between): one kept
+ * already, or being read, is still shared.
  */
-export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Promise<Cue[]> {
+export function loadSubtitles(
+  option: Pick<SubtitleOption, 'url' | 'lang'>,
+  { keep = true }: { keep?: boolean } = {},
+): Promise<Cue[]> {
   const existing = cache.get(option.url);
   if (existing) {
     // Most recently used last, so the oldest is dropped first.
@@ -130,7 +138,19 @@ export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Pro
     cache.set(option.url, existing);
     return existing;
   }
-  const promise = download(option.url, option.lang);
+  const reading = passing.get(option.url);
+  const promise = reading ?? download(option.url, option.lang);
+  if (!keep) {
+    if (!reading) {
+      passing.set(option.url, promise);
+      const done = () => {
+        if (passing.get(option.url) === promise) passing.delete(option.url);
+      };
+      promise.then(done, done);
+    }
+    return promise;
+  }
+  passing.delete(option.url);
   cache.set(option.url, promise);
   promise.catch(() => cache.delete(option.url));
   while (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
@@ -143,6 +163,7 @@ export function loadSubtitles(option: Pick<SubtitleOption, 'url' | 'lang'>): Pro
  */
 export function clearSubtitleCache(): void {
   cache.clear();
+  passing.clear();
 }
 
 /**

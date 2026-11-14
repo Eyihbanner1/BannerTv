@@ -115,6 +115,36 @@ describe('loadSubtitles', () => {
     expect(fetched).toBe(2);
   });
 
+  it('shares a download read only to be lined up, and keeps none of it', async () => {
+    let fetched = 0;
+    vi.stubGlobal('fetch', () => {
+      fetched++;
+      return Promise.resolve(new Response('1\n00:00:01,000 --> 00:00:02,000\nA test line\n'));
+    });
+    clearSubtitleCache();
+    const kept = { url: 'https://subs.example.com/shown.srt', lang: 'eng' };
+    const passing = { url: 'https://subs.example.com/other.srt', lang: 'eng' };
+    // A file the planner is reading is not downloaded again.
+    const shown = loadSubtitles(kept);
+    expect(loadSubtitles(kept, { keep: false })).toBe(shown);
+    await shown;
+    expect(fetched).toBe(1);
+    // One read only to be lined up is shared while it downloads, and then forgotten.
+    const first = loadSubtitles(passing, { keep: false });
+    expect(loadSubtitles(passing, { keep: false })).toBe(first);
+    await first;
+    expect(fetched).toBe(2);
+    await loadSubtitles(passing, { keep: false });
+    expect(fetched).toBe(3);
+    // Asked to keep it while it downloads, it is kept from then on.
+    const again = loadSubtitles(passing, { keep: false });
+    expect(loadSubtitles(passing)).toBe(again);
+    await again;
+    await loadSubtitles(passing);
+    expect(fetched).toBe(4);
+    clearSubtitleCache();
+  });
+
   it('stops reading a file with no declared size once it passes 5 MB', async () => {
     const { stream, read } = counted(50 * MB);
     serve(stream);

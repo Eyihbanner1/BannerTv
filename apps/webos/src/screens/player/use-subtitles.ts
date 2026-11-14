@@ -14,6 +14,7 @@ import {
   subtitleFileKey,
   subtitleRelease,
   type VideoLength,
+  videoFacts,
 } from '@bannertv/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
@@ -35,6 +36,11 @@ import {
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import {
+  type AgreementRunner,
+  createAgreementRunner,
+  type RunnerDecision,
+} from '../../player/subtitle-agreement';
+import {
   createSubtitleAligner,
   decideMove,
   findReference,
@@ -54,6 +60,7 @@ import {
 } from '../../player/subtitle-align';
 import { createSubtitleChecks, type SubtitleChecks } from '../../player/subtitle-checks';
 import {
+  agreedSwitchAllowed,
   filesIn,
   fitsIn,
   MAX_EXTRA_CHECKS,
@@ -63,11 +70,13 @@ import {
   type PlanInput,
   planSubtitlePick,
   type PlayingRelease,
+  rankedFiles,
   type SubtitlePlan,
 } from '../../player/subtitle-pick';
 import {
   type PickReason,
   startSubtitleTrace,
+  traceAgreement,
   traceAlignment,
   traceReason,
   traceReference,
@@ -108,9 +117,12 @@ export interface SubtitleCheck {
   /**
    * In step with the video: lined up against a reference for sure, its lines
    * as that put them (not a drift fix the viewer chose instead). Never the
-   * file the others are lined up against: nothing checked it.
+   * file the others are lined up against: nothing checked it. 'files' where
+   * files for the video that agree with each other found it in step with
+   * them: the one showing once moved or kept so, and those of theirs not
+   * showing.
    */
-  synced?: boolean;
+  synced?: 'video' | 'files';
 }
 
 /**
@@ -121,12 +133,18 @@ export interface SubtitleCheck {
  * matched the video's too little to move it; left as the viewer set it (their
  * drift fix, or timing set before the check ended); found out of step only
  * once the player had moved lines as often as it does in a stream (late); or
- * nothing to check it against.
+ * nothing to check it against. `basis: 'files'` where it was checked against
+ * files for the video that agree with each other, not against the video
+ * itself: then lines left as the viewer set or picked them (`picked`) say how
+ * far BannerTV would move them (`offset`), and `disagree` says those files
+ * did not agree on the timing.
  */
 export type SubtitleSync =
-  | { state: 'moved'; offset: number; rate: number }
+  | { state: 'moved'; offset: number; rate: number; basis?: 'files' }
+  | { state: 'yours' | 'picked'; offset?: number; basis?: 'files' }
   | {
-      state: 'inStep' | 'reference' | 'checking' | 'unmatched' | 'yours' | 'late' | 'unchecked';
+      state: 'inStep' | 'reference' | 'checking' | 'unmatched' | 'late' | 'unchecked' | 'disagree';
+      basis?: 'files';
     };
 
 /**
@@ -204,6 +222,20 @@ const EARLY_MS = 90_000;
 const MAX_SWITCHES = 2;
 /** A line due this soon (seconds) counts as showing already, for a move. */
 const FIRST_LINE_MARGIN_S = 0.5;
+/**
+ * A hash read late may still link a file to the video. SEAM(hash-path): today the subtitles
+ * are asked for only once the hash is read or given up on, so none is still coming once the
+ * list has answered; the hash path makes this `SubtitleListState.hashComing`.
+ */
+const HASH_COMING = false;
+/** Why files that agree changed nothing, where the Timing tab says they disagree. */
+const DISAGREE: ReadonlySet<string> = new Set(['close', 'apart', 'unlinked', 'rate', 'wider']);
+
+/**
+ * Whether the file showing has shown lines, for a file taking over from it. SEAM(hash-path):
+ * today once the hold is over; the hash path makes it the first line's own time.
+ */
+const linesShownOf = (standing: AutoState): boolean => !standing.holding;
 
 /**
  * BannerTV Demo's subtitle tracks only check how subtitles look. They wait for
@@ -278,11 +310,12 @@ interface FilesKnown {
   video: PlayingRelease;
 }
 
-/** The reference to line files up against, now (`findReference`). */
+/** The reference to line files up against, now (`findReference`): last, the files that agree. */
 function referenceIn(
   playing: StreamTracks & Pick<SessionState, 'duration'>,
   files: FilesKnown,
   previous: Reference | null,
+  agreed: RunnerDecision | null,
 ): Reference | null {
   const track = referenceTrackOf(playing);
   const lines = track ? playing.streamTimings[track.id] : undefined;
@@ -295,9 +328,23 @@ function referenceIn(
       lines: files.checks.lines,
       broken: files.broken,
       video: files.video,
+      agreed:
+        agreed && 'leader' in agreed ? { id: agreed.leader.url, lines: agreed.leader.lines } : null,
     },
     previous,
   );
+}
+
+/**
+ * Whether a file in any language is linked to the video or named for its
+ * release: files that agree do not run beside one.
+ */
+function strongFile(offered: readonly SubtitleOption[], video: PlayingRelease): boolean {
+  return offered.some((option) => {
+    if (otherEpisode(option, video)) return false;
+    const match = fileReleaseMatch(option, video);
+    return linkedToVideo(option, video) || match === 'exact' || match === 'group';
+  });
 }
 
 /**
@@ -344,9 +391,14 @@ function readFiles(offered: readonly SubtitleOption[], checks: SubtitleChecks) {
   return files;
 }
 
-/** What was done with a sure answer, and the answer's move it was decided for. */
+/**
+ * What was done with a sure answer, and the answer's move it was decided for,
+ * against which kind of reference: one against files that agree is decided
+ * again when a better kind gives a sure answer.
+ */
 interface Decided extends MoveDecision {
   for: LineMove;
+  against?: Reference['kind'];
 }
 
 /** The moves decided on a stream, by file link, and how many came after lines had shown. */
@@ -371,6 +423,8 @@ interface AutoState {
   shownAt?: number;
   /** Switches made since, to a file that fits clearly better. */
   switches: number;
+  /** The file taken over to for files that agree with each other: once a stream. */
+  agreed?: string;
 }
 
 /**
@@ -452,6 +506,40 @@ export function useSubtitles(
     // The files offered as they are when a run ends.
     [aligner, videoId, listState],
   );
+  // Files for the video that agree with each other (ADR 0003 item 9): the last way to line the
+  // file showing up, where nothing else can. Its reads and pairs are kept for the video.
+  const [runner] = useState<AgreementRunner>(() =>
+    createAgreementRunner({
+      load: (file) => loadSubtitles(file, { keep: false }),
+      // Step B's own runs go first.
+      turn: () =>
+        new Promise<void>((resolve) => {
+          if (!aligner.busy()) {
+            resolve();
+            return;
+          }
+          const stop = aligner.subscribe(() => {
+            if (aligner.busy()) return;
+            stop();
+            resolve();
+          });
+        }),
+    }),
+  );
+  const runnerState = useSyncExternalStore(runner.subscribe, runner.state);
+  useEffect(() => runner.traced((outcome) => traceAgreement(videoId, outcome)), [runner, videoId]);
+  // What was read and lined up is kept for the video only.
+  useEffect(() => runner.forget(), [runner, videoId]);
+  // What they decided, handed over for the stream once nothing else may still come: for the
+  // plan (a ref), and for the screen.
+  const agreedRef = useRef<{ entry: StreamEntry | null; decision: RunnerDecision } | null>(null);
+  const [handed, setHanded] = useState<{
+    entry: StreamEntry | null;
+    decision: RunnerDecision;
+  } | null>(null);
+  const agreedNow = handed?.entry === entry ? handed.decision : null;
+  useEffect(() => () => runner.stop(), [runner]);
+
   // The reference of the stream playing, kept while it still is one: for the plan, and for the
   // screen. And as Diagnostics was last told it.
   const referenceUsed = useRef<Reference | null>(null);
@@ -463,10 +551,13 @@ export function useSubtitles(
   // Another stream lines its files up against its own reference, from the start.
   useEffect(() => {
     aligner.reset();
+    // Files that agree decide again for the stream's own facts, from the files read already.
+    runner.stop();
+    agreedRef.current = null;
     alignedOrder.current = new Map();
     referenceUsed.current = null;
     tracedReference.current = null;
-  }, [aligner, entry]);
+  }, [aligner, runner, entry]);
   /** Keeps the reference for the stream, and tells Diagnostics what it is as that changes. */
   const noteReference = (reference: Reference | null) => {
     const before = referenceUsed.current;
@@ -506,6 +597,8 @@ export function useSubtitles(
      * audio heard, while its version is chosen here.
      */
     language?: string;
+    /** A version the viewer picked from the list. */
+    byHand?: boolean;
   } | null>(null);
   const auto = useRef<AutoState>({ entry: null, holding: false, switches: 0 });
   // Files read for their checks in each language, by link, for the stream playing: another
@@ -651,6 +744,12 @@ export function useSubtitles(
       const playing = session.get();
       const now = Date.now();
       const language = languageKey(wanted);
+      // The file files that agree would show instead, until it has been taken over to.
+      const agreedFor = agreedRef.current?.entry === entry ? agreedRef.current.decision : null;
+      const agreedKey =
+        agreedFor?.state === 'switched' && standing.agreed === undefined
+          ? agreedFor.show
+          : undefined;
       if (checkedIn.current.entry !== entry) {
         checkedIn.current = { entry, byLanguage: new Map(), asked: new Map() };
       }
@@ -686,7 +785,10 @@ export function useSubtitles(
             ? MAX_SWITCHES - standing.switches
             : 0,
         ...sync,
+        agreed: agreedKey === undefined ? undefined : { key: agreedKey },
+        linesShown: linesShownOf(standing),
       });
+      if (result.agreed && result.pick) standing.agreed = result.pick.key;
       for (const file of result.read) {
         checked.add(file.url);
         asked.set(file.url, now);
@@ -720,7 +822,11 @@ export function useSubtitles(
         const due = (asked.get(result.pick.url) ?? now) + HOLD_MS;
         if (due > now) wakeAt(due, now);
       }
-      const why = result.pick && pickReason(result.pick, offered, wanted, context);
+      const why =
+        result.pick &&
+        (result.pick.key === standing.agreed
+          ? 'agrees with other files'
+          : pickReason(result.pick, offered, wanted, context));
       if (result.pick && result.pick.key !== current) {
         // Landing on the version picked by hand, it stays: a track listed later does not take over.
         settle(
@@ -753,6 +859,18 @@ export function useSubtitles(
       wantedNow = wanted;
       pressedNow = pressed;
       const { options: offered, pending: waiting } = list.get();
+      // What files that agree decided, handed over once no addon is still to answer and no hash
+      // may still link a file: the record for the file shown first, so step B does not line it up
+      // against their first file again.
+      const agreedDecision = runner.decision();
+      if (agreedDecision && agreedRef.current?.entry !== entry && waiting === 0 && !HASH_COMING) {
+        // Kept first: seeding tells the aligner's listeners, this among them.
+        agreedRef.current = { entry, decision: agreedDecision };
+        setHanded(agreedRef.current);
+        if ('record' in agreedDecision && agreedDecision.record) {
+          aligner.seed(agreedDecision.showUrl, agreedDecision.record);
+        }
+      }
       const length = videoLength(playing.duration, playing.live, runtimeSeconds);
       const context = wanted === null ? null : contextIn(offered, wanted, entry, length);
       const key = wanted === null ? null : languageKey(wanted);
@@ -765,7 +883,12 @@ export function useSubtitles(
         broken: (url) => broken.current.has(url) || checks.failed(url),
         video: playingRelease(entry, videoId),
       };
-      const reference = referenceIn(playing, known, referenceUsed.current);
+      const reference = referenceIn(
+        playing,
+        known,
+        referenceUsed.current,
+        agreedRef.current?.entry === entry ? agreedRef.current.decision : null,
+      );
       noteReference(reference);
       if (reference) aligner.request(readFiles(offered, checks), reference);
       const trackLinesComing = !reference && trackComing(playing);
@@ -898,6 +1021,7 @@ export function useSubtitles(
     const stopSession = session.subscribe(onSession);
     const stopChecks = checks.subscribe(decide);
     const stopAligner = aligner.subscribe(decide);
+    const stopRunner = runner.subscribe(decide);
     // Both may already hold enough to decide.
     void Promise.resolve().then(decide);
     return () => {
@@ -908,10 +1032,11 @@ export function useSubtitles(
       stopSession();
       stopChecks();
       stopAligner();
+      stopRunner();
     };
     // contextIn and fileKeyOf read only what these name, and refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry, session, list, metaId, runtimeSeconds, videoId, checks, aligner]);
+  }, [entry, session, list, metaId, runtimeSeconds, videoId, checks, aligner, runner]);
 
   // The files read stay in memory only while the player is open.
   useEffect(() => () => clearSubtitleCache(), []);
@@ -1058,8 +1183,10 @@ export function useSubtitles(
         },
         // The one the automatic choice settled on: it is kept while it still is one.
         usedReference.entry === entry ? usedReference.reference : null,
+        agreedNow,
       ),
     [
+      agreedNow,
       streamText,
       engine,
       streamTimings,
@@ -1081,6 +1208,97 @@ export function useSubtitles(
     // Each time the reference changes or grows a stage, or another file is read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [referenceKey, profiles, aligner, checks]);
+
+  // Whether a reference may still come: a stream track to read, or a file in the language linked
+  // to the video or named for its release still to be read.
+  const video = useMemo(() => playingRelease(entry, videoId), [entry, videoId]);
+  const coming = referenceComing(
+    { text: streamText, engine, streamTimings },
+    fileOption?.lang ?? null,
+    {
+      offered: options,
+      fits: fitsByLink,
+      checks,
+      broken: (url) => failedLinks.has(url) || checks.failed(url),
+      video,
+    },
+  );
+  const strong = useMemo(() => strongFile(options, video), [options, video]);
+  // Something better than files that agree lines the file showing up.
+  const betterReference = reference !== null && reference.kind !== 'agreed';
+
+  // Files that agree with each other decide for the file the automatic choice shows, in a
+  // language the viewer wants, where nothing else can line it up and nothing better may come:
+  // no stream track, no file linked to the video or named for its release in any language. Not
+  // for Lab streams or Demo checks, nor beside a version picked by hand. Kept once handed over.
+  useEffect(() => {
+    if (agreedNow) return;
+    const made = decided.current;
+    const ours = made?.entry === entry ? made : null;
+    const startable =
+      !!entry &&
+      !!fileOption &&
+      metaId !== undefined &&
+      !isSubtitleCheck(entry) &&
+      !!ours?.auto &&
+      !ours.byHand &&
+      !ours.remembered &&
+      !betterReference &&
+      !coming &&
+      !strong;
+    if (!startable) {
+      runner.stop();
+      return;
+    }
+    const length = videoLength(duration, live, runtimeSeconds);
+    const broken = (url: string) => failedLinks.has(url) || checks.failed(url);
+    runner.start({
+      video: videoFacts(video.filename, video.title),
+      length,
+      today: fileOption,
+      ranked: rankedFiles(
+        options,
+        fileOption.lang,
+        contextIn(options, fileOption.lang, entry, length),
+      ),
+      files: options.filter((option) => !broken(option.url) && !otherEpisode(option, video)),
+      known: (url) => {
+        const lines = checks.lines(url);
+        const profile = checks.profile(url);
+        return lines && profile ? { lines, profile } : undefined;
+      },
+      // The planner's own test for a file taking over from the one showing.
+      canSwitch: () => {
+        const standing = auto.current;
+        if (standing.entry !== entry) return false;
+        const now = Date.now();
+        const switchesLeft =
+          standing.shownAt !== undefined && now - standing.shownAt < EARLY_MS
+            ? MAX_SWITCHES - standing.switches
+            : 0;
+        return agreedSwitchAllowed({
+          holding: standing.holding,
+          switchesLeft,
+          linesShown: linesShownOf(standing),
+        });
+      },
+    });
+    // contextIn reads only what these name, and refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    agreedNow,
+    entry,
+    choice,
+    fileOption,
+    options,
+    profiles,
+    failedLinks,
+    betterReference,
+    coming,
+    strong,
+    video,
+    runner,
+  ]);
 
   // The timing and drift fix kept for the file showing.
   const offsetKey = choice && entry ? subtitleFileKey(videoId, fileIdentity(choice, entry)) : null;
@@ -1117,11 +1335,27 @@ export function useSubtitles(
   });
   const touchedNow = (url: string) =>
     touched.current.entry === entry && touched.current.links.has(url);
+  // A version the viewer picked from the list, or the one kept for the release: files that agree
+  // never move it.
+  const pickedNow = () => {
+    const made = decided.current;
+    return made?.entry === entry && (!!made.byHand || !!made.remembered);
+  };
+  const against = fileRecord?.reference;
+  // Files that agree only ever move lines at rate 1: never over a drift fix the player made.
+  const agreedOverDrift = against === 'agreed' && unaligned.auto;
   useEffect(() => {
     if (!entry || fileUrl === null || !sureMove) return;
     const made = movesNow.byLink.get(fileUrl);
-    if (made && sameMove(made.for, sureMove)) return;
+    if (made && sameMove(made.for, sureMove) && made.against === against) return;
     if (viewersDrift(keptDrift)) return;
+    if (agreedOverDrift) {
+      const trace = agreedNow?.trace;
+      if (trace && (trace.state === 'moved' || trace.state === 'shifted')) {
+        traceAgreement(videoId, { ...trace, kept: 'drift' });
+      }
+      return;
+    }
     const lines = checks.lines(fileUrl) ?? (fileCues ? timingOf(fileCues) : []);
     // Where the lines show now (as moved before on this stream, or as the file has them), and
     // where the move puts them, the viewer's timing with each.
@@ -1147,12 +1381,13 @@ export function useSubtitles(
       early,
       touched: touchedNow(fileUrl),
       lateMoves: movesNow.late,
+      picked: against === 'agreed' && pickedNow(),
     });
     // Lines moved before stay where they are when the new answer leaves them.
     const kept: Decided =
       decision.move === null && made?.move
-        ? { move: made.move, ...(made.late ? { late: true } : {}), for: sureMove }
-        : { ...decision, for: sureMove };
+        ? { move: made.move, ...(made.late ? { late: true } : {}), for: sureMove, against }
+        : { ...decision, for: sureMove, against };
     movesStore.set({
       entry,
       byLink: new Map(movesNow.byLink).set(fileUrl, kept),
@@ -1160,7 +1395,17 @@ export function useSubtitles(
     });
     // Decided once for each file: what it reads of the rest is as it is at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry, fileUrl, sureMove, keptDrift, holding, fileCues, movesStore]);
+  }, [
+    entry,
+    fileUrl,
+    sureMove,
+    against,
+    agreedOverDrift,
+    keptDrift,
+    holding,
+    fileCues,
+    movesStore,
+  ]);
   const decision = fileUrl !== null ? movesNow.byLink.get(fileUrl) : undefined;
   const appliedMove = decision?.move ?? null;
   const timing = timingInUse({
@@ -1180,38 +1425,47 @@ export function useSubtitles(
   const isReference = (url: string) =>
     !!reference && reference.kind !== 'track' && reference.id === url;
   // What lining the file showing up did, for the Timing tab: from the timing in use, so a drift
-  // fix the viewer chose since, which leaves the lines as the file has them, says so.
+  // fix the viewer chose since, which leaves the lines as the file has them, says so. Against
+  // files that agree with each other, it says so.
+  const filesBasis = fileRecord ? against === 'agreed' : reference?.kind === 'agreed';
   const sync = ((): SubtitleSync | null => {
     if (fileUrl === null) return null;
+    const basis = filesBasis ? ({ basis: 'files' } as const) : {};
     // Checked against nothing itself: said only where there are other files it is used for.
     if (isReference(fileUrl)) {
-      return options.some((option) => option.url !== fileUrl) ? { state: 'reference' } : null;
+      return options.some((option) => option.url !== fileUrl)
+        ? { state: 'reference', ...(reference?.kind === 'agreed' ? { basis: 'files' } : {}) }
+        : null;
     }
     if (move) {
       return Math.abs(move.offset) < 0.05 && move.rate === 1
-        ? { state: 'inStep' }
-        : { state: 'moved', offset: move.offset, rate: move.rate };
+        ? { state: 'inStep', ...basis }
+        : { state: 'moved', offset: move.offset, rate: move.rate, ...basis };
     }
+    // Not made over the player's drift fix: as though nothing had checked it.
+    if (agreedOverDrift && !appliedMove) return { state: 'unchecked' };
     if (appliedMove || sureMove) {
-      if (viewersDrift(keptDrift)) return { state: 'yours' };
-      if (decision?.left) return { state: decision.left };
-      if (sureMove) return { state: 'checking' };
+      // How far BannerTV would move the lines from where they show now.
+      const would = filesBasis && sureMove ? { offset: sureMove.offset - offset } : {};
+      if (viewersDrift(keptDrift)) return { state: 'yours', ...basis, ...would };
+      if (decision?.left === 'yours' || decision?.left === 'picked') {
+        return { state: decision.left, ...basis, ...would };
+      }
+      if (decision?.left) return { state: decision.left, ...basis };
+      if (sureMove) return { state: 'checking', ...basis };
     }
-    if (aligner.pending(fileUrl)) return { state: 'checking' };
-    if (fileRecord) return { state: fileRecord.final ? 'unmatched' : 'checking' };
-    if (reference) return { state: 'checking' };
-    const coming = referenceComing(
-      { text: streamText, engine, streamTimings },
-      fileOption?.lang ?? null,
-      {
-        offered: options,
-        fits: fitsByLink,
-        checks,
-        broken: (url) => failedLinks.has(url) || checks.failed(url),
-        video: playingRelease(entry, videoId),
-      },
-    );
-    return { state: coming ? 'checking' : 'unchecked' };
+    if (fileRecord?.agreed?.within) return { state: 'inStep', basis: 'files' };
+    if (aligner.pending(fileUrl)) return { state: 'checking', ...basis };
+    if (fileRecord) return { state: fileRecord.final ? 'unmatched' : 'checking', ...basis };
+    if (reference) return { state: 'checking', ...basis };
+    if (coming) return { state: 'checking' };
+    // Files that agree with each other, still deciding, or what they found.
+    if (runnerState.active && !agreedNow) return { state: 'checking', basis: 'files' };
+    if (agreedNow?.state === 'none') {
+      if (DISAGREE.has(agreedNow.why)) return { state: 'disagree' };
+      if (agreedNow.why === 'unmatched') return { state: 'unmatched', basis: 'files' };
+    }
+    return { state: 'unchecked' };
   })();
 
   /**
@@ -1220,13 +1474,32 @@ export function useSubtitles(
    * leave its lines as the file has them. Not the reference itself, which nothing checked: its
    * row says what is known of it, linked to the video or the same release.
    */
-  const syncedFile = (option: SubtitleOption, showing: boolean): boolean => {
-    if (isReference(option.url)) return false;
-    if (syncedOf(alignments.get(option.url)) !== 'sure') return false;
-    if (showing) return sync?.state === 'moved' || sync?.state === 'inStep';
-    if (!entry) return false;
-    const key = subtitleFileKey(videoId, fileIdentity({ kind: 'file', key: option.key }, entry));
-    return !viewersDrift(subtitleDrifts.get(key) ?? null);
+  const syncedFile = (option: SubtitleOption, showing: boolean): SubtitleCheck['synced'] => {
+    const keptOwnDrift = () =>
+      !!entry &&
+      viewersDrift(
+        subtitleDrifts.get(
+          subtitleFileKey(videoId, fileIdentity({ kind: 'file', key: option.key }, entry)),
+        ) ?? null,
+      );
+    // In step with files that agree: the file showing once moved or kept so, and theirs.
+    if (showing && sync?.basis === 'files') {
+      return sync.state === 'moved' || sync.state === 'inStep' ? 'files' : undefined;
+    }
+    if (
+      !showing &&
+      reference?.kind === 'agreed' &&
+      agreedNow &&
+      'within' in agreedNow &&
+      agreedNow.within.indexOf(option.url) !== -1
+    ) {
+      return keptOwnDrift() ? undefined : 'files';
+    }
+    if (isReference(option.url)) return undefined;
+    if (syncedOf(alignments.get(option.url)) !== 'sure') return undefined;
+    if (showing) return sync?.state === 'moved' || sync?.state === 'inStep' ? 'video' : undefined;
+    if (!entry) return undefined;
+    return keptOwnDrift() ? undefined : 'video';
   };
 
   /**
@@ -1313,7 +1586,8 @@ export function useSubtitles(
       if (problem) check.problem = problem;
       if (fit.drift) check.drift = fit.drift;
       if (showing && autoDrift) check.autoDrift = true;
-      if (syncedFile(option, showing)) check.synced = true;
+      const synced = syncedFile(option, showing);
+      if (synced) check.synced = synced;
       return check;
     },
     isRemembered(version) {
@@ -1350,7 +1624,7 @@ export function useSubtitles(
         // A file's reason is the plan's, as it is planned again below.
         if (next.kind === 'track') traceReason(videoId, 'own track', language, true);
       } else {
-        decided.current = { entry, choice: next, auto: false };
+        decided.current = { entry, choice: next, auto: false, byHand: next !== null };
         auto.current = { entry, holding: false, switches: 0 };
         setHoldingFor(null);
         traceReason(videoId, next === null ? 'off' : 'by hand', language);

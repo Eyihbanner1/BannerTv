@@ -15,7 +15,7 @@ import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import type { SubtitleListState, SubtitleOption } from '../../player/subtitles';
 import { recentSubtitleTraces } from '../../player/subtitle-trace';
-import { driftHintKey, driftOn } from '../../player/subtitle-versions';
+import { driftHintKey, driftOn, syncLine } from '../../player/subtitle-versions';
 import { type SubtitleChoice, type Subtitles, useSubtitles } from './use-subtitles';
 
 /*
@@ -147,14 +147,17 @@ const world = vi.hoisted(() => ({
   lists: new Map<unknown, unknown>(),
   files: new Map<string, { cues: unknown[]; ms?: number; fail?: boolean }>(),
   loads: [] as string[],
+  /** Of those, the ones read only to be lined up, and not kept (`keep: false`). */
+  passes: [] as string[],
   cached: new Set<string>(),
   cleared: 0,
 }));
 
 vi.mock('../../player/subtitles', () => ({
   // Kept once read, as the real loader keeps the parsed files.
-  loadSubtitles(option: { url: string }) {
+  loadSubtitles(option: { url: string }, how?: { keep?: boolean }) {
     world.loads.push(option.url);
+    if (how?.keep === false) world.passes.push(option.url);
     const file = world.files.get(option.url);
     if (!file || file.fail)
       return Promise.reject(new Error('The subtitle file could not be reached'));
@@ -374,6 +377,7 @@ beforeEach(async () => {
   world.lists.clear();
   world.files.clear();
   world.loads = [];
+  world.passes = [];
   world.cached.clear();
   world.cleared = 0;
   const kv = memoryKeyValueStore();
@@ -948,7 +952,7 @@ describe('lining files up against the video', () => {
     expect(player.subtitles.offset).toBe(0);
     // Its row says it is in step; the one it was lined up against was checked against nothing,
     // so its row says what is known of it (linked to the video), not that it is in step.
-    expect(player.subtitles.checkOf(fileChoice(plain)!)).toMatchObject({ synced: true });
+    expect(player.subtitles.checkOf(fileChoice(plain)!)).toMatchObject({ synced: 'video' });
     expect(player.subtitles.checkOf(fileChoice(sdh)!)).not.toHaveProperty('synced');
     const [trace] = recentSubtitleTraces();
     expect(trace).toMatchObject({ reason: 'synced to your video', reference: 'linked' });
@@ -1306,7 +1310,7 @@ describe('lining files up against the video', () => {
       await player.wait(300);
       await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
       await player.wait(300);
-      expect(player.subtitles.checkOf(fileChoice(second)!)).toMatchObject({ synced: true });
+      expect(player.subtitles.checkOf(fileChoice(second)!)).toMatchObject({ synced: 'video' });
       expect(player.subtitles.choice).toEqual(fileChoice(first));
     });
 
@@ -1331,5 +1335,128 @@ describe('lining files up against the video', () => {
         expect(player.subtitles.sync.offset).toBeCloseTo(-5, 1);
       }
     });
+  });
+});
+
+describe('files that agree with each other', () => {
+  const shift = (cues: Cue[], by: number): Cue[] =>
+    cues.map((cue) => ({ ...cue, start: cue.start + by, end: cue.end + by }));
+  const firstStart = (subtitles: Subtitles) => subtitles.cues?.[0]?.start;
+  const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+  /** The video: an AMZN release no file is named for, with no hash. */
+  const amznVideo = () => streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+  /** E6's shape: the viewer's best file 8 s late, three AMZN files from other groups in step. */
+  function e6(extra: SubtitleOption[] = []) {
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    const amzn = [
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+      file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt`, ms: 400 }),
+    ];
+    return { real, amzn, options: [real, ...amzn, ...extra] };
+  }
+  const synced = (player: ReturnType<typeof play>) => syncLine(player.subtitles.sync);
+
+  it('move a late file onto their timing, and say so', async () => {
+    const entry = amznVideo();
+    const { real, amzn, options } = e6();
+    offer(entry, options);
+    const player = play(entry);
+    await player.wait(300);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    // Deciding: checked against other subtitles.
+    expect(player.subtitles.sync).toEqual({ state: 'checking', basis: 'files' });
+    expect(synced(player)).toEqual({ key: 'player.syncCheckingFiles' });
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved', rate: 1, basis: 'files' });
+    expect(synced(player)).toEqual({ key: 'player.syncMovedFiles', amount: '−8.0 s' });
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.offset).toBe(0);
+    // Its row says it matches other subtitles (`versionNotes`: 'agreed').
+    expect(player.subtitles.checkOf(fileChoice(real)!)).toMatchObject({ synced: 'files' });
+    // The file the planner read is not asked for again to be lined up; one it is still reading
+    // is shared by the loader. Each of the others once.
+    expect(world.passes).not.toContain(real.url);
+    expect(new Set(world.passes).size).toBe(world.passes.length);
+    expect(new Set(world.loads).size).toBe(options.length);
+    const [trace] = recentSubtitleTraces();
+    expect(trace?.agreement).toMatchObject({
+      state: 'moved',
+      best: 9,
+      service: 'amzn',
+      read: 4,
+    });
+    expect(trace?.reference).toBe('agreed');
+    // The English file of the winner was lined up against the leader too: in step.
+    expect(player.subtitles.checkOf(fileChoice(amzn[2]!)!)).toMatchObject({ synced: 'files' });
+  });
+
+  it('leave a version picked by hand as picked, saying how far they would move it', async () => {
+    const entry = amznVideo();
+    const plain = file('plain', shift(FULL, 3), { label: 'Show.S01E06.1080p.WEB.h264-ETHEL.srt' });
+    const { options } = e6([plain]);
+    offer(entry, options);
+    const player = play(entry);
+    await player.wait(3300);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved', basis: 'files' });
+    player.subtitles.choose(fileChoice(plain), 'version');
+    await player.wait(1500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 3, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'picked', basis: 'files' });
+    expect(synced(player)).toEqual({ key: 'player.syncPickedFiles', amount: '−3.0 s' });
+  });
+
+  it('leave lines the viewer timed as theirs, saying how far they would move them', async () => {
+    const entry = amznVideo();
+    const { real, options } = e6();
+    offer(entry, options);
+    const player = play(entry);
+    await player.wait(300);
+    player.subtitles.setOffset(0.5);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'yours', basis: 'files' });
+    expect(synced(player)).toEqual({ key: 'player.syncYoursFiles', amount: '−8.5 s' });
+  });
+
+  it('move nothing where they do not agree, and say so', async () => {
+    // A video naming no service: three plain WEB files in step, the viewer's 12 s from them.
+    const entry = streamEntry('Show.S01E01.1080p.WEB-DL-Grp');
+    const WEB = 'Show.S01E01.1080p.WEB.h264';
+    const own = file('own', shift(FULL, 12), { label: `${WEB}-APART.srt` });
+    const others = [
+      file('w0', FULL, { lang: 'fre', label: `${WEB}-RA0.srt` }),
+      file('w1', FULL, { lang: 'spa', label: `${WEB}-RB1.srt` }),
+      file('w2', FULL, { lang: 'ger', label: `${WEB}-RC2.srt` }),
+    ];
+    offer(entry, [own, ...others]);
+    const player = play(entry);
+    await player.wait(3300);
+    expect(player.subtitles.choice).toEqual(fileChoice(own));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 12, 5);
+    expect(player.subtitles.sync).toEqual({ state: 'disagree' });
+    expect(synced(player)).toEqual({ key: 'player.syncDisagree' });
+    expect(recentSubtitleTraces()[0]?.agreement).toMatchObject({
+      state: 'none',
+      why: { kind: 'apart', score: 1, rate: 1 },
+    });
+  });
+
+  it('never run beside a file named for the release', async () => {
+    const entry = amznVideo();
+    const named = file('named', FULL, {
+      label: 'Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp.srt',
+    });
+    const { options } = e6();
+    offer(entry, [...options, named]);
+    const player = play(entry);
+    await player.wait(3300);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+    expect(player.subtitles.sync?.basis).toBeUndefined();
+    // Only what the planner reads.
+    expect(world.loads.length).toBeLessThanOrEqual(3);
   });
 });

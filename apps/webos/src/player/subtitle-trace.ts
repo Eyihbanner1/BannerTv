@@ -8,7 +8,8 @@ import type { ReferenceKind } from './subtitle-align';
  * TV can say why each title got the file it did: whether the exact file's
  * hash was read, how many files came in each language, why the version
  * showing was chosen, what the files were lined up against and what that
- * found, and how long the first line took. Settings >
+ * found (files that agree with each other among them), and how long the
+ * first line took. Settings >
  * Diagnostics shows it, and its console line carries it. In memory only,
  * never stored, and never a link, an address or a file's name: states,
  * counts, language codes and times.
@@ -30,7 +31,8 @@ export type HashOutcome =
  * (linked to it); its name the same release as the video's, with the group
  * confirming it or loosely; lined up against a reference for sure (synced);
  * the best fit of the files read; the list's order, nothing telling the
- * files apart; or none showing.
+ * files apart; shown instead of the file chosen first, as files that agree
+ * with each other put it ahead; or none showing.
  */
 export type PickReason =
   | 'by hand'
@@ -41,6 +43,7 @@ export type PickReason =
   | 'same release name, no group'
   | 'best fit'
   | 'list order'
+  | 'agrees with other files'
   | 'off';
 
 /** What lining one file up against the reference found, for Diagnostics. */
@@ -55,6 +58,41 @@ export interface AlignTrace {
   /** Milliseconds of work it took. */
   ms: number;
 }
+
+/** Why files that agree changed nothing (`AgreementWhy` in core, by kind). */
+export type AgreementAbstain =
+  | { kind: 'under'; best: number }
+  | { kind: 'close'; best: number; second: number }
+  | { kind: 'unlinked'; score: number }
+  | { kind: 'apart'; score: number; offset: number; rate: number }
+  | { kind: 'rate' }
+  | { kind: 'edition'; edition: string }
+  | { kind: 'wider'; best: number; second: number }
+  | { kind: 'unmatched'; best: number; second: number }
+  | { kind: 'gave up'; after: 'time' | 'files' | 'aligned' };
+
+/**
+ * What the files that agree with each other found, for Diagnostics: counts,
+ * scores and times only. `file` is the place of the file shown instead among
+ * its language's files, in the list's order; `kept` says a drift fix the
+ * player made is on, so the move was not made.
+ */
+export type AgreementTrace =
+  | { state: 'reading'; read: number; aligned: number }
+  | {
+      state: 'kept' | 'moved' | 'shifted' | 'switched';
+      best: number;
+      second: number;
+      service?: string;
+      read: number;
+      aligned: number;
+      ms: number;
+      offset?: number;
+      file?: number;
+      kept?: 'drift';
+    }
+  | { state: 'none'; why: AgreementAbstain; read: number; aligned: number; ms: number }
+  | { state: 'not tried'; why: 'recording' | 'no source' };
 
 /** One play's subtitles, as Diagnostics shows them. */
 export interface SubtitleTrace {
@@ -74,14 +112,19 @@ export interface SubtitleTrace {
   reference?: ReferenceKind | null;
   /** Each file lined up, by its place in the order lined up, its last run. Never its link. */
   aligned?: Record<number, AlignTrace>;
+  /** What the files that agree found, where they were needed. */
+  agreement?: AgreementTrace;
 }
 
 interface Running extends SubtitleTrace {
   startedAt: number;
 }
 
-/** Plays kept, newest first: Diagnostics' console line carries them all, its screen the newest. */
-const KEPT = 3;
+/**
+ * Plays kept, newest first: Diagnostics' console line carries them all, its screen the newest.
+ * Enough that a detour (another title, a sports stream) leaves the play under study on it.
+ */
+const KEPT = 5;
 const traces: Running[] = [];
 
 /** An addon's own id that is a link is never kept: only that it was one. */
@@ -160,6 +203,13 @@ export function traceAlignment(videoId: string, file: number, outcome: AlignTrac
   mark(`sub:aligned:${outcome.confidence}`);
 }
 
+/** What the files that agree found so far, or decided. */
+export function traceAgreement(videoId: string, outcome: AgreementTrace): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  trace.agreement = outcome;
+}
+
 /** The first subtitle line of the play now went on screen. */
 export function traceFirstLine(now = Date.now()): void {
   const trace = traces[0];
@@ -173,6 +223,7 @@ export function recentSubtitleTraces(): SubtitleTrace[] {
   return traces.map((trace) => {
     const copy: SubtitleTrace = { ...trace, files: { ...trace.files } };
     if (trace.aligned) copy.aligned = { ...trace.aligned };
+    if (trace.agreement) copy.agreement = { ...trace.agreement };
     delete (copy as Partial<Running>).startedAt;
     return copy;
   });
@@ -223,6 +274,7 @@ const REFERENCE_WORDS: Readonly<Record<ReferenceKind, string>> = {
   track: 'the stream’s track',
   linked: 'a file linked by hash',
   release: 'a file named for the release',
+  agreed: 'files that agree',
 };
 
 /** "+2.3 s", "−0.4 s": a true minus sign. */
@@ -246,6 +298,67 @@ function alignText(trace: SubtitleTrace): string | undefined {
     : `lined up against ${against}`;
 }
 
+function abstainText(why: AgreementAbstain): string {
+  switch (why.kind) {
+    case 'under':
+      return `best ${why.best} is under 3`;
+    case 'close':
+      return `${why.best} vs ${why.second} is too close`;
+    case 'unlinked':
+      return `files scoring ${why.score} aren’t lined up with the rest`;
+    case 'apart':
+      return why.rate !== 1
+        ? `files scoring ${why.score} are at another rate`
+        : `files scoring ${why.score} are ${Math.abs(why.offset).toFixed(1)} s apart`;
+    case 'rate':
+      return 'this file is at another rate';
+    case 'edition':
+      return `the video’s edition (${why.edition}) isn’t named by them`;
+    case 'wider':
+      return `a wider read disagrees (${why.best} vs ${why.second})`;
+    case 'unmatched':
+      return `this file lines up with none of them (${why.best} vs ${why.second})`;
+    case 'gave up':
+      return `gave up after ${
+        why.after === 'time' ? '120 s' : why.after === 'files' ? '100 files' : '1000 lined up'
+      }`;
+  }
+}
+
+/** What the files that agree found: how sure, how much they read and lined up, and what it did. */
+function agreementText(agreement: AgreementTrace | undefined): string | undefined {
+  if (!agreement) return undefined;
+  const said = 'files that agree';
+  switch (agreement.state) {
+    case 'not tried':
+      return `${said}: not tried (${
+        agreement.why === 'recording' ? 'a cinema recording' : 'the video names no source'
+      })`;
+    case 'reading':
+      return `${said}: reading, ${agreement.read} read, ${agreement.aligned} lined up`;
+    case 'none':
+      return `${said}: none, ${abstainText(agreement.why)}, ${agreement.read} read, ${
+        agreement.aligned
+      } lined up in ${seconds(agreement.ms)}`;
+    default: {
+      const service = agreement.service ? ` (${agreement.service})` : '';
+      const done =
+        agreement.kept === 'drift'
+          ? 'kept: a drift fix is on'
+          : agreement.state === 'kept'
+            ? 'already in step'
+            : agreement.state === 'switched'
+              ? `switched to file ${agreement.file ?? '?'}`
+              : `moved ${signed(agreement.offset ?? 0)}${
+                  agreement.state === 'shifted' ? ' by the group’s timing' : ''
+                }`;
+      return `${said}: ${agreement.best} vs ${agreement.second}${service}, ${agreement.read} read, ${
+        agreement.aligned
+      } lined up in ${seconds(agreement.ms)}; ${done}`;
+    }
+  }
+}
+
 function reasonText(trace: SubtitleTrace): string {
   if (!trace.reason) return 'none chosen yet';
   const said = trace.reason === 'off' ? 'off' : `${trace.language ?? '?'}, ${trace.reason}`;
@@ -263,6 +376,7 @@ export function subtitleTraceRows(
       hashText(trace.hash),
       filesText(trace),
       reasonText(trace),
+      agreementText(trace.agreement),
       alignText(trace),
       trace.firstLineMs === undefined
         ? 'no line yet'

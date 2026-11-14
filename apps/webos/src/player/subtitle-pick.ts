@@ -182,6 +182,16 @@ export interface PlanInput<T extends PickableSubtitle> extends PickContext {
   syncing?: boolean;
   /** Whether the file has been read and waits to be lined up against the reference. */
   aligning?: (url: string) => boolean;
+  /**
+   * The file that files agreeing with each other would show instead of the
+   * one showing (`subtitle-agreement`): taken over to once, while that may be.
+   */
+  agreed?: { key: string };
+  /**
+   * The file showing has shown lines. SEAM(hash-path): today the hook says so once the hold
+   * is over; the hash path makes it the first line's own time, with its margin.
+   */
+  linesShown?: boolean;
 }
 
 export interface SubtitlePlan<T> {
@@ -193,6 +203,19 @@ export interface SubtitlePlan<T> {
   hold: boolean;
   /** The pick takes over from the file showing because it fits clearly better. */
   switched: boolean;
+  /** The pick is the one files that agree would show (`agreed`). */
+  agreed?: boolean;
+}
+
+/**
+ * Whether a file may take over from the one showing for files that agree: in
+ * the hold, or before its lines have shown while switches are left, soon
+ * after the hold. Anything later lines the file showing up instead.
+ */
+export function agreedSwitchAllowed(
+  input: Pick<PlanInput<PickableSubtitle>, 'holding' | 'switchesLeft' | 'linesShown'>,
+): boolean {
+  return input.holding || (input.switchesLeft > 0 && !input.linesShown);
 }
 
 /**
@@ -263,6 +286,14 @@ function keepOrSwitch<T extends PickableSubtitle>(
  *   gives way to the next best.
  */
 export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>): SubtitlePlan<T> {
+  // The file that files agreeing with each other would show: it takes over once, while it may.
+  const agreed = input.agreed;
+  if (agreed && agreed.key !== input.current && agreedSwitchAllowed(input)) {
+    const pick = filesIn(input.offered, input.language).find(
+      (option) => option.key === agreed.key && !input.broken(option.url),
+    );
+    if (pick) return { pick, read: [], hold: false, switched: !input.holding, agreed: true };
+  }
   const ranked = rankedFiles(input.offered, input.language, input);
   if (ranked.length === 0) {
     return {

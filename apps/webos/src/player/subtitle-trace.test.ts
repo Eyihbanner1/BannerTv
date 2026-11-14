@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  type AgreementAbstain,
+  type AgreementTrace,
   forgetSubtitleTraces,
   recentSubtitleTraces,
   startSubtitleTrace,
@@ -7,6 +9,7 @@ import {
   traceFiles,
   traceFirstLine,
   traceHash,
+  traceAgreement,
   traceAlignment,
   traceReason,
   traceReference,
@@ -38,14 +41,20 @@ describe('the subtitles of the last few plays', () => {
     ]);
   });
 
-  it('keeps three plays, and drops one that saw nothing', () => {
+  it('keeps five plays, and drops one that saw nothing', () => {
     for (let i = 0; i < 7; i++) {
       startSubtitleTrace(`tt${i}`);
       traceFiles(`tt${i}`, ['eng']);
     }
     startSubtitleTrace('tt-empty');
     startSubtitleTrace('tt-next');
-    expect(recentSubtitleTraces().map((trace) => trace.videoId)).toEqual(['tt-next', 'tt6', 'tt5']);
+    expect(recentSubtitleTraces().map((trace) => trace.videoId)).toEqual([
+      'tt-next',
+      'tt6',
+      'tt5',
+      'tt4',
+      'tt3',
+    ]);
     // What comes for another video than the one playing is not kept.
     traceReason('tt6', 'off', null);
     expect(recentSubtitleTraces()[1]?.reason).toBeUndefined();
@@ -92,5 +101,97 @@ describe('the subtitles of the last few plays', () => {
     traceFiles('tt0816693', ['eng']);
     traceReference('tt0816693', null);
     expect(subtitleTraceRows()[0]?.[1]).toContain('lined up against nothing ·');
+  });
+
+  it('says what files that agree found, before what the files were lined up against', () => {
+    startSubtitleTrace('tt8106366:1:6', 1000);
+    traceFiles('tt8106366:1:6', ['eng', 'eng']);
+    traceReason('tt8106366:1:6', 'best fit', 'eng');
+    traceAgreement('tt8106366:1:6', { state: 'reading', read: 7, aligned: 21 });
+    expect(subtitleTraceRows()[0]?.[1]).toBe(
+      'hash: not asked yet · files en 2 (2 in all) · en, best fit · files that agree: reading, 7 read, 21 lined up · no line yet',
+    );
+    const done = { best: 9, second: 3, read: 28, aligned: 176, ms: 9400 };
+    traceAgreement('tt8106366:1:6', { state: 'moved', ...done, service: 'amzn', offset: -8.73 });
+    traceReference('tt8106366:1:6', 'agreed');
+    traceAlignment('tt8106366:1:6', 0, {
+      language: 'eng',
+      reference: 'agreed',
+      confidence: 'sure',
+      offset: -8.73,
+      rate: 1,
+      ms: 52,
+    });
+    expect(subtitleTraceRows()[0]?.[1]).toBe(
+      'hash: not asked yet · files en 2 (2 in all) · en, best fit · files that agree: 9 vs 3 (amzn), 28 read, 176 lined up in 9.4 s; moved −8.7 s · lined up against files that agree: en sure −8.7 s (52 ms) · no line yet',
+    );
+    expect(recentSubtitleTraces()[0]?.agreement).toMatchObject({ state: 'moved', best: 9 });
+  });
+
+  it('words each thing files that agree can do, or why they did nothing', () => {
+    const said = (outcome: AgreementTrace) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt8106366:1:5');
+      traceAgreement('tt8106366:1:5', outcome);
+      return subtitleTraceRows()[0]![1]
+        .split(' · ')
+        .find((part) => part.startsWith('files that agree'));
+    };
+    const counts = { read: 12, aligned: 46, ms: 2400 };
+    expect(said({ state: 'kept', best: 7, second: 3, ...counts })).toBe(
+      'files that agree: 7 vs 3, 12 read, 46 lined up in 2.4 s; already in step',
+    );
+    expect(said({ state: 'shifted', best: 6, second: 2, ...counts, offset: 1.03 })).toBe(
+      'files that agree: 6 vs 2, 12 read, 46 lined up in 2.4 s; moved +1.0 s by the group’s timing',
+    );
+    expect(said({ state: 'switched', best: 6, second: 3, ...counts, file: 4 })).toBe(
+      'files that agree: 6 vs 3, 12 read, 46 lined up in 2.4 s; switched to file 4',
+    );
+    expect(
+      said({ state: 'moved', best: 9, second: 3, ...counts, offset: -8.7, kept: 'drift' }),
+    ).toBe('files that agree: 9 vs 3, 12 read, 46 lined up in 2.4 s; kept: a drift fix is on');
+    const none = (why: AgreementAbstain) =>
+      said({ state: 'none', why, ...counts })!.replace(', 12 read, 46 lined up in 2.4 s', '');
+    expect(none({ kind: 'under', best: 2 })).toBe('files that agree: none, best 2 is under 3');
+    expect(none({ kind: 'close', best: 4, second: 3 })).toBe(
+      'files that agree: none, 4 vs 3 is too close',
+    );
+    expect(none({ kind: 'unlinked', score: 1 })).toBe(
+      'files that agree: none, files scoring 1 aren’t lined up with the rest',
+    );
+    expect(none({ kind: 'apart', score: 1, offset: -11.94, rate: 1 })).toBe(
+      'files that agree: none, files scoring 1 are 11.9 s apart',
+    );
+    expect(none({ kind: 'apart', score: 2, offset: 0.1, rate: 25 / 23.976 })).toBe(
+      'files that agree: none, files scoring 2 are at another rate',
+    );
+    expect(none({ kind: 'rate' })).toBe('files that agree: none, this file is at another rate');
+    expect(none({ kind: 'edition', edition: 'extended' })).toBe(
+      'files that agree: none, the video’s edition (extended) isn’t named by them',
+    );
+    expect(none({ kind: 'wider', best: 11, second: 8 })).toBe(
+      'files that agree: none, a wider read disagrees (11 vs 8)',
+    );
+    expect(none({ kind: 'unmatched', best: 6, second: 2 })).toBe(
+      'files that agree: none, this file lines up with none of them (6 vs 2)',
+    );
+    expect(none({ kind: 'gave up', after: 'time' })).toBe(
+      'files that agree: none, gave up after 120 s',
+    );
+    expect(none({ kind: 'gave up', after: 'files' })).toBe(
+      'files that agree: none, gave up after 100 files',
+    );
+    expect(none({ kind: 'gave up', after: 'aligned' })).toBe(
+      'files that agree: none, gave up after 1000 lined up',
+    );
+    expect(said({ state: 'none', why: { kind: 'under', best: 2 }, ...counts })).toBe(
+      'files that agree: none, best 2 is under 3, 12 read, 46 lined up in 2.4 s',
+    );
+    expect(said({ state: 'not tried', why: 'recording' })).toBe(
+      'files that agree: not tried (a cinema recording)',
+    );
+    expect(said({ state: 'not tried', why: 'no source' })).toBe(
+      'files that agree: not tried (the video names no source)',
+    );
   });
 });
