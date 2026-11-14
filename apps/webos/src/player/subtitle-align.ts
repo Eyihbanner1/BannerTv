@@ -1,5 +1,4 @@
 import {
-  type AlignConfidence,
   alignSubtitlesInSlices,
   type Cue,
   fileReleaseMatch,
@@ -10,7 +9,7 @@ import {
   type SubtitleAlignment,
   type SubtitleFit,
 } from '@bannertv/core';
-import type { LineMove } from './drift';
+import { type LineMove, retimeCues } from './drift';
 import type { EngineTrack } from './engines/types';
 import type { PickableSubtitle, PlayingRelease } from './subtitle-pick';
 
@@ -47,21 +46,33 @@ export const MIN_REFERENCE_LINES = 40;
  * against it: the first look, then again as it grows, then once it covers
  * the video, so a file is lined up again twice at most. Against ten
  * minutes most files cannot be told for sure, against twenty a quarter
- * can, and against forty nearly all.
+ * can, and against forty nearly all. Minutes with lines, not the span from
+ * the first line to the last: a stretch the viewer skipped has none.
  */
 const GROWING_STAGES = [20, 40];
 /** A reference that covers the video: no more of it is coming. */
 const COMPLETE = GROWING_STAGES.length + 1;
-/** A reference reaching this share of the video's length covers it: the end credits have no lines. */
+/**
+ * A stream track covers the video once its lines reach this share of the
+ * video's length (the end credits have no lines)...
+ */
 const COMPLETE_SHARE = 0.75;
+/**
+ * ...and its stretches with lines add up to this share of it: a play
+ * resumed late in the film, or a skip to its end, reaches the end with a
+ * few minutes of lines.
+ */
+const COVERED_SHARE = 0.5;
 /** Runs at most for one file against references still arriving. */
 const MAX_RUNS = COMPLETE;
 /**
- * A reference still arriving says a file is for another video only with no
- * stretch longer than this without a line: one the viewer skipped through
- * has gaps the aligner would take for silence.
+ * A track says a file is for another video only with no stretch longer
+ * than this without a line: one the viewer skipped through has gaps the
+ * aligner would take for silence. Stretches with lines are counted so too.
  */
 const LONGEST_SILENCE = 300;
+/** Share of the file a sure answer must be checked against to stand for good. */
+const FINAL_SHARE = 0.5;
 
 /**
  * Whether the engine can hand over a track's lines without showing them, so
@@ -111,23 +122,55 @@ export function readsWhole(fit: SubtitleFit | undefined): boolean {
   );
 }
 
-/** Seconds from a reference's first line to its last. */
-function spanOf(lines: readonly LineTiming[]): number {
-  if (lines.length === 0) return 0;
-  let first = Infinity;
-  let last = -Infinity;
-  for (const line of lines) {
-    if (line.start < first) first = line.start;
-    if (line.end > last) last = line.end;
-  }
-  return last - first;
+/** What a stream track's lines so far cover of the video. */
+export interface TrackCoverage {
+  /**
+   * Seconds in stretches with lines: from a line to the last before a
+   * silence longer than LONGEST_SILENCE, added up.
+   */
+  heard: number;
+  /** Where the last line ends, in seconds. */
+  lastEnd: number;
+  /** Whether it has a silence longer than LONGEST_SILENCE between two lines (a skip). */
+  gap: boolean;
 }
 
-/** The last line's end, in seconds. */
-function lastEnd(lines: readonly LineTiming[]): number {
-  let last = 0;
-  for (const line of lines) if (line.end > last) last = line.end;
-  return last;
+export function trackCoverage(lines: readonly LineTiming[]): TrackCoverage {
+  const order = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => isFinite(line.start))
+    // By start, with the position as the tie-break: Chromium 68's sort is not stable.
+    .sort((a, b) => a.line.start - b.line.start || a.index - b.index);
+  let heard = 0;
+  let gap = false;
+  let lastEnd = 0;
+  let runStart = -Infinity;
+  let runEnd = -Infinity;
+  for (const { line } of order) {
+    const end = isFinite(line.end) ? Math.max(line.end, line.start) : line.start;
+    if (end > lastEnd) lastEnd = end;
+    if (line.start - runEnd > LONGEST_SILENCE) {
+      if (runEnd > runStart) heard += runEnd - runStart;
+      if (runEnd !== -Infinity) gap = true;
+      runStart = line.start;
+      runEnd = end;
+    } else if (end > runEnd) {
+      runEnd = end;
+    }
+  }
+  if (runEnd > runStart) heard += runEnd - runStart;
+  return { heard, lastEnd, gap };
+}
+
+/**
+ * Whether a stream track's lines cover the video, so no more is coming
+ * that would change an answer: they reach COMPLETE_SHARE of its length,
+ * and their stretches with lines add up to COVERED_SHARE of it.
+ */
+function trackComplete(lines: readonly LineTiming[], duration: number): boolean {
+  if (!(duration > 0)) return false;
+  const { heard, lastEnd } = trackCoverage(lines);
+  return lastEnd >= COMPLETE_SHARE * duration && heard >= COVERED_SHARE * duration;
 }
 
 export interface ReferenceInput<T extends PickableSubtitle> {
@@ -146,7 +189,7 @@ export interface ReferenceInput<T extends PickableSubtitle> {
 
 /**
  * The reference to line files up against, if any: the stream's own track
- * once its lines cover the video; a file read whole and linked to the video
+ * once its lines cover the video (`trackComplete`); a file read whole and linked to the video
  * by its hash (`linkedToVideo`); one read whole and named for its release
  * (the same name, or the group confirming it); else the stream's track while
  * its lines still arrive, once it has enough of them. The reference used
@@ -161,9 +204,7 @@ export function findReference<T extends PickableSubtitle>(
   const found: Array<{ rank: number; reference: Reference }> = [];
   const { track } = input;
   if (track && track.lines.length >= MIN_REFERENCE_LINES) {
-    const growing = !(
-      input.duration > 0 && lastEnd(track.lines) >= COMPLETE_SHARE * input.duration
-    );
+    const growing = !trackComplete(track.lines, input.duration);
     const reference: Reference = { kind: 'track', id: track.id, lines: track.lines, growing };
     found.push({ rank: growing ? 3 : 0, reference });
   }
@@ -196,10 +237,13 @@ export function findReference<T extends PickableSubtitle>(
   return kept && kept.rank <= best.rank ? kept.reference : best.reference;
 }
 
-/** How far a reference has come: higher as more of it has arrived, COMPLETE once whole. */
+/**
+ * How far a reference has come: higher as more of it has arrived (by its
+ * minutes with lines), COMPLETE once whole.
+ */
 export function referenceStage(reference: Reference): number {
   if (!reference.growing) return COMPLETE;
-  const minutes = spanOf(reference.lines) / 60;
+  const minutes = trackCoverage(reference.lines).heard / 60;
   return GROWING_STAGES.filter((stage) => minutes >= stage).length;
 }
 
@@ -313,8 +357,13 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
   async function run(): Promise<void> {
     const mine = generation;
     while (queue.length > 0 && mine === generation) {
-      const job = queue.shift()!;
+      const job = queue[0]!;
       running = job.file.url;
+      // Each run starts on a task of its own, not inside the one that asked for it (a player's
+      // own work as it hands the track's lines over).
+      await slicing.pause();
+      if (mine !== generation) break;
+      queue.shift();
       let paused = 0;
       const started = slicing.now();
       const alignment = await alignSubtitlesInSlices(
@@ -340,7 +389,7 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
         stage: job.stage,
         runs,
         ms: Math.max(0, slicing.now() - started - paused),
-        final: isFinal(alignment.confidence, job.reference),
+        final: isFinal(alignment, job.reference),
       };
       results = new Map(results).set(job.file.url, record);
       running = null;
@@ -399,28 +448,28 @@ export function createSubtitleAligner(slicing: Slicing = PAGE_SLICING): Subtitle
 }
 
 /**
- * Whether an answer stands for good: a sure one; one against a reference
- * that will not grow; one against a reference still arriving that says the
- * file is for another video, only where that reference has no long
- * stretch without a line (none skipped through).
+ * Whether an answer stands for good. A sure one, unless it was found
+ * against a reference still arriving that covers under half of the file:
+ * a later look may find it out by a little, and then moves the lines
+ * again. Any answer against a reference that will not grow. One that says
+ * the file is for another video only where the track it was found against
+ * has no long stretch without a line (none skipped through); a file
+ * reference is a whole file, whose silences are the film's.
  */
-function isFinal(confidence: AlignConfidence, reference: Reference): boolean {
-  if (confidence === 'sure' || !reference.growing) return true;
-  if (confidence !== 'none') return false;
-  const starts = reference.lines.map((line) => line.start).sort((a, b) => a - b);
-  for (let i = 1; i < starts.length; i++) {
-    if (starts[i]! - starts[i - 1]! > LONGEST_SILENCE) return false;
-  }
-  return starts.length > 0;
+export function isFinal(
+  alignment: Pick<SubtitleAlignment, 'confidence' | 'coveredShare'>,
+  reference: Pick<Reference, 'kind' | 'growing' | 'lines'>,
+): boolean {
+  const { confidence } = alignment;
+  if (confidence === 'sure') return !reference.growing || alignment.coveredShare >= FINAL_SHARE;
+  if (confidence === 'unsure') return !reference.growing;
+  if (reference.kind !== 'track') return true;
+  return reference.lines.length > 0 && !trackCoverage(reference.lines).gap;
 }
 
 /** The cues moved onto the video's clock by a move: a line the file times at t shows at t / rate + offset. */
 export function moveCues(cues: readonly Cue[], move: LineMove): Cue[] {
-  return cues.map((cue) => ({
-    ...cue,
-    start: cue.start / move.rate + move.offset,
-    end: cue.end / move.rate + move.offset,
-  }));
+  return retimeCues(cues, (t) => t / move.rate + move.offset);
 }
 
 /** How far, at most, one way of showing a file's lines puts them from another, over the file. */

@@ -33,7 +33,23 @@ export const DRIFT_RATES: Readonly<Record<SubtitleDrift, number>> = {
 export function stretchCues(cues: readonly Cue[], drift: SubtitleDrift | null): readonly Cue[] {
   if (drift === null) return cues;
   const rate = DRIFT_RATES[drift];
-  return cues.map((cue) => ({ ...cue, start: cue.start / rate, end: cue.end / rate }));
+  return retimeCues(cues, (t) => t / rate);
+}
+
+/**
+ * The cues with their times mapped, each copied by hand: done in the render
+ * that first shows a file's lines, and an object spread over thousands of
+ * cues costs a TV tens of milliseconds there.
+ */
+export function retimeCues(cues: readonly Cue[], map: (t: number) => number): Cue[] {
+  const out: Cue[] = new Array<Cue>(cues.length);
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i]!;
+    const moved: Cue = { start: map(cue.start), end: map(cue.end), lines: cue.lines };
+    if (cue.top !== undefined) moved.top = cue.top;
+    out[i] = moved;
+  }
+  return out;
 }
 
 /**

@@ -1,9 +1,10 @@
-import type { LineTiming, SubtitleFit } from '@bannertv/core';
+import { fileReleaseMatch, type LineTiming, type SubtitleFit } from '@bannertv/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createSubtitleAligner,
   decideMove,
   findReference,
+  isFinal,
   moveCues,
   moveSize,
   readableTrack,
@@ -13,6 +14,7 @@ import {
   referenceTrack,
   syncedOf,
   timingOf,
+  trackCoverage,
   withSync,
 } from './subtitle-align';
 
@@ -182,19 +184,47 @@ describe('findReference', () => {
     ).toBeNull();
   });
 
-  it('counts how far a reference still arriving has come', () => {
-    const stage = (minutes: number): number =>
-      referenceStage({
-        kind: 'track',
-        id: 'fr',
-        growing: true,
-        lines: [
-          { start: 0, end: 1 },
-          { start: minutes * 60 - 1, end: minutes * 60 },
-        ],
-      });
-    expect([stage(5), stage(12), stage(25), stage(60)]).toEqual([0, 0, 1, 2]);
+  it('counts how far a reference still arriving has come, by its minutes with lines', () => {
+    const stage = (lines: LineTiming[]): number =>
+      referenceStage({ kind: 'track', id: 'fr', growing: true, lines });
+    expect([5, 12, 25, 60].map((minutes) => stage(film(minutes * 60)))).toEqual([0, 0, 1, 2]);
+    // Skipped from the start to the end of an hour: the minutes with lines count, not the span.
+    const hour = film(3600);
+    expect(stage(hour.filter((line) => line.end < 540 || line.start > 3060))).toBe(0);
+    expect(stage(hour.filter((line) => line.end < 900 || line.start > 2700))).toBe(1);
     expect(referenceStage({ kind: 'linked', id: 'x', growing: false, lines: [] })).toBe(3);
+  });
+
+  it('takes the stream’s track as complete only once its lines cover the video', () => {
+    const hour = film(3600, 3);
+    const track = (lines: LineTiming[]) =>
+      findReference({ ...base, offered: [], duration: 3600, track: { id: 'fr', lines } });
+    // Played from the start to past three quarters of the video: complete.
+    expect(track(hour.filter((line) => line.end < 2800))).toMatchObject({ growing: false });
+    // Resumed at 80%: the end is reached with twelve minutes of lines. Still to come.
+    expect(track(hour.filter((line) => line.start > 2880))).toMatchObject({ growing: true });
+    // Ten minutes watched, then a skip to 80%: still to come, with a long stretch skipped.
+    const skipped = hour.filter((line) => line.end < 600 || line.start > 2880);
+    expect(track(skipped)).toMatchObject({ growing: true });
+    expect(trackCoverage(skipped)).toMatchObject({ gap: true });
+    expect(trackCoverage(skipped).heard).toBeLessThan(25 * 60);
+    // Half the video heard, reaching its last quarter: complete, but with a skip in it.
+    const half = hour.filter((line) => line.end < 1500 || line.start > 2100);
+    expect(track(half)).toMatchObject({ growing: false });
+    expect(trackCoverage(half)).toMatchObject({ gap: true });
+    // With no length to judge by, never complete.
+    expect(
+      findReference({ ...base, offered: [], duration: 0, track: { id: 'fr', lines: hour } }),
+    ).toMatchObject({ growing: true });
+  });
+
+  it('never takes a file named for the release only loosely, read whole as it is', () => {
+    // The episode and resolution alone, no group to confirm it: a loose match says nothing.
+    const loose = file('loose', { label: 'Some.Film.2021.1080p.BluRay.x264' });
+    read.set(loose.url, lines);
+    expect(fileReleaseMatch(loose, video)).toBe('loose');
+    expect(readsWhole(FITS)).toBe(true);
+    expect(findReference({ ...base, offered: [plain, loose] })).toBeNull();
   });
 });
 
@@ -229,6 +259,39 @@ describe('createSubtitleAligner', () => {
     expect(aligner.pending('https://subs.example/ref.srt')).toBe(false);
   });
 
+  it('starts each run once the page has had its turn, not inside the call that asked for it', async () => {
+    let looks = 0;
+    const turns: Array<() => void> = [];
+    const aligner = createSubtitleAligner({
+      now: () => looks++,
+      pause: () => new Promise<void>((resolve) => turns.push(resolve)),
+      sliceMs: 8,
+    });
+    const url = 'https://subs.example/late.srt';
+    aligner.request([{ url, lines: shifted(lines, -2.5) }], complete);
+    await Promise.resolve();
+    // Nothing worked out yet: the run waits for its turn.
+    expect(looks).toBe(0);
+    expect(turns).toHaveLength(1);
+    expect(aligner.pending(url)).toBe(true);
+    // Cleared while it waits (another stream): it never runs.
+    aligner.reset();
+    turns.shift()!();
+    await Promise.resolve();
+    expect(looks).toBe(0);
+    expect(aligner.pending(url)).toBe(false);
+    // Asked again, it runs once given its turn, and every turn after.
+    aligner.request([{ url, lines: shifted(lines, -2.5) }], complete);
+    const turning = setInterval(() => turns.splice(0).forEach((resolve) => resolve()), 0);
+    try {
+      const record = await settled(aligner, url);
+      expect(record!.alignment.confidence).toBe('sure');
+      expect(looks).toBeGreaterThan(0);
+    } finally {
+      clearInterval(turning);
+    }
+  });
+
   it('says a file for another video matches nothing, for good', async () => {
     const aligner = createSubtitleAligner(testSlicing());
     const url = 'https://subs.example/other.srt';
@@ -254,6 +317,10 @@ describe('createSubtitleAligner', () => {
     aligner.request(candidate, upTo(21));
     const first = await settled(aligner, url);
     expect(first!.stage).toBe(1);
+    // Sure, against a third of the file: looked at again, as a later look may find it out a little.
+    expect(first!.alignment.confidence).toBe('sure');
+    expect(first!.alignment.coveredShare).toBeLessThan(0.5);
+    expect(first!.final).toBe(false);
     // The same stage again: nothing to do.
     aligner.request(candidate, upTo(30));
     expect(aligner.pending(url)).toBe(false);
@@ -262,18 +329,18 @@ describe('createSubtitleAligner', () => {
     expect(later!.alignment.confidence).toBe('sure');
     expect(later!.alignment.offset).toBeCloseTo(4, 1);
     expect(later!.final).toBe(true);
-    expect(later!.runs).toBeLessThanOrEqual(3);
+    expect(later!.runs).toBe(2);
   });
 
   it('does not take a reference skipped through for a file for another video', async () => {
     const aligner = createSubtitleAligner(testSlicing());
     const url = 'https://subs.example/other.srt';
-    // The first and last ten minutes only: a long stretch with no lines at all.
+    // The first and last quarter of an hour only: a long stretch with no lines at all.
     const gappy: Reference = {
       kind: 'track',
       id: 'fr',
       growing: true,
-      lines: lines.filter((line) => line.end < 600 || line.start > 3000),
+      lines: lines.filter((line) => line.end < 900 || line.start > 2700),
     };
     aligner.request([{ url, lines: film(3600, 99) }], gappy);
     const record = await settled(aligner, url);
@@ -291,6 +358,41 @@ describe('createSubtitleAligner', () => {
     aligner.reset();
     expect(aligner.result(url)).toBeUndefined();
     expect(heard).toHaveBeenCalled();
+  });
+});
+
+describe('isFinal', () => {
+  const lines = film(3600, 5);
+  const track = (growing: boolean, from = lines): Reference => ({
+    kind: 'track',
+    id: 'fr',
+    growing,
+    lines: from,
+  });
+  const answer = (confidence: 'sure' | 'unsure' | 'none', coveredShare = 1) => ({
+    confidence,
+    coveredShare,
+  });
+
+  it('stands for good against a reference that will not grow, whatever it says', () => {
+    expect(isFinal(answer('sure'), track(false))).toBe(true);
+    expect(isFinal(answer('unsure'), track(false))).toBe(true);
+    expect(isFinal(answer('none'), track(false))).toBe(true);
+    const linked: Reference = { kind: 'linked', id: 'x', growing: false, lines };
+    expect(isFinal(answer('none'), linked)).toBe(true);
+  });
+
+  it('looks again at an answer against a reference still arriving, until it covers half the file', () => {
+    expect(isFinal(answer('unsure'), track(true))).toBe(false);
+    expect(isFinal(answer('sure', 0.3), track(true))).toBe(false);
+    expect(isFinal(answer('sure', 0.6), track(true))).toBe(true);
+    expect(isFinal(answer('none'), track(true))).toBe(true);
+  });
+
+  it('never says another video for good against a track with a stretch skipped', () => {
+    const skipped = lines.filter((line) => line.end < 900 || line.start > 1800);
+    expect(isFinal(answer('none'), track(true, skipped))).toBe(false);
+    expect(isFinal(answer('none'), track(false, skipped))).toBe(false);
   });
 });
 
@@ -338,6 +440,10 @@ describe('moving lines', () => {
     const cue = { start: 25, end: 50, lines: [[{ text: 'Made-up line' }]] };
     expect(moveCues([cue], { offset: 2, rate: 1 })).toEqual([{ ...cue, start: 27, end: 52 }]);
     expect(moveCues([cue], { offset: 0, rate: 25 / 24 })[0]).toMatchObject({ start: 24, end: 48 });
+    // A line drawn at the top stays there; the cue itself is left as it was.
+    const top = { ...cue, top: true };
+    expect(moveCues([top], { offset: 1, rate: 1 })).toEqual([{ ...top, start: 26, end: 51 }]);
+    expect(top.start).toBe(25);
   });
 
   it('measures how far a move takes lines from where they show, at the file’s ends', () => {
@@ -348,6 +454,11 @@ describe('moving lines', () => {
     expect(moveSize({ offset: 0, rate: 1 }, { offset: 0.2, rate: 1 }, lines)).toBeCloseTo(0.2);
     expect(moveSize({ offset: 0, rate: 1 }, { offset: 0, rate: 1.001 }, lines)).toBeCloseTo(
       1002 - 1002 / 1.001,
+    );
+    // The file's seconds for one of the video's: a 25 fps file on a 23.976 video, divided by.
+    const pal = 24000 / 1001 / 25;
+    expect(moveSize({ offset: 0, rate: 1 }, { offset: 0, rate: pal }, lines)).toBeCloseTo(
+      1002 / pal - 1002,
     );
   });
 
