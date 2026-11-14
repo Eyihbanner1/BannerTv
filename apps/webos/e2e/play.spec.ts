@@ -7,13 +7,17 @@ import {
   APART_SPEECH,
   COMMENTARY_HLS_PATH,
   DEFAULT_STREAMS,
+  EARLY_SPEECH,
+  FILM_SIZE,
   HLS_LONG_PATH,
   HLS_PATH,
+  LATE_SPEECH,
   LIVE_HLS_PATH,
   MEDIA_HOST,
   mockPlayback,
   readKv,
   seedStreamAddon,
+  serveRedirects,
   type TestStream,
   type TestSubtitle,
 } from './play';
@@ -4217,6 +4221,139 @@ test('a file named for the release is used, and the other files are not read', a
   await expect(section).toContainText(MOVIE);
   await expect(section).not.toContainText('files that agree');
   expect(mock.files.length).toBeLessThanOrEqual(2);
+});
+
+/** The 10-minute video, big enough for its hash to be read (FILM_SIZE). */
+const FILM_STREAM: TestStream = { ...DEFAULT_STREAMS[0]!, path: '/film-1080p.webm' };
+
+/**
+ * What OpenSubtitles finds for the film: by the video's id, one file; with its hash, also one
+ * linked to this very file, listed first, whose name says nothing of the release.
+ */
+function hashAnswers(asked: string, linked: string) {
+  const byId: TestSubtitle = { id: asked, lang: 'eng', m: 'i' };
+  const byHash: TestSubtitle = {
+    id: linked,
+    lang: 'eng',
+    subtitleFileName: 'elephants_dream.srt',
+    m: 'h',
+  };
+  return { subtitleList: [byId], subtitleListWithHash: [byHash, byId] };
+}
+
+test('the hash takes 6 s, and the first line still shows on time; a second ask brings the file it links, which the one showing is lined up against', async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  const mock = await mockPlayback(page, {
+    streams: { [MOVIE]: [FILM_STREAM] },
+    hashDelayMs: 6000,
+    ...hashAnswers('askedEarly', 'linkedEarly'),
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // The subtitles are asked for after 2 s at most, without the hash: the first line, 2 s in,
+  // shows on time.
+  await expect.poll(() => shownAt(page, 'Asked first, line 1'), { timeout: 15000 }).not.toBeNull();
+  const first = (await shownAt(page, 'Asked first, line 1'))!;
+  expect(Math.abs(first - EARLY_SPEECH[0]![0])).toBeLessThan(0.6);
+  expect(mock.subtitles[0]).not.toContain('videoHash=');
+  // Once the hash comes, OpenSubtitles is asked again with it.
+  await expect
+    .poll(() => mock.subtitles.filter((path) => path.includes('videoHash=')).length, {
+      timeout: 20000,
+    })
+    .toBe(1);
+  expect(mock.subtitles).toHaveLength(2);
+
+  // The file it links comes after the first answer's, and says so; the one showing stays, lined
+  // up against it, and the linked file never shows a line.
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedEarly"]`)).toHaveText(
+    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+  );
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#askedEarly"]`)).toHaveText(
+    'OpenSubtitles v3 1Synced to your video',
+    { timeout: 15000 },
+  );
+  expect(await firstShown(page, 'Found by hash, line')).toBeNull();
+
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read in \d+\.\d s, asked again: 1 file linked/);
+});
+
+test('a file linked by a later hash takes the place of one whose first line is still to come', async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  const mock = await mockPlayback(page, {
+    streams: { [MOVIE]: [FILM_STREAM] },
+    hashDelayMs: 6000,
+    ...hashAnswers('askedLate', 'linkedLate'),
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect
+    .poll(() => mock.subtitles.filter((path) => path.includes('videoHash=')).length, {
+      timeout: 20000,
+    })
+    .toBe(1);
+
+  // The file the hash links shows from its first line, 20 s in; the one asked for first, chosen
+  // before any of its lines was due, never shows one.
+  await expect.poll(() => shownAt(page, 'Linked late, line 1'), { timeout: 40000 }).not.toBeNull();
+  expect(Math.abs((await shownAt(page, 'Linked late, line 1'))! - LATE_SPEECH[0]![0])).toBeLessThan(
+    0.6,
+  );
+  expect(await firstShown(page, 'Starts late, line')).toBeNull();
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedLate"]`)).toHaveText(
+    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+  );
+});
+
+test('the hash is read once through the redirects, and Diagnostics names none of the links', async ({
+  page,
+}) => {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  // The addon's link leads to a debrid service, which leads to the film on its own server.
+  const chain = await serveRedirects(page);
+  const mock = await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...FILM_STREAM, path: chain.link('/film-1080p.webm') }] },
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // Read within 2 s: one ask, with the hash.
+  await expect.poll(() => mock.subtitles.join()).toContain('videoHash=');
+  expect(mock.subtitles).toHaveLength(1);
+
+  // The first 64 KB through the redirects; the size (hidden behind CORS in the range's answer)
+  // and the last 64 KB straight from where they led.
+  expect(chain.fetched).toEqual([
+    { server: 'resolve', range: 'bytes=0-65535' },
+    { server: 'debrid', range: 'bytes=0-65535' },
+    { server: 'media', range: 'bytes=0-65535' },
+    { server: 'media' },
+    { server: 'media', range: `bytes=${FILM_SIZE - 65536}-${FILM_SIZE - 1}` },
+  ]);
+
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read in \d+\.\d s/);
+  const shown = await section.innerText();
+  for (const name of ['http', '127.0.0.1', 'token', 'resolve', '.webm']) {
+    expect(shown).not.toContain(name);
+  }
 });
 
 /** Records every piece of text the page draws, for a check that some never showed. */

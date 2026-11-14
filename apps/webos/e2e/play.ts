@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
 import { API_SERVICE } from '../src/data/api-service';
@@ -19,6 +21,20 @@ const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.we
 // The same, 10 minutes long, at any media path starting /long-: long enough
 // that the player takes it for a title with a page saying it runs for hours.
 const LONG_FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-10min.webm'));
+
+/**
+ * The size of the 10-minute video at any media path starting /film-: padded to it with an EBML
+ * Void element after its segment, which players skip, so its OpenSubtitles hash can be read from
+ * two 64 KB ends. The fixtures alone are too small for that, so their hash read fails, as it
+ * does for any file under 128 KB.
+ */
+export const FILM_SIZE = 256 * 1024;
+const FILM_FIXTURE = (() => {
+  const head = Buffer.from([0xec, 0x01, 0, 0, 0, 0, 0, 0, 0]);
+  const rest = FILM_SIZE - LONG_FIXTURE.length - head.length;
+  head.writeUIntBE(rest, 3, 6);
+  return Buffer.concat([LONG_FIXTURE, head, Buffer.alloc(rest)]);
+})();
 
 /**
  * 10 s of HLS at MEDIA_HOST/hls/master.m3u8: VP9 and Opus in fMP4, audio in
@@ -289,6 +305,24 @@ export const AGREE_SUBTITLES = {
   apartLate12: timed(APART_SPEECH, 12, 'Apart line'),
 };
 
+/** The made-up film's lines on the 10-minute video from 2 s, so the first shows soon after Play. */
+export const EARLY_SPEECH = speech(2, 588);
+
+/** The same film's lines from 20 s, so the first is due well after a hash read late. */
+export const LATE_SPEECH = speech(20, 588);
+
+/**
+ * Files for a hash read after the subtitles were asked for, on the 10-minute video: test lines
+ * only. On EARLY_SPEECH, one OpenSubtitles finds by the video's id and one it finds only by the
+ * hash, both on time; on LATE_SPEECH, the same pair.
+ */
+export const HASH_SUBTITLES = {
+  askedEarly: timed(EARLY_SPEECH, 0, 'Asked first, line'),
+  linkedEarly: timed(EARLY_SPEECH, 0, 'Found by hash, line'),
+  askedLate: timed(LATE_SPEECH, 0, 'Starts late, line'),
+  linkedLate: timed(LATE_SPEECH, 0, 'Linked late, line'),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
@@ -298,6 +332,7 @@ export const SUBTITLE_FILES: Record<string, string> = {
   ...LONG_SUBTITLES,
   ...ALIGN_SUBTITLES,
   ...AGREE_SUBTITLES,
+  ...HASH_SUBTITLES,
   hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 
@@ -329,10 +364,17 @@ export interface PlaybackOptions {
   refused?: Readonly<Record<string, readonly string[]>>;
   /** How long media takes to answer. Default at once. */
   mediaDelayMs?: number;
+  /**
+   * How long the first 'fetch' request to MEDIA_HOST takes to answer: the hash read's first
+   * 64 KB, as the video's own requests are 'media'. Default at once.
+   */
+  hashDelayMs?: number;
   /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
   subtitles?: boolean;
   /** OpenSubtitles' answer. Default DEFAULT_SUBTITLES. */
   subtitleList?: readonly TestSubtitle[];
+  /** OpenSubtitles' answer when asked with the video's hash (`videoHash=`). Default subtitleList. */
+  subtitleListWithHash?: readonly TestSubtitle[];
   /** How long each subtitle file, by id, takes to arrive. Default at once. */
   subtitleDelayMs?: Readonly<Record<string, number>>;
   /** Subtitle files, by id, that arrive only once this settles, so a test decides when. */
@@ -515,6 +557,7 @@ export async function mockPlayback(
     skips: [],
   };
   const broken = new Set(options.broken ?? []);
+  let hashHeld = false;
 
   await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -575,6 +618,10 @@ export async function mockPlayback(
   await page.route(/^https:\/\/media\.example\.com\//, async (route) => {
     const path = new URL(route.request().url()).pathname;
     mock.media.push(path);
+    if (options.hashDelayMs && !hashHeld && route.request().resourceType() === 'fetch') {
+      hashHeld = true;
+      await new Promise((resolve) => setTimeout(resolve, options.hashDelayMs));
+    }
     if (options.mediaDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.mediaDelayMs));
     }
@@ -619,6 +666,7 @@ export async function mockPlayback(
         body,
       });
     }
+    if (path.indexOf('/film-') === 0) return serveVideo(route, FILM_FIXTURE);
     return serveVideo(route, path.indexOf('/long-') === 0 ? LONG_FIXTURE : FIXTURE);
   });
 
@@ -627,8 +675,12 @@ export async function mockPlayback(
     mock.subtitles.push(decodeURIComponent(path));
     if (options.subtitlesGate) await options.subtitlesGate;
     if (options.subtitles === false) return json(route, { subtitles: [] });
+    const list =
+      (path.indexOf('videoHash=') !== -1 && options.subtitleListWithHash) ||
+      options.subtitleList ||
+      DEFAULT_SUBTITLES;
     return json(route, {
-      subtitles: (options.subtitleList ?? DEFAULT_SUBTITLES).map(
+      subtitles: list.map(
         ({ id, lang, label, subtitleFileName, movieReleaseName, m, withoutId }) => ({
           ...(!withoutId && { id }),
           url: `${SUBTITLE_HOST}/${id}.srt`,
@@ -674,6 +726,93 @@ export async function mockPlayback(
     });
   });
   return mock;
+}
+
+/** Which server of a RedirectChain a request reached. */
+export type ChainServer = 'resolve' | 'debrid' | 'media';
+
+/**
+ * A stream link that leads on to the film, as an addon's link to a debrid service does: the
+ * addon's server answers 302 to the service's, which answers 307 to its media server with a new
+ * token each time. Real servers on this machine, each with cross-origin headers as the browser
+ * checks them at every step: Playwright's routes never see a redirect's next request, which the
+ * browser sends itself.
+ */
+export interface RedirectChain {
+  /** The stream link to a path on the media server, through the other two. */
+  link: (path: string) => string;
+  /**
+   * Every request the page's own code made (not the video's, nor a CORS check), in order: the
+   * server it reached and the bytes asked for, if any. For a file, these are the hash read's.
+   */
+  fetched: Array<{ server: ChainServer; range?: string }>;
+}
+
+/** Starts a RedirectChain serving the 10-minute film at any /film- path, until the page closes. */
+export async function serveRedirects(page: Page): Promise<RedirectChain> {
+  const fetched: RedirectChain['fetched'] = [];
+  let walks = 0;
+  const origins = {} as Record<ChainServer, string>;
+  const answer = (server: ChainServer, request: IncomingMessage, response: ServerResponse) => {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'range',
+      'access-control-allow-methods': 'GET',
+    };
+    if (request.method === 'OPTIONS') return response.writeHead(204, cors).end();
+    const range = request.headers.range;
+    if (request.headers['sec-fetch-dest'] === 'empty') {
+      fetched.push({ server, ...(range && { range }) });
+    }
+    const path = new URL(request.url ?? '/', origins[server]).pathname;
+    if (server === 'resolve') {
+      return response
+        .writeHead(302, { ...cors, location: `${origins.debrid}${path.replace(/^\/resolve/, '')}` })
+        .end();
+    }
+    if (server === 'debrid') {
+      walks++;
+      return response
+        .writeHead(307, { ...cors, location: `${origins.media}${path}?token=t${walks}` })
+        .end();
+    }
+    if (path.indexOf('/film-') !== 0) return response.writeHead(404, cors).end();
+    const bytes = /bytes=(\d+)-(\d*)/.exec(range ?? '');
+    const start = bytes ? Number(bytes[1]) : 0;
+    const end = bytes?.[2] ? Math.min(Number(bytes[2]), FILM_SIZE - 1) : FILM_SIZE - 1;
+    return response
+      .writeHead(bytes ? 206 : 200, {
+        ...cors,
+        'content-type': 'video/webm',
+        'accept-ranges': 'bytes',
+        'content-length': String(end - start + 1),
+        ...(bytes && { 'content-range': `bytes ${start}-${end}/${FILM_SIZE}` }),
+      })
+      .end(FILM_FIXTURE.subarray(start, end + 1));
+  };
+  const servers = await Promise.all(
+    (['resolve', 'debrid', 'media'] as const).map(
+      (server) =>
+        new Promise<ReturnType<typeof createServer>>((started) => {
+          const http = createServer((request, response) => answer(server, request, response));
+          http.listen(0, '127.0.0.1', () => {
+            origins[server] = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+            started(http);
+          });
+        }),
+    ),
+  );
+  page.once('close', () => {
+    for (const http of servers) {
+      http.closeAllConnections();
+      http.close();
+    }
+  });
+  // The journeys refuse every other address (mockAddons): these servers' are let through.
+  for (const origin of Object.values(origins)) {
+    await page.route(`${origin}/**`, (route) => route.continue());
+  }
+  return { link: (path) => `${origins.resolve}/resolve${path}`, fetched };
 }
 
 /** A value the app keeps in its IndexedDB key-value store. */
