@@ -86,6 +86,7 @@ export {
   BANNERTV_DEMO_URL,
   CINEMETA_URL,
   DEFAULT_ADDONS,
+  OPENSUBTITLES_V3_ID,
   OPENSUBTITLES_V3_URL,
 } from './addons/defaults';
 export {
@@ -460,6 +461,7 @@ export {
 export { detectSubtitleFormat, parseCueMarkup, parseSubtitleText } from './subtitles/parse';
 export {
   clearlyBetter,
+  fileTier,
   fitTier,
   rankReason,
   type RankOptions,
@@ -467,7 +469,19 @@ export {
   type ReasonOptions,
   UNREAD_TIER,
 } from './subtitles/rank';
-export { keepOrder, numberBySource, releaseMatch } from './subtitles/versions';
+export {
+  discPart,
+  fileReleaseMatch,
+  hearingName,
+  keepOrder,
+  madeForRelease,
+  type MatchedFile,
+  numberBySource,
+  otherEpisode,
+  releaseMatch,
+  type ReleaseMatch,
+  type VideoRelease,
+} from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
 export {

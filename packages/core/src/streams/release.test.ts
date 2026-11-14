@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { releaseGroup } from './release';
+import { isYtsRelease, readNameTags, releaseGroup } from './release';
 
 describe('releaseGroup', () => {
   it('reads the group a release name ends on, lower case', () => {
@@ -65,5 +65,84 @@ describe('releaseGroup', () => {
     const start = Date.now();
     expect(releaseGroup(line)).toBeUndefined();
     expect(Date.now() - start).toBeLessThan(200);
+  });
+});
+
+describe('readNameTags', () => {
+  it('reads a subtitle file’s own tags off the end, one at a time, back to the release', () => {
+    const release = 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES';
+    for (const tail of [
+      '.srt',
+      '-HI.srt',
+      '.eng.srt',
+      '.en.HI.srt',
+      '.English.srt',
+      '(SDH).srt',
+      '.en[cc].srt',
+      '-HI.v2.srt',
+      '13_[spa].srt',
+      '.HI.C.updated.Addic7ed.com.srt',
+      ' [ger].srt',
+      '.forced.srt',
+      '.pt-BR.srt',
+    ]) {
+      expect(readNameTags(release + tail).release, tail).toBe(release);
+    }
+    expect(releaseGroup(readNameTags(`${release}-HI.srt`).release)).toBe('cakes');
+  });
+
+  it('says whether the file is for the hard of hearing, and which disc it goes with', () => {
+    expect(readNameTags('The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt')).toEqual({
+      release: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES',
+      hearing: true,
+    });
+    expect(readNameTags('The_Shawshank_Redemption_(1994).CD1.aFLDp.srt')).toMatchObject({
+      hearing: false,
+      part: 1,
+    });
+    expect(readNameTags('Film.1994.DVDRip.XviD-HigHoT-CD2.ENG.srt')).toEqual({
+      release: 'Film.1994.DVDRip.XviD-HigHoT',
+      hearing: false,
+      part: 2,
+    });
+  });
+
+  it('keeps a name of one word, and a title that ends on a language’s name', () => {
+    expect(readNameTags('It.srt').release).toBe('It');
+    expect(readNameTags('English.srt').release).toBe('English');
+    expect(readNameTags('').release).toBe('');
+  });
+});
+
+describe('isYtsRelease', () => {
+  it('knows YTS and YIFY by their tag, never by a word inside another', () => {
+    for (const name of [
+      'Inception (2010) [1080p] [BluRay] [5.1] [YTS.MX]',
+      'Inception.2010.1080p.BluRay.x264-[YTS.AM]',
+      'Inception.2010.720p.BrRip.x264.YIFY',
+      'Inception 2010 1080p YTS',
+    ]) {
+      expect(isYtsRelease(name), name).toBe(true);
+    }
+    for (const name of [
+      'Inception.2010.1080p.BluRay.x264-SPARKS',
+      'Keyytsu.2020.1080p',
+      'YTSE.Jam',
+    ]) {
+      expect(isYtsRelease(name), name).toBe(false);
+    }
+  });
+});
+
+describe('releaseGroup and a subtitle file’s tags', () => {
+  it('takes no subtitle tag for a group', () => {
+    for (const name of [
+      'Film.2021.1080p.WEB-HI',
+      'Film.2021.1080p.WEB-SDH',
+      'Film.2021-CD1',
+      'Film.2021.WEB-v2',
+    ]) {
+      expect(releaseGroup(name), name).toBeUndefined();
+    }
   });
 });

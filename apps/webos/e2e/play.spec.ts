@@ -3575,7 +3575,8 @@ test('each version says where it is from and how it is doing, and its timing is 
   await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
   await mockPlayback(page, {
     subtitleList: [
-      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL' },
+      // The stream's own release name: made for it, it shows at once, and no other is read.
+      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL.x264' },
       { id: 'en2', lang: 'eng', label: 'Open.Movie.720p.BluRay' },
       { id: 'missing', lang: 'eng' },
       { id: 'fr1', lang: 'fre' },
@@ -3593,7 +3594,9 @@ test('each version says where it is from and how it is doing, and its timing is 
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   const missing = page.locator(`[data-focus-key="${OPENSUBTITLES}#missing"]`);
   // The release names it sends, and a best guess at which matches the stream (1080p WEB-DL).
-  await expect(en1).toHaveText('OpenSubtitles v3 1Matches your video · Open.Movie.1080p.WEB-DL');
+  await expect(en1).toHaveText(
+    'OpenSubtitles v3 1Matches your video · Open.Movie.1080p.WEB-DL.x264',
+  );
   await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
 

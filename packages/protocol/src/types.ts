@@ -208,8 +208,24 @@ export interface Subtitle {
   url: string;
   /** As the addon sent it: usually ISO 639-2 (eng, fre, pob), sometimes ISO 639-1 or a name. */
   lang: string;
-  /** Some addons name the file or the release it matches. */
+  /** Some addons name the file or the release it matches; OpenSubtitles v3 sends its file name. */
   label?: string;
+  /**
+   * A second release name, for matching the video only, never shown:
+   * OpenSubtitles' `movieReleaseName`, often only the title for a film.
+   */
+  releaseName?: string;
+  /**
+   * OpenSubtitles found the file by the hash of the video sent with the
+   * request (`m: "h"`): someone linked this file to that very video. A strong
+   * hint that it was made for this copy, not proof.
+   */
+  hashMatch?: boolean;
+  /** Frames a second the file was timed for, as the addon says: often wrong. */
+  fps?: number;
+  /** The season and episode the addon says the file is for. */
+  season?: number;
+  episode?: number;
 }
 
 export interface SubtitlesResponse {
