@@ -183,8 +183,19 @@ describe('the runner of files that agree on the TV', () => {
     expect(loads.asked.length).toBeGreaterThanOrEqual(26);
     expect(loads.asked.length).toBeLessThanOrEqual(26 + AGREEMENT_DOWNLOADS);
     expect(loads.most()).toBeLessThanOrEqual(AGREEMENT_DOWNLOADS);
-    // Diagnostics is told as it reads, and then what it decided.
+    // Diagnostics is told as it reads, that it waits for the rest, and what it decided once that
+    // is handed over: once.
     expect(traces[0]).toMatchObject({ state: 'reading' });
+    expect(traces[traces.length - 1]).toEqual({
+      state: 'waiting',
+      read: 28,
+      aligned: 176,
+      ms: shown.trace.state === 'moved' ? shown.trace.ms : -1,
+    });
+    const told = traces.length;
+    runner.handOver();
+    runner.handOver();
+    expect(traces.length).toBe(told + 1);
     expect(traces[traces.length - 1]).toEqual(shown.trace);
     expect(runner.state()).toEqual({ active: true, decision });
   }, 30000);
@@ -256,17 +267,24 @@ describe('the runner of files that agree on the TV', () => {
     expect(loads.asked).toEqual([]);
   });
 
-  it('counts a file that fails to download as one of no use, and stops when told', async () => {
+  it('tries a file that fails to download once more, then counts it failed, and stops when told', async () => {
     const { start, cues } = played('RM-E5');
+    let tries = 0;
     const failing = createAgreementRunner({
-      load: () => Promise.reject(new Error('offline')),
+      load: () => {
+        tries++;
+        return Promise.reject(new Error('offline'));
+      },
       slicing: slicing(),
+      retryMs: 0,
     });
     failing.start(start);
     const decision = await decided(failing);
-    // Only the planner's two could be read, of the 20 tried: too few to agree on anything.
+    // Only the planner's two could be read; the 18 others of the 20 tried failed, each tried
+    // twice: too few to agree on anything.
     expect(decision).toMatchObject({ state: 'none', why: 'under' });
-    expect(decision.trace).toMatchObject({ state: 'none', read: 20 });
+    expect(decision.trace).toMatchObject({ state: 'none', read: 2, failed: 18 });
+    expect(tries).toBe(36);
     const stopped = createAgreementRunner({ load: loader(cues).load, slicing: slicing() });
     const told: string[] = [];
     stopped.subscribe(() => told.push(stopped.state().active ? 'active' : 'idle'));
@@ -276,6 +294,107 @@ describe('the runner of files that agree on the TV', () => {
     expect(stopped.decision()).toBeNull();
     expect(told).toEqual(['active', 'idle']);
   });
+
+  it('reads a file that downloads the second time, and tries a failed one again on the next run', async () => {
+    const { start, cues } = played('RM-E5');
+    const loads = loader(cues);
+    // The first file downloaded fails once: tried again, the run decides as if it never failed.
+    let first: string | null = null;
+    let broken = true;
+    const flaky = createAgreementRunner({
+      load: (file) => {
+        first ??= file.url;
+        if (file.url === first && broken) {
+          broken = false;
+          return Promise.reject(new Error('520'));
+        }
+        return loads.load(file);
+      },
+      slicing: slicing(),
+      retryMs: 0,
+    });
+    flaky.start(start);
+    expect(await decided(flaky)).toMatchObject({
+      state: 'kept',
+      show: '13260775',
+      trace: { state: 'kept', best: 7, read: 12, aligned: 46 },
+    });
+    expect((flaky.decision()!.trace as { failed?: number }).failed).toBeUndefined();
+    // Failing twice, it is failed for that run: a file the wider read would count could not be
+    // read, so nothing changes; the next run downloads it again.
+    let down = true;
+    const asked: string[] = [];
+    const runner = createAgreementRunner({
+      load: (file) => {
+        asked.push(file.url);
+        return down && file.url === urlOf(caseOf('RM-E5').read[2]!)
+          ? Promise.reject(new Error('520'))
+          : loads.load(file);
+      },
+      slicing: slicing(),
+      retryMs: 0,
+    });
+    runner.start(start);
+    const failed = await decided(runner);
+    expect(failed.trace).toMatchObject({ failed: 1 });
+    expect(asked.filter((url) => url === urlOf(caseOf('RM-E5').read[2]!))).toHaveLength(2);
+    down = false;
+    runner.stop();
+    runner.start({ ...start, files: [...start.files] });
+    const again = await decided(runner);
+    expect(again).toMatchObject({ state: 'kept', show: '13260775' });
+    expect((again.trace as { failed?: number }).failed).toBeUndefined();
+    expect(asked.filter((url) => url === urlOf(caseOf('RM-E5').read[2]!))).toHaveLength(3);
+  }, 30000);
+
+  it('judges each file whole against the length of the run, not the one it was read for', async () => {
+    const { start, cues } = played('RM-E5');
+    const loads = loader(cues);
+    const runner = createAgreementRunner({ load: loads.load, slicing: slicing() });
+    // Against a length twice the video's, every file stops halfway: none reads whole.
+    const seconds = start.length.seconds!;
+    runner.start({ ...start, length: { seconds: seconds * 2, exact: true } });
+    expect(await decided(runner)).toMatchObject({ state: 'none' });
+    const downloads = loads.asked.length;
+    // The length known now: another start, judged afresh from the same lines, with no download.
+    runner.start(start);
+    expect(runner.decision()).toBeNull();
+    expect(await decided(runner)).toMatchObject({ state: 'kept', show: '13260775' });
+    expect(loads.asked.length).toBeGreaterThanOrEqual(downloads);
+    expect(new Set(loads.asked).size).toBe(loads.asked.length);
+  }, 30000);
+
+  it('gives its decision only for the start it was made for, and says when it was not needed', async () => {
+    const { start, cues } = played('RM-E6');
+    const runner = createAgreementRunner({ load: loader(cues).load, slicing: slicing() });
+    const traces: AgreementTrace[] = [];
+    runner.traced((trace) => traces.push(trace));
+    runner.start(start);
+    const decision = await decided(runner);
+    expect(runner.decisionFor(start)).toBe(decision);
+    expect(runner.decisionFor({ ...start, known: () => undefined })).toBe(decision);
+    // Another file offered since, another file showing, or the length to the second: not this one.
+    const more = { ...start.files[0]!, key: 'late', url: urlOf('late') };
+    expect(runner.decisionFor({ ...start, files: [...start.files, more] })).toBeNull();
+    expect(runner.decisionFor({ ...start, today: start.files[1]! })).toBeNull();
+    expect(
+      runner.decisionFor({
+        ...start,
+        length: { ...start.length, seconds: start.length.seconds! + 5 },
+      }),
+    ).toBeNull();
+    // Not needed after all: Diagnostics says so, with what was read, and the decision is gone.
+    runner.drop();
+    expect(traces[traces.length - 1]).toEqual({ state: 'not needed', read: 28, aligned: 176 });
+    expect(runner.state()).toEqual({ active: false, decision: null });
+    // Handed over, it was needed: dropping it later says nothing more.
+    runner.start(start);
+    await decided(runner);
+    runner.handOver();
+    const told = traces.length;
+    runner.drop();
+    expect(traces.length).toBe(told);
+  }, 30000);
 
   it('answers a case of the fixture as it was measured, switching only where it may', async () => {
     const c = caseOf('X1');
@@ -411,6 +530,12 @@ describe('the runner of files that agree on the TV', () => {
     runner.stop();
     runner.start(start(true));
     expect(await decided(runner)).toMatchObject({ state: 'switched', show: 'n' });
+    // The same start once none may take over goes on with the same decision; told to decide
+    // again, it shifts the file showing, from the lines and pairs it has (none asked twice).
+    runner.start(start(false));
+    expect(runner.decision()).toMatchObject({ state: 'switched' });
+    runner.again();
+    expect(await decided(runner)).toMatchObject({ state: 'shifted', show: 'a' });
   });
 });
 

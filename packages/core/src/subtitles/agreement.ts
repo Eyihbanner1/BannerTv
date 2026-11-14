@@ -170,14 +170,20 @@ export type AgreementWhy =
   | { kind: 'edition'; edition: string }
   /** Reading the rest of the files gave another winner, or none. */
   | { kind: 'wider'; best: number; second: number }
+  /**
+   * Files that count (weight above 0) could not be downloaded: the rest of
+   * them cannot all be read, so the winner cannot be confirmed.
+   */
+  | { kind: 'unread'; files: number }
   /** A winner, but the file showing lines up with none of it, and none of it can show instead. */
   | { kind: 'unmatched'; best: number; second: number }
   | { kind: 'gave up'; after: 'time' | 'files' | 'aligned' };
 
-/** Files read and lined up so far. */
+/** Files read and lined up so far, and files that could not be downloaded (when any). */
 export interface AgreementCounts {
   read: number;
   aligned: number;
+  failed?: number;
 }
 
 export type AgreementDecision =
@@ -217,8 +223,13 @@ export interface Agreement {
   next(): AgreementStep;
   /** The files to be read next, in order, as far as is known now: downloads may run ahead. */
   wanted(): string[];
-  /** A file's timed lines, or null when it could not be read or is no use (`AGREEMENT_MIN_LINES`). */
-  read(key: string, lines: number | null): void;
+  /**
+   * A file's timed lines; null when it is no use (it does not parse, reads
+   * as less than whole, or has under AGREEMENT_MIN_LINES); 'failed' when it
+   * could not be downloaded, which no other file makes up for in the wider
+   * read.
+   */
+  read(key: string, lines: number | null | 'failed'): void;
   aligned(candidate: string, reference: string, answer: PairAnswer): void;
   /** Files read and lined up so far. */
   counts(): AgreementCounts;
@@ -261,7 +272,9 @@ function middleOf(pairs: ReadonlyArray<readonly [number, number]>): Relation | n
  * the video's source, the rest. Each file read is lined up against the first
  * two files of each group so far and joins the one it agrees with most, or
  * starts its own. When a winner would change what shows, stage 2 reads every
- * other file that counts (weight above 0) and must find the same winner.
+ * other file that counts (weight above 0) and must find the same winner: a
+ * file that counts and could not be downloaded, in either stage, leaves the
+ * winner unconfirmed, as the files left may all be the ones that agree.
  */
 export function createAgreement(input: AgreementInput): Agreement {
   const limits: AgreementLimits = { ...AGREEMENT_LIMITS, ...input.limits };
@@ -307,7 +320,8 @@ export function createAgreement(input: AgreementInput): Agreement {
     .sort((a, b) => a.tier - b.tier || a.at - b.at)
     .map((entry) => entry.file.key);
 
-  const answers = new Map<string, boolean>();
+  // Usable, no use, or not downloaded.
+  const answers = new Map<string, boolean | 'failed'>();
   /** Files taken in turn so far, usable or not: the wider read leaves them out. */
   const seen = new Set<string>();
   const pairs = new Map<string, PairAnswer>();
@@ -330,12 +344,16 @@ export function createAgreement(input: AgreementInput): Agreement {
   let tried = 0;
   let usable = 0;
   let read = 0;
+  let failed = 0;
+  // Files that count (weight above 0) not downloaded: no winner is confirmed without them.
+  let unread = 0;
   let alignedCount = 0;
   let decision: AgreementDecision | null = null;
   // Stage 1's winner, kept as it stood: the wider read only confirms it.
   let winner: { members: string[]; best: number; second: number; keep: boolean } | null = null;
 
-  const counts = (): AgreementCounts => ({ read, aligned: alignedCount });
+  const counts = (): AgreementCounts =>
+    failed > 0 ? { read, aligned: alignedCount, failed } : { read, aligned: alignedCount };
   const finish = (made: AgreementDecision): AgreementStep => {
     decision = made;
     return { kind: 'done', decision: made };
@@ -459,6 +477,8 @@ export function createAgreement(input: AgreementInput): Agreement {
     const keep = inIt || (!!near && Math.abs(near.offset) <= LINK_S);
     winner = { members, best: judged.scores[judged.best]!, second: judged.second, keep };
     if (keep) return show();
+    // A file that counts and could not be downloaded is one the wider read can't read either.
+    if (unread > 0) return none({ kind: 'unread', files: unread });
     // The wider read: every other file that counts, those of the video's source naming no service
     // first, then the rest, each in the list's order.
     const first = (key: string) => {
@@ -580,13 +600,20 @@ export function createAgreement(input: AgreementInput): Agreement {
       const key = order[cursor]!;
       const answer = answers.get(key);
       if (answer === undefined) {
-        if (read >= limits.files) return none({ kind: 'gave up', after: 'files' });
+        if (read + failed >= limits.files) return none({ kind: 'gave up', after: 'files' });
         return { kind: 'read', key };
       }
       cursor++;
-      read++;
       seen.add(key);
       if (stage === 1) tried++;
+      if (answer === 'failed') {
+        failed++;
+        if ((weight.get(key) ?? 0) > 0) unread++;
+        // The wider read confirms only on every file that counts: one missing, it can't.
+        if (stage === 2) return none({ kind: 'unread', files: unread });
+        continue;
+      }
+      read++;
       if (!answer) continue;
       if (stage === 1) usable++;
       joining = key;
@@ -600,7 +627,7 @@ export function createAgreement(input: AgreementInput): Agreement {
       const out: string[] = [];
       let triedSoFar = tried;
       let usableSoFar = usable;
-      let readSoFar = read;
+      let readSoFar = read + failed;
       for (let at = cursor; at < order.length; at++) {
         if (stage === 1 && (usableSoFar >= FIRST_READ_FILES || triedSoFar >= FIRST_READ_TRIES)) {
           break;
@@ -610,7 +637,7 @@ export function createAgreement(input: AgreementInput): Agreement {
         const answer = answers.get(key);
         triedSoFar++;
         readSoFar++;
-        if (answer === false) continue;
+        if (answer === false || answer === 'failed') continue;
         usableSoFar++;
         if (answer === undefined) out.push(key);
       }
@@ -618,7 +645,7 @@ export function createAgreement(input: AgreementInput): Agreement {
     },
     read(key, lines) {
       if (answers.has(key)) return;
-      answers.set(key, lines !== null && lines >= AGREEMENT_MIN_LINES);
+      answers.set(key, lines === 'failed' ? lines : lines !== null && lines >= AGREEMENT_MIN_LINES);
     },
     aligned(candidate, reference, answer) {
       const at = pairKey(candidate, reference);

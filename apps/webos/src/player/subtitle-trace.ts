@@ -90,30 +90,43 @@ export type AgreementAbstain =
   | { kind: 'rate' }
   | { kind: 'edition'; edition: string }
   | { kind: 'wider'; best: number; second: number }
+  | { kind: 'unread'; files: number }
   | { kind: 'unmatched'; best: number; second: number }
   | { kind: 'gave up'; after: 'time' | 'files' | 'aligned' };
 
 /**
+ * Files read and lined up, and files that could not be downloaded (when any);
+ * `ms` the work of lining them up, pauses and downloads left out.
+ */
+interface AgreementCounts {
+  read: number;
+  aligned: number;
+  failed?: number;
+}
+
+/**
  * What the files that agree with each other found, for Diagnostics: counts,
- * scores and times only. `file` is the place of the file shown instead among
- * its language's files, in the list's order; `kept` says a drift fix the
- * player made is on, so the move was not made.
+ * scores and times only. `reading` as they go; `waiting` once decided, until
+ * every addon has answered and no hash may still link a file, when what was
+ * decided is used and said; `not needed` when something better came first, or
+ * the viewer chose. `file` is the place of the file shown instead among its
+ * language's files, in the list's order; `kept` says a drift fix the player
+ * made is on, so the move was not made.
  */
 export type AgreementTrace =
-  | { state: 'reading'; read: number; aligned: number }
-  | {
+  | ({ state: 'reading' | 'not needed' } & AgreementCounts)
+  | ({ state: 'waiting'; ms: number } & AgreementCounts)
+  | ({
       state: 'kept' | 'moved' | 'shifted' | 'switched';
       best: number;
       second: number;
       service?: string;
-      read: number;
-      aligned: number;
       ms: number;
       offset?: number;
       file?: number;
       kept?: 'drift';
-    }
-  | { state: 'none'; why: AgreementAbstain; read: number; aligned: number; ms: number }
+    } & AgreementCounts)
+  | ({ state: 'none'; why: AgreementAbstain; ms: number } & AgreementCounts)
   | { state: 'not tried'; why: 'recording' | 'no source' };
 
 /** One play's subtitles, as Diagnostics shows them. */
@@ -380,6 +393,8 @@ function abstainText(why: AgreementAbstain): string {
       return `the video’s edition (${why.edition}) isn’t named by them`;
     case 'wider':
       return `a wider read disagrees (${why.best} vs ${why.second})`;
+    case 'unread':
+      return 'not all could be downloaded';
     case 'unmatched':
       return `this file lines up with none of them (${why.best} vs ${why.second})`;
     case 'gave up':
@@ -387,6 +402,12 @@ function abstainText(why: AgreementAbstain): string {
         why.after === 'time' ? '120 s' : why.after === 'files' ? '100 files' : '1000 lined up'
       }`;
   }
+}
+
+/** Files read, those that could not be downloaded, and those lined up: "12 read, 1 failed, 43 lined up". */
+function countsText(counts: AgreementCounts): string {
+  const failed = counts.failed ? `, ${counts.failed} failed` : '';
+  return `${counts.read} read${failed}, ${counts.aligned} lined up`;
 }
 
 /** What the files that agree found: how sure, how much they read and lined up, and what it did. */
@@ -399,11 +420,15 @@ function agreementText(agreement: AgreementTrace | undefined): string | undefine
         agreement.why === 'recording' ? 'a cinema recording' : 'the video names no source'
       })`;
     case 'reading':
-      return `${said}: reading, ${agreement.read} read, ${agreement.aligned} lined up`;
+      return `${said}: reading, ${countsText(agreement)}`;
+    case 'not needed':
+      return `${said}: not needed, ${countsText(agreement)}`;
+    case 'waiting':
+      return `${said}: waiting for more files, ${countsText(agreement)} in ${seconds(agreement.ms)}`;
     case 'none':
-      return `${said}: none, ${abstainText(agreement.why)}, ${agreement.read} read, ${
-        agreement.aligned
-      } lined up in ${seconds(agreement.ms)}`;
+      return `${said}: none, ${abstainText(agreement.why)}, ${countsText(agreement)} in ${seconds(
+        agreement.ms,
+      )}`;
     default: {
       const service = agreement.service ? ` (${agreement.service})` : '';
       const done =
@@ -416,9 +441,9 @@ function agreementText(agreement: AgreementTrace | undefined): string | undefine
               : `moved ${signed(agreement.offset ?? 0)}${
                   agreement.state === 'shifted' ? ' by the group’s timing' : ''
                 }`;
-      return `${said}: ${agreement.best} vs ${agreement.second}${service}, ${agreement.read} read, ${
-        agreement.aligned
-      } lined up in ${seconds(agreement.ms)}; ${done}`;
+      return `${said}: ${agreement.best} vs ${agreement.second}${service}, ${countsText(
+        agreement,
+      )} in ${seconds(agreement.ms)}; ${done}`;
     }
   }
 }

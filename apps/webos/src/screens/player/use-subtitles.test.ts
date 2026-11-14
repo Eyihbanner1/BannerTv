@@ -1465,7 +1465,8 @@ describe('files that agree with each other', () => {
   const firstStart = (subtitles: Subtitles) => subtitles.cues?.[0]?.start;
   const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
   /** The video: an AMZN release no file is named for, with no hash. */
-  const amznVideo = () => streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+  const RELEASE_OF_E6 = 'Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp';
+  const amznVideo = () => streamEntry(RELEASE_OF_E6);
   /** E6's shape: the viewer's best file 8 s late, three AMZN files from other groups in step. */
   function e6(extra: SubtitleOption[] = []) {
     const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
@@ -1579,5 +1580,128 @@ describe('files that agree with each other', () => {
     expect(player.subtitles.sync?.basis).toBeUndefined();
     // Only what the planner reads.
     expect(world.loads.length).toBeLessThanOrEqual(3);
+  });
+
+  describe('handing over what they decided', () => {
+    const RELEASE = RELEASE_OF_E6;
+    const agreement = () => recentSubtitleTraces()[0]?.agreement;
+
+    it('hand over nothing beside a file named for the release from the last addon to answer', async () => {
+      const entry = amznVideo();
+      const { real, options } = e6();
+      const more = offer(entry, options, 1);
+      const player = play(entry);
+      await player.wait(3300);
+      // Decided, but an addon is still to answer: nothing moved, and Diagnostics says it waits.
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(player.subtitles.sync).toEqual({ state: 'checking', basis: 'files' });
+      expect(agreement()).toMatchObject({ state: 'waiting', read: 4, aligned: 6 });
+      // A French file named for this very release: files that agree never run beside one.
+      const named = file('named', shift(FULL, 8), { lang: 'fre', label: `${RELEASE}.srt` });
+      more([named], 0);
+      await player.wait(2000);
+      expect(player.subtitles.choice).toEqual(fileChoice(real));
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(player.subtitles.sync?.basis).toBeUndefined();
+      expect(agreement()).toEqual({ state: 'not needed', read: 4, aligned: 6 });
+    });
+
+    it('decide again with the files the last addon adds, and hand that over', async () => {
+      const entry = amznVideo();
+      const { real, options } = e6();
+      const more = offer(entry, options, 1);
+      const player = play(entry);
+      await player.wait(3300);
+      expect(agreement()).toMatchObject({ state: 'waiting' });
+      // Three more AMZN files of one group, in step with the viewer's: the two groups are too
+      // close to tell apart, as when all are offered at once.
+      const GROUP = 'Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC';
+      more(
+        [
+          file('d1', shift(FULL, 8), { lang: 'pol', label: `${GROUP}-AAA.srt` }),
+          file('d2', shift(FULL, 8), { lang: 'rum', label: `${GROUP}-BBB.srt` }),
+          file('d3', shift(FULL, 8), { lang: 'hun', label: `${GROUP}-CCC.srt` }),
+        ],
+        0,
+      );
+      await player.wait(3000);
+      expect(player.subtitles.choice).toEqual(fileChoice(real));
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(player.subtitles.sync).toEqual({ state: 'disagree' });
+      expect(agreement()).toMatchObject({ state: 'none', why: { kind: 'close' }, read: 7 });
+    });
+
+    // The hash, read late, links a Spanish file through OpenSubtitles asked again (or a slow
+    // addon offers one): before they decided or after, nothing they decided is handed over.
+    for (const [when, linkedLate] of [
+      ['before they decided', true],
+      ['after they decided', true],
+      ['after they decided, from a slow addon', false],
+    ] as const) {
+      it(`hand over nothing beside a file linked to the video ${when}`, async () => {
+        const entry = amznVideo();
+        const { real, options } = e6();
+        const more = offer(entry, options, 1, linkedLate);
+        const player = play(entry);
+        await player.wait(when === 'before they decided' ? 50 : 3300);
+        const linked = file('linked', shift(FULL, 8), {
+          lang: 'spa',
+          label: 'some_name.srt',
+          hashMatch: true,
+          ...(linkedLate && { linkedLate: true }),
+        });
+        more([linked], 0, false);
+        await player.wait(3000);
+        expect(player.subtitles.choice).toEqual(fileChoice(real));
+        expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+        expect(player.subtitles.sync?.basis).toBeUndefined();
+        expect(agreement()).toMatchObject({ state: 'not needed' });
+      });
+    }
+
+    it('wait for the video’s length to judge each file whole', async () => {
+      const entry = amznVideo();
+      const { real, options } = e6();
+      offer(entry, options);
+      const player = play(entry, { duration: 0 });
+      await player.wait(1500);
+      expect(agreement()).toBeUndefined();
+      await player.session({ duration: VIDEO_S });
+      await player.wait(5000);
+      expect(player.subtitles.choice).toEqual(fileChoice(real));
+      expect(player.subtitles.sync).toMatchObject({ state: 'moved', basis: 'files' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      expect(agreement()).toMatchObject({ state: 'moved', read: 4, aligned: 6 });
+    });
+
+    it('move the file showing instead of switching once its lines show before they hand over', async () => {
+      const entry = amznVideo();
+      const odd = file('odd', shift(lines(900, 7000), 30), { label: 'Show.S01E06.WEB.ODD.srt' });
+      const odd2 = file('odd2', shift(lines(700, 7000), 30), { label: 'Show.S01E06.WEB.ODD2.srt' });
+      const more = offer(
+        entry,
+        [
+          odd,
+          odd2,
+          file('ntb', shift(FULL, 30), { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+          file('flux', shift(FULL, 30), { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+          file('kings', shift(FULL, 30), { lang: 'eng', label: `${AMZN}-KiNGS.srt` }),
+        ],
+        1,
+      );
+      const player = play(entry);
+      await player.wait(8000);
+      expect(agreement()).toMatchObject({ state: 'waiting' });
+      // The video reaches the file's first line while the last addon is still to answer.
+      await player.session({ position: 30.5 });
+      await player.wait(200);
+      more([], 0);
+      await player.wait(3000);
+      // Decided again as no other file may take over: the file showing lines up with none of
+      // theirs, so it stays as it is.
+      expect(player.subtitles.choice).toEqual(fileChoice(odd));
+      expect(player.subtitles.sync).toEqual({ state: 'unmatched', basis: 'files' });
+      expect(agreement()).toMatchObject({ state: 'none', why: { kind: 'unmatched' } });
+    });
   });
 });

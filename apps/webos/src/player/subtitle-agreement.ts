@@ -36,8 +36,13 @@ import type { SubtitleOption } from './subtitles';
  * read already are taken from it, not downloaded again; lining up runs one
  * pair at a time in slices, after step B's own aligner has done its work.
  * Lines and pairs are kept for the video, in memory only, so another stream
- * of it decides again from them. Nothing here is a link to Diagnostics: the
- * trace holds counts, scores and times.
+ * of it decides again from them; whether a file reads whole is judged on each
+ * run, against the video's length then. A download that fails is tried once
+ * more after a pause, and then told to the decision as failed for that run
+ * only. What was decided is the hook's to hand over (`handOver`), once the
+ * list it was decided on is the one offered: Diagnostics says what was
+ * decided only then. Nothing here is a link to Diagnostics: the trace holds
+ * counts, scores and times.
  */
 
 /** What the runner needs of a file: who it is, its names, and its link (never traced). */
@@ -62,6 +67,22 @@ export interface AgreementStart {
   known: (url: string) => { lines: readonly LineTiming[]; profile: SubtitleProfile } | undefined;
   /** Whether another file may take over from the one showing now. */
   canSwitch: () => boolean;
+}
+
+/**
+ * What a start decides for: the video's facts and length (to the second),
+ * the file showing and the files offered. Another start with the same goes
+ * on with the same decision.
+ */
+export function agreementSignature(input: AgreementStart): string {
+  const { source, service, edition } = input.video;
+  const { seconds, exact } = input.length;
+  return [
+    `${source ?? ''}|${service ?? ''}|${edition ?? ''}`,
+    `${seconds === undefined ? '' : Math.round(seconds)}|${exact ? 1 : 0}`,
+    input.today.key,
+    ...input.files.map((file) => file.key),
+  ].join('\n');
 }
 
 /** What the files that agree decided, for the hook to hand over to step B. */
@@ -97,6 +118,8 @@ export interface AgreementRunnerOptions {
     reference: readonly LineTiming[],
     slicing: Slicing,
   ) => Promise<SubtitleAlignment>;
+  /** Milliseconds before a download that failed is tried again, once (AGREEMENT_RETRY_MS). */
+  retryMs?: number;
 }
 
 /** Where the runner stands: started for the stream playing, and what it decided. */
@@ -107,19 +130,32 @@ export interface RunnerState {
 
 /** Files downloaded at once. */
 export const AGREEMENT_DOWNLOADS = 4;
+/** A download that failed is tried again once, this long after (ms): a busy host often recovers. */
+export const AGREEMENT_RETRY_MS = 2000;
 
 export interface AgreementRunner {
   /**
    * Decides for these files, the file showing and the stream, unless it is
-   * deciding or has decided for the same already: then only what it asks
-   * along the way (`known`, `canSwitch`) is taken afresh.
+   * deciding or has decided for the same already (`agreementSignature`): then
+   * only what it asks along the way (`known`, `canSwitch`) is taken afresh.
    */
   start(input: AgreementStart): void;
+  /** Decides again for the same, from the lines and pairs read: as canSwitch says now. */
+  again(): void;
   /** Stops deciding and forgets the decision: the lines and pairs read stay. */
   stop(): void;
+  /**
+   * The same, as nothing it decided is needed any more (a better reference
+   * came, the viewer chose): Diagnostics says so, unless it was handed over.
+   */
+  drop(): void;
   /** Stops, and forgets the lines and pairs read too: for another video. */
   forget(): void;
   decision(): RunnerDecision | null;
+  /** The decision, only when it was made for this start (`agreementSignature`). */
+  decisionFor(input: AgreementStart): RunnerDecision | null;
+  /** The decision is used now: Diagnostics is told what it was (`sub:agreed:handed`). */
+  handOver(): void;
   /** A new object each time it changes, for useSyncExternalStore. */
   state(): RunnerState;
   subscribe(listener: () => void): () => void;
@@ -138,9 +174,18 @@ interface Run {
   signature: string;
   agreement: Agreement;
   byKey: Map<string, AgreementOption>;
-  startedAt: number;
   wider: boolean;
   traced: string;
+  /** Milliseconds of lining up this run did, pauses left out (pairs kept from before cost none). */
+  work: number;
+  /** Links whose download failed, tried twice, while this run was deciding. */
+  failed: Set<string>;
+}
+
+/** A file downloaded: its lines' timing and what reading it found. */
+interface Read {
+  lines: readonly LineTiming[];
+  profile: SubtitleProfile;
 }
 
 /** A made answer's other fields, for a move worked out from the files' places (a shift). */
@@ -161,15 +206,10 @@ const MADE: SubtitleAlignment = {
 
 const pairKey = (candidate: string, reference: string) => `${candidate}\n${reference}`;
 
-/** Lines a file read whole, and long enough, gives: null for one that is no use. */
-function usableLines(
-  file: AgreementOption,
-  lines: readonly LineTiming[],
-  profile: SubtitleProfile,
-  length: VideoLength,
-): readonly LineTiming[] | null {
-  if (lines.length < MIN_REFERENCE_LINES) return null;
-  return readsWhole(judgeSubtitleFit(profile, length, file.lang)) ? lines : null;
+/** How many lines a file read whole, and long enough, gives: null for one that is no use. */
+function usableLines(file: AgreementOption, read: Read, length: VideoLength): number | null {
+  if (read.lines.length < MIN_REFERENCE_LINES) return null;
+  return readsWhole(judgeSubtitleFit(read.profile, length, file.lang)) ? read.lines.length : null;
 }
 
 export function createAgreementRunner(options: AgreementRunnerOptions): AgreementRunner {
@@ -179,8 +219,10 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
   const align =
     options.align ??
     ((candidate, reference, sliced) => alignSubtitlesInSlices(candidate, reference, sliced));
-  // Kept for the video: each file's lines by link (null for one that is no use), each pair.
-  const reads = new Map<string, readonly LineTiming[] | null>();
+  const retryMs = options.retryMs ?? AGREEMENT_RETRY_MS;
+  // Kept for the video: each file downloaded by link, and each pair. Not a failure: another run
+  // downloads the file again.
+  const reads = new Map<string, Read>();
   const pairs = new Map<string, Pair>();
   const downloading = new Set<string>();
   // Which video the reads are for: a download that ends after `forget` keeps nothing.
@@ -189,6 +231,8 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
   const tracers = new Set<(trace: AgreementTrace) => void>();
   let run: Run | null = null;
   let decided: RunnerDecision | null = null;
+  // The decision was handed over to step B: Diagnostics was told it.
+  let handed = false;
   let snapshot: RunnerState = { active: false, decision: null };
   // The run waiting for a download to end.
   let wake: (() => void) | null = null;
@@ -203,37 +247,52 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
     resume?.();
   };
 
+  /** What the run tells the decision of a file: its usable lines, none, failed, or not yet known. */
+  function answerOf(current: Run, file: AgreementOption): number | null | 'failed' | undefined {
+    if (current.failed.has(file.url)) return 'failed';
+    let got = reads.get(file.url);
+    if (!got) {
+      got = current.input.known(file.url);
+      if (got) reads.set(file.url, got);
+    }
+    return got ? usableLines(file, got, current.input.length) : undefined;
+  }
+
   /** Answers the files wanted next that are known, and downloads more, four at most at once. */
   function feed(current: Run): void {
     for (const key of current.agreement.wanted()) {
       const file = current.byKey.get(key)!;
-      if (!reads.has(file.url)) {
-        const known = current.input.known(file.url);
-        if (known) {
-          reads.set(file.url, usableLines(file, known.lines, known.profile, current.input.length));
-        }
-      }
-      if (reads.has(file.url)) {
-        current.agreement.read(key, reads.get(file.url)?.length ?? null);
+      const answer = answerOf(current, file);
+      if (answer !== undefined) {
+        current.agreement.read(key, answer);
         continue;
       }
       if (downloading.has(file.url) || downloading.size >= AGREEMENT_DOWNLOADS) continue;
       downloading.add(file.url);
-      const { length } = current.input;
       const forVideo = video;
-      options
-        .load(file)
+      // Once more after a pause: a host that answered 520 often answers the next time.
+      const download = () => options.load(file);
+      download()
+        .catch(
+          () =>
+            new Promise<Cue[]>((resolve, reject) => {
+              setTimeout(() => {
+                if (forVideo !== video) reject(new Error('Another video'));
+                else download().then(resolve, reject);
+              }, retryMs);
+            }),
+        )
         .then(
           (cues) => {
             if (forVideo !== video) return;
-            const lines = timingOf(cues);
-            reads.set(
-              file.url,
-              usableLines(file, lines, profileSubtitles(cues, file.label), length),
-            );
+            reads.set(file.url, {
+              lines: timingOf(cues),
+              profile: profileSubtitles(cues, file.label),
+            });
           },
           () => {
-            if (forVideo === video) reads.set(file.url, null);
+            // For the run deciding now only: the next one tries again.
+            if (forVideo === video) run?.failed.add(file.url);
           },
         )
         .then(() => {
@@ -247,7 +306,7 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
   async function alignPair(candidate: string, reference: string): Promise<Pair> {
     let paused = 0;
     const started = slicing.now();
-    const alignment = await align(reads.get(candidate)!, reads.get(reference)!, {
+    const alignment = await align(reads.get(candidate)!.lines, reads.get(reference)!.lines, {
       ...slicing,
       pause: async () => {
         const before = slicing.now();
@@ -306,7 +365,10 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
   function finish(current: Run, made: AgreementDecision): void {
     if (!current.wider) mark('sub:agreed:first');
     mark('sub:agreed:done');
-    const ms = Math.max(0, now() - current.startedAt);
+    // The work of lining files up: what "lined up in N s" says, for the TV's cost of a pair.
+    const ms = Math.round(current.work);
+    const failed = made.failed ? { failed: made.failed } : {};
+    handed = false;
     if (made.state === 'not tried') {
       decided = { state: 'not tried', trace: { state: 'not tried', why: made.why } };
     } else if (made.state === 'none') {
@@ -314,7 +376,7 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
       decided = {
         state: 'none',
         why: made.why.kind,
-        trace: { state: 'none', why: made.why, read, aligned, ms },
+        trace: { state: 'none', why: made.why, read, aligned, ...failed, ms },
       };
     } else {
       const urlOf = (key: string) => current.byKey.get(key)!.url;
@@ -332,13 +394,14 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
         ...(made.service ? { service: made.service } : {}),
         read: made.read,
         aligned: made.aligned,
+        ...failed,
         ms,
         ...(made.state === 'moved' || made.state === 'shifted' ? { offset: made.offset } : {}),
         ...(made.state === 'switched' ? { file: place } : {}),
       };
       decided = {
         state: made.state,
-        leader: { url: leaderUrl, lines: reads.get(leaderUrl) ?? [] },
+        leader: { url: leaderUrl, lines: reads.get(leaderUrl)?.lines ?? [] },
         show: made.show,
         showUrl,
         ...(showUrl === leaderUrl ? {} : { record: recordOf(made, showUrl, leaderUrl) }),
@@ -346,7 +409,12 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
         trace,
       };
     }
-    tell(decided.trace);
+    // Said once it is handed over: until then it is what was found, waiting for the rest.
+    tell(
+      decided.trace.state === 'not tried'
+        ? decided.trace
+        : { state: 'waiting', read: made.read, aligned: made.aligned, ...failed, ms },
+    );
     changed();
   }
 
@@ -357,11 +425,11 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
       mark('sub:agreed:first');
       mark('sub:agreed:wider');
     }
-    const { read, aligned } = current.agreement.counts();
-    const said = `${read}|${aligned}`;
+    const counts = current.agreement.counts();
+    const said = `${counts.read}|${counts.aligned}|${counts.failed ?? 0}`;
     if (said === current.traced) return;
     current.traced = said;
-    tell({ state: 'reading', read, aligned });
+    tell({ state: 'reading', ...counts });
   }
 
   async function pump(current: Run): Promise<void> {
@@ -377,7 +445,7 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
       feed(current);
       if (step.kind === 'read') {
         // Until a download ends, the one needed next or one ahead of it, unless it was known.
-        if (!reads.has(current.byKey.get(step.key)!.url)) {
+        if (answerOf(current, current.byKey.get(step.key)!) === undefined) {
           await new Promise<void>((resume) => (wake = resume));
         }
         continue;
@@ -390,6 +458,7 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
         if (run !== current) return;
         pair = await alignPair(candidate, reference);
         if (run !== current) return;
+        current.work += pair.ms;
       }
       current.agreement.aligned(step.candidate, step.reference, pair.alignment);
     }
@@ -399,57 +468,67 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
     const had = run !== null || decided !== null;
     run = null;
     decided = null;
+    handed = false;
     poke();
     if (had) changed();
   }
 
+  function start(input: AgreementStart, fresh = false): void {
+    const signature = agreementSignature(input);
+    if (!fresh && run && run.signature === signature) {
+      run.input = input;
+      return;
+    }
+    const hadDecision = decided !== null;
+    decided = null;
+    handed = false;
+    const byKey = new Map(input.files.map((file) => [file.key, file] as const));
+    byKey.set(input.today.key, input.today);
+    const current: Run = {
+      input,
+      signature,
+      byKey,
+      wider: false,
+      traced: '',
+      work: 0,
+      failed: new Set(),
+      agreement: createAgreement({
+        video: input.video,
+        language: input.today.lang,
+        today: input.today.key,
+        ranked: input.ranked.map((file) => file.key),
+        files: Array.from(byKey.values(), (file) => ({
+          key: file.key,
+          lang: file.lang,
+          label: file.label,
+          releaseName: file.releaseName,
+        })),
+        limits: options.limits,
+        now,
+        canSwitch: () => current.input.canSwitch(),
+      }),
+    };
+    const wasActive = run !== null;
+    run = current;
+    poke();
+    mark('sub:agreed:start');
+    if (hadDecision || !wasActive) changed();
+    void pump(current);
+  }
+
   return {
-    start(input) {
-      const { source, service, edition } = input.video;
-      const signature = [
-        `${source ?? ''}|${service ?? ''}|${edition ?? ''}`,
-        input.today.key,
-        ...input.files.map((file) => file.key),
-      ].join('\n');
-      if (run && run.signature === signature) {
-        run.input = input;
-        return;
-      }
-      const hadDecision = decided !== null;
-      decided = null;
-      const byKey = new Map(input.files.map((file) => [file.key, file] as const));
-      byKey.set(input.today.key, input.today);
-      const current: Run = {
-        input,
-        signature,
-        byKey,
-        startedAt: now(),
-        wider: false,
-        traced: '',
-        agreement: createAgreement({
-          video: input.video,
-          language: input.today.lang,
-          today: input.today.key,
-          ranked: input.ranked.map((file) => file.key),
-          files: Array.from(byKey.values(), (file) => ({
-            key: file.key,
-            lang: file.lang,
-            label: file.label,
-            releaseName: file.releaseName,
-          })),
-          limits: options.limits,
-          now,
-          canSwitch: () => current.input.canSwitch(),
-        }),
-      };
-      const wasActive = run !== null;
-      run = current;
-      poke();
-      mark('sub:agreed:start');
-      if (hadDecision || !wasActive) changed();
-      void pump(current);
+    start,
+    again() {
+      if (run) start(run.input, true);
     },
     stop,
+    drop() {
+      if (run && !handed && decided?.state !== 'not tried') {
+        const { read, aligned, failed } = run.agreement.counts();
+        tell({ state: 'not needed', read, aligned, ...(failed ? { failed } : {}) });
+      }
+      stop();
+    },
     forget() {
       stop();
       video++;
@@ -457,6 +536,13 @@ export function createAgreementRunner(options: AgreementRunnerOptions): Agreemen
       pairs.clear();
     },
     decision: () => decided,
+    decisionFor: (input) => (run && run.signature === agreementSignature(input) ? decided : null),
+    handOver() {
+      if (!decided || handed) return;
+      handed = true;
+      mark('sub:agreed:handed');
+      tell(decided.trace);
+    },
     state: () => snapshot,
     subscribe(listener) {
       listeners.add(listener);

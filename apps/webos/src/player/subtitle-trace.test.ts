@@ -264,5 +264,20 @@ describe('the subtitles of the last few plays', () => {
     expect(said({ state: 'not tried', why: 'no source' })).toBe(
       'files that agree: not tried (the video names no source)',
     );
+    // Decided, and not used yet: every addon has not answered, or the hash may link a file.
+    expect(said({ state: 'waiting', ...counts })).toBe(
+      'files that agree: waiting for more files, 12 read, 46 lined up in 2.4 s',
+    );
+    // Something better came first, or the viewer chose, before it was used.
+    expect(said({ state: 'not needed', read: 4, aligned: 6 })).toBe(
+      'files that agree: not needed, 4 read, 6 lined up',
+    );
+    // Files that could not be downloaded are not counted as read.
+    expect(said({ state: 'none', why: { kind: 'unread', files: 1 }, ...counts, failed: 1 })).toBe(
+      'files that agree: none, not all could be downloaded, 12 read, 1 failed, 46 lined up in 2.4 s',
+    );
+    expect(said({ state: 'reading', read: 7, aligned: 21, failed: 2 })).toBe(
+      'files that agree: reading, 7 read, 2 failed, 21 lined up',
+    );
   });
 });

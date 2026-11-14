@@ -42,7 +42,7 @@ interface Run {
  */
 function drive(
   agreement: Agreement,
-  lines: (key: string) => number | null,
+  lines: (key: string) => number | null | 'failed',
   align: (candidate: string, reference: string) => PairAnswer,
   ahead = 0,
 ): Run {
@@ -176,6 +176,31 @@ describe('createAgreement on the fixture cases', () => {
       expect(ahead.aligns, c.tag).toEqual(inOrder.aligns);
     }
   });
+
+  // A file host that answers 520 for a few of the rest: the files left must not confirm the
+  // winner on their own, or the right file showing is moved by 5 to 10 s.
+  for (const tag of ['CE1', 'CE1b', 'CE2', 'CE2b']) {
+    it(`${tag}: changes nothing when files of the wider read could not be downloaded`, () => {
+      const c = caseOf(tag);
+      const lines = new Map(c.files.map((file) => [file.id, file.lines]));
+      const wider = c.read.slice(12);
+      // Every one of them failing, or only the last.
+      for (const failing of [new Set(wider), new Set(wider.slice(-1))]) {
+        const run = drive(
+          createAgreement(inputOf(c)),
+          (key) => (failing.has(key) ? 'failed' : (lines.get(key) ?? null)),
+          tableOf(c),
+        );
+        expect(run.decision, tag).toMatchObject({
+          state: 'none',
+          why: { kind: 'unread', files: 1 },
+          failed: 1,
+        });
+        // A file that failed is not counted as read.
+        expect(run.decision.read, tag).toBe(c.read.indexOf([...failing][0]!));
+      }
+    });
+  }
 });
 
 /** The fixture's timings: `[gap from the previous end, duration, …]` in hundredths of a second. */
@@ -191,13 +216,17 @@ function decode(deltas: readonly number[]): LineTiming[] {
   return lines;
 }
 
-function realRun(tag: string, extra: Partial<AgreementInput> = {}): Run {
+function realRun(
+  tag: string,
+  extra: Partial<AgreementInput> = {},
+  failing: ReadonlySet<string> = new Set(),
+): Run {
   const c = caseOf(tag);
   const files = (timings as Record<string, Record<string, number[]>>)[c.key]!;
   const lines = new Map(Object.keys(files).map((id) => [id, decode(files[id]!)]));
   return drive(
     createAgreement(inputOf(c, extra)),
-    (key) => lines.get(key)?.length ?? null,
+    (key) => (failing.has(key) ? 'failed' : (lines.get(key)?.length ?? null)),
     (candidate, reference) => alignSubtitles(lines.get(candidate)!, lines.get(reference)!),
   );
 }
@@ -235,6 +264,26 @@ describe('createAgreement with the aligner on real timings', () => {
       read: 12,
       aligned: 46,
     });
+  });
+
+  it('moves nothing on E6 when an AMZN file of the first read could not be downloaded', () => {
+    const c = caseOf('RM-E6');
+    // The third read: the first naming the video's service, after the viewer's two.
+    const amzn = c.read[2]!;
+    const { decision } = realRun('RM-E6', {}, new Set([amzn]));
+    expect(decision).toMatchObject({
+      state: 'none',
+      why: { kind: 'unread', files: 1 },
+      read: 12,
+      failed: 1,
+    });
+  });
+
+  it('keeps the E5 WEB file all the same when a file of the first read could not be downloaded', () => {
+    const c = caseOf('RM-E5');
+    const { decision } = realRun('RM-E5', {}, new Set([c.read[2]!]));
+    // The next files in the order stand in (the fixture holds no timings for them: no use).
+    expect(decision).toMatchObject({ state: 'kept', show: '13260775', best: 7, failed: 1 });
   });
 });
 
