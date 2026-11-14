@@ -13,6 +13,7 @@ import {
   seedStreamAddon,
 } from './play';
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
+import { openAsLgTv } from './homebrew';
 import { mockServices, traktSignIn } from './services';
 
 /** Elephants Dream, the first title on Home. */
@@ -3770,6 +3771,66 @@ test('the file OpenSubtitles names for the stream’s release shows first and sa
   for (const name of ['http', 'example.com', 'BANNER', '.webm', '.srt']) {
     expect(logged).not.toContain(name);
   }
+});
+
+test('on an LG TV, Diagnostics shows the newest play’s subtitles inside the screen, and its console line the plays before', async ({
+  page,
+}) => {
+  const report: string[] = [];
+  page.on('console', async (message) => {
+    const [label, body] = message.args();
+    if ((await label?.jsonValue()) === '[BannerTV diagnostics]') {
+      report.push(String(await body?.jsonValue()));
+    }
+  });
+  // The TV's own section has its ten rows there, as on a real TV, above the Lab's speeds.
+  await openAsLgTv(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    subtitleList: [
+      { id: 'en1', lang: 'eng' },
+      { id: 'en2', lang: 'eng' },
+      { id: 'fr1', lang: 'fre' },
+    ],
+  });
+  await openMovie(page);
+  for (let play = 0; play < 2; play++) {
+    await page.keyboard.press('Enter');
+    await expect.poll(() => focusedKey(page)).toBe('player-surface');
+    await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+    for (let step = 0; step < 4 && !(await focusedKey(page))?.startsWith('details-'); step++) {
+      await pressBack(page);
+    }
+    await expect.poll(() => focusedKey(page)).toMatch(/^details-/);
+    // Watched a little: the first button may now be another than Watch.
+    for (let step = 0; step < 3 && (await focusedKey(page)) !== 'details-watch'; step++) {
+      await page.keyboard.press('ArrowLeft');
+    }
+    await expectFocus(page, 'details-watch');
+  }
+  await pressBack(page);
+  await expect.poll(() => focusedKey(page)).not.toMatch(/^details-/);
+  await openDiagnostics(page);
+  const tv = page.locator('section', {
+    has: page.getByRole('heading', { name: 'TV', exact: true }),
+  });
+  await expect(tv.locator('div')).toHaveCount(10);
+  const section = page.locator('section', {
+    has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
+  });
+  await expect(section).toContainText('first line after');
+  // The newest play only, inside the screen's safe area.
+  await expect(section.locator('div')).toHaveCount(1);
+  const box = await section.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(1080 - 54);
+  // The console line carries both.
+  await expect.poll(() => report.length).toBeGreaterThan(0);
+  const sections = JSON.parse(report[report.length - 1]!) as Array<{
+    title: string;
+    rows: string[][];
+  }>;
+  expect(sections.find((part) => part.title === 'Subtitles')?.rows).toHaveLength(2);
 });
 
 test('the file OpenSubtitles found by the video’s hash shows first and says it is linked to your video', async ({

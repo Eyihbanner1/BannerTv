@@ -59,7 +59,7 @@ interface Running extends SubtitleTrace {
   startedAt: number;
 }
 
-/** Plays kept, newest first: as many as Diagnostics' column shows, the longest rows and all. */
+/** Plays kept, newest first: Diagnostics' console line carries them all, its screen the newest. */
 const KEPT = 3;
 const traces: Running[] = [];
 

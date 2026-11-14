@@ -11,7 +11,7 @@ import {
   type DiagnosticSection,
 } from '../platform/diagnostics';
 import { formatClock } from '../player/media';
-import { subtitleTraceRows } from '../player/subtitle-trace';
+import { recentSubtitleTraces, subtitleTraceRows } from '../player/subtitle-trace';
 import screenStyles from './Screen.module.css';
 import styles from './DiagnosticsScreen.module.css';
 
@@ -42,12 +42,22 @@ function speedSection(results: SpeedResults): DiagnosticSection {
 }
 
 /**
- * The subtitles of the last few plays: whether the video's hash was read,
- * the files in each language, why the version showing was chosen, and how
- * long the first line took. Ids, counts and times only, never a link.
+ * Plays the Subtitles section shows on screen, newest first. Beside a TV's
+ * ten rows and the Lab's speeds, its column has room for one; the console
+ * line carries every play kept.
  */
-function subtitleSection(): DiagnosticSection {
-  return { title: 'Subtitles', rows: subtitleTraceRows(), stacked: true };
+const PLAYS_ON_SCREEN = 1;
+
+/**
+ * The subtitles of the last few plays (or of the newest `shown`): whether
+ * the video's hash was read, the files in each language, why the version
+ * showing was chosen, and how long the first line took. Ids, counts and
+ * times only, never a link.
+ */
+function subtitleSection(shown?: number): DiagnosticSection {
+  const plays = recentSubtitleTraces();
+  const rows = subtitleTraceRows(shown === undefined ? plays : plays.slice(0, shown));
+  return { title: 'Subtitles', rows, stacked: true };
 }
 
 /**
@@ -70,9 +80,10 @@ export function DiagnosticsScreen() {
       setSkipCheck(result);
     });
     void Promise.all([collectDiagnostics(), speedMemory.load()]).then(([report]) => {
-      const full = [...report, speedSection(speedMemory.results()), subtitleSection()];
+      const speed = speedSection(speedMemory.results());
+      const full = [...report, speed, subtitleSection()];
       console.info('[BannerTV diagnostics]', JSON.stringify(full, null, 2));
-      setSections(full);
+      setSections([...report, speed, subtitleSection(PLAYS_ON_SCREEN)]);
     });
   }, []);
 
