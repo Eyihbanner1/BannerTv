@@ -173,6 +173,15 @@ export interface PlanInput<T extends PickableSubtitle> extends PickContext {
   readsLeft: number;
   /** How many more times the file showing may give way to one that fits clearly better. */
   switchesLeft: number;
+  /**
+   * A reference to line the files up against is there, or on its way (a
+   * stream track whose lines are coming, a file linked to the video or named
+   * for its release being read): a file not made for the release may be
+   * lined up, and so count as one, so the hold waits for that too.
+   */
+  syncing?: boolean;
+  /** Whether the file has been read and waits to be lined up against the reference. */
+  aligning?: (url: string) => boolean;
 }
 
 export interface SubtitlePlan<T> {
@@ -300,24 +309,59 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
       : [];
     return { pick: current, read: toRead, hold: false, switched: false };
   }
+  const aligningNow = (option: T) => !!input.aligning?.(option.url);
   if (reason < 2) {
-    // Made for the release, by the video's hash or its name, whatever reading it found.
+    // Made for the release, by the video's hash or its name, or lined up against a reference,
+    // whatever reading it found.
     const peerOf = (option: T) =>
       reasonOf(option) === reason || (reason === 1 && madeForRelease(option, input.video));
+    // With a reference on its way, the lines wait (within the hold) while the one chosen is
+    // read: none of them can show before, and it may yet give way to a file lined up.
+    const waitFor = (option: T) =>
+      !!input.syncing &&
+      input.holding &&
+      !input.timeUp &&
+      !isRead(option) &&
+      !input.slow?.(option.url);
     if (!current || !peerOf(current)) {
-      return { pick: top, read: [], hold: false, switched: false };
+      return { pick: top, read: [], hold: waitFor(top), switched: false };
     }
     // Others of the same standing, best first. Those placed above the one showing may be read;
     // all of them once it has read as less than whole and plain (or as wanted for the hard of
     // hearing), as a copy placed below it, not read yet, may be; and while it is a slow
     // download, as the first of them read shows at once (keepOrSwitch).
     const peers = ranked.filter(peerOf);
-    const others =
-      (isRead(current) && tierOf(current) > 0) || (!isRead(current) && !!input.slow?.(current.url));
+    const lessThanWhole = isRead(current) && tierOf(current) > 0;
+    const others = lessThanWhole || (!isRead(current) && !!input.slow?.(current.url));
     const pool = others
       ? peers.filter((option) => option !== current)
       : peers.slice(0, peers.indexOf(current));
-    const toRead = pool.filter(unread).slice(0, Math.max(0, input.readsLeft));
+    // With a reference, a file not made for the release may be lined up and so count as one:
+    // while the one showing reads as less than whole and plain, the rest are read too, in the
+    // list's order.
+    const toSync =
+      input.syncing && lessThanWhole
+        ? inOrder.filter((option) => option !== current && pool.indexOf(option) === -1)
+        : [];
+    const toRead = pool.concat(toSync).filter(unread).slice(0, Math.max(0, input.readsLeft));
+    if (input.holding && input.syncing) {
+      // No line has shown yet: the best read shows, and that is no switch. The hold waits for
+      // the one chosen to be read, and then, where it reads as less than whole and plain, for
+      // the rest to be read and lined up.
+      const busy =
+        waitFor(current) ||
+        (!!input.syncing &&
+          lessThanWhole &&
+          !input.timeUp &&
+          (toRead.length > 0 ||
+            inOrder.some(
+              (option) =>
+                option !== current &&
+                ((input.reading(option.url) && !input.slow?.(option.url)) || aligningNow(option)),
+            )));
+      const best = peers.find(isRead) ?? current;
+      return { pick: busy ? current : best, read: toRead, hold: busy, switched: false };
+    }
     return keepOrSwitch(peers, current, toRead, input);
   }
   const first = inOrder.slice(0, FIRST_READS);
@@ -333,7 +377,9 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
   const known = ranked.filter(isRead);
 
   if (input.holding) {
-    const busy = toRead.length > 0 || readingNow > 0 || !!input.lengthPending;
+    // A file read and waiting to be lined up may yet count as made for the release.
+    const busy =
+      toRead.length > 0 || readingNow > 0 || !!input.lengthPending || inOrder.some(aligningNow);
     if (busy && !input.timeUp) {
       return { pick: current ?? top, read: toRead, hold: true, switched: false };
     }
@@ -348,7 +394,8 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
  * Why the file chosen automatically is the one showing, for Diagnostics:
  * picked by hand for the release; found by the video's hash with no name
  * saying otherwise, or named for the release with the group confirming it
- * (made for the release, while it does not read as fitting badly); a better fit than another in the list; named
+ * (made for the release, while it does not read as fitting badly), or lined
+ * up against a reference for sure; a better fit than another in the list; named
  * for the release loosely, with no group to confirm it, among files that fit
  * as well; or nothing told it apart, and the list's order chose.
  */
@@ -366,7 +413,8 @@ export function pickReason<T extends PickableSubtitle>(
     hearing: context.hearing,
   });
   if (reason === 1) {
-    return linkedToVideo(pick, context.video) ? 'linked to your video' : 'same release name';
+    if (linkedToVideo(pick, context.video)) return 'linked to your video';
+    return madeForRelease(pick, context.video) ? 'same release name' : 'synced to your video';
   }
   const tierOf = (option: T) =>
     fileTier(option, context.fit(option.url), context.video, context.hearing);

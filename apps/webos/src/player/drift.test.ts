@@ -5,7 +5,9 @@ import {
   DRIFT_RATES,
   driftInUse,
   driftKeptWithTiming,
+  driftOfRate,
   stretchCues,
+  timingInUse,
 } from './drift';
 
 const line = (text: string) => [[{ text }]];
@@ -108,6 +110,84 @@ describe('driftInUse and driftKeptWithTiming', () => {
     expect(driftInUse({ ...file, canFix: false, kept: 'auto', offset: 0.5 })).toEqual({
       drift: null,
       auto: false,
+    });
+  });
+});
+
+describe('timingInUse: a file the player lined up itself', () => {
+  const file = { canFix: true, evidence: null, kept: null, offset: 0 };
+  const moved = { offset: 2.3, rate: 1 };
+
+  it('moves the lines as lining them up found, its rate as the drift fix in use', () => {
+    expect(timingInUse({ ...file, aligned: moved })).toEqual({
+      drift: null,
+      auto: false,
+      move: moved,
+      offset: 0,
+    });
+    const pal = { offset: 0.7, rate: DRIFT_RATES.ahead };
+    expect(timingInUse({ ...file, aligned: pal })).toEqual({
+      drift: 'ahead',
+      auto: true,
+      move: pal,
+      offset: 0,
+    });
+    expect(driftOfRate(DRIFT_RATES.behind)).toBe('behind');
+    expect(driftOfRate(24 / (24000 / 1001))).toBeNull();
+    // The rate replaces a drift the file's length gives away.
+    expect(timingInUse({ ...file, evidence: 'behind', aligned: moved }).move).toEqual(moved);
+  });
+
+  it('leaves the lines as the viewer set them where they chose a drift fix for the file', () => {
+    for (const kept of ['ahead', 'behind', 'none'] as const) {
+      expect(timingInUse({ ...file, kept, offset: 1.2, aligned: moved })).toEqual({
+        ...driftInUse({ ...file, kept, offset: 1.2 }),
+        move: null,
+        offset: 1.2,
+      });
+    }
+  });
+
+  it('adds timing set on lined-up lines to the move, and sets aside timing set on the file’s own', () => {
+    // Set on lines the player had lined up, on any release: it adds to this one's move.
+    expect(timingInUse({ ...file, kept: 'aligned', offset: 0.4, aligned: moved })).toMatchObject({
+      move: moved,
+      offset: 0.4,
+    });
+    // Set on the file's own lines (another release, or before it was lined up): not stacked.
+    for (const kept of [null, 'auto'] as const) {
+      expect(timingInUse({ ...file, kept, offset: 3, aligned: moved })).toMatchObject({
+        move: moved,
+        offset: 0,
+      });
+    }
+    // Where the file is not lined up, the timing kept applies to its own lines, as before.
+    expect(timingInUse({ ...file, kept: 'aligned', offset: 0.4 })).toEqual({
+      drift: null,
+      auto: false,
+      move: null,
+      offset: 0.4,
+    });
+    expect(timingInUse({ ...file, kept: null, offset: 3 })).toMatchObject({
+      move: null,
+      offset: 3,
+    });
+  });
+
+  it('marks timing set on lined-up lines, so it adds to the move next time and is not stacked', () => {
+    expect(driftKeptWithTiming({ ...file, aligned: moved }, 0.4)).toBe('aligned');
+    expect(driftKeptWithTiming({ ...file, kept: 'auto', aligned: moved }, 0.4)).toBe('aligned');
+    expect(driftKeptWithTiming({ ...file, kept: 'aligned', aligned: moved }, 0.4)).toBe('aligned');
+    // Set on the file's own lines again: no longer on top of a move.
+    expect(driftKeptWithTiming({ ...file, kept: 'aligned', offset: 0.4 }, 0.5)).toBe('auto');
+    // The viewer's own drift fix stands, with nothing kept beside it.
+    expect(driftKeptWithTiming({ ...file, kept: 'ahead', aligned: moved }, 0.4)).toBeNull();
+    // Back to no timing: nothing to keep.
+    expect(driftKeptWithTiming({ ...file, aligned: moved }, 0)).toBeNull();
+    // Kept 'aligned' with no move here: the drift is worked out as for 'auto'.
+    expect(driftInUse({ ...file, evidence: 'behind', kept: 'aligned', offset: 0.4 })).toEqual({
+      drift: 'behind',
+      auto: true,
     });
   });
 });

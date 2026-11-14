@@ -263,6 +263,7 @@ const BASE: SessionState = {
   audio: [],
   text: [],
   streamCues: {},
+  streamTimings: {},
   rate: 1,
   clip: false,
   attempts: [],

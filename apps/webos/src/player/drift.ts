@@ -36,10 +36,30 @@ export function stretchCues(cues: readonly Cue[], drift: SubtitleDrift | null): 
   return cues.map((cue) => ({ ...cue, start: cue.start / rate, end: cue.end / rate }));
 }
 
+/**
+ * A move the player makes on a file's lines once it has lined them up
+ * against the video itself: a line the file times at t shows at
+ * t / rate + offset.
+ */
+export interface LineMove {
+  offset: number;
+  rate: number;
+}
+
+/** The drift fix a move's rate is, where it is one of the two the Timing tab offers. */
+export function driftOfRate(rate: number): SubtitleDrift | null {
+  for (const drift of SUBTITLE_DRIFT_NAMES) {
+    if (Math.abs(DRIFT_RATES[drift] - rate) < 1e-9) return drift;
+  }
+  return null;
+}
+
+const SUBTITLE_DRIFT_NAMES: readonly SubtitleDrift[] = ['ahead', 'behind'];
+
 /** The drift fix in use on the file showing, and whether the player made it by itself. */
 export interface DriftInUse {
   drift: SubtitleDrift | null;
-  /** Made by the player, from the file's length: the viewer chose none. */
+  /** Made by the player, from the file's length or by lining it up: the viewer chose none. */
   auto: boolean;
 }
 
@@ -53,6 +73,16 @@ export interface DriftFile {
   kept: DriftChoice | null;
   /** The timing kept for the file, in seconds. */
   offset: number;
+  /** The move the player made on its lines on this stream, having lined them up, if any. */
+  aligned?: LineMove | null;
+}
+
+/**
+ * Whether the viewer chose the file's drift fix themselves: a fix, or none
+ * where the player had made one. Then nothing moves its lines by itself.
+ */
+export function viewersDrift(kept: DriftChoice | null): boolean {
+  return kept === 'ahead' || kept === 'behind' || kept === 'none';
 }
 
 /**
@@ -67,7 +97,9 @@ export interface DriftFile {
 export function driftInUse(file: DriftFile): DriftInUse {
   if (!file.canFix) return { drift: null, auto: false };
   // Worked out from this stream: a drift belongs to the file and the release together.
-  if (file.kept === 'auto') return { drift: file.evidence, auto: file.evidence !== null };
+  if (file.kept === 'auto' || file.kept === 'aligned') {
+    return { drift: file.evidence, auto: file.evidence !== null };
+  }
   if (file.kept !== null) return { drift: file.kept === 'none' ? null : file.kept, auto: false };
   if (file.evidence !== null && file.offset === 0) return { drift: file.evidence, auto: true };
   return { drift: null, auto: false };
@@ -80,11 +112,50 @@ export function driftInUse(file: DriftFile): DriftInUse {
  * make). The fix is then worked out again on every stream with their timing:
  * the lines they move stay stretched as they see them, a release the file
  * fits as it is gets no stretch, and one whose length shows a drift still
- * gets the player's fix. Not a fixed drift. Null when there is nothing to
- * keep: a drift choice of their own stands, and so do lines an older build's
- * timing left unstretched.
+ * gets the player's fix. Not a fixed drift. 'aligned' instead where the
+ * player lined the file up on this stream: the timing is then set on its
+ * move, and adds to the move on every stream where it is lined up. Null when
+ * there is nothing to keep: a drift choice of their own stands, and so do
+ * lines an older build's timing left unstretched.
  */
-export function driftKeptWithTiming(file: DriftFile, offset: number): 'auto' | null {
-  if (!file.canFix || offset === 0 || file.kept !== null) return null;
+export function driftKeptWithTiming(file: DriftFile, offset: number): 'auto' | 'aligned' | null {
+  if (!file.canFix || offset === 0 || viewersDrift(file.kept)) return null;
+  // Set on lines the player lined up: it adds to the player's move, wherever the file is lined up.
+  if (file.aligned) return 'aligned';
+  // Set on the file's own lines now: no longer on top of a move.
+  if (file.kept === 'aligned') return 'auto';
+  if (file.kept !== null) return null;
   return driftInUse(file).auto || file.evidence === null ? 'auto' : null;
+}
+
+/** The timing in use on the file showing: the player's move, its drift fix, and the viewer's timing. */
+export interface TimingInUse extends DriftInUse {
+  /** The move the player made on the lines, having lined them up; the viewer's timing adds to it. */
+  move: LineMove | null;
+  /** The viewer's timing in use, in seconds: on top of the move, if any. */
+  offset: number;
+}
+
+/**
+ * The timing of the file showing. Lined up by the player on this stream
+ * (`aligned`), its lines are moved and stretched as that found, unless the
+ * viewer chose a drift fix for the file themselves: theirs stands, and so
+ * does their timing. On a moved file the viewer's timing adds to the move
+ * when it was set on lines the player had lined up ('aligned' kept beside
+ * it); timing kept with no such mark was set on the file's own lines, on
+ * another release or before the player lined it up, and is set aside rather
+ * than added: the move already puts the lines where this video has them.
+ * Not lined up, it is as `driftInUse` has it, with the timing kept.
+ */
+export function timingInUse(file: DriftFile): TimingInUse {
+  if (file.canFix && file.aligned && !viewersDrift(file.kept)) {
+    const drift = driftOfRate(file.aligned.rate);
+    return {
+      drift,
+      auto: drift !== null,
+      move: file.aligned,
+      offset: file.kept === 'aligned' ? file.offset : 0,
+    };
+  }
+  return { ...driftInUse(file), move: null, offset: file.offset };
 }

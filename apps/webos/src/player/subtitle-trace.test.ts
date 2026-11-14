@@ -7,7 +7,9 @@ import {
   traceFiles,
   traceFirstLine,
   traceHash,
+  traceAlignment,
   traceReason,
+  traceReference,
 } from './subtitle-trace';
 
 afterEach(() => forgetSubtitleTraces());
@@ -57,5 +59,38 @@ describe('the subtitles of the last few plays', () => {
       'a link (not shown)',
       'hash: not asked yet · no files · off · no line yet',
     ]);
+  });
+
+  it('says what the files were lined up against, and what each run found, with no link', () => {
+    startSubtitleTrace('tt0816692', 1000);
+    traceFiles('tt0816692', ['eng', 'eng']);
+    traceReference('tt0816692', 'linked');
+    traceAlignment('tt0816692', 1, {
+      language: 'eng',
+      reference: 'linked',
+      confidence: 'none',
+      offset: 0,
+      rate: 1,
+      ms: 7.6,
+    });
+    traceAlignment('tt0816692', 0, {
+      language: 'eng',
+      reference: 'linked',
+      confidence: 'sure',
+      offset: -3.04,
+      rate: 23.976 / 25,
+      ms: 12.2,
+    });
+    traceReason('tt0816692', 'synced to your video', 'eng');
+    expect(recentSubtitleTraces()[0]?.aligned?.[0]).toMatchObject({ confidence: 'sure', ms: 12.2 });
+    expect(subtitleTraceRows()[0]).toEqual([
+      'tt0816692',
+      'hash: not asked yet · files en 2 (2 in all) · en, synced to your video · lined up against a file linked by hash: en sure −3.0 s ×0.9590 (12 ms), en none (8 ms) · no line yet',
+    ]);
+    // Nothing to line up against: said, with no runs.
+    startSubtitleTrace('tt0816693');
+    traceFiles('tt0816693', ['eng']);
+    traceReference('tt0816693', null);
+    expect(subtitleTraceRows()[0]?.[1]).toContain('lined up against nothing ·');
   });
 });
