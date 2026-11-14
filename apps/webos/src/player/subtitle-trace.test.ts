@@ -43,7 +43,7 @@ describe('the subtitles of the last few plays', () => {
   });
 
   it('says how the hash went, and what a late one brought, in the words Diagnostics uses', () => {
-    const rowFor = (outcome: Parameters<typeof traceHash>[1], linked?: number) => {
+    const rowFor = (outcome: Parameters<typeof traceHash>[1], linked?: number | null) => {
       forgetSubtitleTraces();
       startSubtitleTrace('tt6151526:1:6', 0);
       traceHash('tt6151526:1:6', outcome);
@@ -71,6 +71,10 @@ describe('the subtitles of the last few plays', () => {
     );
     expect(rowFor({ state: 'read', ms: 5100, late }, 0)).toBe(
       'hash read in 5.1 s, asked again: none linked',
+    );
+    // Asked again, and no answer came: not the same as an answer linking none.
+    expect(rowFor({ state: 'read', ms: 5100, late }, null)).toBe(
+      'hash read in 5.1 s, asked again: no answer',
     );
     expect(rowFor({ state: 'read', ms: 5100, late: { askedAtMs: 2000, askedAgain: 0 } })).toBe(
       'hash read in 5.1 s, after the files were asked for',

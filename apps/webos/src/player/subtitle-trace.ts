@@ -38,12 +38,13 @@ export type HashOutcome =
 /**
  * A hash read after the files were asked for without it: when they were, how many addons that
  * match files by the hash were asked again with it, and how many files their answers linked to
- * the video, once they answered.
+ * the video, once they answered; `failed` when none of them answered.
  */
 export interface HashLate {
   askedAtMs: number;
   askedAgain: number;
   linked?: number;
+  failed?: true;
 }
 
 /**
@@ -181,11 +182,18 @@ export function traceHash(videoId: string, outcome: HashOutcome): void {
   mark(`sub:hash:${outcome.state}`);
 }
 
-/** How many files the addons asked again with a hash read late linked to the video. */
-export function traceHashLinked(videoId: string, linked: number): void {
+/**
+ * How many files the addons asked again with a hash read late linked to the video; null when
+ * none of them answered.
+ */
+export function traceHashLinked(videoId: string, linked: number | null): void {
   const trace = current(videoId);
   if (!trace || trace.hash?.state !== 'read' || !trace.hash.late) return;
-  trace.hash = { ...trace.hash, late: { ...trace.hash.late, linked } };
+  const { askedAtMs, askedAgain } = trace.hash.late;
+  trace.hash = {
+    ...trace.hash,
+    late: { askedAtMs, askedAgain, ...(linked === null ? { failed: true } : { linked }) },
+  };
 }
 
 /** The files on offer now, counted by language. */
@@ -277,6 +285,7 @@ const askedWithout = (ms: number) => `files asked for without it after ${seconds
 /** What a hash read late brought: the addons asked again with it, and the files they linked. */
 function lateText(late: HashLate): string {
   if (late.askedAgain === 0) return ', after the files were asked for';
+  if (late.failed) return ', asked again: no answer';
   if (late.linked === undefined) return ', asked again';
   const linked =
     late.linked === 0 ? 'none' : `${late.linked} ${late.linked === 1 ? 'file' : 'files'}`;

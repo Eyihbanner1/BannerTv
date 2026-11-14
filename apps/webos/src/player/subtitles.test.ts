@@ -27,6 +27,7 @@ const net = vi.hoisted(() => ({
         subscribe(listener: () => void): () => void;
         load(): void;
         answer(data: unknown): void;
+        fail(): void;
       };
     }>;
   }>,
@@ -46,6 +47,7 @@ vi.mock('../data/addons', () => ({
             subscribe: store.subscribe,
             load: () => store.set({ status: 'loading' }),
             answer: (data: unknown) => store.set({ status: 'success', data }),
+            fail: () => store.set({ status: 'error' }),
           },
         };
       });
@@ -356,6 +358,24 @@ describe('the files on offer, and the video’s hash', () => {
       late: { askedAtMs: HASH_WAIT_MS, askedAgain: 1, linked: 2 },
     });
     expect(JSON.stringify(recentSubtitleTraces())).not.toContain('example');
+  });
+
+  it('says no answer came when OpenSubtitles asked again with a late hash fails', async () => {
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    net.asks[0]!.answers.forEach((answer) => answer.query.answer([file('a')]));
+    await vi.advanceTimersByTimeAsync(3000);
+    await hashRead(found(5000));
+    net.asks[1]!.answers[0]!.query.fail();
+    expect(list.get()).toMatchObject({ pending: 0 });
+    expect(list.get().hashComing).toBeUndefined();
+    // Not "none linked": nothing answered.
+    expect(hashOf()).toEqual({
+      state: 'read',
+      ms: 5000,
+      late: { askedAtMs: HASH_WAIT_MS, askedAgain: 1, failed: true },
+    });
   });
 
   it('keeps nothing open once a late read fails, and asks no one again', async () => {

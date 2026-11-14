@@ -291,11 +291,14 @@ export function subtitleList(
     const seen = new Set(own.map((option) => option.url));
     let pending = 0;
     let askingAgain = 0;
+    // Addons asked again that answered with files, whether they linked any or not.
+    let answeredAgain = 0;
     answers.forEach((answer) => {
       const first = answer.query.get();
       if (!settled(first)) pending++;
       const second = again.get(answer)?.query.get();
       if (second && !settled(second)) askingAgain++;
+      if (second?.data) answeredAgain++;
       const files: readonly ListedSubtitle[] = second?.data
         ? mergeHashAnswer(first.data ?? [], second.data)
         : (first.data ?? []);
@@ -321,8 +324,12 @@ export function subtitleList(
       videoId,
       options.map((option) => option.lang),
     );
+    // Once every addon asked again has answered, or failed to: no answer is not "none linked".
     if (again.size > 0 && askingAgain === 0) {
-      traceHashLinked(videoId, options.filter((option) => option.linkedLate).length);
+      traceHashLinked(
+        videoId,
+        answeredAgain > 0 ? options.filter((option) => option.linkedLate).length : null,
+      );
     }
   }
 
