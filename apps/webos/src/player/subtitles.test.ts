@@ -307,8 +307,9 @@ describe('the files on offer, and the video’s hash', () => {
     const [os, other] = net.asks[0]!.answers;
     os!.query.answer([file('a'), file('b'), file('c')]);
     other!.query.answer([file('x')]);
-    // Both answered, but the hash may still link files: the list is not done, and says so.
-    expect(list.get()).toMatchObject({ pending: 1, hashComing: true });
+    // Both answered, but the hash may still link files: the list is not done, and says so. The
+    // one still to come is the hash, not an addon (`hashReading`).
+    expect(list.get()).toMatchObject({ pending: 1, hashComing: true, hashReading: true });
     expect(list.get().options.map((option) => option.key)).toEqual([
       `${OPENSUBTITLES_V3_ID}#a`,
       `${OPENSUBTITLES_V3_ID}#b`,
@@ -330,7 +331,9 @@ describe('the files on offer, and the video’s hash', () => {
         (answer) => answer.addon.manifest.id,
       ),
     ).toEqual([OPENSUBTITLES_V3_ID]);
+    // Now an addon is asked: OpenSubtitles again.
     expect(list.get()).toMatchObject({ pending: 1, hashComing: true });
+    expect(list.get().hashReading).toBeUndefined();
     expect(hashOf()).toEqual({
       state: 'read',
       ms: 5000,

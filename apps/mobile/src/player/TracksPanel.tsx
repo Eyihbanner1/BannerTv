@@ -217,6 +217,8 @@ function SubtitleChoices({
       })}
       {subtitles.pending > 0 ? (
         <Text style={styles.note}>{t('player.stillAsking', { count: subtitles.pending })}</Text>
+      ) : subtitles.hashReading ? (
+        <Text style={styles.note}>{t('player.stillLinking')}</Text>
       ) : groups.length === 0 ? (
         <Text style={styles.note}>{t('player.noSubtitles')}</Text>
       ) : null}

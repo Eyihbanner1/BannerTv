@@ -53,6 +53,8 @@ export interface SubtitleListState {
    * addons were asked without it, or asked again with it and not answered.
    */
   hashComing?: boolean;
+  /** Of those in `pending`, the hash still being read after the addons were asked without it. */
+  hashReading?: boolean;
 }
 
 /**
@@ -319,6 +321,7 @@ export function subtitleList(
       options,
       pending: pending + askingAgain + (hashLate ? 1 : 0),
       ...(hashComing && { hashComing: true }),
+      ...(hashLate && { hashReading: true }),
     });
     traceFiles(
       videoId,

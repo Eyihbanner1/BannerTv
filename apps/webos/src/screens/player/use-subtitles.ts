@@ -159,6 +159,11 @@ export interface Subtitles {
   tracks: EngineTrack[];
   /** Addons still looking for subtitles. */
   pending: number;
+  /**
+   * The video's hash is still being read after the addons were asked without
+   * it: it may yet bring files made for the video.
+   */
+  hashReading: boolean;
   choice: SubtitleChoice;
   /** What to draw, or null when off or still loading: on the video's clock, drift fix applied. */
   cues: Cue[] | null;
@@ -1575,7 +1580,9 @@ export function useSubtitles(
   return {
     options,
     tracks,
-    pending,
+    // The hash still being read is not an addon still asked.
+    pending: pending - (listState.hashReading ? 1 : 0),
+    hashReading: !!listState.hashReading,
     choice,
     cues,
     loading: fileKey !== null && (fileCues === null || holding) && !fileFailed,

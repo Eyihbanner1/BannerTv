@@ -194,7 +194,9 @@ export function TracksSheet(props: TracksSheetProps) {
             <Note>
               {subtitles.pending > 0
                 ? t('player.stillAsking', { count: subtitles.pending })
-                : t('player.noSubtitles')}
+                : subtitles.hashReading
+                  ? t('player.stillLinking')
+                  : t('player.noSubtitles')}
             </Note>
           </div>
         )}
@@ -381,9 +383,13 @@ export function TracksSheet(props: TracksSheetProps) {
         values={values}
         onTab={onTab}
         aside={
-          tab === 'subtitles' && subtitles.pending > 0 && groups.length > 0
-            ? t('player.stillAsking', { count: subtitles.pending })
-            : undefined
+          tab !== 'subtitles' || groups.length === 0
+            ? undefined
+            : subtitles.pending > 0
+              ? t('player.stillAsking', { count: subtitles.pending })
+              : subtitles.hashReading
+                ? t('player.stillLinking')
+                : undefined
         }
       />
       {/* Each tab's choices register afresh: a focusable keeps the key it was first given. */}

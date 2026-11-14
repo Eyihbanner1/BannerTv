@@ -255,11 +255,22 @@ function streamEntry(name: string, addonId = 'streams'): StreamEntry {
  * The files offered with a stream, how many addons are still to answer, and whether a hash read
  * late may still link a file (the hash then counts among those to answer, as the list counts it).
  */
-function offer(entry: StreamEntry, options: SubtitleOption[], pending = 0, hashComing = false) {
+/**
+ * The files an addon offers for the stream, and how many addons are still to answer. With
+ * `hashComing`, the hash may still link a file; 'reading' says it is still being read, and is
+ * one of those `pending`, as the list counts it.
+ */
+function offer(
+  entry: StreamEntry,
+  options: SubtitleOption[],
+  pending = 0,
+  hashComing: boolean | 'reading' = false,
+) {
   const store = createStore<SubtitleListState>({
     options,
     pending,
     ...(hashComing && { hashComing: true }),
+    ...(hashComing === 'reading' && { hashReading: true }),
   });
   world.lists.set(entry.stream, {
     get: store.get,
@@ -1239,6 +1250,22 @@ describe('lining files up against the video', () => {
       more([], 0, false);
       await player.flush();
       expect(player.subtitles.sync).toEqual({ state: 'unchecked' });
+    });
+
+    it('counts the hash being read as no addon still to answer', async () => {
+      const entry = streamEntry('film');
+      const plain = file('plain', shift(FULL, 3));
+      // The list counts the hash being read as one still to answer: the sheet does not.
+      const more = offer(entry, [plain], 1, 'reading');
+      const player = play(entry);
+      await player.wait(2500);
+      expect(player.subtitles.pending).toBe(0);
+      expect(player.subtitles.hashReading).toBe(true);
+      // Read: OpenSubtitles is asked again, and that is an addon still to answer.
+      more([], 1, true);
+      await player.flush();
+      expect(player.subtitles.pending).toBe(1);
+      expect(player.subtitles.hashReading).toBe(false);
     });
 
     it('takes the place of the file showing before its first line is due', async () => {
