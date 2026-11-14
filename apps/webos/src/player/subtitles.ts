@@ -273,10 +273,10 @@ export function subtitleList(
         traceHash(
           videoId,
           reading.found
-            ? { state: 'read', ms: reading.ms }
+            ? { state: 'read', ms: reading.ms, ...(reading.fellBack && { fellBack: true }) }
             : 'skipped' in reading
               ? { state: 'skipped', why: reading.skipped }
-              : { state: 'failed', why: reading.failed, ms: reading.ms },
+              : { state: 'failed', why: reading.failed, step: reading.step, ms: reading.ms },
         );
         const found = reading.found;
         ask(found?.videoHash, found?.videoSize ?? videoSize);

@@ -9,6 +9,7 @@ import {
   traceFiles,
   traceFirstLine,
   traceHash,
+  traceHashLinked,
   traceAgreement,
   traceAlignment,
   traceReason,
@@ -38,6 +39,68 @@ describe('the subtitles of the last few plays', () => {
         'tt1375666',
         'hash not tried (request headers) · files en 2, fr 1 (3 in all) · en, best fit · first line after 2.4 s',
       ],
+    ]);
+  });
+
+  it('says how the hash went, and what a late one brought, in the words Diagnostics uses', () => {
+    const rowFor = (outcome: Parameters<typeof traceHash>[1], linked?: number) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt6151526:1:6', 0);
+      traceHash('tt6151526:1:6', outcome);
+      if (linked !== undefined) traceHashLinked('tt6151526:1:6', linked);
+      return subtitleTraceRows()[0]![1].split(' · ')[0];
+    };
+    expect(rowFor({ state: 'read', ms: 1400 })).toBe('hash read in 1.4 s');
+    expect(rowFor({ state: 'read', ms: 3100, fellBack: true })).toBe(
+      'hash read in 3.1 s, the end through the stream’s link again',
+    );
+    expect(rowFor({ state: 'reading', askedAtMs: 2000 })).toBe(
+      'hash still being read; files asked for without it after 2.0 s',
+    );
+    const late = { askedAtMs: 2000, askedAgain: 1 };
+    expect(rowFor({ state: 'read', ms: 5100, late })).toBe('hash read in 5.1 s, asked again');
+    expect(rowFor({ state: 'read', ms: 5100, late }, 1)).toBe(
+      'hash read in 5.1 s, asked again: 1 file linked',
+    );
+    expect(rowFor({ state: 'read', ms: 5100, late }, 3)).toBe(
+      'hash read in 5.1 s, asked again: 3 files linked',
+    );
+    expect(rowFor({ state: 'read', ms: 5100, late }, 0)).toBe(
+      'hash read in 5.1 s, asked again: none linked',
+    );
+    expect(rowFor({ state: 'read', ms: 5100, late: { askedAtMs: 2000, askedAgain: 0 } })).toBe(
+      'hash read in 5.1 s, after the files were asked for',
+    );
+    expect(rowFor({ state: 'failed', why: 'refused', step: 'end', ms: 300 })).toBe(
+      'hash failed after 0.3 s (refused, end read)',
+    );
+    expect(rowFor({ state: 'failed', why: 'no size', step: 'size', ms: 300 })).toBe(
+      'hash failed after 0.3 s (no size, size read)',
+    );
+    expect(rowFor({ state: 'failed', why: 'refused', step: 'start', ms: 300 })).toBe(
+      'hash failed after 0.3 s (refused, start read)',
+    );
+    expect(
+      rowFor({ state: 'failed', why: 'timed out', step: 'end', ms: 15000, askedAtMs: 2000 }),
+    ).toBe(
+      'hash failed after 15.0 s (timed out, end read); files asked for without it after 2.0 s',
+    );
+    // Linked files are counted only for a hash read late.
+    expect(rowFor({ state: 'read', ms: 1400 }, 2)).toBe('hash read in 1.4 s');
+  });
+
+  it('keeps the play under study on the console line after a detour, as five are kept', () => {
+    // As on the TV round: the play, a sports stream, the play again, then two more.
+    for (const id of ['tt1:1:5', 'sports', 'tt1:1:5', 'tt1:1:6', 'tt2']) {
+      startSubtitleTrace(id);
+      traceFiles(id, ['eng']);
+    }
+    expect(recentSubtitleTraces().map((trace) => trace.videoId)).toEqual([
+      'tt2',
+      'tt1:1:6',
+      'tt1:1:5',
+      'sports',
+      'tt1:1:5',
     ]);
   });
 

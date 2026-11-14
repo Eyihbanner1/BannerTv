@@ -1,6 +1,6 @@
 import { type AlignConfidence, languageKey } from '@bannertv/core';
 import { mark } from '../platform/marks';
-import type { HashFailure, HashSkip } from './stream-hash';
+import type { HashFailure, HashSkip, HashStep } from './stream-hash';
 import type { ReferenceKind } from './subtitle-align';
 
 /*
@@ -15,15 +15,36 @@ import type { ReferenceKind } from './subtitle-align';
  * counts, language codes and times.
  */
 
-/** Whether the hash of the exact file playing was read for the subtitles addons. */
+/**
+ * Whether the hash of the exact file playing was read for the subtitles addons. `askedAtMs`:
+ * the addons were asked without it after so many milliseconds, as it was still being read.
+ */
 export type HashOutcome =
-  /** Read from the file, in so many milliseconds. */
-  | { state: 'read'; ms: number }
+  /**
+   * Read from the file, in so many milliseconds; `fellBack` where the link it led to refused a
+   * later read, which went through the stream's link again; `late` when it came after the files
+   * were asked for without it.
+   */
+  | { state: 'read'; ms: number; fellBack?: true; late?: HashLate }
   /** The stream's addon sent it with the stream. */
   | { state: 'sent' }
-  | { state: 'failed'; why: HashFailure; ms: number }
+  /** Still being read when the addons were asked without it. */
+  | { state: 'reading'; askedAtMs: number }
+  /** Why it failed, and at which read: the start, the size or the end. */
+  | { state: 'failed'; why: HashFailure; step: HashStep; ms: number; askedAtMs?: number }
   /** Not tried: a playlist, a link needing request headers, or no file link at all (a torrent). */
   | { state: 'skipped'; why: HashSkip };
+
+/**
+ * A hash read after the files were asked for without it: when they were, how many addons that
+ * match files by the hash were asked again with it, and how many files their answers linked to
+ * the video, once they answered.
+ */
+export interface HashLate {
+  askedAtMs: number;
+  askedAgain: number;
+  linked?: number;
+}
 
 /**
  * Why the version showing was chosen: picked by hand (from the list, or kept
@@ -160,6 +181,13 @@ export function traceHash(videoId: string, outcome: HashOutcome): void {
   mark(`sub:hash:${outcome.state}`);
 }
 
+/** How many files the addons asked again with a hash read late linked to the video. */
+export function traceHashLinked(videoId: string, linked: number): void {
+  const trace = current(videoId);
+  if (!trace || trace.hash?.state !== 'read' || !trace.hash.late) return;
+  trace.hash = { ...trace.hash, late: { ...trace.hash.late, linked } };
+}
+
 /** The files on offer now, counted by language. */
 export function traceFiles(videoId: string, languages: readonly string[]): void {
   const trace = current(videoId);
@@ -222,6 +250,7 @@ export function traceFirstLine(now = Date.now()): void {
 export function recentSubtitleTraces(): SubtitleTrace[] {
   return traces.map((trace) => {
     const copy: SubtitleTrace = { ...trace, files: { ...trace.files } };
+    if (trace.hash) copy.hash = { ...trace.hash };
     if (trace.aligned) copy.aligned = { ...trace.aligned };
     if (trace.agreement) copy.agreement = { ...trace.agreement };
     delete (copy as Partial<Running>).startedAt;
@@ -236,15 +265,39 @@ export function forgetSubtitleTraces(): void {
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
+const STEP_WORDS: Readonly<Record<HashStep, string>> = {
+  start: 'start read',
+  size: 'size read',
+  end: 'end read',
+};
+
+/** The addons were asked without the hash after so long. */
+const askedWithout = (ms: number) => `files asked for without it after ${seconds(ms)}`;
+
+/** What a hash read late brought: the addons asked again with it, and the files they linked. */
+function lateText(late: HashLate): string {
+  if (late.askedAgain === 0) return ', after the files were asked for';
+  if (late.linked === undefined) return ', asked again';
+  const linked =
+    late.linked === 0 ? 'none' : `${late.linked} ${late.linked === 1 ? 'file' : 'files'}`;
+  return `, asked again: ${linked} linked`;
+}
+
 function hashText(hash: HashOutcome | undefined): string {
   if (!hash) return 'hash: not asked yet';
   switch (hash.state) {
-    case 'read':
-      return `hash read in ${seconds(hash.ms)}`;
+    case 'read': {
+      const back = hash.fellBack ? ', the end through the stream’s link again' : '';
+      return `hash read in ${seconds(hash.ms)}${back}${hash.late ? lateText(hash.late) : ''}`;
+    }
     case 'sent':
       return 'hash sent by the addon';
-    case 'failed':
-      return `hash failed after ${seconds(hash.ms)} (${hash.why})`;
+    case 'reading':
+      return `hash still being read; ${askedWithout(hash.askedAtMs)}`;
+    case 'failed': {
+      const late = hash.askedAtMs === undefined ? '' : `; ${askedWithout(hash.askedAtMs)}`;
+      return `hash failed after ${seconds(hash.ms)} (${hash.why}, ${STEP_WORDS[hash.step]})${late}`;
+    }
     case 'skipped':
       return `hash not tried (${hash.why})`;
   }
