@@ -14,9 +14,14 @@ interface NodeUrl {
   fileURLToPath(url: string): string;
 }
 
+interface NodeZlib {
+  deflateSync(bytes: Uint8Array): Uint8Array;
+}
+
 // The core is typed without Node or the DOM; the tests run in Node, and need only this.
 const FS = 'node:fs';
 const URL_MODULE = 'node:url';
+const ZLIB = 'node:zlib';
 const HERE = (import.meta as unknown as { url: string }).url;
 const FOLDER = HERE.slice(0, HERE.lastIndexOf('/') + 1);
 
@@ -28,6 +33,12 @@ export async function readFixture(name: string): Promise<Uint8Array> {
 
 export async function readFixtureText(name: string): Promise<string> {
   return decodeUtf8(await readFixture(name));
+}
+
+/** zlib (RFC 1950) compression, as mkvmerge writes a compressed track. */
+export async function deflater(): Promise<(bytes: Uint8Array) => Uint8Array> {
+  const zlib = (await import(/* @vite-ignore */ ZLIB)) as NodeZlib;
+  return (bytes) => new Uint8Array(zlib.deflateSync(bytes));
 }
 
 export interface CountedRead {

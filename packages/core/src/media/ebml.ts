@@ -239,7 +239,15 @@ export function* children(bytes: Uint8Array, start: number, end: number): Genera
     const elementEnd = header.size === UNKNOWN_SIZE ? end : dataStart + header.size;
     if (elementEnd > end) throw new EbmlError('corrupt', 'an element past its parent');
     if (header.id !== ID.CRC32 && header.id !== ID.VOID) {
-      yield { ...header, start: at, dataStart, end: elementEnd };
+      // Fields by hand: an ES2017 build turns object spread into a helper call, slow here.
+      yield {
+        id: header.id,
+        size: header.size,
+        headerLength: header.headerLength,
+        start: at,
+        dataStart,
+        end: elementEnd,
+      };
     }
     at = elementEnd;
   }

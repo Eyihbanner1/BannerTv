@@ -34,6 +34,11 @@ export interface SyntheticTrack {
   codecPrivate?: Uint8Array;
   /** ContentCompAlgo 3: these bytes are taken off the front of every block of the track. */
   stripped?: Uint8Array;
+  /**
+   * ContentCompAlgo 0 (zlib) with this ContentEncodingScope: 1 the blocks,
+   * each compressed with `deflate`; 2 the CodecPrivate, given compressed.
+   */
+  zlib?: { scope: number; deflate?: (bytes: Uint8Array) => Uint8Array };
   encrypted?: boolean;
 }
 
@@ -54,6 +59,8 @@ export interface SyntheticOptions {
   clusterLength?: number;
   /** Video frames a second, each a SimpleBlock of zeros. */
   frameRate?: number;
+  /** The last bytes of video frame `index` (counted from 0), in place of zeros. */
+  videoTail?: (index: number) => Uint8Array | undefined;
   /** Bytes of video a second. */
   videoRate?: number;
   /** How subtitle blocks are written. */
@@ -74,6 +81,8 @@ export interface SyntheticOptions {
   blockTimeShift?: number;
   /** A SeekPosition for the Cues past 2^53. */
   hugeCuesPosition?: boolean;
+  /** Track numbers the file does not have, given a position in every cue point too. */
+  strayCueTracks?: number[];
   docType?: string;
 }
 
@@ -95,9 +104,11 @@ function trackEntry(track: SyntheticTrack): Built {
   if (track.name) fields.push(str(ID.NAME, track.name));
   if (track.forced) fields.push(uint(ID.FLAG_FORCED, 1));
   if (track.codecPrivate) fields.push(el(ID.CODEC_PRIVATE, track.codecPrivate));
-  if (track.stripped || track.encrypted) {
-    const encoding: Built[] = [uint(ID.CONTENT_ENCODING_SCOPE, 1)];
-    if (track.encrypted) {
+  if (track.stripped || track.encrypted || track.zlib) {
+    const encoding: Built[] = [uint(ID.CONTENT_ENCODING_SCOPE, track.zlib?.scope ?? 1)];
+    if (track.zlib) {
+      encoding.push(el(ID.CONTENT_COMPRESSION, join(uint(ID.CONTENT_COMP_ALGO, 0))));
+    } else if (track.encrypted) {
       encoding.push(uint(ID.CONTENT_ENCODING_TYPE, 1), el(ID.CONTENT_ENCRYPTION, []));
     } else {
       encoding.push(
@@ -165,6 +176,7 @@ export function synthesize(options: SyntheticOptions): { parts: Part[]; cues: Cu
   const clusters: Array<{ built: Built; cues: Array<Omit<CuePlace, 'cluster'>>; video: number }> =
     [];
   let next = 0;
+  let frames = 0;
   for (let start = 0, index = 0; start < options.length; start += clusterLength, index++) {
     const end = Math.min(options.length, start + clusterLength);
     const content: Part[] = [];
@@ -189,6 +201,7 @@ export function synthesize(options: SyntheticOptions): { parts: Part[]; cues: Cu
             throw new Error('line does not start with the stripped bytes');
           payload = payload.subarray(track.stripped.length);
         }
+        if (track.zlib && track.zlib.scope & 1) payload = track.zlib.deflate!(payload);
         const timecode = line.time - start + (options.blockTimeShift ?? 0);
         const flags = (options.blocks === 'simple' ? 0x80 : 0) | (options.laced ? 0x02 : 0);
         const body = [
@@ -216,10 +229,12 @@ export function synthesize(options: SyntheticOptions): { parts: Part[]; cues: Cu
         }
         cues.push(cue);
       } else {
+        const tail = options.videoTail?.(frames++);
+        const data: Part[] = tail ? [frameBytes - tail.length, tail] : [frameBytes];
         push(
           el(
             ID.SIMPLE_BLOCK,
-            [bytes(0x80 | VIDEO_TRACK), int16(frame - start), bytes(0x80), frameBytes],
+            [bytes(0x80 | VIDEO_TRACK), int16(frame - start), bytes(0x80), ...data],
             8,
           ),
         );
@@ -262,9 +277,15 @@ export function synthesize(options: SyntheticOptions): { parts: Part[]; cues: Cu
     ];
     if (!options.noCueRelative) positions.push(uint(ID.CUE_RELATIVE_POSITION, place.relative));
     if (place.duration !== undefined) positions.push(uint(ID.CUE_DURATION, place.duration));
+    const stray = (options.strayCueTracks ?? []).map((track) =>
+      el(
+        ID.CUE_TRACK_POSITIONS,
+        join(uint(ID.CUE_TRACK, track), uint(ID.CUE_CLUSTER_POSITION, place.cluster)),
+      ),
+    );
     return el(
       ID.CUE_POINT,
-      join(uint(ID.CUE_TIME, place.time), el(ID.CUE_TRACK_POSITIONS, join(...positions))),
+      join(uint(ID.CUE_TIME, place.time), el(ID.CUE_TRACK_POSITIONS, join(...positions)), ...stray),
     );
   });
   const cuesElement = options.noCues ? undefined : el(ID.CUES, joinAll(cuePoints));

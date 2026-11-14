@@ -484,7 +484,15 @@ export {
   type VideoRelease,
 } from './subtitles/versions';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
-export { type ByteSource, bytesSource, countedSource, type ReadStats } from './media/source';
+export {
+  type ByteSource,
+  bytesSource,
+  countedSource,
+  type ReadCanceller,
+  readCanceller,
+  type ReadSignal,
+  type ReadStats,
+} from './media/source';
 export {
   cueTimings,
   type CueEntry as MatroskaCueEntry,
@@ -516,6 +524,7 @@ export {
   createMatroskaWindow,
   type MatroskaLines,
   type MatroskaWindow,
+  type WindowClock as MatroskaWindowClock,
   type MatroskaWindowOptions,
   type MatroskaWindowStats,
   readMatroskaLines,

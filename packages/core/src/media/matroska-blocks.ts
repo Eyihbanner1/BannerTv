@@ -17,6 +17,7 @@ import {
   type TrackData,
 } from './matroska';
 import { matroskaTextCue } from './matroska-text';
+import type { ReadSignal } from './source';
 
 /**
  * Reads a text track's lines block by block, at the places the Cues give:
@@ -29,8 +30,12 @@ import { matroskaTextCue } from './matroska-text';
  * by default the reader reads the 7 bytes either side instead: from where
  * the block starts if the size took 1 byte to where it starts if it took 8,
  * and finds the one place a block of this track starts, its BlockGroup
- * parsing whole. A place that is not certain (none, or two that do not nest)
- * falls back to reading the Cluster's head. A Cluster's head is read too,
+ * parsing whole. A place that is not certain falls back to reading the
+ * Cluster's head: none parses, the one that would win is laced, or another
+ * parses that is not inside the winner's own Block (the last bytes of the
+ * frame before can read as a block of this track that swallows the real
+ * one, as a track numbered 32 or 35 shows: its number is the BlockGroup's
+ * or SimpleBlock's ID). A Cluster's head is read too,
  * at no extra request, when it sits in the same read as its block; its
  * Timestamp then checks the block's time against the cue's.
  */
@@ -120,6 +125,8 @@ interface Block {
   /** File positions. */
   start: number;
   end: number;
+  /** A BlockGroup's own Block, as file positions. */
+  inner?: { start: number; end: number };
   payload: Uint8Array;
   timecode: number;
   laced: boolean;
@@ -130,10 +137,11 @@ interface Block {
 /** A block element parsed, or how many bytes from its start it needs, or not a block of the track. */
 type Parsed = Block | { needs: number } | undefined;
 
-/** Bytes read from the file at `start`. */
+/** Bytes read from the file at `start`, and the signal any further read for them is made with. */
 interface Bytes {
   start: number;
   data: Uint8Array;
+  signal: ReadSignal | undefined;
 }
 
 const GROUP_CHILDREN = new Set<number>([
@@ -201,6 +209,17 @@ function parseBlockAt(
       }
       return { needs: end - at };
     }
+    if (header.id !== ID.BLOCK_GROUP) {
+      const body = readBlockBody(data, dataStart, end, track);
+      if (!body) return undefined;
+      return {
+        start: fileStart + at,
+        end: fileStart + end,
+        payload: body.payload,
+        timecode: body.timecode,
+        laced: body.laced,
+      };
+    }
     const block: Block = {
       start: fileStart + at,
       end: fileStart + end,
@@ -208,16 +227,13 @@ function parseBlockAt(
       timecode: 0,
       laced: false,
     };
-    if (header.id !== ID.BLOCK_GROUP) {
-      const body = readBlockBody(data, dataStart, end, track);
-      return body ? { ...block, ...body } : undefined;
-    }
     let body: ReturnType<typeof readBlockBody>;
     let blocks = 0;
     for (const child of children(data, dataStart, end)) {
       if (child.id === ID.BLOCK) {
         blocks++;
         body = readBlockBody(data, child.dataStart, child.end, track);
+        block.inner = { start: fileStart + child.start, end: fileStart + child.end };
       } else if (child.id === ID.BLOCK_DURATION) {
         block.duration = readUint(data, child.dataStart, child.end);
       } else if (child.id === ID.BLOCK_ADDITIONS) {
@@ -236,7 +252,10 @@ function parseBlockAt(
       } else if (strict && !GROUP_CHILDREN.has(child.id)) return undefined;
     }
     if (blocks !== 1 || !body) return undefined;
-    return { ...block, ...body };
+    block.payload = body.payload;
+    block.timecode = body.timecode;
+    block.laced = body.laced;
+    return block;
   } catch (error) {
     if (error instanceof EbmlError) return undefined;
     throw error;
@@ -284,8 +303,12 @@ function parseClusterHead(
 export interface BlockReader {
   /** Groups lines whose blocks sit close together into reads, in file order. */
   plan(lines: readonly LineRequest[]): PlannedRead[];
-  /** Makes one planned read (and any it needs after) and turns its blocks into cues. */
-  run(read: PlannedRead): Promise<LineResult[]>;
+  /**
+   * Makes one planned read (and any it needs after) and turns its blocks
+   * into cues. Every read is made with `signal`; once it aborts, no more are
+   * made and the promise rejects.
+   */
+  run(read: PlannedRead, signal?: ReadSignal): Promise<LineResult[]>;
   readonly stats: BlockReaderStats;
 }
 
@@ -335,7 +358,10 @@ export function createBlockReader(
   function plan(lines: readonly LineRequest[]): PlannedRead[] {
     const spans = lines
       .filter((line) => line.entry.relative !== undefined)
-      .map((line) => ({ line, ...spanOf(line) }))
+      .map((line) => {
+        const span = spanOf(line);
+        return { line, start: span.start, end: span.end };
+      })
       .sort((a, b) => a.start - b.start || a.line.index - b.line.index);
     const reads: PlannedRead[] = [];
     let current: PlannedRead | undefined;
@@ -358,42 +384,49 @@ export function createBlockReader(
     return reads;
   }
 
-  async function readBytes(start: number, length: number): Promise<Bytes> {
-    return { start, data: await file.source.read(start, length) };
+  async function readBytes(
+    start: number,
+    length: number,
+    signal: ReadSignal | undefined,
+  ): Promise<Bytes> {
+    if (signal?.aborted) throw new Error('aborted');
+    return { start, data: await file.source.read(start, length, signal), signal };
   }
 
   /** The bytes from `start`, `length` long, from `bytes` when it holds them. */
   async function bytesAt(bytes: Bytes, start: number, length: number): Promise<Bytes> {
     const offset = start - bytes.start;
+    const { signal } = bytes;
     if (offset >= 0 && offset + length <= bytes.data.length) {
-      return { start, data: bytes.data.subarray(offset, offset + length) };
+      return { start, data: bytes.data.subarray(offset, offset + length), signal };
     }
     if (offset >= 0 && offset < bytes.data.length) {
       const have = bytes.data.subarray(offset);
-      const rest = await file.source.read(start + have.length, length - have.length);
+      const rest = (await readBytes(start + have.length, length - have.length, signal)).data;
       stats.rereads++;
-      return { start, data: concatBytes(have, rest) };
+      return { start, data: concatBytes(have, rest), signal };
     }
-    return readBytes(start, length);
+    return readBytes(start, length, signal);
   }
 
+  /** The Cluster's head from `bytes` when they hold it, or read on its own when they are a signal. */
   async function headOf(
     cluster: number,
-    bytes: Bytes | undefined,
+    bytes: Bytes | { signal: ReadSignal | undefined },
   ): Promise<ClusterHead | undefined> {
     const known = heads.get(cluster);
     if (known) return known;
     let head: ClusterHead | undefined;
-    if (
-      bytes &&
-      cluster >= bytes.start &&
-      cluster + MAX_CLUSTER_HEADER <= bytes.start + bytes.data.length
-    ) {
-      head = parseClusterHead(bytes.data, cluster - bytes.start, bytes.start);
-    }
-    if (!head && bytes === undefined) {
+    if ('data' in bytes) {
+      if (
+        cluster >= bytes.start &&
+        cluster + MAX_CLUSTER_HEADER <= bytes.start + bytes.data.length
+      ) {
+        head = parseClusterHead(bytes.data, cluster - bytes.start, bytes.start);
+      }
+    } else {
       stats.headReads++;
-      const read = await readBytes(cluster, CLUSTER_HEAD_READ);
+      const read = await readBytes(cluster, CLUSTER_HEAD_READ, bytes.signal);
       head = parseClusterHead(read.data, 0, read.start);
     }
     if (head) remember(cluster, head);
@@ -407,7 +440,7 @@ export function createBlockReader(
   async function bytesFrom(bytes: Bytes, start: number, least: number): Promise<Bytes> {
     const offset = start - bytes.start;
     if (offset >= 0 && bytes.data.length - offset >= least) {
-      return { start, data: bytes.data.subarray(offset) };
+      return { start, data: bytes.data.subarray(offset), signal: bytes.signal };
     }
     return bytesAt(bytes, start, Math.max(least, guess));
   }
@@ -424,10 +457,13 @@ export function createBlockReader(
   }
 
   /**
-   * The block somewhere in the 8 places its Cluster's size allows. Among
-   * those that parse whole, the first wins, as long as every other lies
-   * inside it (a bare Block inside the BlockGroup found first); otherwise
-   * the place is not certain.
+   * The block somewhere in the 8 places its Cluster's size allows. One
+   * place that parses whole is the block. Of several, the first wins only
+   * when it is a BlockGroup and every other lies inside its own Block: the
+   * Block itself, and bytes of its text that happen to parse. A Block or
+   * SimpleBlock that holds another place may be the last bytes of the frame
+   * before, read as a block that swallows the real one, so then the place
+   * is not certain, nor is it when the winner is laced, as text never is.
    */
   async function guessedBlock(
     bytes: Bytes,
@@ -446,8 +482,15 @@ export function createBlockReader(
       }
       if (found.length > 0) {
         const outer = found[0]!;
-        const nested = found.every((block) => block.start >= outer.start && block.end <= outer.end);
-        return nested ? outer : 'unsure';
+        if (outer.laced) return 'unsure';
+        if (found.length === 1) return outer;
+        const inner = outer.inner;
+        if (!inner) return 'unsure';
+        for (let i = 1; i < found.length; i++) {
+          const block = found[i]!;
+          if (block.start < inner.start || block.end > inner.end) return 'unsure';
+        }
+        return outer;
       }
       if (needs <= view.data.length) break;
       view = await bytesAt(view, first, needs);
@@ -466,7 +509,7 @@ export function createBlockReader(
       if (guessed !== 'unsure') block = guessed;
       else {
         stats.fallbacks++;
-        head = await headOf(entry.cluster, undefined);
+        head = await headOf(entry.cluster, { signal: bytes.signal });
         if (head) block = await exactBlock(bytes, head.dataStart + relative);
       }
     }
@@ -491,7 +534,13 @@ export function createBlockReader(
 
     let payload: Uint8Array;
     try {
-      payload = await decodeContent(block.payload, trackData.encodings, 1, file.inflate);
+      payload = await decodeContent(
+        block.payload,
+        trackData.encodings,
+        1,
+        file.inflate,
+        MAX_TEXT_BLOCK,
+      );
     } catch {
       return { index, problem: 'undecodable' };
     }
@@ -506,7 +555,7 @@ export function createBlockReader(
     return cue ? { index, cue } : { index, problem: 'empty' };
   }
 
-  async function run(read: PlannedRead): Promise<LineResult[]> {
+  async function run(read: PlannedRead, signal?: ReadSignal): Promise<LineResult[]> {
     const results: LineResult[] = [];
     const placed = read.lines.filter((line) => line.entry.relative !== undefined);
     for (const line of read.lines) {
@@ -515,7 +564,7 @@ export function createBlockReader(
     }
     if (placed.length > 0) {
       if (alwaysHeads) {
-        for (const line of placed) await headOf(line.entry.cluster, undefined);
+        for (const line of placed) await headOf(line.entry.cluster, { signal });
       }
       // Heads read above (or earlier) place each block exactly: the planned span may have guessed.
       let start = read.start;
@@ -525,8 +574,11 @@ export function createBlockReader(
         start = Math.min(start, span.start);
         end = Math.max(end, span.end);
       }
-      const bytes = await readBytes(start, Math.min(end - start, maxRead + MAX_GUESS));
-      for (const line of placed) results.push(await lineOf(line, bytes));
+      const bytes = await readBytes(start, Math.min(end - start, maxRead + MAX_GUESS), signal);
+      for (const line of placed) {
+        if (signal?.aborted) throw new Error('aborted');
+        results.push(await lineOf(line, bytes));
+      }
     }
     for (const result of results) {
       if (result.cue) stats.lines++;

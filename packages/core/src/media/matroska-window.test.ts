@@ -10,7 +10,12 @@ import {
 } from './fixtures/helpers';
 import { type SyntheticLine, synthesize } from './fixtures/synthetic';
 import { type CueEntry, type MatroskaFile, openMatroska, readMatroskaCues } from './matroska';
-import { createMatroskaWindow, type MatroskaWindowOptions } from './matroska-window';
+import {
+  createMatroskaWindow,
+  type MatroskaWindowOptions,
+  type WindowClock,
+} from './matroska-window';
+import type { ReadSignal } from './source';
 
 /**
  * A two-hour film as a reader meets it on a debrid link: 5 Mbit/s of video
@@ -81,8 +86,47 @@ async function windowOn(options: MatroskaWindowOptions = {}) {
   const { file, entries } = await openFilm(source);
   const headReads = source.reads.length;
   const headBytes = source.bytes;
-  const window = createMatroskaWindow(file, 2, entries, options);
-  return { source, file, entries, window, headReads, headBytes };
+  // The signal each read for lines was made with.
+  const signals: ReadSignal[] = [];
+  const read = file.source.read;
+  file.source.read = (start, length, signal) => {
+    if (signal) signals.push(signal);
+    return read(start, length, signal);
+  };
+  const window = createMatroskaWindow(file, 2, entries, { clock: fakeClock(), ...options });
+  return { source, file, entries, window, headReads, headBytes, signals };
+}
+
+/** A clock that moves only when told to, firing the timers due on the way in order. */
+function fakeClock(): WindowClock & { advance(ms: number): void } {
+  let now = 0;
+  let id = 0;
+  const timers = new Map<number, { at: number; callback: () => void }>();
+  return {
+    now: () => now,
+    setTimeout(callback, ms) {
+      timers.set(++id, { at: now + ms, callback });
+      return id;
+    },
+    clearTimeout(handle) {
+      timers.delete(handle as number);
+    },
+    advance(ms) {
+      const until = now + ms;
+      for (;;) {
+        let due: number | undefined;
+        for (const [key, timer] of timers) {
+          if (timer.at <= until && (due === undefined || timer.at < timers.get(due)!.at)) due = key;
+        }
+        if (due === undefined) break;
+        const timer = timers.get(due)!;
+        timers.delete(due);
+        now = timer.at;
+        timer.callback();
+      }
+      now = until;
+    },
+  };
 }
 
 describe('a two-hour film', () => {
@@ -146,20 +190,28 @@ describe('a two-hour film', () => {
     expect(stats.requests).toBe(readsFor(wanted) + stats.headReads);
   });
 
-  it('drops the reads not yet made after a seek, and loads the new window first', async () => {
-    const { window, source, headReads } = await windowOn();
+  it('drops the reads not yet made after a seek, aborts those in flight, and loads the new window first', async () => {
+    const { window, source, headReads, signals } = await windowOn();
     window.update(0);
     // Four reads are in flight; the seek comes before any lands.
     window.update(3600);
+    expect(signals.slice(0, 4).map((signal) => signal.aborted)).toEqual([true, true, true, true]);
     await window.settled();
     const wanted = linesAround(3600);
     expect(source.reads.length - headReads).toBe(4 + readsFor(wanted));
     const cues = window.cues();
-    expect(cues.filter((cue) => cue.end > 3595)).toEqual(wanted.map(expectedCue));
-    // What landed from the first window is kept: four reads, the first a line and its reply.
-    expect(cues.filter((cue) => cue.start < 120)).toEqual(
-      linesAround(0).slice(0, 5).map(expectedCue),
-    );
+    expect(cues).toEqual(wanted.map(expectedCue));
+    expect(window.stats()).toMatchObject({ aborted: 4, failedReads: 0, inFlight: 0 });
+    expect(signals.slice(4).some((signal) => signal.aborted)).toBe(false);
+  });
+
+  it('keeps the reads in flight that a short rewind still wants', async () => {
+    const { window, signals } = await windowOn();
+    window.update(30);
+    window.update(28);
+    await window.settled();
+    expect(signals.some((signal) => signal.aborted)).toBe(false);
+    expect(window.cues()).toEqual(linesAround(28).map(expectedCue));
   });
 
   it('reads lines again after a rewind past what its bounded cache kept', async () => {
@@ -176,41 +228,168 @@ describe('a two-hour film', () => {
     expect(window.stats().evicted).toBeGreaterThan(0);
   });
 
-  it('tries a failed read again on the next update, at most three times', async () => {
+  it('tries a failed read again after 1 s, 2 s and 4 s, until the source answers', async () => {
     const source = partsSource(filmParts());
     const { file, entries } = await openFilm(source);
-    // Every read past the first 2 MB (the lines after the first Cluster) is refused.
+    // Every read past the first 2 MB (the lines after the first Cluster) is refused while down.
+    let down = true;
     let refused = 0;
     const failing = {
       size: source.size,
       read(start: number, length: number) {
-        if (start <= 2000000) return source.read(start, length);
+        if (start <= 2000000 || !down) return source.read(start, length);
         refused++;
         return Promise.reject(new Error('refused'));
       },
     };
+    const clock = fakeClock();
     const window = createMatroskaWindow({ ...file, source: failing }, 2, entries, {
       ahead: 10,
       refill: 5,
+      clock,
     });
+    const wanted = linesAround(0, 5, 10);
     window.update(0);
     await window.settled();
-    window.update(0.5);
+    expect(refused).toBe(1);
+    expect(window.stats()).toMatchObject({ failedReads: 1, waiting: 1 });
+    // Ticks do not hurry it.
+    for (let tick = 1; tick < 4; tick++) {
+      clock.advance(250);
+      window.update(tick / 4);
+      await window.settled();
+    }
+    expect(refused).toBe(1);
+    clock.advance(250);
     await window.settled();
-    window.update(1);
+    expect(refused).toBe(2);
+    clock.advance(1999);
     await window.settled();
-    window.update(1.5);
+    expect(refused).toBe(2);
+    clock.advance(1);
     await window.settled();
-    // The line past the first 2 MB failed three times and is not asked for again.
-    const failed = linesAround(0, 5, 10).filter((line) => line.time > 3000);
-    expect(failed).toHaveLength(1);
-    expect(window.stats().failedReads).toBe(3);
     expect(refused).toBe(3);
-    expect(window.cues()).toEqual(
-      linesAround(0, 5, 10)
-        .filter((line) => line.time <= 3000)
-        .map(expectedCue),
-    );
+    down = false;
+    clock.advance(4000);
+    await window.settled();
+    expect(refused).toBe(3);
+    expect(window.cues()).toEqual(wanted.map(expectedCue));
+    expect(window.stats()).toMatchObject({ failedReads: 3, waiting: 0 });
+  });
+
+  it('waits at most 30 s between tries, and tries again at once after a seek', async () => {
+    const source = partsSource(filmParts());
+    const { file, entries } = await openFilm(source);
+    let down = true;
+    let refused = 0;
+    const failing = {
+      size: source.size,
+      read(start: number, length: number) {
+        if (!down) return source.read(start, length);
+        refused++;
+        return Promise.reject(new Error('refused'));
+      },
+    };
+    const clock = fakeClock();
+    const window = createMatroskaWindow({ ...file, source: failing }, 2, entries, {
+      ahead: 10,
+      refill: 5,
+      maxInFlight: 1,
+      mergeGap: 1e9,
+      maxRead: 1e9,
+      clock,
+    });
+    window.update(1000);
+    await window.settled();
+    const waits: number[] = [];
+    let last = 0;
+    while (clock.now() < 200000) {
+      clock.advance(500);
+      await window.settled();
+      if (refused !== waits.length + 1) {
+        waits.push(clock.now() - last);
+        last = clock.now();
+      }
+    }
+    expect(waits.slice(0, 7)).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+    down = false;
+    window.update(1000);
+    window.update(980);
+    await window.settled();
+    expect(window.cues()).toEqual(linesAround(980, 5, 10).map(expectedCue));
+  });
+
+  it('aborts a read that takes more than 15 s, counts it failed, and frees its place', async () => {
+    const source = partsSource(filmParts());
+    const { file, entries } = await openFilm(source);
+    let stalled = true;
+    const signals: ReadSignal[] = [];
+    const stalling = {
+      size: source.size,
+      read(start: number, length: number, signal?: ReadSignal) {
+        if (signal) signals.push(signal);
+        return stalled ? new Promise<Uint8Array>(() => undefined) : source.read(start, length);
+      },
+    };
+    const clock = fakeClock();
+    const window = createMatroskaWindow({ ...file, source: stalling }, 2, entries, { clock });
+    window.update(0);
+    await Promise.resolve();
+    expect(window.stats()).toMatchObject({ inFlight: 4, timedOut: 0 });
+    clock.advance(14999);
+    expect(window.stats().inFlight).toBe(4);
+    stalled = false;
+    clock.advance(1);
+    // The four that hung are aborted and their places taken by the reads queued behind them.
+    expect(signals.slice(0, 4).map((signal) => signal.aborted)).toEqual([true, true, true, true]);
+    expect(window.stats()).toMatchObject({ timedOut: 4, failedReads: 4 });
+    await window.settled();
+    clock.advance(1000);
+    await window.settled();
+    expect(window.cues()).toEqual(linesAround(0).map(expectedCue));
+    expect(window.stats()).toMatchObject({ inFlight: 0, waiting: 0 });
+  });
+
+  it('keeps the lines up at the playhead through a stretch of twelve lines a second', async () => {
+    const dense: SyntheticLine[] = [];
+    for (let time = 10000; time < 900000; time += 4000) {
+      if (time < 600000 || time > 700000)
+        dense.push({ track: 2, time, duration: 2000, text: `Line at ${time}` });
+    }
+    for (let time = 600000; time < 690000; time += 83) {
+      dense.push({ track: 2, time, duration: 400, text: `Syllable at ${time}` });
+    }
+    dense.sort((a, b) => a.time - b.time);
+    const { parts } = synthesize({
+      length: 900000,
+      tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],
+      lines: dense,
+      clusterLength: 5000,
+      frameRate: 1,
+      videoRate: 625000,
+    });
+    const source = partsSource(parts);
+    const { file, entries } = await openFilm(source);
+    const window = createMatroskaWindow(file, 2, entries, { clock: fakeClock() });
+    let missing = 0;
+    let checks = 0;
+    let most = 0;
+    for (let time = 590; time < 700; time += 0.25) {
+      window.update(time);
+      await window.settled();
+      most = Math.max(most, window.stats().cached);
+      const shown = new Set(window.cues().map((cue) => cue.start));
+      for (const line of dense) {
+        if (line.time / 1000 <= time && (line.time + line.duration!) / 1000 > time) {
+          checks++;
+          if (!shown.has(line.time / 1000)) missing++;
+        }
+      }
+    }
+    expect(checks).toBeGreaterThan(1000);
+    expect(missing).toBe(0);
+    expect(most).toBeLessThanOrEqual(800);
+    expect(window.stats().evicted).toBeGreaterThan(0);
   });
 
   it('stops reading once closed', async () => {
