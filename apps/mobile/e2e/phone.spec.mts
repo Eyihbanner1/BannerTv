@@ -682,7 +682,8 @@ test('subtitles by language with numbered versions, the match note, and Timing k
   await mockAddons(page, { firstRun: true });
   await mockPlayback(page, {
     subtitleList: [
-      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL' },
+      // The stream's own release name ("Open Movie 1080p WEB-DL x264"): made for it.
+      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL.x264' },
       { id: 'en2', lang: 'eng' },
       { id: 'fr1', lang: 'fre' },
     ],
@@ -729,9 +730,9 @@ test('subtitles by language with numbered versions, the match note, and Timing k
   await english.click();
   const first = page.getByRole('button', { name: /^OpenSubtitles v3 1, / });
   await expect(first).toHaveAccessibleName(
-    'OpenSubtitles v3 1, Matches your video · Open.Movie.1080p.WEB-DL',
+    'OpenSubtitles v3 1, Same release · Open.Movie.1080p.WEB-DL.x264',
   );
-  await expect(first).toContainText('Matches your video · Open.Movie.1080p.WEB-DL');
+  await expect(first).toContainText('Same release · Open.Movie.1080p.WEB-DL.x264');
   await expect(page.getByRole('button', { name: 'OpenSubtitles v3 2', exact: true })).toBeVisible();
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
 
@@ -765,7 +766,7 @@ test('subtitles by language with numbered versions, the match note, and Timing k
   await openPanel();
   // English is the language chosen now, and the file made for this release comes first.
   await expect(page.getByRole('button', { name: /^OpenSubtitles v3 1, / })).toHaveAccessibleName(
-    /Matches your video/,
+    /Same release/,
   );
   await expect(timingTab).toHaveText('Timing +5.5 s · drift fixed');
   expect(errors).toEqual([]);

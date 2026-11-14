@@ -474,6 +474,7 @@ export {
   fileReleaseMatch,
   hearingName,
   keepOrder,
+  linkedToVideo,
   madeForRelease,
   type MatchedFile,
   numberBySource,

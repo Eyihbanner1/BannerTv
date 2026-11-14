@@ -167,16 +167,45 @@ describe('rankReason', () => {
 });
 
 describe('hash, disc and episode', () => {
-  it('ranks a file found by the video’s hash as made for the release, before one named for it', () => {
+  it('ranks a file found by the video’s hash as made for the release, after one named for it', () => {
     const files = [
       { id: 'plain' },
-      { id: 'named', label: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP-HI.srt' },
       { id: 'hash', label: 'Open_Movie.srt', hashMatch: true },
+      { id: 'named', label: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP-HI.srt' },
     ];
-    expect(rankReason(files[2]!, { video })).toBe(1);
-    expect(rank(files, {})).toEqual(['hash', 'named', 'plain']);
+    expect(rankReason(files[1]!, { video })).toBe(1);
+    // Named for the release beats the hash's mark alone, which OpenSubtitles puts on other
+    // releases' files too; both beat the rest.
+    expect(rank(files, {})).toEqual(['named', 'hash', 'plain']);
     // Read as drifting, it ranks by its fit like any other.
     expect(rank(files, { hash: DRIFTS, plain: FITS })).toEqual(['named', 'plain', 'hash']);
+  });
+
+  it('puts a hash match named for the release first, and takes one named for another for loose', () => {
+    // Fringe S04E03, Hungarian, on LOL's HDTV file: both linked to its hash by OpenSubtitles.
+    const fringe = { filename: 'Fringe.S04E03.HDTV.XviD-LOL.avi', season: 4, episode: 3 };
+    const reward = {
+      id: 'reward',
+      label: 'fringe.s04e03.dvdrip.xvid-reward.srt',
+      hashMatch: true,
+    };
+    const lol = { id: 'lol', label: 'Fringe.S04E03.HDTV.XviD-LOL.srt', hashMatch: true };
+    const unnamed = {
+      id: 'unnamed',
+      label: 'Fringe.S04E03.Alone in the World.srt',
+      hashMatch: true,
+    };
+    const order = (files: File[]) =>
+      rankSubtitles(files, { video: fringe, fit: () => undefined, hearing: false }).map(
+        (file) => file.id,
+      );
+    // Another source and group: not made for the release, whatever the hash says.
+    expect(rankReason(reward, { video: fringe })).toBe(2);
+    expect(order([reward, lol])).toEqual(['lol', 'reward']);
+    expect(order([unnamed, lol])).toEqual(['lol', 'unnamed']);
+    expect(order([reward, unnamed])).toEqual(['unnamed', 'reward']);
+    // Among files made for nothing, it counts as a loose match: before one with no match.
+    expect(order([{ id: 'plain', label: 'Fringe.srt' }, reward])).toEqual(['reward', 'plain']);
   });
 
   it('puts a loosely named file before another only where they fit as well', () => {
@@ -212,6 +241,8 @@ describe('hash, disc and episode', () => {
     ];
     expect(rank(files, {})).toEqual(['plain', 'sdh']);
     expect(rank(files, {}, { hearing: true })).toEqual(['sdh', 'plain']);
+    // Once both are read as plain, what reading found decides, not the name: the list's order.
+    expect(rank(files, { sdh: FITS, plain: FITS })).toEqual(['sdh', 'plain']);
   });
 });
 

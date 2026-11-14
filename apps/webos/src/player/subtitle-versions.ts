@@ -4,6 +4,7 @@ import {
   keepOrder,
   type LanguageGroup,
   languageName,
+  linkedToVideo,
   rankSubtitles,
   type StreamEntry,
   type SubtitleFit,
@@ -147,8 +148,16 @@ export function versionGroups(
 }
 
 /**
+ * An episode's video id, `{metaId}:{season}:{episode}`, for an IMDb or TMDB
+ * meta id. Other ids say nothing of a season: Kitsu's "kitsu:1376:5" is
+ * episode 5 of anime 1376, and the names are left to say which.
+ */
+const EPISODE_ID = /^(?:tt\d+|tmdb:\d+):(\d{1,4}):(\d{1,5})$/;
+
+/**
  * The release playing, as versions are matched against it: its file name and
- * title, and the season and episode its video's id gives ("tt0944947:1:2").
+ * title, and the season and episode its video's id gives ("tt0944947:1:2",
+ * "tmdb:1399:1:2").
  */
 export function playingRelease(entry: StreamEntry | null, videoId?: string): PlayingRelease {
   if (!entry) return {};
@@ -156,7 +165,7 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
     filename: entry.stream.behaviorHints.filename,
     title: streamTitle(entry),
   };
-  const episode = videoId ? /:(\d{1,4}):(\d{1,5})$/.exec(videoId) : null;
+  const episode = videoId ? EPISODE_ID.exec(videoId) : null;
   if (episode) {
     release.season = Number(episode[1]);
     release.episode = Number(episode[2]);
@@ -168,10 +177,11 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
  * What a version's row says of it: still loading its first line, could not be
  * read (the one chosen) or was passed over for that reason (another); else
  * what reading it found (its text in another script, signs only, part of the
- * video, longer than it) or its name says (another episode, one disc of two),
+ * video, longer than it) or its names or its addon say (another episode),
  * that its drift was fixed by itself, that its addon found it by the video's
- * hash (linked to it) or its release name looks the same as the video's (a
- * guess), and that it is for the hard of hearing.
+ * hash with no name saying otherwise (linked to it) or its release name is
+ * the same as the video's with enough to confirm it (a guess), and that it
+ * is for the hard of hearing.
  */
 export type VersionNote =
   | 'loading'
@@ -217,7 +227,9 @@ const MAX_NOTES = 2;
 /**
  * The notes on a version's row, most telling first, at most two: loading or
  * a failure alone; else what reading it found, then a drift fixed by itself,
- * found by the video's hash or else a release name that looks the same, and
+ * linked to the video by its hash (`linkedToVideo`) or else the same release
+ * by a strong match of the names (the same name, or the group confirming it:
+ * a loose match, another group's file as often as not, says nothing), and
  * lines for the hard of hearing.
  */
 export function versionNotes(
@@ -232,10 +244,14 @@ export function versionNotes(
   const notes: VersionNote[] = [];
   if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
   if (check?.autoDrift) notes.push('driftFixed');
-  if (version.hashMatch) notes.push('linked');
-  else if (fileReleaseMatch({ label: version.release, releaseName: version.releaseName }, video)) {
-    notes.push('sameRelease');
-  }
+  const file = {
+    label: version.release,
+    releaseName: version.releaseName,
+    hashMatch: version.hashMatch,
+  };
+  const match = fileReleaseMatch(file, video);
+  if (linkedToVideo(file, video)) notes.push('linked');
+  else if (match === 'exact' || match === 'group') notes.push('sameRelease');
   if (check?.hearing) notes.push('hearing');
   return notes.slice(0, MAX_NOTES);
 }

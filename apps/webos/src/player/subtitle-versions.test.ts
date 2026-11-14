@@ -137,6 +137,11 @@ describe('subtitle versions', () => {
     expect(versionNotes(matching, false, undefined, video)).toEqual(['sameRelease']);
     expect(versionNotes(other, false, undefined, video)).toEqual([]);
     expect(versionNotes(matching, false, undefined, {})).toEqual([]);
+    // A loose match, with no group on one side to confirm it, is as often another group's
+    // release: it says nothing.
+    expect(
+      versionNotes({ ...matching, release: 'Film.2024.1080p.WEB-DL' }, false, undefined, video),
+    ).toEqual([]);
     // The second name the addon sent counts too, and a subtitle file's own tags do not get in
     // the way: OpenSubtitles names its files ("…-GROUP-HI.srt").
     expect(
@@ -149,21 +154,48 @@ describe('subtitle versions', () => {
     ).toEqual(['sameRelease']);
     expect(
       versionNotes(
-        { ...other, releaseName: 'Film.2024.1080p.WEB-DL.x264-GROUP' },
+        { ...other, release: 'Film.2024.srt', releaseName: 'Film.2024.1080p.WEB-DL.x264-GROUP' },
         false,
         undefined,
         video,
       ),
     ).toEqual(['sameRelease']);
+    // But never against what the file's own name says: 720p from Blu-ray.
+    expect(
+      versionNotes(
+        { ...other, releaseName: 'Film.2024.1080p.WEB-DL.x264-GROUP' },
+        false,
+        undefined,
+        video,
+      ),
+    ).toEqual([]);
   });
 
-  it('says a file its addon found by the video’s hash is linked to it, whatever its name', () => {
+  it('carries the second release name from the addon’s file to the row', () => {
+    const video = { filename: 'Film.2024.1080p.WEB-DL.x264-GROUP.mkv' };
+    const [version] = subtitleVersions(
+      {
+        tracks: [],
+        options: [
+          {
+            ...option('os#1', 'eng', 'Film.2024.srt'),
+            releaseName: 'Film.2024.1080p.WEB-DL.x264-GROUP',
+          },
+        ],
+      },
+      IN_THE_STREAM,
+    );
+    expect(version).toMatchObject({ releaseName: 'Film.2024.1080p.WEB-DL.x264-GROUP' });
+    expect(versionNotes(version!, false, undefined, video)).toEqual(['sameRelease']);
+  });
+
+  it('says a file its addon found by the video’s hash is linked to it, unless its names say another release', () => {
     const video = { filename: 'Film.2024.1080p.WEB-DL.x264-GROUP.mkv' };
     const linked = {
       choice: { kind: 'file', key: 'os#1' } as const,
       lang: 'eng',
       source: 'OpenSubtitles v3',
-      release: 'Film.2024.720p.BluRay.srt',
+      release: 'Film_2024.srt',
       hashMatch: true,
     };
     expect(versionNotes(linked, false, undefined, video)).toEqual(['linked']);
@@ -179,6 +211,10 @@ describe('subtitle versions', () => {
       'linked',
       'hearing',
     ]);
+    // OpenSubtitles marks other releases' files linked to the hash too: 720p from Blu-ray.
+    expect(
+      versionNotes({ ...linked, release: 'Film.2024.720p.BluRay.srt' }, false, undefined, video),
+    ).toEqual([]);
   });
 
   it('says a file for another episode is, dimmed', () => {
@@ -203,8 +239,16 @@ describe('subtitle versions', () => {
       season: 1,
       episode: 1,
     });
+    expect(playingRelease(entry, 'tmdb:1399:2:3')).toMatchObject({ season: 2, episode: 3 });
     expect(playingRelease(entry, 'tt0111161')).not.toHaveProperty('season');
     expect(playingRelease(null, 'tt3581920:1:1')).toEqual({});
+    // A Kitsu or MyAnimeList episode is the anime's id and the episode: no season, so the
+    // names say which episode a file is for.
+    for (const id of ['kitsu:1376:5', 'kitsu:7442:3', 'mal:5114:1']) {
+      const release = playingRelease(entry, id);
+      expect(release, id).not.toHaveProperty('season');
+      expect(release, id).not.toHaveProperty('episode');
+    }
   });
 
   it('says what reading a file found, a drift fixed by itself, then the match and lines for the hard of hearing', () => {
@@ -321,9 +365,11 @@ describe('subtitle versions', () => {
       option('os#3', 'eng'),
     ];
     expect(firstOf([], options)).toBe('file:os#2');
-    // One its addon found by the video's hash, before one named for the release.
+    // One named for the release goes before one its addon's hash alone links to the video
+    // (OpenSubtitles marks other releases' files too), which goes before the rest.
     const hashed = options.map((o) => (o.key === 'os#3' ? { ...o, hashMatch: true } : o));
-    expect(firstOf([], hashed)).toBe('file:os#3');
+    expect(firstOf([], hashed)).toBe('file:os#2');
+    expect(firstOf([], [hashed[0]!, hashed[2]!])).toBe('file:os#3');
     // One for another episode, read or not, is passed over.
     expect(
       firstOf([], options, { checks: { 'file:os#2': { hearing: false, problem: 'episode' } } }),

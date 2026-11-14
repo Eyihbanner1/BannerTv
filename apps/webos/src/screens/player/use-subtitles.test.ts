@@ -199,7 +199,7 @@ const LONG = lines(1200, 9000);
 function file(
   id: string,
   cues: Cue[] | null,
-  extra: { lang?: string; label?: string; ms?: number } = {},
+  extra: { lang?: string; label?: string; ms?: number; season?: number; episode?: number } = {},
 ) {
   const option: SubtitleOption = {
     key: `os#${id}`,
@@ -208,6 +208,8 @@ function file(
     url: `https://subs.example/${id}.srt`,
   };
   if (extra.label) option.label = extra.label;
+  if (extra.season !== undefined) option.season = extra.season;
+  if (extra.episode !== undefined) option.episode = extra.episode;
   world.files.set(option.url, cues ? { cues, ms: extra.ms } : { cues: [], fail: true });
   return option;
 }
@@ -266,8 +268,11 @@ const BASE: SessionState = {
   attempts: [],
 };
 
-/** The player as the hook sees it, with the stream playing and the session's state. */
-function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false) {
+/**
+ * The player as the hook sees it, with the stream playing and the session's state: a film,
+ * or the episode a series video id names.
+ */
+function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false, videoId = VIDEO) {
   // A Lab stream has no title.
   const metaId = lab ? undefined : META;
   const playing = createStore<SessionState>({ ...BASE, entry: first, ...state });
@@ -282,7 +287,8 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
   const Screen = () => {
     react.state.at = 0;
     react.state.dirty = false;
-    result = useSubtitles('movie', VIDEO, metaId, entry, session, playing.get());
+    const type = videoId === VIDEO ? 'movie' : 'series';
+    result = useSubtitles(type, videoId, metaId, entry, session, playing.get());
   };
   react.state.slots = [];
   react.state.effects = [];
@@ -837,6 +843,39 @@ describe('the stream’s own tracks', () => {
     expect(player.subtitles.choice).toEqual(fileChoice(full));
     await player.session({ text: [forced, track('en|English', 'en')] });
     expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'en|English' });
+  });
+});
+
+describe('files for another episode', () => {
+  it('are said to be before they are read, and never chosen', async () => {
+    // The stream's name says nothing of the episode: the video's id does.
+    const entry = streamEntry('episode-one');
+    const named = file('named', FULL, { label: 'Show.S01E02.1080p.WEB.H264-CAKES.srt' });
+    const tagged = file('tagged', FULL, { season: 1, episode: 2 });
+    const right = file('right', FULL, { ms: 1000, season: 1, episode: 1 });
+    offer(entry, [named, tagged, right]);
+    const player = play(entry, {}, false, `${META}:1:1`);
+    await player.flush();
+    const episode = { hearing: false, problem: 'episode' };
+    expect(player.subtitles.checkOf({ kind: 'file', key: named.key })).toEqual(episode);
+    expect(player.subtitles.checkOf({ kind: 'file', key: tagged.key })).toEqual(episode);
+    expect(player.subtitles.checkOf({ kind: 'file', key: right.key })).toBeUndefined();
+    await player.wait(1500);
+    expect(player.subtitles.choice).toEqual(fileChoice(right));
+    expect(world.loads).toEqual([right.url]);
+  });
+
+  it('are told by the names alone for a Kitsu episode, whose id gives no season', async () => {
+    const entry = streamEntry('episode-five');
+    const e5 = file('e5', FULL, { label: 'Death.Note.S01E05.1080p.BluRay.x264.srt' });
+    offer(entry, [e5]);
+    const player = play(entry, {}, false, 'kitsu:1376:5');
+    await player.wait(500);
+    expect(player.subtitles.checkOf({ kind: 'file', key: e5.key })).toMatchObject({
+      hearing: false,
+    });
+    expect(player.subtitles.checkOf({ kind: 'file', key: e5.key })).not.toHaveProperty('problem');
+    expect(player.subtitles.choice).toEqual(fileChoice(e5));
   });
 });
 

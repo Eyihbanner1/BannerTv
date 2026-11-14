@@ -85,10 +85,21 @@ describe('readNameTags', () => {
       ' [ger].srt',
       '.forced.srt',
       '.pt-BR.srt',
+      // A copy's number in brackets, other formats, and tags saying the lines are plain.
+      '(1).srt',
+      '[2].srt',
+      '.smi',
+      '.idx',
+      '-NHI.srt',
+      '-NHI_spa.srt',
+      '.NonHI.srt',
+      '.Non-HI.en.srt',
     ]) {
       expect(readNameTags(release + tail).release, tail).toBe(release);
     }
     expect(releaseGroup(readNameTags(`${release}-HI.srt`).release)).toBe('cakes');
+    expect(releaseGroup(readNameTags(`${release}-NHI.srt`).release)).toBe('cakes');
+    expect(releaseGroup(readNameTags('Film.2021.1080p.WEB-DL-GRP(1).srt').release)).toBe('grp');
   });
 
   it('says whether the file is for the hard of hearing, and which disc it goes with', () => {

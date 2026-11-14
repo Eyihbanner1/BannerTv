@@ -3,6 +3,7 @@ import {
   discPart,
   fileReleaseMatch,
   hearingName,
+  linkedToVideo,
   madeForRelease,
   type MatchedFile,
   otherEpisode,
@@ -12,9 +13,9 @@ import {
 /*
  * The order to try the subtitle files of one language in: the version the
  * viewer picked by hand for this release first, then one made for the
- * release (found by the video's hash, or named for it with the group
- * confirming it), then the files that fit the video best, and the addon's
- * own order where nothing tells them apart.
+ * release (named for it with the group confirming it, or found by the
+ * video's hash with no name saying otherwise), then the files that fit the
+ * video best, and the addon's own order where nothing tells them apart.
  */
 
 /** Where a file not read yet sits among the tiers below. */
@@ -81,9 +82,10 @@ export type ReasonOptions<T> = Pick<RankOptions<T>, 'video' | 'remembered'> &
 
 /**
  * Why a file ranks where it does, best first: picked before, made for the
- * release (`madeForRelease`: found by the video's hash, or named for it with
- * the group confirming it), then neither. Being made for the release is a
- * strong hint, not proof, so it counts only while the file is not read yet
+ * release (`madeForRelease`: named for it with the group confirming it, or
+ * found by the video's hash with no name saying otherwise), then neither.
+ * Being made for the release is a strong hint, not proof, so it counts only
+ * while the file is not read yet
  * or reads whole: once read (or named) as drifting, covering only part,
  * running long, failing its checks or for another episode, the file ranks
  * by its fit like any other. The version picked by hand stays first whatever
@@ -99,14 +101,20 @@ export function rankReason<T extends MatchedFile>(item: T, options: ReasonOption
 
 /**
  * How strongly a file is said to be for the release, best first, among
- * files of the same reason and tier: found by the video's hash; the same
- * name or group; a loose match on the episode, resolution or source alone;
- * none.
+ * files of the same reason and tier: found by the video's hash and named for
+ * the release; named for it (the same name, or the group confirming it);
+ * found by the hash, its names saying nothing against it; a loose match on
+ * the episode, resolution or source alone, or a hash match whose names say
+ * another release; none. OpenSubtitles marks every file linked to the hash,
+ * some made for other releases, so its mark alone counts for less than a
+ * name that says the release.
  */
 function standing(file: MatchedFile, video: VideoRelease): number {
-  if (file.hashMatch) return 0;
   const match = fileReleaseMatch(file, video);
-  return match === 'exact' || match === 'group' ? 1 : match === 'loose' ? 2 : 3;
+  const named = match === 'exact' || match === 'group';
+  if (named) return file.hashMatch ? 0 : 1;
+  if (linkedToVideo(file, video)) return 2;
+  return match === 'loose' || file.hashMatch ? 3 : 4;
 }
 
 /**

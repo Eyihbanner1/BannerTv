@@ -4,6 +4,7 @@ import {
   fileReleaseMatch,
   hearingName,
   keepOrder,
+  linkedToVideo,
   madeForRelease,
   numberBySource,
   otherEpisode,
@@ -94,15 +95,38 @@ describe('fileReleaseMatch', () => {
     ).toBeUndefined();
   });
 
-  it('matches two names that are the same once read, though they give few facts', () => {
+  it('matches two names that are the same once read, when they give the group or two facts', () => {
     const video = { filename: 'Inception.2010.TS.V2.XVID.FEEL-FREE.avi' };
     expect(fileReleaseMatch({ label: 'Inception.2010.TS.V2.XVID.FEEL-FREE.srt' }, video)).toBe(
       'exact',
     );
     expect(fileReleaseMatch({ label: 'Inception 2010 TS V2 XVID FEEL-FREE' }, video)).toBe('exact');
+    // The group alone, no other fact: the same name is enough.
+    expect(
+      fileReleaseMatch(
+        { label: 'Inception.2010.R5.LiNE.XviD-GRP.srt' },
+        { filename: 'Inception.2010.R5.LiNE.XviD-GRP.avi' },
+      ),
+    ).toBe('exact');
+    expect(
+      fileReleaseMatch(
+        { label: 'Movie.2010.XviD-GRP.srt' },
+        { filename: 'Movie.2010.XviD-GRP.avi' },
+      ),
+    ).toBe('exact');
     // Not a bare title: "Inception" says nothing of the release.
     expect(
       fileReleaseMatch({ label: 'Inception.srt' }, { filename: 'Inception.mkv' }),
+    ).toBeUndefined();
+    // Nor the title, year and resolution alone, the only fact the names share.
+    expect(
+      fileReleaseMatch(
+        { label: 'Dune.Part.Two.2024.4K.srt', releaseName: 'Dune Part Two 2024' },
+        {
+          filename: 'Dune- Part Two (2024) 4K.mkv',
+          title: 'Dune Part Two 2024 2160p UHD Blu-Ray',
+        },
+      ),
     ).toBeUndefined();
   });
 
@@ -131,7 +155,7 @@ describe('fileReleaseMatch', () => {
     ).toBeUndefined();
   });
 
-  it('reads the second release name the addon sends, unless it is a bare title', () => {
+  it('fills what the file’s own name leaves out from the second release name the addon sends', () => {
     const film = { filename: 'Dune.Part.Two.2024.1080p.WEB-DL.H264.AAC-InMemoryOfEVO.mp4' };
     expect(
       fileReleaseMatch(
@@ -142,6 +166,17 @@ describe('fileReleaseMatch', () => {
         film,
       ),
     ).toBe('exact');
+    // The group from the second name, the rest from the file's own.
+    expect(
+      fileReleaseMatch(
+        {
+          label: 'Dune.Part.Two.2024.1080p.WEB-DL.srt',
+          releaseName: 'Dune.Part.Two-InMemoryOfEVO',
+        },
+        film,
+      ),
+    ).toBe('group');
+    // Neither name says enough of the release.
     expect(
       fileReleaseMatch(
         {
@@ -151,6 +186,53 @@ describe('fileReleaseMatch', () => {
         { filename: 'The.Shawshank.Redemption.1994.1080p.BluRay.x264-aFLDp.mkv' },
       ),
     ).toBeUndefined();
+  });
+
+  it('never lets the second release name outweigh a fact the file’s own name gives', () => {
+    // The Last of Us S01E01, Italian: NTb's 1080p file on NTb's 720p stream.
+    const ntb720 = {
+      filename:
+        'The.Last.of.Us.S01E01.When.Youre.Lost.in.the.Darkness.720p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv',
+    };
+    expect(
+      fileReleaseMatch(
+        {
+          label:
+            'The.Last.of.Us.S01E01.When.Youre.Lost.in.the.Darkness.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.ita.srt',
+          releaseName: 'AMZN.WEB-DL.DDP5.1.H.264-NTb',
+        },
+        ntb720,
+      ),
+    ).toBeUndefined();
+    // Arabic: SMURF's 2160p file, its second name leaving the resolution out, on a 1080p stream.
+    expect(
+      fileReleaseMatch(
+        {
+          label: 'The.Last.of.Us.S01E01.2160p.HMAX.WEB-DL.x265.10bit.HDR.DDP5.1.Atmos-SMURF.srt',
+          releaseName: 'The.Last.of.Us.S01E01.HMAX.WEB-SMURF',
+        },
+        {
+          filename:
+            'The.Last.of.Us.S01E01.Episode.1.1080p.HMAX.WEB-DL.DDP5.1.Atmos.H.264-SMURF.mkv',
+        },
+      ),
+    ).toBeUndefined();
+    // A name that gives two resolutions says neither: the file's own 1080p decides.
+    const turkish = {
+      label: 'The.Last.of.Us.S01E01.Episode.1.1080p.HMAX.WEB-DL.DDP5.1.Atmos.H.264-SMURF.srt',
+      releaseName: 'The.Last.of.Us.S01E01.WEBRip.720p/1080p.HMAX.DDP5.1.Atmos.x264-SMURF',
+    };
+    expect(
+      fileReleaseMatch(turkish, {
+        filename: 'The.Last.of.Us.S01E01.Episode.1.720p.HMAX.WEB-DL.DDP5.1.Atmos.H.264-SMURF.mkv',
+      }),
+    ).toBeUndefined();
+    expect(
+      fileReleaseMatch(
+        { label: 'The.Last.of.Us.S01E01.WEBRip.720p/1080p.HMAX.DDP5.1.Atmos.x264-SMURF' },
+        { filename: 'The.Last.of.Us.S01E01.720p.HMAX.WEBRip.DDP5.1.Atmos.x264-SMURF.mkv' },
+      ),
+    ).toBe('group');
   });
 
   it('takes YTS and YIFY for one group, as they name their releases with a tag', () => {
@@ -175,13 +257,17 @@ describe('fileReleaseMatch', () => {
         other,
       ).toBeUndefined();
     }
-    // A title word is not a source: "The.TS.Madison…" from the web.
+    // A title word is not a source: "The.TS.Madison…" from the web is not a telesync copy,
+    // and matches another web release of the same group.
+    const madison = { label: 'The.TS.Madison.Experience.2024.1080p.WEB-DL-GRP' };
     expect(
-      fileReleaseMatch(
-        { label: 'The.TS.Madison.Experience.2024.1080p.WEB-DL-GRP' },
-        { filename: 'The.TS.Madison.Experience.2024.1080p.WEB-DL-GRP.mkv' },
-      ),
-    ).toBe('exact');
+      fileReleaseMatch(madison, { filename: 'The.TS.Madison.Experience.2024.HDTS.x264-GRP.mkv' }),
+    ).toBeUndefined();
+    expect(
+      fileReleaseMatch(madison, {
+        filename: 'The.TS.Madison.Experience.2024.1080p.WEBRip.x264-GRP.mkv',
+      }),
+    ).toBe('group');
   });
 });
 
@@ -198,6 +284,36 @@ describe('madeForRelease', () => {
     // A loose match is not enough.
     expect(madeForRelease({ label: 'The.Last.of.Us.S01E01.1080p.WEB.srt' }, video)).toBe(false);
     expect(madeForRelease({}, video)).toBe(false);
+  });
+
+  it('does not take a hash match whose names say another release', () => {
+    // OpenSubtitles marks every file linked to Fringe S04E03's LOL file, REWARD's DVDRip too.
+    const fringe = { filename: 'Fringe.S04E03.HDTV.XviD-LOL.avi', season: 4, episode: 3 };
+    const reward = {
+      label: 'fringe.s04e03.dvdrip.xvid-reward.srt',
+      releaseName: 'Fringe.S04E03.DVDRip.XviD-REWARD',
+      hashMatch: true,
+    };
+    expect(linkedToVideo(reward, fringe)).toBe(false);
+    expect(madeForRelease(reward, fringe)).toBe(false);
+    // Another group alone, or another episode, says as much.
+    expect(
+      linkedToVideo({ label: 'Fringe.S04E03.HDTV.XviD-2HD.srt', hashMatch: true }, fringe),
+    ).toBe(false);
+    expect(linkedToVideo({ label: 'Fringe.S04E04.srt', hashMatch: true }, fringe)).toBe(false);
+    // Its second name fills what its own leaves out: "fringe.403.hdtv-lol" is LOL's.
+    const named = {
+      label: 'Fringe 4x03 Alone in the World.en.srt',
+      releaseName: 'fringe.403.hdtv-lol',
+      hashMatch: true,
+    };
+    expect(linkedToVideo(named, fringe)).toBe(true);
+    expect(fileReleaseMatch(named, fringe)).toBe('group');
+    // Names that say nothing against it.
+    expect(
+      linkedToVideo({ label: 'Fringe.S04E03.Alone in the World.srt', hashMatch: true }, fringe),
+    ).toBe(true);
+    expect(linkedToVideo({ label: 'Fringe.S04E03.HDTV.XviD-LOL.srt' }, fringe)).toBe(false);
   });
 });
 
@@ -231,6 +347,54 @@ describe('otherEpisode', () => {
     expect(otherEpisode({ label: 'Show.S01E02.srt' }, { filename: 'Film.2021.1080p.mkv' })).toBe(
       false,
     );
+  });
+
+  it('reads the second release name only when the file’s own name and its addon say nothing', () => {
+    expect(otherEpisode({ label: 'x.srt', releaseName: 'Show.S01E02.1080p.WEB' }, video)).toBe(
+      true,
+    );
+    // Fallout S01E01, Amharic: the addon and the file's own name say 1x01, the second name is cut.
+    expect(
+      otherEpisode(
+        {
+          label: 'amharic Fallout.2024.S01E01.AMZN.WEB- BOB DL.H.264-FLUX+GalaxyTV.srt',
+          releaseName: 'Fallout.2024.S01E0',
+          season: 1,
+          episode: 1,
+        },
+        video,
+      ),
+    ).toBe(false);
+    // The Bear 1x01, Spanish: its second name says another season.
+    expect(
+      otherEpisode(
+        { label: 'The Bear 1x01 -es.srt', releaseName: 'The Bear S06E01', season: 1, episode: 1 },
+        video,
+      ),
+    ).toBe(false);
+    // Game of Thrones 1x01, Indonesian: a whole season's release name.
+    expect(
+      otherEpisode(
+        {
+          label: 'Game.Of.Thrones.S01E01.720p.HDTV.x264-CTU.Ind.srt',
+          releaseName: 'Game.Of.Thrones.S01E00-10.720p.HDTV.x264-CTU',
+          season: 1,
+          episode: 1,
+        },
+        video,
+      ),
+    ).toBe(false);
+  });
+
+  it('takes episode 0 alone for no episode, and reads a range after a dash', () => {
+    expect(otherEpisode({ label: 'Show.S01E0' }, video)).toBe(false);
+    expect(otherEpisode({ label: 'Show.S01E00.HDTV.XviD-lSy.srt' }, video)).toBe(false);
+    expect(otherEpisode({ label: 'Show.S01E00-10.720p.HDTV.x264-CTU' }, video)).toBe(false);
+    expect(otherEpisode({ label: 'Show.S01E01-03.srt' }, { ...video, episode: 3 })).toBe(false);
+    expect(otherEpisode({ label: 'Show.S01E01-03.srt' }, { ...video, episode: 4 })).toBe(true);
+    // A resolution after a dash is no range.
+    expect(otherEpisode({ label: 'Show.S01E02-1080p.srt' }, { ...video, episode: 2 })).toBe(false);
+    expect(otherEpisode({ label: 'Show.S01E02-720p.srt' }, video)).toBe(true);
   });
 });
 
@@ -271,11 +435,16 @@ describe('discPart and hearingName', () => {
     for (const name of [
       'Hi.Score.Girl.S01E01.srt',
       'Film.2021.NonHI.srt',
+      // "NonHI", "NHI" or "Non-HI" says plain lines, whatever tag follows.
+      'House on Haunted Hill (1959).DVDRip.NonHI.cc.en.LGND.srt',
+      'The.Bear.S01E01.1080p.WEB.H264-CAKES-NHI.srt',
+      'Film.2021.1080p.WEB.H264-GRP.Non-HI.cc.srt',
       'Chicago.srt',
       undefined,
     ]) {
       expect(hearingName(name), String(name)).toBe(false);
     }
+    expect(hearingName('House on Haunted Hill (1959).DVDRip.HI.cc.en.LGND.srt')).toBe(true);
   });
 });
 

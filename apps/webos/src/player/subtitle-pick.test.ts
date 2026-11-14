@@ -613,21 +613,39 @@ describe('fitsIn', () => {
 describe('files made for the release, discs and other episodes', () => {
   const offered = [file('a'), file('b'), file('c')];
 
-  it('shows a file its addon found by the video’s hash at once, whatever its name', () => {
-    const hashed = [
-      ...offered,
-      { ...file('hash', 'eng', 'Film.2021.720p.WEB.srt'), hashMatch: true },
-    ];
+  it('shows a file its addon found by the video’s hash at once, unless its names say another release', () => {
+    const hashed = [...offered, { ...file('hash', 'eng', 'Some_Film.srt'), hashMatch: true }];
     expect(plan(hashed, {})).toEqual({ pick: 'hash', read: [], hold: false, switched: false });
-    // Before one named for the release with its group: the hash is the file itself.
+    // After one named for the release with its group: OpenSubtitles marks other releases' files
+    // linked to the hash too. One both found by the hash and named goes first.
     const named = file('named', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP-HI.srt');
     expect(keys(rankedFiles([named, ...hashed], 'en', context()))).toEqual([
-      'hash',
       'named',
+      'hash',
       'a',
       'b',
       'c',
     ]);
+    const both = {
+      ...file('both', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP.srt'),
+      hashMatch: true,
+    };
+    expect(keys(rankedFiles([named, ...hashed, both], 'en', context()))[0]).toBe('both');
+    // Names that say another source and resolution: read and held like any other file.
+    const other = { ...file('other', 'eng', 'Some.Film.2021.720p.WEB.srt'), hashMatch: true };
+    expect(plan([other, ...offered], {})).toEqual({
+      pick: 'other',
+      read: ['other', 'a'],
+      hold: true,
+      switched: false,
+    });
+    // Like a loose match, it goes before others only while they fit no better.
+    expect(plan([...offered, other], {})).toMatchObject({ read: ['a', 'b'], hold: true });
+    expect(
+      plan([...offered, other], { a: FITS, other: BEHIND }, { current: 'other', timeUp: true })
+        .pick,
+    ).toBe('a');
+    expect(plan([named, other], {}).pick).toBe('named');
     // Read as drifting, it ranks by its fit like any other.
     expect(plan(hashed, { a: FITS, hash: BEHIND }, { current: 'hash', holding: false })).toEqual({
       pick: 'a',

@@ -10,7 +10,7 @@ const GROUP = /-([a-z0-9]{2,})(?:\[[^\][]*\])?$/i;
 
 // Words a release name ends on that are not a group: "WEB-DL", "Blu-Ray",
 // "x264", "DTS-HD", "5.1", a language ("-ITA"), "-sample", "-NOGRP", or a
-// subtitle file's own tags ("-HI", "-SDH", "-CD1", "-v2").
+// subtitle file's own tags ("-HI", "-SDH", "-NHI", "-CD1", "-v2").
 const NOT_A_GROUP = new RegExp(
   '^(?:' +
     [
@@ -24,7 +24,7 @@ const NOT_A_GROUP = new RegExp(
       'multi|dual|audio|lang|dub|dubbed|subs?|esubs?|vostfr|truefrench',
       'eng|english|ingles|ita|italian|spa|spanish|esp|fre|french|ger|german|rus|hin|hindi|jpn|kor',
       'lat|latino|castellano',
-      'hi|sdh|cc|forced|cd\\d|v\\d',
+      'hi|sdh|cc|nhi|nonhi|forced|cd\\d|v\\d',
     ].join('|') +
     ')$',
   'i',
@@ -45,10 +45,11 @@ export function releaseGroup(name: string): string | undefined {
  * A subtitle file's name is often its release's name with tags of its own
  * after it: its language ("…-NTb.en.srt", "….English.srt",
  * "…-NTb13_[spa].srt"), that it is for the hard of hearing ("…-CAKES-HI.srt",
- * "…(SDH).srt", "….en[cc].srt"), which disc of a release split in two it
- * goes with ("…-HigHoT-CD1.ENG.srt"), a second version ("…-EVO-HI.v2.srt")
- * or the site it came from ("….HI.C.updated.Addic7ed.com.srt"). Those are
- * read off the end, one at a time, before the release is read.
+ * "…(SDH).srt", "….en[cc].srt") or is not ("…-CAKES-NHI.srt", "….Non-HI.srt"),
+ * which disc of a release split in two it goes with ("…-HigHoT-CD1.ENG.srt"),
+ * a second version ("…-EVO-HI.v2.srt") or the site it came from
+ * ("….HI.C.updated.Addic7ed.com.srt"). Those are read off the end, one at a
+ * time, before the release is read.
  */
 
 /** Languages, as ISO 639 codes and names: the end of a name only. */
@@ -75,13 +76,22 @@ const LANGUAGE_TAG = new RegExp(
 );
 /** For the hard of hearing: "HI", "SDH", "CC". */
 const HEARING_TAG = /^(?:hi|sdh|cc)$/i;
+/** Plain lines, not for the hard of hearing: "NonHI", "NHI". */
+const PLAIN_TAG = /^(?:nonhi|nhi)$/i;
+/** "Non-HI" or "Non.HI" at the end, two words that are one tag. */
+const NON_HI_END = /[ ._-]+non[ ._-]hi$/i;
 /**
  * "SDH" or "hearing impaired" anywhere, or "HI" or "CC" after another word
  * ("…-CAKES-HI", "….HI.cc.en.LGND", "….en[cc]"): "Hi.Score.Girl" is a
- * title and "NonHI" says the opposite.
+ * title.
  */
 const HEARING_WORD =
   /(?:^|[^a-z0-9])(?:sdh|hearing[ ._-]?impaired)(?![a-z])|[^a-z0-9](?:hi|cc)(?![a-z0-9])/i;
+/**
+ * "NonHI", "Non-HI" or "NHI" anywhere says the lines are plain, whatever
+ * else the name says: LGND names its plain files "….NonHI.cc.en.LGND".
+ */
+const PLAIN_WORD = /(?:^|[^a-z0-9])(?:non[ ._-]?hi|nhi)(?![a-z0-9])/i;
 /** Tags that say nothing of the release or of the file's lines. */
 const OTHER_TAG =
   /^(?:forced|full|subs?|v\d|ansi|utf-?8|c|updated|edit(?:ed)?|orig(?:inal)?|addic7ed|com)$/i;
@@ -103,7 +113,7 @@ const PART_AFTER_GROUP = /-[a-z0-9]{2,}[ ._-]+(?:part|pt)[ ._-]?([1-9])$/i;
 export interface NameTags {
   /** The name without its extension and the tags that follow the release. */
   release: string;
-  /** It says the file is for the hard of hearing: HI, SDH or CC. */
+  /** It says the file is for the hard of hearing: HI, SDH or CC, and not NonHI or NHI. */
   hearing: boolean;
   /** Which disc of a release split in two or more it goes with: CD1, Disc 2, "Part 1 of 2". */
   part?: number;
@@ -113,6 +123,7 @@ function isTag(word: string, bracketed: boolean): boolean {
   return (
     LANGUAGE_TAG.test(word) ||
     HEARING_TAG.test(word) ||
+    PLAIN_TAG.test(word) ||
     OTHER_TAG.test(word) ||
     DISC_TAG.test(word) ||
     (bracketed && /^\d{1,2}$/.test(word))
@@ -128,7 +139,7 @@ export function readNameTags(name: string): NameTags {
   // A few rounds at most: a careless name could otherwise be read for long.
   for (let round = 0; round < 12; round++) {
     const before = text;
-    text = text.replace(EXTENSION, '').replace(PACK_TAG, '');
+    text = text.replace(EXTENSION, '').replace(PACK_TAG, '').replace(NON_HI_END, '');
     const bracket = BRACKET_TAG.exec(text);
     const tag = bracket ?? END_WORD.exec(text);
     if (tag && tag.index > 0 && isTag(tag[1]!, !!bracket)) text = text.slice(0, tag.index);
@@ -137,7 +148,7 @@ export function readNameTags(name: string): NameTags {
   const disc = DISC.exec(name) ?? PART_OF.exec(name) ?? PART_AFTER_GROUP.exec(text);
   return {
     release: text,
-    hearing: HEARING_WORD.test(name),
+    hearing: HEARING_WORD.test(name) && !PLAIN_WORD.test(name),
     ...(disc && { part: Number(disc[1]) }),
   };
 }

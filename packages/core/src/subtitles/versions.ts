@@ -13,9 +13,9 @@ type SourceFamily = 'web' | 'bluray' | 'hdtv' | 'dvd' | 'cam' | 'ts' | 'tc' | 's
 interface ReleaseFeatures {
   /** The season, from "s01e04", "1x04" or a season pack's "S01". */
   season?: number;
-  /** The episodes, from "s01e04", "S01E01E02" or "S01E01-E03". */
+  /** The episodes, from "s01e04", "S01E01E02", "S01E01-E03" or "S01E01-03". Never episode 0 alone. */
   episodes?: number[];
-  /** "2160p", "1080p", "720p", "576p", "480p". */
+  /** "2160p", "1080p", "720p", "576p", "480p"; none from a name that gives two ("720p/1080p"). */
   resolution?: string;
   source?: SourceFamily;
   /** The group that made the release, lower case; `yts` for YTS and YIFY. */
@@ -45,14 +45,15 @@ export interface MatchedFile {
   episode?: number;
 }
 
-const EPISODE = /(?:^|[^a-z0-9])s(\d{1,2})[ ._-]?e(\d{1,3})((?:[ ._]?-?[ ._]?e\d{1,3})*)(?![0-9])/;
+const EPISODE =
+  /(?:^|[^a-z0-9])s(\d{1,2})[ ._-]?e(\d{1,3})((?:[ ._]?-?[ ._]?e\d{1,3}|-\d{1,3}(?![0-9a-z]))*)(?![0-9])/;
 const CROSS_EPISODE = /(?:^|[^a-z0-9])(\d{1,2})x(\d{2,3})(?![a-z0-9])/;
 const SEASON_PACK = /(?:^|[^a-z0-9])s(\d{1,2})(?![a-z0-9])/;
 
-/** "e02e03" or "-e03" after the first episode: the others, a dash making a range. */
+/** "e02e03", "-e03" or "-03" after the first episode: the others, a dash making a range. */
 function moreEpisodes(first: number, rest: string): number[] {
   const episodes = [first];
-  const re = /(-?)[ ._]?e(\d{1,3})/g;
+  const re = /(-?)[ ._]?e?(\d{1,3})/g;
   for (let found = re.exec(rest); found; found = re.exec(rest)) {
     const next = Number(found[2]);
     const last = episodes[episodes.length - 1]!;
@@ -90,7 +91,10 @@ function features(name: string): ReleaseFeatures {
   const cross = episode ? null : CROSS_EPISODE.exec(words);
   if (episode) {
     found.season = Number(episode[1]);
-    found.episodes = moreEpisodes(Number(episode[2]), episode[3] ?? '');
+    const episodes = moreEpisodes(Number(episode[2]), episode[3] ?? '');
+    // "S01E00" alone is a name cut short ("S01E0") or the start of a range read no further:
+    // no episode.
+    if (episodes.length > 1 || episodes[0] !== 0) found.episodes = episodes;
   } else if (cross) {
     found.season = Number(cross[1]);
     found.episodes = [Number(cross[2])];
@@ -99,9 +103,14 @@ function features(name: string): ReleaseFeatures {
     if (pack) found.season = Number(pack[1]);
   }
 
-  const resolution = /(?:^|[^a-z0-9])(2160|1080|720|576|480)[pi](?![a-z0-9])/.exec(words);
-  if (resolution) found.resolution = `${resolution[1]}p`;
-  else if (/(?:^|[^a-z0-9])(?:4k|uhd)(?![a-z0-9])/.test(words)) found.resolution = '2160p';
+  const resolutions = new Set<string>();
+  const re = /(?:^|[^a-z0-9])(2160|1080|720|576|480)[pi](?![a-z0-9])/g;
+  for (let res = re.exec(words); res; res = re.exec(words)) resolutions.add(`${res[1]}p`);
+  if (resolutions.size === 0 && /(?:^|[^a-z0-9])(?:4k|uhd)(?![a-z0-9])/.test(words)) {
+    resolutions.add('2160p');
+  }
+  // "WEBRip.720p/1080p" names two releases: it says neither.
+  if (resolutions.size === 1) found.resolution = Array.from(resolutions)[0];
 
   for (const [family, pattern] of SOURCES) {
     if (!pattern.test(words)) continue;
@@ -112,11 +121,6 @@ function features(name: string): ReleaseFeatures {
   const group = isYtsRelease(name) ? 'yts' : releaseGroup(tags.release);
   if (group) found.group = group;
   return found;
-}
-
-/** A name that says no more than a title: no resolution, source or group. */
-function isBare(found: ReleaseFeatures): boolean {
-  return !found.resolution && !found.source && !found.group;
 }
 
 /** The video's features: its file name first, its title filling the gaps. */
@@ -130,18 +134,39 @@ const episodeKey = (found: ReleaseFeatures) =>
   found.episodes ? `${found.season}:${found.episodes.join(',')}` : undefined;
 
 /**
- * How a subtitle file's name matches the video playing, best first:
- * `exact`, the same release name; `group`, the same group and at least one
- * more fact; `loose`, at least two facts (episode, resolution, family of
- * source) but no group on both sides to confirm it, so the file may be
- * another service's or another group's; undefined, no match. Every fact
- * both names give must agree.
+ * How a subtitle file's names match the video playing, best first:
+ * `exact`, the same release name, which gives a group or agrees on at least
+ * two facts; `group`, the same group and at least one more fact; `loose`, at
+ * least two facts (episode, resolution, family of source) but no group on
+ * both sides to confirm it, so the file may be another service's or another
+ * group's; undefined, no match. Every fact the file's names and the video's
+ * both give must agree.
  */
 export type ReleaseMatch = 'exact' | 'group' | 'loose';
 
-function matchOne(name: string, video: VideoRelease): ReleaseMatch | undefined {
-  const sub = features(name);
-  const vid = videoFeatures(video);
+/**
+ * What a file's names say of its release: its own name first, the second
+ * release name its addon sends (OpenSubtitles' `movieReleaseName`) filling
+ * only what that leaves out. So a fact its own name gives against the video
+ * ("…1080p…-NTb.ita.srt" on a 720p stream) is never outweighed by a second
+ * name that leaves it out ("AMZN.WEB-DL.DDP5.1.H.264-NTb").
+ */
+function fileFeatures(file: Pick<MatchedFile, 'label' | 'releaseName'>): {
+  facts: ReleaseFeatures;
+  names: ReleaseFeatures[];
+} {
+  const names = [file.label, file.releaseName]
+    .filter((name): name is string => !!name)
+    .map(features);
+  const [own, second] = names;
+  return { facts: { ...second, ...own, plain: own?.plain ?? '' }, names };
+}
+
+/**
+ * How many facts (episode, resolution, family of source, group) a file and
+ * the video both give and agree on; undefined when one of them differs.
+ */
+function agreeing(sub: ReleaseFeatures, vid: ReleaseFeatures): number | undefined {
   const facts: Array<[string | undefined, string | undefined]> = [
     [episodeKey(sub), episodeKey(vid)],
     [sub.resolution, vid.resolution],
@@ -154,36 +179,35 @@ function matchOne(name: string, video: VideoRelease): ReleaseMatch | undefined {
     if (a !== b) return undefined;
     agree++;
   }
-  // The same name as the video's file or title, once both are read past their tags, and
-  // nothing in the file name against it. Not a bare title: "Inception" says nothing.
-  const same = [video.filename, video.title].some(
-    (videoName) => !!videoName && features(videoName).plain === sub.plain,
-  );
-  if (same && !isBare(sub)) return 'exact';
-  if (agree < 2) return undefined;
-  return sub.group !== undefined && vid.group !== undefined ? 'group' : 'loose';
+  return agree;
 }
-
-const STRENGTH: Readonly<Record<ReleaseMatch, number>> = { exact: 0, group: 1, loose: 2 };
 
 /**
  * How a subtitle file's names match the video playing (`ReleaseMatch`): its
- * label, and its second release name when that says more than a title
- * ("Shawshank Redemption, The (1994)" says nothing of the release). The
- * better of the two counts. A best guess from the names, so the sheet can
- * say "Same release".
+ * own name, with the second release name its addon sends filling what that
+ * leaves out (`fileFeatures`). A best guess from the names.
  */
 export function fileReleaseMatch(
   file: Pick<MatchedFile, 'label' | 'releaseName'>,
   video: VideoRelease,
 ): ReleaseMatch | undefined {
-  let best: ReleaseMatch | undefined;
-  for (const name of [file.label, file.releaseName]) {
-    if (!name || (name === file.releaseName && isBare(features(name)))) continue;
-    const match = matchOne(name, video);
-    if (match && (!best || STRENGTH[match] < STRENGTH[best])) best = match;
-  }
-  return best;
+  const { facts, names } = fileFeatures(file);
+  if (names.length === 0) return undefined;
+  const vid = videoFeatures(video);
+  const agree = agreeing(facts, vid);
+  if (agree === undefined) return undefined;
+  // One of its names is the video's file name or title, once both are read past their tags,
+  // and that name gives the group or two facts: "Dune.Part.Two.2024.4K" says only the
+  // resolution, and "Inception" nothing.
+  const videoNames = [video.filename, video.title]
+    .filter((name): name is string => !!name)
+    .map((name) => features(name).plain);
+  const same = names.some(
+    (name) => !!name.plain && videoNames.indexOf(name.plain) !== -1 && (!!name.group || agree >= 2),
+  );
+  if (same) return 'exact';
+  if (agree < 2) return undefined;
+  return facts.group !== undefined && vid.group !== undefined ? 'group' : 'loose';
 }
 
 /** Whether a subtitle file's release name matches the video playing, however loosely. */
@@ -192,22 +216,35 @@ export function releaseMatch(subtitleName: string | undefined, video: VideoRelea
 }
 
 /**
+ * Whether its addon found the file by the video's hash and its names do not
+ * say it is another release: OpenSubtitles links many files to one hash, some
+ * made for another source, group or episode ("…DVDRip.XviD-REWARD" on an
+ * HDTV file of LOL's), and those count as a loose match at most.
+ */
+export function linkedToVideo(file: MatchedFile, video: VideoRelease): boolean {
+  return !!file.hashMatch && agreeing(fileFeatures(file).facts, videoFeatures(video)) !== undefined;
+}
+
+/**
  * Whether a file is made for the release playing, so it may show at once:
- * its addon found it by the video's hash, or its name matches the video's
- * with the group confirming it (or is the very same name). A loose match
- * on the episode and resolution alone is not enough: another group's or
- * another service's file says as much.
+ * its name matches the video's with the group confirming it (or is the very
+ * same name, saying enough), or its addon found it by the video's hash and
+ * its names do not say otherwise (`linkedToVideo`). A loose match on the
+ * episode and resolution alone is not enough: another group's or another
+ * service's file says as much.
  */
 export function madeForRelease(file: MatchedFile, video: VideoRelease): boolean {
-  if (file.hashMatch) return true;
   const match = fileReleaseMatch(file, video);
-  return match === 'exact' || match === 'group';
+  return match === 'exact' || match === 'group' || linkedToVideo(file, video);
 }
 
 /**
  * Whether a file is for another episode than the one playing, or another
- * season: by the season and episode its addon gives, or by its names. Never
- * for a film, nor when neither side says.
+ * season: by the season and episode its addon gives, or by its own name. Its
+ * second release name counts only when neither says anything: OpenSubtitles'
+ * is often cut short ("Fallout.2024.S01E0"), a whole season's
+ * ("S01E00-10"), or another season's by mistake. Never for a film, nor when
+ * neither side says.
  */
 export function otherEpisode(file: MatchedFile, video: VideoRelease): boolean {
   const named = videoFeatures(video);
@@ -221,7 +258,10 @@ export function otherEpisode(file: MatchedFile, video: VideoRelease): boolean {
       ...(file.episode !== undefined && { episodes: [file.episode] }),
     });
   }
-  for (const name of [file.label, file.releaseName]) if (name) claims.push(features(name));
+  if (file.label) claims.push(features(file.label));
+  const says = (claim: { season?: number; episodes?: number[] }) =>
+    claim.season !== undefined || claim.episodes !== undefined;
+  if (!claims.some(says) && file.releaseName) claims.push(features(file.releaseName));
   return claims.some(
     (claim) =>
       (claim.season !== undefined && season !== undefined && claim.season !== season) ||

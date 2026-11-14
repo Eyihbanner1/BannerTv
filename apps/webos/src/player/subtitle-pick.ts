@@ -4,6 +4,7 @@ import {
   fileTier,
   judgeSubtitleFits,
   languageKey,
+  linkedToVideo,
   madeForRelease,
   type MatchedFile,
   otherEpisode,
@@ -55,12 +56,12 @@ export function filesIn<T extends PickableSubtitle>(offered: readonly T[], langu
 
 /**
  * The files in a language, best first (`rankSubtitles`): the version picked
- * by hand for this release, one made for the release (found by the video's
- * hash, or named for it with the group confirming it), then the best fit, in
- * the order given where nothing tells them apart. Files that could not be
- * read are left out, and so are those that failed their checks badly (in
- * another script, or signs only) or are for another episode, unless picked
- * by hand.
+ * by hand for this release, one made for the release (named for it with the
+ * group confirming it, or found by the video's hash with no name saying
+ * otherwise), then the best fit, in the order given where nothing tells them
+ * apart. Files that could not be read are left out, and so are those that
+ * failed their checks badly (in another script, or signs only) or are for
+ * another episode, unless picked by hand.
  */
 export function rankedFiles<T extends PickableSubtitle>(
   offered: readonly T[],
@@ -221,9 +222,10 @@ function keepOrSwitch<T extends PickableSubtitle>(
  * and whether to hold the lines back meanwhile.
  *
  * - A version picked by hand for this release, or one made for the release
- *   (found by the video's hash, or named for it with the group confirming
- *   it: `madeForRelease`), is chosen at once, and no other is read while it
- *   reads whole and plain (or for the hard of hearing, as wanted), nor, for
+ *   (named for it with the group confirming it, or found by the video's hash
+ *   with no name saying otherwise: `madeForRelease`), is chosen at once, and
+ *   no other is read while it reads whole and plain (or for the hard of
+ *   hearing, as wanted), nor, for
  *   one made for the release, while it is on its way and not yet a slow
  *   download. A loose match on the episode and resolution alone is not
  *   enough: such a file is read and held like any other, and only goes
@@ -344,9 +346,9 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
 
 /**
  * Why the file chosen automatically is the one showing, for Diagnostics:
- * picked by hand for the release; found by the video's hash, or named for the
- * release with the group confirming it (made for the release, while it does
- * not read as fitting badly); a better fit than another in the list; named
+ * picked by hand for the release; found by the video's hash with no name
+ * saying otherwise, or named for the release with the group confirming it
+ * (made for the release, while it does not read as fitting badly); a better fit than another in the list; named
  * for the release loosely, with no group to confirm it, among files that fit
  * as well; or nothing told it apart, and the list's order chose.
  */
@@ -363,7 +365,9 @@ export function pickReason<T extends PickableSubtitle>(
     fit: (option) => context.fit(option.url),
     hearing: context.hearing,
   });
-  if (reason === 1) return pick.hashMatch ? 'linked to your video' : 'same release name';
+  if (reason === 1) {
+    return linkedToVideo(pick, context.video) ? 'linked to your video' : 'same release name';
+  }
   const tierOf = (option: T) =>
     fileTier(option, context.fit(option.url), context.video, context.hearing);
   const tier = tierOf(pick);
