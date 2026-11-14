@@ -1,4 +1,5 @@
 import type { SubtitleDrift } from '../playback/drifts';
+import { readNameTags } from '../streams/release';
 import { languageKey } from './languages';
 import type { Cue } from './types';
 
@@ -162,7 +163,7 @@ export interface SubtitleProfile {
   scripts: Partial<Record<Script, number>>;
   /** Lines marked for the hard of hearing: sounds in brackets, a speaker's name, music alone. */
   hearingLines: number;
-  /** The release name the addon sent says it is for the hard of hearing (SDH). */
+  /** The release name the addon sent says it is for the hard of hearing (SDH, HI, CC). */
   hearingLabel: boolean;
   /** The release name says it holds only forced lines, or signs and songs. */
   forcedLabel: boolean;
@@ -189,7 +190,6 @@ const BRACKETED = /^[-–—]?\s*[[(][^\])]{2,}[\])]/;
 const SPEAKER = /^[-–—]?\s*[A-Z][A-Z0-9'’.# -]{1,28}:(?:\s|$)/;
 /** Music notes alone, with no words between them. */
 const MUSIC_ALONE = /^[\s♪♫#*~]*[♪♫][\s♪♫#*~]*$/;
-const HEARING_LABEL = /(?:^|[^a-z])(?:sdh|hearing[ ._-]?impaired)(?:[^a-z]|$)/i;
 const FORCED_WORD = /(?:^|[^a-z])forced(?:[^a-z]|$)/i;
 const SONGS_LABEL = /(?:^|[^a-z])signs?[ ._-]*(?:&|and|\+|\/)[ ._-]*songs(?:[^a-z]|$)/i;
 /** Words that say a file is not forced ("Non-Forced", "no forced", "not forced"): no tag at all. */
@@ -308,7 +308,8 @@ export function profileSubtitles(cues: readonly Cue[], label?: string): Subtitle
     letters,
     scripts,
     hearingLines,
-    hearingLabel: !!label && HEARING_LABEL.test(label),
+    // "SDH", "hearing impaired", or an HI or CC tag: "…-CAKES-HI.srt", "….en[cc].srt".
+    hearingLabel: !!label && readNameTags(label).hearing,
     forcedLabel: !!label && isForcedLabel(label),
     songsLabel: !!label && SONGS_LABEL.test(label),
   };

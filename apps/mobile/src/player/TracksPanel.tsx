@@ -58,9 +58,9 @@ export interface TracksPanelProps {
  * The player's audio and subtitles panel, as the TV's sheet has them: Subtitles, Audio and
  * Timing tabs. Subtitles lists Off and the languages, the last chosen first, each with how
  * many versions it has; the open language shows its versions under it, numbered by source,
- * each saying first whether it is loading, couldn't be read or matches the video. Rows keep
- * their places while the panel is open, as more addons answer. Mount it only while open, so
- * each opening starts afresh, as the TV's sheet does.
+ * each saying first whether it is loading, couldn't be read, or is linked to the video or the
+ * same release. Rows keep their places while the panel is open, as more addons answer. Mount
+ * it only while open, so each opening starts afresh, as the TV's sheet does.
  */
 export function TracksPanel(props: TracksPanelProps) {
   const { subtitles } = props;

@@ -5,8 +5,10 @@ import {
   forgetHashes,
   HASH_CHUNK,
   HASH_TIMEOUT_MS,
+  hashSkip,
   hashStream,
   openSubtitlesHash,
+  readStreamHash,
 } from './stream-hash';
 import { noteRequestHeaders } from './request-headers';
 
@@ -168,5 +170,24 @@ describe('reading the hash of a stream', () => {
     // Listed again without headers, it is one file like any other.
     noteRequestHeaders({ source: { kind: 'url', url: guarded }, behaviorHints: {} } as Stream);
     expect(canHash(guarded)).toBe(true);
+  });
+
+  it('says why a hash was not read, for Diagnostics, and never the link', async () => {
+    expect(hashSkip('https://live.example.com/match/master.m3u8')).toBe('playlist');
+    expect(hashSkip('magnet:?xt=urn:btih:abc')).toBe('not a file link');
+    expect(await readStreamHash('https://cdn.example.com/film/manifest.mpd')).toEqual({
+      skipped: 'playlist',
+      ms: 0,
+    });
+    serve(file(4 * HASH_CHUNK), { ranges: false });
+    expect(await readStreamHash(url)).toMatchObject({ failed: 'no range' });
+    serve(file(HASH_CHUNK + 10));
+    expect(await readStreamHash(url)).toMatchObject({ failed: 'too small' });
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')));
+    const refused = await readStreamHash(url);
+    expect(refused).toMatchObject({ failed: 'refused' });
+    expect(JSON.stringify(refused)).not.toContain('example');
+    serve(file(4 * HASH_CHUNK));
+    expect(await readStreamHash(url)).toMatchObject({ found: { videoSize: 4 * HASH_CHUNK } });
   });
 });

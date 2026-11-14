@@ -29,6 +29,22 @@
   color: var(--bt-text-subtle);
 }
 
+/* A long value under its label, across the column. */
+.stacked {
+  margin-bottom: 8px;
+  font: 500 24px/1.3 var(--bt-font);
+}
+
+.stacked .label {
+  display: block;
+  width: auto;
+}
+
+.stacked .value {
+  display: block;
+  overflow-wrap: break-word;
+}
+
 .value {
   flex: 1;
   min-width: 0;

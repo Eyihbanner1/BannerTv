@@ -789,7 +789,7 @@ describe('judgeSubtitleFits', () => {
         }).map((each) => each.id);
         return { fits, ranked };
       };
-      // OpenSubtitles sends no release name at all.
+      // A file whose name says nothing of it.
       const unnamed = { id: 'songs', profile: profileSubtitles(ass(sung.concat(signs))) };
       // The karaoke gives it more than half the plain file's lines, and a full file's a minute.
       expect(unnamed.profile.lines).toBeGreaterThan(plain.profile.lines / 2);

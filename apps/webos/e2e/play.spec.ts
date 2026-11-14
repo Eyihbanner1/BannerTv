@@ -13,6 +13,7 @@ import {
   seedStreamAddon,
 } from './play';
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
+import { openAsLgTv } from './homebrew';
 import { mockServices, traktSignIn } from './services';
 
 /** Elephants Dream, the first title on Home. */
@@ -948,8 +949,9 @@ test('subtitles come from the subtitles addon: a language on the left, its versi
   await openMovie(page);
   await press(page, 'Enter', 'player-surface');
   await expect.poll(async () => (await video(page)).playing).toBe(true);
-  // The subtitles addon was asked with the stream's file name, to match the release.
-  await expect.poll(() => mock.subtitles.join()).toContain('filename=movie-1080p.webm');
+  // OpenSubtitles v3 is not sent the stream's file name: it answers the same without it.
+  await expect.poll(() => mock.subtitles.length).toBeGreaterThan(0);
+  expect(mock.subtitles.join()).not.toContain('filename=');
 
   await press(page, 'ArrowUp', 'player-play');
   await press(page, 'ArrowDown', 'player-tracks-button');
@@ -963,7 +965,7 @@ test('subtitles come from the subtitles addon: a language on the left, its versi
     'aria-label',
     'English, 2 versions',
   );
-  // Its versions show beside it as it takes focus. OpenSubtitles sends no release names.
+  // Its versions show beside it as it takes focus. These files come with no names.
   const first = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
   const second = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   await expect(first).toHaveText('OpenSubtitles v3 1');
@@ -3575,7 +3577,8 @@ test('each version says where it is from and how it is doing, and its timing is 
   await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
   await mockPlayback(page, {
     subtitleList: [
-      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL' },
+      // The stream's own release name: made for it, it shows at once, and no other is read.
+      { id: 'en1', lang: 'eng', label: 'Open.Movie.1080p.WEB-DL.x264' },
       { id: 'en2', lang: 'eng', label: 'Open.Movie.720p.BluRay' },
       { id: 'missing', lang: 'eng' },
       { id: 'fr1', lang: 'fre' },
@@ -3592,8 +3595,8 @@ test('each version says where it is from and how it is doing, and its timing is 
   const en1 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   const missing = page.locator(`[data-focus-key="${OPENSUBTITLES}#missing"]`);
-  // The release names it sends, and a best guess at which matches the stream (1080p WEB-DL).
-  await expect(en1).toHaveText('OpenSubtitles v3 1Matches your video · Open.Movie.1080p.WEB-DL');
+  // The release names it sends, and a best guess at which is the stream's release.
+  await expect(en1).toHaveText('OpenSubtitles v3 1Same release · Open.Movie.1080p.WEB-DL.x264');
   await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
 
@@ -3665,6 +3668,199 @@ test('each version says where it is from and how it is doing, and its timing is 
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
 });
 
+/** Leaves the player for the title's page, then Home. */
+async function leavePlayer(page: Page) {
+  for (let step = 0; step < 4 && (await focusedKey(page)) !== 'details-watch'; step++) {
+    await pressBack(page);
+  }
+  await expectFocus(page, 'details-watch');
+  await pressBack(page);
+  await expect.poll(() => focusedKey(page)).not.toBe('details-watch');
+}
+
+/** Settings > Diagnostics, from Home. */
+async function openDiagnostics(page: Page) {
+  await openSection(page, 'settings');
+  await expectFocus(page, 'settings-stream-choice');
+  for (const key of [
+    'settings-probing',
+    'settings-subtitle-style',
+    'settings-still-watching',
+    'settings-next-at-credits',
+    'settings-diagnostics',
+  ]) {
+    await press(page, 'ArrowDown', key);
+  }
+  await press(page, 'Enter', 'diagnostics-refresh');
+}
+
+test('the file OpenSubtitles names for the stream’s release shows first and says Same release, and Diagnostics says why with no link', async ({
+  page,
+}) => {
+  await recordDrawnText(page);
+  const report: string[] = [];
+  page.on('console', async (message) => {
+    const [label, body] = message.args();
+    if ((await label?.jsonValue()) === '[BannerTV diagnostics]') {
+      report.push(String(await body?.jsonValue()));
+    }
+  });
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  const release = 'Open.Movie.2024.1080p.WEB-DL.x264-BANNER';
+  const mock = await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: `/${release}.webm` }] },
+    // As OpenSubtitles v3 sends them: its file names, the release they were made for, and
+    // found by the video's id. The second is the stream's release, its language after it.
+    subtitleList: [
+      {
+        id: 'en1',
+        lang: 'eng',
+        subtitleFileName: 'Open.Movie.2024.1080p.WEB-DL.x264-OTHER.srt',
+        movieReleaseName: 'Open.Movie.2024.1080p.WEB-DL.x264-OTHER',
+        m: 'i',
+      },
+      {
+        id: 'en2',
+        lang: 'eng',
+        subtitleFileName: `${release}.eng.srt`,
+        movieReleaseName: release,
+        m: 'i',
+      },
+      { id: 'fr1', lang: 'fre', subtitleFileName: `${release}.fre.srt`, m: 'i' },
+    ],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  // Made for the release, it shows at once: the first in the list never does.
+  await expect(page.getByText('The second English file')).toBeVisible();
+  expect(await drawnText(page)).not.toContain('Hello from the test subtitles');
+  expect(mock.subtitles.join()).not.toContain('filename=');
+
+  await openSheet(page, 'player-tracks-lang-en');
+  const en1 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
+  const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
+  // Its file name, without the extension, after the note; another group's says nothing.
+  await expect(en2).toHaveText(`OpenSubtitles v3 2Same release · ${release}.eng`);
+  await expect(en1).toHaveText('OpenSubtitles v3 1Open.Movie.2024.1080p.WEB-DL.x264-OTHER');
+
+  // Diagnostics says what happened to this play's subtitles, and names no file or link.
+  await leavePlayer(page);
+  await openDiagnostics(page);
+  const section = page.locator('section', {
+    has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
+  });
+  await expect(section).toContainText(MOVIE);
+  await expect(section).toContainText('files en 2, fr 1 (3 in all)');
+  await expect(section).toContainText('en, same release name');
+  await expect(section).toContainText(/first line after \d+\.\d s/);
+  await expect(section).toContainText(/hash (read in|failed after|not tried)/);
+  const shown = await section.innerText();
+  for (const name of ['http', 'example.com', 'BANNER', '.webm', '.srt']) {
+    expect(shown).not.toContain(name);
+  }
+  // The console line carries it too, as plainly.
+  await expect.poll(() => report.length).toBeGreaterThan(0);
+  const sections = JSON.parse(report[report.length - 1]!) as Array<{
+    title: string;
+    rows: string[][];
+  }>;
+  const logged = JSON.stringify(sections.find((part) => part.title === 'Subtitles'));
+  expect(logged).toContain(MOVIE);
+  for (const name of ['http', 'example.com', 'BANNER', '.webm', '.srt']) {
+    expect(logged).not.toContain(name);
+  }
+});
+
+test('on an LG TV, Diagnostics shows the newest play’s subtitles inside the screen, and its console line the plays before', async ({
+  page,
+}) => {
+  const report: string[] = [];
+  page.on('console', async (message) => {
+    const [label, body] = message.args();
+    if ((await label?.jsonValue()) === '[BannerTV diagnostics]') {
+      report.push(String(await body?.jsonValue()));
+    }
+  });
+  // The TV's own section has its ten rows there, as on a real TV, above the Lab's speeds.
+  await openAsLgTv(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    subtitleList: [
+      { id: 'en1', lang: 'eng' },
+      { id: 'en2', lang: 'eng' },
+      { id: 'fr1', lang: 'fre' },
+    ],
+  });
+  await openMovie(page);
+  for (let play = 0; play < 2; play++) {
+    await page.keyboard.press('Enter');
+    await expect.poll(() => focusedKey(page)).toBe('player-surface');
+    await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+    for (let step = 0; step < 4 && !(await focusedKey(page))?.startsWith('details-'); step++) {
+      await pressBack(page);
+    }
+    await expect.poll(() => focusedKey(page)).toMatch(/^details-/);
+    // Watched a little: the first button may now be another than Watch.
+    for (let step = 0; step < 3 && (await focusedKey(page)) !== 'details-watch'; step++) {
+      await page.keyboard.press('ArrowLeft');
+    }
+    await expectFocus(page, 'details-watch');
+  }
+  await pressBack(page);
+  await expect.poll(() => focusedKey(page)).not.toMatch(/^details-/);
+  await openDiagnostics(page);
+  const tv = page.locator('section', {
+    has: page.getByRole('heading', { name: 'TV', exact: true }),
+  });
+  await expect(tv.locator('div')).toHaveCount(10);
+  const section = page.locator('section', {
+    has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
+  });
+  await expect(section).toContainText('first line after');
+  // The newest play only, inside the screen's safe area.
+  await expect(section.locator('div')).toHaveCount(1);
+  const box = await section.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(1080 - 54);
+  // The console line carries both.
+  await expect.poll(() => report.length).toBeGreaterThan(0);
+  const sections = JSON.parse(report[report.length - 1]!) as Array<{
+    title: string;
+    rows: string[][];
+  }>;
+  expect(sections.find((part) => part.title === 'Subtitles')?.rows).toHaveLength(2);
+});
+
+test('the file OpenSubtitles found by the video’s hash shows first and says it is linked to your video', async ({
+  page,
+}) => {
+  await recordDrawnText(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    subtitleList: [
+      { id: 'en1', lang: 'eng', subtitleFileName: 'Elephants.Dream.2006.720p.BluRay.srt', m: 'i' },
+      // Its name says nothing of the release: someone linked it to this very file.
+      { id: 'en2', lang: 'eng', subtitleFileName: 'elephants_dream.srt', m: 'h' },
+    ],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect(page.getByText('The second English file')).toBeVisible();
+  expect(await drawnText(page)).not.toContain('Hello from the test subtitles');
+
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`)).toHaveText(
+    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+  );
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`)).toHaveText(
+    'OpenSubtitles v3 1Elephants.Dream.2006.720p.BluRay',
+  );
+});
+
 /** Records every piece of text the page draws, for a check that some never showed. */
 async function recordDrawnText(page: Page) {
   await page.addInitScript(() => {
@@ -3691,7 +3887,7 @@ test('the first subtitles to show are the full file: signs only, lines for the h
   await mockPlayback(page, {
     // The 10-minute video, so the files' lengths can be judged against it.
     streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
-    // As OpenSubtitles might list them: the worst first, and no release names.
+    // As OpenSubtitles might list them: the worst first, and no names that tell them apart.
     subtitleList: [
       { id: 'signs', lang: 'eng' },
       { id: 'sdh', lang: 'eng' },

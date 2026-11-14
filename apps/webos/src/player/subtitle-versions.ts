@@ -1,10 +1,11 @@
 import {
+  fileReleaseMatch,
   groupByLanguage,
   keepOrder,
   type LanguageGroup,
   languageName,
+  linkedToVideo,
   rankSubtitles,
-  releaseMatch,
   type StreamEntry,
   type SubtitleFit,
 } from '@bannertv/core';
@@ -30,6 +31,10 @@ export interface SubtitleVersion {
   source: string;
   /** The release name an addon sent, or a track's own name where it says more than its language. */
   release?: string;
+  /** A second release name the addon sent, for matching only: never shown. */
+  releaseName?: string;
+  /** The addon found the file by the video's hash. */
+  hashMatch?: boolean;
   /** A stream track of forced lines only (signs, the foreign-language scenes). */
   forced?: boolean;
 }
@@ -107,6 +112,8 @@ export function subtitleVersions(
       lang: option.lang,
       source: option.source,
       release: option.label,
+      ...(option.releaseName !== undefined && { releaseName: option.releaseName }),
+      ...(option.hashMatch && { hashMatch: true }),
     })),
   ];
 }
@@ -140,18 +147,41 @@ export function versionGroups(
   );
 }
 
-/** The release playing, as versions are matched against it. */
-export function playingRelease(entry: StreamEntry | null): PlayingRelease {
-  return entry ? { filename: entry.stream.behaviorHints.filename, title: streamTitle(entry) } : {};
+/**
+ * An episode's video id, `{metaId}:{season}:{episode}`, for an IMDb or TMDB
+ * meta id. Other ids say nothing of a season: Kitsu's "kitsu:1376:5" is
+ * episode 5 of anime 1376, and the names are left to say which.
+ */
+const EPISODE_ID = /^(?:tt\d+|tmdb:\d+):(\d{1,4}):(\d{1,5})$/;
+
+/**
+ * The release playing, as versions are matched against it: its file name and
+ * title, and the season and episode its video's id gives ("tt0944947:1:2",
+ * "tmdb:1399:1:2").
+ */
+export function playingRelease(entry: StreamEntry | null, videoId?: string): PlayingRelease {
+  if (!entry) return {};
+  const release: PlayingRelease = {
+    filename: entry.stream.behaviorHints.filename,
+    title: streamTitle(entry),
+  };
+  const episode = videoId ? EPISODE_ID.exec(videoId) : null;
+  if (episode) {
+    release.season = Number(episode[1]);
+    release.episode = Number(episode[2]);
+  }
+  return release;
 }
 
 /**
  * What a version's row says of it: still loading its first line, could not be
  * read (the one chosen) or was passed over for that reason (another); else
  * what reading it found (its text in another script, signs only, part of the
- * video, longer than it), that its drift was fixed by itself, that its
- * release name looks made for the video playing, and that it is for the hard
- * of hearing.
+ * video, longer than it) or its names or its addon say (another episode),
+ * that its drift was fixed by itself, that its addon found it by the video's
+ * hash with no name saying otherwise (linked to it) or its release name is
+ * the same as the video's with enough to confirm it (a guess), and that it
+ * is for the hard of hearing.
  */
 export type VersionNote =
   | 'loading'
@@ -159,10 +189,12 @@ export type VersionNote =
   | 'skipped'
   | 'otherScript'
   | 'signs'
+  | 'otherEpisode'
   | 'short'
   | 'long'
   | 'driftFixed'
-  | 'matches'
+  | 'linked'
+  | 'sameRelease'
   | 'hearing';
 
 /** Each note's words, as keys in the strings. */
@@ -172,16 +204,19 @@ export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
   skipped: 'player.versionSkipped',
   otherScript: 'player.versionOtherScript',
   signs: 'player.versionSigns',
+  otherEpisode: 'player.versionOtherEpisode',
   short: 'player.versionShort',
   long: 'player.versionLong',
   driftFixed: 'player.versionDriftFixed',
-  matches: 'player.matchesVideo',
+  linked: 'player.versionLinked',
+  sameRelease: 'player.versionSameRelease',
   hearing: 'player.versionHearing',
 };
 
 const PROBLEM_NOTES: Readonly<Record<NonNullable<SubtitleCheck['problem']>, VersionNote>> = {
   script: 'otherScript',
   signs: 'signs',
+  episode: 'otherEpisode',
   short: 'short',
   long: 'long',
 };
@@ -192,7 +227,10 @@ const MAX_NOTES = 2;
 /**
  * The notes on a version's row, most telling first, at most two: loading or
  * a failure alone; else what reading it found, then a drift fixed by itself,
- * a release name that matches, and lines for the hard of hearing.
+ * linked to the video by its hash (`linkedToVideo`) or else the same release
+ * by a strong match of the names (the same name, or the group confirming it:
+ * a loose match, another group's file as often as not, says nothing), and
+ * lines for the hard of hearing.
  */
 export function versionNotes(
   version: SubtitleVersion,
@@ -206,23 +244,35 @@ export function versionNotes(
   const notes: VersionNote[] = [];
   if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
   if (check?.autoDrift) notes.push('driftFixed');
-  if (releaseMatch(version.release, video)) notes.push('matches');
+  const file = {
+    label: version.release,
+    releaseName: version.releaseName,
+    hashMatch: version.hashMatch,
+  };
+  const match = fileReleaseMatch(file, video);
+  if (linkedToVideo(file, video)) notes.push('linked');
+  else if (match === 'exact' || match === 'group') notes.push('sameRelease');
   if (check?.hearing) notes.push('hearing');
   return notes.slice(0, MAX_NOTES);
 }
 
 /**
- * A version's row detail: its notes, said in words, then its release name.
- * The notes first, on the TV and the phone alike: a long release name is
- * cut at the end, and why a row is dimmed must stay in sight.
+ * A version's row detail: its notes, said in words, then its release name,
+ * without a subtitle file's extension (OpenSubtitles names its files). The
+ * notes first, on the TV and the phone alike: a long release name is cut at
+ * the end, and why a row is dimmed must stay in sight.
  */
 export function versionDetail(said: readonly string[], release?: string): string | undefined {
-  return said.concat(release ? [release] : []).join(' · ') || undefined;
+  const name = release?.replace(/\.(?:srt|vtt|ass|ssa|sub)$/i, '');
+  return said.concat(name ? [name] : []).join(' · ') || undefined;
 }
 
-/** Whether a version was passed over for what reading it found: another script, or signs only. */
+/**
+ * Whether a version is passed over for what reading it found or its name
+ * says: another script, signs only, or another episode.
+ */
 export function isUnfit(check: SubtitleCheck | undefined): boolean {
-  return check?.problem === 'script' || check?.problem === 'signs';
+  return check?.problem === 'script' || check?.problem === 'signs' || check?.problem === 'episode';
 }
 
 /** What a row says reading a file found, as the checks' findings, for ranking it. */
@@ -265,7 +315,12 @@ export function languageFirstPick(
     (item) => item.choice.kind === 'file' && !isUnfit(subtitles.checkOf(item.choice)),
   );
   const [best] = rankSubtitles(
-    files.map((item) => ({ item, label: item.release })),
+    files.map((item) => ({
+      item,
+      label: item.release,
+      releaseName: item.releaseName,
+      hashMatch: item.hashMatch,
+    })),
     {
       video,
       fit: ({ item }) => fitOfCheck(subtitles.checkOf(item.choice)),

@@ -52,17 +52,43 @@ export function openSubtitlesHash(
   return pieces.reverse().join('');
 }
 
+/** Why a link's hash is not read at all. */
+export type HashSkip = 'playlist' | 'request headers' | 'not a file link';
+
 /**
- * Whether a link is one file the hash can be read from: not a playlist, and
- * not a link whose addon asked for request headers. The page cannot send
- * those (Referer, Origin and cookies are a browser's own), and a host that
- * wants them should not be asked without them: such a stream's subtitles are
- * asked for with no hash.
+ * Why a link is not one file the hash can be read from: a playlist, or a
+ * link whose addon asked for request headers. The page cannot send those
+ * (Referer, Origin and cookies are a browser's own), and a host that wants
+ * them should not be asked without them: such a stream's subtitles are asked
+ * for with no hash. Undefined for a link that can be read.
  */
-export function canHash(url: string): boolean {
-  if (!/^https?:\/\//i.test(url) || requestHeadersFor(url)) return false;
+export function hashSkip(url: string): HashSkip | undefined {
+  if (!/^https?:\/\//i.test(url)) return 'not a file link';
+  if (requestHeadersFor(url)) return 'request headers';
   const mime = guessMimeType(url);
-  return mime !== 'application/vnd.apple.mpegurl' && mime !== 'application/dash+xml';
+  return mime === 'application/vnd.apple.mpegurl' || mime === 'application/dash+xml'
+    ? 'playlist'
+    : undefined;
+}
+
+/** Whether a link is one file the hash can be read from (`hashSkip`). */
+export function canHash(url: string): boolean {
+  return hashSkip(url) === undefined;
+}
+
+/**
+ * Why reading a hash failed: the server answered a range with the whole
+ * file or a short piece; the file's size could not be learnt; the file is
+ * too small to hash; the request was refused or never answered (a host
+ * that sends no cross-origin headers, or no network: the page cannot tell
+ * which); or it took longer than HASH_TIMEOUT_MS.
+ */
+export type HashFailure = 'no range' | 'no size' | 'too small' | 'refused' | 'timed out';
+
+class HashError extends Error {
+  constructor(readonly why: HashFailure) {
+    super(why);
+  }
 }
 
 /** The size the server gives: from Content-Range when it lets us read it, or a whole answer's length. */
@@ -121,47 +147,79 @@ async function read(
   url: string,
   knownSize: number | undefined,
   signal: AbortSignal | undefined,
-): Promise<{ videoHash: string; videoSize: number } | undefined> {
+): Promise<{ videoHash: string; videoSize: number }> {
   const first = await readRange(url, 0, signal);
-  if (!first.bytes) return undefined;
+  if (!first.bytes) throw new HashError('no range');
   const size = knownSize ?? first.total ?? (await readSize(url, signal));
-  if (size === undefined || size < 2 * HASH_CHUNK) return undefined;
+  if (size === undefined) throw new HashError('no size');
+  if (size < 2 * HASH_CHUNK) throw new HashError('too small');
   const last = await readRange(url, size - HASH_CHUNK, signal);
-  if (!last.bytes) return undefined;
+  if (!last.bytes) throw new HashError('no range');
   const videoHash = openSubtitlesHash(size, first.bytes, last.bytes);
-  return videoHash ? { videoHash, videoSize: size } : undefined;
+  if (!videoHash) throw new HashError('too small');
+  return { videoHash, videoSize: size };
 }
 
-const known = new Map<string, Promise<{ videoHash: string; videoSize: number } | undefined>>();
+/** How reading a link's hash went, and how long it took. Never the link. */
+export type HashReading =
+  | { found: { videoHash: string; videoSize: number }; ms: number }
+  | { found?: undefined; skipped: HashSkip; ms: 0 }
+  | { found?: undefined; failed: HashFailure; ms: number };
+
+const known = new Map<string, Promise<HashReading>>();
 /** Hashes kept for going back and forth between streams. */
 const KEPT = 20;
 
 /**
- * Reads the OpenSubtitles hash and size of the file at `url`, once per link.
- * Undefined when the link can't be read that way: the server refuses ranges
- * or cross-origin reads, it is a playlist, or it took longer than
- * HASH_TIMEOUT_MS. Never throws.
+ * Reads the OpenSubtitles hash and size of the file at `url`, once per link,
+ * and says why when it can't: the link is a playlist or needs request
+ * headers (not tried), or the server refuses ranges or cross-origin reads,
+ * hides the size, or took longer than HASH_TIMEOUT_MS. Never throws. A
+ * failure may be passing, so only a hash read is kept.
+ */
+export function readStreamHash(url: string, knownSize?: number): Promise<HashReading> {
+  const kept = known.get(url);
+  if (kept) return kept;
+  const skipped = hashSkip(url);
+  if (skipped) return Promise.resolve({ skipped, ms: 0 });
+  const startedAt = Date.now();
+  const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller?.abort();
+  }, HASH_TIMEOUT_MS);
+  const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
+  const reading = read(url, size, controller?.signal).then(
+    (found): HashReading => {
+      clearTimeout(timer);
+      return { found, ms: Date.now() - startedAt };
+    },
+    (error: unknown): HashReading => {
+      clearTimeout(timer);
+      known.delete(url);
+      const failed: HashFailure = timedOut
+        ? 'timed out'
+        : error instanceof HashError
+          ? error.why
+          : 'refused';
+      return { failed, ms: Date.now() - startedAt };
+    },
+  );
+  known.set(url, reading);
+  while (known.size > KEPT) known.delete(known.keys().next().value!);
+  return reading;
+}
+
+/**
+ * The OpenSubtitles hash and size of the file at `url` (`readStreamHash`),
+ * or undefined when it can't be read that way.
  */
 export function hashStream(
   url: string,
   knownSize?: number,
 ): Promise<{ videoHash: string; videoSize: number } | undefined> {
-  const kept = known.get(url);
-  if (kept) return kept;
-  const controller = typeof AbortController === 'undefined' ? null : new AbortController();
-  const timer = window.setTimeout(() => controller?.abort(), HASH_TIMEOUT_MS);
-  const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
-  const reading = (canHash(url) ? read(url, size, controller?.signal) : Promise.resolve(undefined))
-    .catch(() => undefined)
-    .then((found) => {
-      clearTimeout(timer);
-      // A failure may be passing (a slow moment): only answers are kept.
-      if (!found) known.delete(url);
-      return found;
-    });
-  known.set(url, reading);
-  while (known.size > KEPT) known.delete(known.keys().next().value!);
-  return reading;
+  return readStreamHash(url, knownSize).then((reading) => reading.found);
 }
 
 /** For tests: forgets every hash read. */

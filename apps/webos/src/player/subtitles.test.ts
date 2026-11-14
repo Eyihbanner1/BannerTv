@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearSubtitleCache, loadSubtitles, plainId } from './subtitles';
+import { clearSubtitleCache, loadSubtitles, plainId, toOption } from './subtitles';
 
 const CHUNK = new Uint8Array(64 * 1024);
 const MB = 1024 * 1024;
@@ -41,6 +41,46 @@ describe('plainId', () => {
     expect(hashed).toMatch(/^h[0-9a-z]+$/);
     expect(hashed).toBe(plainId(link));
     expect(hashed).not.toBe(plainId('https://subs.example.com/account-key/other.srt'));
+  });
+});
+
+describe('toOption', () => {
+  it('carries what the addon says of a file, and leaves out what it does not', () => {
+    const subtitle = {
+      id: '9397119',
+      url: 'https://subs.example.com/9397119.srt',
+      lang: 'eng',
+      label: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt',
+      releaseName: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES',
+      hashMatch: true,
+      fps: 23.976,
+      season: 1,
+      episode: 1,
+    };
+    expect(toOption('os', 'OpenSubtitles v3', subtitle)).toEqual({
+      key: 'os#9397119',
+      source: 'OpenSubtitles v3',
+      lang: 'eng',
+      url: 'https://subs.example.com/9397119.srt',
+      label: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt',
+      releaseName: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES',
+      hashMatch: true,
+      fps: 23.976,
+      season: 1,
+      episode: 1,
+    });
+    expect(
+      toOption('os', 'OpenSubtitles v3', {
+        id: '1',
+        url: 'https://subs.example.com/1.srt',
+        lang: 'eng',
+      }),
+    ).toEqual({
+      key: 'os#1',
+      lang: 'eng',
+      source: 'OpenSubtitles v3',
+      url: 'https://subs.example.com/1.srt',
+    });
   });
 });
 

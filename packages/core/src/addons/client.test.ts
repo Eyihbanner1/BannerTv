@@ -228,6 +228,37 @@ describe('createAddonClient', () => {
     }
   });
 
+  it("tells subtitles addons the video's hash, size and file name, but not OpenSubtitles v3 the name", async () => {
+    const subsUrl = 'https://subs.example/manifest.json';
+    const { client, collection, fetchJson } = await setup({
+      [subsUrl]: () =>
+        Promise.resolve({
+          id: 'org.subs',
+          version: '1.0.0',
+          name: 'Subs',
+          types: ['movie'],
+          idPrefixes: ['tt'],
+          resources: ['subtitles'],
+        }),
+    });
+    await collection.install(subsUrl);
+    client
+      .subtitles('movie', 'tt1375666', {
+        videoHash: '8e245d9679d31e12',
+        videoSize: 12909756,
+        filename: 'Inception.2010.1080p.BluRay.x264-SPARKS.mkv',
+      })
+      .forEach(({ query }) => query.load());
+    await flush();
+    const asked = fetchJson.mock.calls
+      .map(([url]) => url)
+      .filter((url) => url.includes('/subtitles/'));
+    expect(asked.sort()).toEqual([
+      'https://opensubtitles-v3.strem.io/subtitles/movie/tt1375666/videoHash=8e245d9679d31e12&videoSize=12909756.json',
+      'https://subs.example/subtitles/movie/tt1375666/videoHash=8e245d9679d31e12&videoSize=12909756&filename=Inception.2010.1080p.BluRay.x264-SPARKS.mkv.json',
+    ]);
+  });
+
   it('puts the stream and subtitles requests of the video playPriority names ahead of the rest waiting', async () => {
     const top = 'https://v3-cinemeta.strem.io/catalog/movie/top.json';
     const later = 'https://v3-cinemeta.strem.io/catalog/series/top.json';

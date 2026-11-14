@@ -81,16 +81,24 @@ export interface TestStream {
   subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
 }
 
-/** A file in OpenSubtitles' answer: SUBTITLE_HOST/<id>.srt, and its release name if given. */
+/**
+ * A file in OpenSubtitles' answer: SUBTITLE_HOST/<id>.srt, and its names if
+ * given: a label as other addons send, or the file and release names
+ * OpenSubtitles v3 sends, and whether it found the file by the video's hash.
+ */
 export interface TestSubtitle {
   id: string;
   lang: string;
   label?: string;
+  subtitleFileName?: string;
+  movieReleaseName?: string;
+  /** 'h': found by the video's hash; 'i': by the video's id. */
+  m?: 'h' | 'i';
   /** Sent with no id, so its link stands in for one. */
   withoutId?: boolean;
 }
 
-/** What OpenSubtitles answers unless a test passes its own list: no release names, as it sends. */
+/** What OpenSubtitles answers unless a test passes its own list: no names. */
 export const DEFAULT_SUBTITLES: readonly TestSubtitle[] = [
   { id: 'en1', lang: 'eng' },
   { id: 'fr1', lang: 'fre' },
@@ -493,11 +501,14 @@ export async function mockPlayback(
     if (options.subtitles === false) return json(route, { subtitles: [] });
     return json(route, {
       subtitles: (options.subtitleList ?? DEFAULT_SUBTITLES).map(
-        ({ id, lang, label, withoutId }) => ({
+        ({ id, lang, label, subtitleFileName, movieReleaseName, m, withoutId }) => ({
           ...(!withoutId && { id }),
           url: `${SUBTITLE_HOST}/${id}.srt`,
           lang,
           ...(label && { label }),
+          ...(subtitleFileName !== undefined && { subtitleFileName }),
+          ...(movieReleaseName !== undefined && { movieReleaseName }),
+          ...(m && { m }),
         }),
       ),
     });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SubtitleFit } from './fit';
-import { clearlyBetter, fitTier, rankReason, rankSubtitles, UNREAD_TIER } from './rank';
+import { clearlyBetter, fileTier, fitTier, rankReason, rankSubtitles, UNREAD_TIER } from './rank';
 
 const FITS: SubtitleFit = {
   script: 'right',
@@ -18,6 +18,9 @@ const LONG: SubtitleFit = { ...FITS, length: 'long' };
 interface File {
   id: string;
   label?: string;
+  hashMatch?: boolean;
+  season?: number;
+  episode?: number;
 }
 
 const video = { filename: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP.mkv' };
@@ -160,6 +163,86 @@ describe('rankReason', () => {
     expect(reason(LONG)).toBe(2);
     expect(reason(SIGNS)).toBe(2);
     expect(rankReason(match, { video, fit: () => LONG, remembered: () => true })).toBe(0);
+  });
+});
+
+describe('hash, disc and episode', () => {
+  it('ranks a file found by the video’s hash as made for the release, after one named for it', () => {
+    const files = [
+      { id: 'plain' },
+      { id: 'hash', label: 'Open_Movie.srt', hashMatch: true },
+      { id: 'named', label: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP-HI.srt' },
+    ];
+    expect(rankReason(files[1]!, { video })).toBe(1);
+    // Named for the release beats the hash's mark alone, which OpenSubtitles puts on other
+    // releases' files too; both beat the rest.
+    expect(rank(files, {})).toEqual(['named', 'hash', 'plain']);
+    // Read as drifting, it ranks by its fit like any other.
+    expect(rank(files, { hash: DRIFTS, plain: FITS })).toEqual(['named', 'plain', 'hash']);
+  });
+
+  it('puts a hash match named for the release first, and takes one named for another for loose', () => {
+    // Fringe S04E03, Hungarian, on LOL's HDTV file: both linked to its hash by OpenSubtitles.
+    const fringe = { filename: 'Fringe.S04E03.HDTV.XviD-LOL.avi', season: 4, episode: 3 };
+    const reward = {
+      id: 'reward',
+      label: 'fringe.s04e03.dvdrip.xvid-reward.srt',
+      hashMatch: true,
+    };
+    const lol = { id: 'lol', label: 'Fringe.S04E03.HDTV.XviD-LOL.srt', hashMatch: true };
+    const unnamed = {
+      id: 'unnamed',
+      label: 'Fringe.S04E03.Alone in the World.srt',
+      hashMatch: true,
+    };
+    const order = (files: File[]) =>
+      rankSubtitles(files, { video: fringe, fit: () => undefined, hearing: false }).map(
+        (file) => file.id,
+      );
+    // Another source and group: not made for the release, whatever the hash says.
+    expect(rankReason(reward, { video: fringe })).toBe(2);
+    expect(order([reward, lol])).toEqual(['lol', 'reward']);
+    expect(order([unnamed, lol])).toEqual(['lol', 'unnamed']);
+    expect(order([reward, unnamed])).toEqual(['unnamed', 'reward']);
+    // Among files made for nothing, it counts as a loose match: before one with no match.
+    expect(order([{ id: 'plain', label: 'Fringe.srt' }, reward])).toEqual(['reward', 'plain']);
+  });
+
+  it('puts a loosely named file before another only where they fit as well', () => {
+    const files = [{ id: 'a' }, { id: 'loose', label: 'Open.Movie.2021.1080p.WEB-DL.srt' }];
+    expect(rankReason(files[1]!, { video })).toBe(2);
+    expect(rank(files, {})).toEqual(['loose', 'a']);
+    expect(rank(files, { a: FITS })).toEqual(['a', 'loose']);
+  });
+
+  it('takes one disc of two for part of the video until it is read against its length', () => {
+    const cd1 = { id: 'cd1', label: 'Open.Movie.2021.1080p.WEB-DL.x264-GROUP.CD1.srt' };
+    expect(fileTier(cd1, undefined, video, false)).toBe(4);
+    // Read while the video's length is not known yet: still part of it.
+    expect(fileTier(cd1, { ...FITS, length: undefined }, video, false)).toBe(4);
+    // Read against the video's length and found whole: judged by that.
+    expect(fileTier(cd1, FITS, video, false)).toBe(0);
+    expect(rank([cd1, { id: 'whole' }], {})).toEqual(['whole', 'cd1']);
+    expect(rankReason(cd1, { video })).toBe(2);
+  });
+
+  it('takes a file for another episode for unfit, whatever reading finds', () => {
+    const episode = { filename: 'Show.S01E01.1080p.WEB.H264-CAKES.mkv', season: 1, episode: 1 };
+    const e2 = { id: 'e2', label: 'Show.S01E02.1080p.WEB.H264-CAKES.srt' };
+    expect(fileTier(e2, FITS, episode, false)).toBe(5);
+    expect(fileTier({ season: 1, episode: 2 }, undefined, episode, false)).toBe(5);
+    expect(fileTier({ label: 'Show.S01E01.srt' }, FITS, episode, false)).toBe(0);
+  });
+
+  it('puts a file named for the hard of hearing after a plain one while neither is read', () => {
+    const files = [
+      { id: 'sdh', label: 'Film.2021.HI.srt' },
+      { id: 'plain', label: 'Film.2021.srt' },
+    ];
+    expect(rank(files, {})).toEqual(['plain', 'sdh']);
+    expect(rank(files, {}, { hearing: true })).toEqual(['sdh', 'plain']);
+    // Once both are read as plain, what reading found decides, not the name: the list's order.
+    expect(rank(files, { sdh: FITS, plain: FITS })).toEqual(['sdh', 'plain']);
   });
 });
 

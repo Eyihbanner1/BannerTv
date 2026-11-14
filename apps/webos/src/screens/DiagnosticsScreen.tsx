@@ -11,11 +11,16 @@ import {
   type DiagnosticSection,
 } from '../platform/diagnostics';
 import { formatClock } from '../player/media';
+import { recentSubtitleTraces, subtitleTraceRows } from '../player/subtitle-trace';
 import screenStyles from './Screen.module.css';
 import styles from './DiagnosticsScreen.module.css';
 
 // Sections per column, so the whole report fits on one 1920x1080 screen.
-const COLUMNS = [[0, 1], [2, 4, 5], [3]];
+const COLUMNS = [
+  [0, 1],
+  [2, 4, 5],
+  [3, 6],
+];
 
 const CHECKING = 'checking…';
 
@@ -34,6 +39,25 @@ function speedSection(results: SpeedResults): DiagnosticSection {
     ];
   });
   return { title: 'Playback speed (Lab)', rows };
+}
+
+/**
+ * Plays the Subtitles section shows on screen, newest first. Beside a TV's
+ * ten rows and the Lab's speeds, its column has room for one; the console
+ * line carries every play kept.
+ */
+const PLAYS_ON_SCREEN = 1;
+
+/**
+ * The subtitles of the last few plays (or of the newest `shown`): whether
+ * the video's hash was read, the files in each language, why the version
+ * showing was chosen, and how long the first line took. Ids, counts and
+ * times only, never a link.
+ */
+function subtitleSection(shown?: number): DiagnosticSection {
+  const plays = recentSubtitleTraces();
+  const rows = subtitleTraceRows(shown === undefined ? plays : plays.slice(0, shown));
+  return { title: 'Subtitles', rows, stacked: true };
 }
 
 /**
@@ -56,9 +80,10 @@ export function DiagnosticsScreen() {
       setSkipCheck(result);
     });
     void Promise.all([collectDiagnostics(), speedMemory.load()]).then(([report]) => {
-      const full = [...report, speedSection(speedMemory.results())];
+      const speed = speedSection(speedMemory.results());
+      const full = [...report, speed, subtitleSection()];
       console.info('[BannerTV diagnostics]', JSON.stringify(full, null, 2));
-      setSections(full);
+      setSections([...report, speed, subtitleSection(PLAYS_ON_SCREEN)]);
     });
   }, []);
 
@@ -99,8 +124,11 @@ export function DiagnosticsScreen() {
                 return (
                   <section key={section.title} className={styles.section}>
                     <h2 className={styles.heading}>{section.title}</h2>
-                    {section.rows.map(([label, value]) => (
-                      <div key={label} className={styles.row}>
+                    {section.rows.map(([label, value], row) => (
+                      <div
+                        key={`${row}-${label}`}
+                        className={section.stacked ? styles.stacked : styles.row}
+                      >
                         <span className={styles.label}>{label}</span>
                         <span className={styles.value}>{value}</span>
                       </div>
