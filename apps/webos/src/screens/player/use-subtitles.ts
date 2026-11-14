@@ -1444,15 +1444,20 @@ export function useSubtitles(
       holding ||
       fileCues === null ||
       position < first / before.rate + before.offset - FIRST_LINE_MARGIN_S;
+    // Against files that agree, the weakest evidence, timing kept for the file from another
+    // stream of the video or an earlier play is the viewer's too, unless it was set on lines the
+    // player had moved, where it adds to the move.
+    const keptTiming = against === 'agreed' && offset !== 0 && keptDrift !== 'aligned';
     const decision = decideMove({
       move: sureMove,
       before,
       after,
       lines,
       early,
-      touched: touchedNow(fileUrl),
+      touched: touchedNow(fileUrl) || keptTiming,
       lateMoves: movesNow.late,
       picked: against === 'agreed' && pickedNow(),
+      agreed: against === 'agreed',
     });
     // Lines moved before stay where they are when the new answer leaves them.
     const kept: Decided =
@@ -1477,6 +1482,14 @@ export function useSubtitles(
     fileCues,
     movesStore,
   ]);
+  // The file files that agree kept, or took over to, when it is their first file: nothing lined
+  // it up, as the others were lined up against it, and it is in step with them.
+  const agreedFirst =
+    fileUrl !== null &&
+    reference?.kind === 'agreed' &&
+    reference.id === fileUrl &&
+    (agreedNow?.state === 'kept' || agreedNow?.state === 'switched') &&
+    agreedNow.showUrl === fileUrl;
   const decision = fileUrl !== null ? movesNow.byLink.get(fileUrl) : undefined;
   const appliedMove = decision?.move ?? null;
   const timing = timingInUse({
@@ -1502,6 +1515,7 @@ export function useSubtitles(
   const sync = ((): SubtitleSync | null => {
     if (fileUrl === null) return null;
     const basis = filesBasis ? ({ basis: 'files' } as const) : {};
+    if (agreedFirst) return { state: 'inStep', basis: 'files' };
     // Checked against nothing itself: said only where there are other files it is used for.
     if (isReference(fileUrl)) {
       return options.some((option) => option.url !== fileUrl)
@@ -1604,11 +1618,12 @@ export function useSubtitles(
   );
   // Whether a line of the file showing, let through, is on screen or due within moments: from
   // then on, on this stream, a file taking over from it would be seen to.
+  // On the lines' own clock, the viewer's timing taken out, as the subtitle layer draws them.
   const shownNow =
     trackId === null &&
     fileUrl !== null &&
     cues !== null &&
-    lineNear(cues, session?.trustedPosition() ?? state.position);
+    lineNear(cues, (session?.trustedPosition() ?? state.position) - timing.offset);
   useEffect(() => {
     if (shownNow && fileUrl !== null && !shownOn(entry, fileUrl)) {
       linesShown.current = { entry, url: fileUrl };

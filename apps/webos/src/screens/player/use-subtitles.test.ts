@@ -1732,4 +1732,123 @@ describe('files that agree with each other', () => {
       expect(agreement()).toMatchObject({ state: 'none', why: { kind: 'unmatched' } });
     });
   });
+
+  describe('beside timing the viewer set', () => {
+    it('leave the timing kept for a file on an earlier play as theirs, on any stream', async () => {
+      const entry = amznVideo();
+      const { real, options } = e6();
+      offer(entry, options);
+      const first = play(entry);
+      await first.wait(300);
+      first.subtitles.setOffset(-7.5);
+      await first.wait(3000);
+      expect(first.subtitles.sync).toEqual({ state: 'yours', basis: 'files', offset: -0.5 });
+      first.unmount();
+      // The next play of the same release: the timing kept for the file is the viewer's still.
+      const again = amznVideo();
+      offer(again, options);
+      const second = play(again);
+      await second.wait(3300);
+      expect(second.subtitles.choice).toEqual(fileChoice(real));
+      expect(second.subtitles.offset).toBe(-7.5);
+      expect(firstStart(second.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(second.subtitles.sync).toEqual({ state: 'yours', basis: 'files', offset: -0.5 });
+      expect(synced(second)).toEqual({ key: 'player.syncYoursFiles', amount: '−0.5 s' });
+      // Another stream of the video: the same.
+      const other = streamEntry(RELEASE_OF_E6, 'other');
+      offer(other, options);
+      await second.stream(other);
+      await second.wait(3300);
+      expect(second.subtitles.offset).toBe(-7.5);
+      expect(firstStart(second.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(second.subtitles.sync).toEqual({ state: 'yours', basis: 'files', offset: -0.5 });
+    });
+
+    it('leave lines timed while they still read as the viewer’s', async () => {
+      const entry = amznVideo();
+      const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+      offer(entry, [
+        real,
+        file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt`, ms: 400 }),
+        file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt`, ms: 1500 }),
+        file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt`, ms: 1500 }),
+      ]);
+      const player = play(entry);
+      await player.wait(100);
+      player.subtitles.setOffset(0.5);
+      await player.wait(4000);
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 8, 1);
+      expect(player.subtitles.sync).toEqual({ state: 'yours', basis: 'files', offset: -8.5 });
+      expect(synced(player)).toEqual({ key: 'player.syncYoursFiles', amount: '−8.5 s' });
+    });
+
+    it('say lines already where they would put them are in step: timed, or a version picked', async () => {
+      const entry = amznVideo();
+      const other = file('other', FULL, { lang: 'eng', label: `${AMZN}-CMRG.srt` });
+      const { options } = e6([other]);
+      offer(entry, options);
+      const player = play(entry);
+      await player.wait(300);
+      player.subtitles.setOffset(-8);
+      await player.wait(3000);
+      expect(player.subtitles.sync).toEqual({ state: 'inStep', basis: 'files' });
+      expect(synced(player)).toEqual({ key: 'player.syncInStepFiles' });
+      player.subtitles.setOffset(0);
+      player.subtitles.choose(fileChoice(other), 'version');
+      await player.wait(2000);
+      expect(player.subtitles.choice).toEqual(fileChoice(other));
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      expect(player.subtitles.sync).toEqual({ state: 'inStep', basis: 'files' });
+      expect(player.subtitles.checkOf(fileChoice(other)!)).toMatchObject({ synced: 'files' });
+    });
+
+    it('leave a file with the viewer’s timing, its lines on screen, to a file linked late', async () => {
+      const entry = streamEntry('film');
+      // Its first line at 20 s in the file, moved 7.5 s earlier on an earlier play: on screen
+      // from 12.5 s.
+      const plain = file('plain', shift(FULL, 20));
+      offer(entry, [plain]);
+      const first = play(entry);
+      await first.wait(2500);
+      first.subtitles.setOffset(-7.5);
+      await first.wait(300);
+      first.unmount();
+      const again = streamEntry('film');
+      const more = offer(again, [plain], 1, true);
+      const player = play(again);
+      await player.wait(2500);
+      expect(player.subtitles.offset).toBe(-7.5);
+      await player.session({ position: 14 });
+      await player.wait(200);
+      more([
+        file('late', shift(FULL, 20), {
+          label: 'some_film_subs.srt',
+          hashMatch: true,
+          linkedLate: true,
+        }),
+      ]);
+      await player.wait(500);
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    });
+  });
+
+  it('say the file showing is in step where it is the first of theirs', async () => {
+    // E5's shape: the viewer's file read first is in step with the AMZN files.
+    const entry = amznVideo();
+    const web = file('web', FULL, { label: 'Show.S01E06.WEB.srt' });
+    const kings = file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt` });
+    offer(entry, [
+      web,
+      kings,
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+    ]);
+    const player = play(entry);
+    await player.wait(3300);
+    expect(player.subtitles.choice).toEqual(fileChoice(web));
+    expect(player.subtitles.sync).toEqual({ state: 'inStep', basis: 'files' });
+    expect(synced(player)).toEqual({ key: 'player.syncInStepFiles' });
+    expect(player.subtitles.checkOf(fileChoice(web)!)).toMatchObject({ synced: 'files' });
+    expect(recentSubtitleTraces()[0]?.agreement).toMatchObject({ state: 'kept', best: 10 });
+  });
 });

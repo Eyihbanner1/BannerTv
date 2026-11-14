@@ -603,7 +603,9 @@ export interface MoveDecision {
  * LATE_MOVE_S from where they show (`before`, against `after`), and only
  * while fewer than MAX_LATE_MOVES such moves were made in the stream. Never
  * on a version picked by hand, by files that agree (`picked`): the weakest
- * evidence leaves the viewer's choice as it is.
+ * evidence leaves the viewer's choice as it is. Against files that agree
+ * (`agreed`), the viewer's timing or version already within LATE_MOVE_S of
+ * where the move puts the lines is in step, not theirs to move.
  */
 export function decideMove(input: {
   move: LineMove;
@@ -615,13 +617,17 @@ export function decideMove(input: {
   lateMoves: number;
   /** A version picked by hand, lined up against files that agree. */
   picked?: boolean;
+  /** Lined up against files that agree: the Timing tab says how far a move left undone is. */
+  agreed?: boolean;
 }): MoveDecision {
+  const near = () => moveSize(input.before, input.after, input.lines) < LATE_MOVE_S;
+  if (input.agreed && (input.touched || input.picked) && near()) {
+    return { move: null, left: 'inStep' };
+  }
   if (input.touched) return { move: null, left: 'yours' };
   if (input.picked) return { move: null, left: 'picked' };
   if (input.early) return { move: input.move };
-  if (moveSize(input.before, input.after, input.lines) < LATE_MOVE_S) {
-    return { move: null, left: 'inStep' };
-  }
+  if (near()) return { move: null, left: 'inStep' };
   if (input.lateMoves >= MAX_LATE_MOVES) return { move: null, left: 'late' };
   return { move: input.move, late: true };
 }

@@ -583,6 +583,22 @@ describe('decideMove', () => {
       left: 'yours',
     });
   });
+
+  it('says a version picked, or timing set, already where files that agree put it is in step', () => {
+    const agreed = { ...base, early: true, agreed: true };
+    // The version picked is 0.2 s from them, the viewer's timing 0.1 s: in step, not theirs.
+    expect(decideMove({ ...agreed, picked: true, after: { offset: 0.2, rate: 1 } })).toEqual({
+      move: null,
+      left: 'inStep',
+    });
+    expect(decideMove({ ...agreed, touched: true, before: { offset: 1.9, rate: 1 } })).toEqual({
+      move: null,
+      left: 'inStep',
+    });
+    // Further than LATE_MOVE_S, they stay the viewer's.
+    expect(decideMove({ ...agreed, picked: true })).toEqual({ move: null, left: 'picked' });
+    expect(decideMove({ ...agreed, touched: true })).toEqual({ move: null, left: 'yours' });
+  });
 });
 
 describe('moving lines', () => {
