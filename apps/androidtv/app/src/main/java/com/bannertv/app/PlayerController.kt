@@ -342,10 +342,12 @@ class PlayerController(
                             .put("label", format.label ?: "")
                             .put("active", group.isTrackSelected(trackIndex))
                             .put("mime", format.sampleMimeType ?: "")
+                            // For subtitles read into Media3's own cues, the type they had before: the
+                            // page tells picture subtitles, which only this player can draw, from text.
+                            .put("codecs", format.codecs ?: "")
                             .put("supported", group.isTrackSupported(trackIndex))
                     if (type == C.TRACK_TYPE_AUDIO) {
                         if (format.channelCount != Format.NO_VALUE) track.put("channels", format.channelCount)
-                        track.put("codecs", format.codecs ?: "")
                         track.put("commentary", (format.roleFlags and C.ROLE_FLAG_COMMENTARY) != 0)
                         audio.put(track)
                     } else {

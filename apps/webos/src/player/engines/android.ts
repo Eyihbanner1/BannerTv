@@ -56,10 +56,36 @@ export function toEngineTrack(track: AndroidTrack, audio: boolean): EngineTrack 
     const format = formatName(AUDIO_CODECS[mime] ?? track.codecs, mime === 'audio/eac3-joc');
     if (format) listed.format = format;
     if (track.commentary) listed.commentary = true;
-  } else if (track.forced || isForcedName(track.label)) {
-    listed.forced = true;
+  } else {
+    if (track.forced || isForcedName(track.label)) listed.forced = true;
+    const picture = subtitleKind(track);
+    if (picture !== undefined) listed.picture = picture;
   }
   return listed;
+}
+
+/** Subtitle formats Android's player draws as pictures, by their type. */
+const PICTURE_SUBTITLES = ['application/pgs', 'application/vobsub', 'application/dvbsubs'];
+/** Subtitle formats of text lines, which Android hands over for the page to draw. */
+const TEXT_SUBTITLES = [
+  'application/x-subrip',
+  'text/vtt',
+  'text/x-ssa',
+  'application/ttml+xml',
+  'application/x-quicktime-tx3g',
+  'application/x-mp4-vtt',
+];
+
+/**
+ * Whether a subtitle track is pictures (true) or text (false), by its type, or by
+ * the type it had before Android's player read it into its own (`codecs`, beside
+ * the media3 cues type); undefined where neither says.
+ */
+function subtitleKind(track: AndroidTrack): boolean | undefined {
+  const types = [track.mime, track.codecs].map((type) => (type ?? '').toLowerCase());
+  if (types.some((type) => PICTURE_SUBTITLES.indexOf(type) !== -1)) return true;
+  if (types.some((type) => TEXT_SUBTITLES.indexOf(type) !== -1)) return false;
+  return undefined;
 }
 
 /** When the last group Android handed over began: the latest start or end in the record. */
