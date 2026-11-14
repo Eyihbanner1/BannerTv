@@ -85,6 +85,8 @@ export interface TestStream {
   requestHeaders?: Record<string, string>;
   /** Subtitles that come with the stream, as paths on SUBTITLE_HOST, with a release name if given. */
   subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
+  /** The file name the addon gives (behaviorHints.filename). Default the path's last part. */
+  filename?: string;
 }
 
 /**
@@ -256,6 +258,37 @@ export const HLS_LONG_ENGLISH = srt(
   HLS_LONG_SPEECH.map(([start, end], i) => [ms(start - 5), ms(end - 5), `English line ${i + 1}`]),
 );
 
+/**
+ * The made-up film's 120 lines for files that agree with each other, on the 10-minute video:
+ * from 30 s, so a move made in the first seconds comes before the first line.
+ */
+export const AGREE_SPEECH = speech(30, 588).slice(0, 120);
+
+/** The same 120 lines from 3 s, for a journey whose first line need not wait. */
+export const APART_SPEECH = speech(3, 588).slice(0, 120);
+
+/** A file of these lines `by` seconds late, each numbered after `name`. */
+const timed = (lines: ReadonlyArray<readonly [number, number]>, by: number, name: string) =>
+  srt(lines.map(([start, end], i) => [ms(start + by), ms(end + by), `${name} ${i + 1}`]));
+
+/**
+ * Files for the 10-minute video that agree with each other, or don't: test lines only. On
+ * AGREE_SPEECH, four on time, one 8 s late and one 3 s late; on APART_SPEECH, three on time and
+ * one 12 s late.
+ */
+export const AGREE_SUBTITLES = {
+  agreeOnTimeA: timed(AGREE_SPEECH, 0, 'On time A, line'),
+  agreeOnTimeB: timed(AGREE_SPEECH, 0, 'On time B, line'),
+  agreeOnTimeC: timed(AGREE_SPEECH, 0, 'On time C, line'),
+  agreeLate8: timed(AGREE_SPEECH, 8, 'Test line'),
+  agreeLate3: timed(AGREE_SPEECH, 3, 'Picked line'),
+  agreeNamed: timed(AGREE_SPEECH, 0, 'Named line'),
+  apartOnTimeA: timed(APART_SPEECH, 0, 'In step A, line'),
+  apartOnTimeB: timed(APART_SPEECH, 0, 'In step B, line'),
+  apartOnTimeC: timed(APART_SPEECH, 0, 'In step C, line'),
+  apartLate12: timed(APART_SPEECH, 12, 'Apart line'),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
@@ -264,6 +297,7 @@ export const SUBTITLE_FILES: Record<string, string> = {
   fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
   ...LONG_SUBTITLES,
   ...ALIGN_SUBTITLES,
+  ...AGREE_SUBTITLES,
   hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 
@@ -274,6 +308,8 @@ export interface PlaybackMock {
   streams: string[];
   /** Every subtitles request, as the path after /subtitles/. */
   subtitles: string[];
+  /** Every subtitle file asked for from SUBTITLE_HOST, by id, in order. */
+  files: string[];
   /** Stream answers the slow addon has sent. */
   slowAnswers: number;
   /** Every episode IntroDB was asked about, as imdbId:season:episode. */
@@ -470,7 +506,14 @@ export async function mockPlayback(
   page: Page,
   options: PlaybackOptions = {},
 ): Promise<PlaybackMock> {
-  const mock: PlaybackMock = { media: [], streams: [], subtitles: [], slowAnswers: 0, skips: [] };
+  const mock: PlaybackMock = {
+    media: [],
+    streams: [],
+    subtitles: [],
+    files: [],
+    slowAnswers: 0,
+    skips: [],
+  };
   const broken = new Set(options.broken ?? []);
 
   await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) => {
@@ -493,7 +536,7 @@ export async function mockPlayback(
         behaviorHints: {
           ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
           ...(stream.requestHeaders && { proxyHeaders: { request: stream.requestHeaders } }),
-          filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
+          filename: stream.filename ?? `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
         ...(stream.subtitles && {
           subtitles: stream.subtitles.map(({ id, path, lang, label }) => ({
@@ -617,6 +660,7 @@ export async function mockPlayback(
 
   await page.route(/^https:\/\/subs\.example\.com\//, async (route) => {
     const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
+    mock.files.push(id);
     const delay = options.subtitleDelayMs?.[id];
     if (delay) await new Promise((done) => setTimeout(done, delay));
     await options.subtitleGates?.[id];
