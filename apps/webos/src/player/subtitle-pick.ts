@@ -323,6 +323,13 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
       !input.timeUp &&
       !isRead(option) &&
       !input.slow?.(option.url);
+    // Once lines show, a file that ranks so only by being lined up takes over from the one
+    // showing as any file read later does: soon after the first line, while switches are left,
+    // counted, and only when it fits clearly better. A file made for the release, from an
+    // addon that answers late, takes over by itself.
+    if (current && !peerOf(current) && !input.holding && !madeForRelease(top, input.video)) {
+      return keepOrSwitch(ranked, current, [], input);
+    }
     if (!current || !peerOf(current)) {
       return { pick: top, read: [], hold: waitFor(top), switched: false };
     }

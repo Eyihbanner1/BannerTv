@@ -561,6 +561,36 @@ describe('lined up against a reference', () => {
     });
   });
 
+  it('once lines show, takes a file not made for the release, lined up later, only as any file read later', () => {
+    const two = [file('first'), file('second')];
+    const drifting: SubtitleFit = { ...FITS, drift: 'behind' };
+    const showing = { current: 'first', holding: false };
+    // As good a fit as the one showing: it stays, though the other now ranks first.
+    expect(plan(two, { first: FITS, second: SYNCED }, showing)).toEqual({
+      pick: 'first',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Clearly better (no drift left to fix), and switches left: a switch, counted.
+    expect(plan(two, { first: drifting, second: SYNCED }, showing)).toEqual({
+      pick: 'second',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    // Long after the first line, no switches are left: it stays.
+    expect(plan(two, { first: drifting, second: SYNCED }, { ...showing, switchesLeft: 0 })).toEqual(
+      { pick: 'first', read: [], hold: false, switched: false },
+    );
+    // A file made for the release, from an addon that answers late, takes over by itself.
+    const late = [file('first'), { ...file('named'), label: 'some_film.srt', hashMatch: true }];
+    expect(plan(late, { first: FITS }, { ...showing, switchesLeft: 0 })).toMatchObject({
+      pick: 'named',
+      switched: false,
+    });
+  });
+
   it('never takes over from the version picked by hand', () => {
     expect(
       plan(offered, { sdh: SDH, plain: SYNCED }, { ...syncing, current: 'sdh', remembered: 'sdh' }),
