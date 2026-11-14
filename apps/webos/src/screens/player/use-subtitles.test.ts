@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import type { SubtitleListState, SubtitleOption } from '../../player/subtitles';
+import { recentSubtitleTraces } from '../../player/subtitle-trace';
+import { driftHintKey, driftOn } from '../../player/subtitle-versions';
 import { type SubtitleChoice, type Subtitles, useSubtitles } from './use-subtitles';
 
 /*
@@ -177,10 +179,16 @@ const META = 'tt0000001';
 const VIDEO = 'tt0000001';
 const VIDEO_S = 7200;
 
-/** Lines spread over the video: `hearing` of every ten are sounds in brackets. */
+/**
+ * Lines spread over the video, a little irregularly as speech is (lining
+ * files up needs that): `hearing` of every ten are sounds in brackets.
+ */
 function lines(count: number, end: number, hearing = 0): Cue[] {
+  const step = (end - 2) / (count - 1);
   return Array.from({ length: count }, (_, i) => {
-    const start = (i * (end - 2)) / (count - 1);
+    const random = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
+    const wobble = i === 0 || i === count - 1 ? 0 : (random - 0.5) * step * 0.5;
+    const start = i * step + wobble;
     const text = i % 10 < hearing ? '[door creaks]' : 'Where have you been all night?';
     return { start, end: start + 2, lines: [[{ text }]] };
   });
@@ -199,7 +207,14 @@ const LONG = lines(1200, 9000);
 function file(
   id: string,
   cues: Cue[] | null,
-  extra: { lang?: string; label?: string; ms?: number; season?: number; episode?: number } = {},
+  extra: {
+    lang?: string;
+    label?: string;
+    ms?: number;
+    season?: number;
+    episode?: number;
+    hashMatch?: boolean;
+  } = {},
 ) {
   const option: SubtitleOption = {
     key: `os#${id}`,
@@ -210,6 +225,7 @@ function file(
   if (extra.label) option.label = extra.label;
   if (extra.season !== undefined) option.season = extra.season;
   if (extra.episode !== undefined) option.episode = extra.episode;
+  if (extra.hashMatch) option.hashMatch = true;
   world.files.set(option.url, cues ? { cues, ms: extra.ms } : { cues: [], fail: true });
   return option;
 }
@@ -263,6 +279,7 @@ const BASE: SessionState = {
   audio: [],
   text: [],
   streamCues: {},
+  streamTimings: {},
   rate: 1,
   clip: false,
   attempts: [],
@@ -276,10 +293,12 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
   // A Lab stream has no title.
   const metaId = lab ? undefined : META;
   const playing = createStore<SessionState>({ ...BASE, entry: first, ...state });
+  // The tracks the engine was asked for, last last.
+  const selected: Array<string | null> = [];
   const session = {
     get: playing.get,
     subscribe: playing.subscribe,
-    selectText: () => undefined,
+    selectText: (id: string | null) => selected.push(id),
   } as unknown as PlaybackSession;
   let entry = first;
   let result!: Subtitles;
@@ -311,6 +330,7 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
     get subtitles() {
       return result;
     },
+    selected,
     flush,
     /** Lets time pass, drawing again as often as anything changes, as React would. */
     async wait(ms: number) {
@@ -893,5 +913,423 @@ describe('another stream of the same video', () => {
     await player.stream(next);
     await player.wait(2500);
     expect(player.subtitles.choice).toEqual(fileChoice(own));
+  });
+});
+
+describe('lining files up against the video', () => {
+  /** The cues moved later by `by` seconds: a file a few seconds out. */
+  const shift = (cues: Cue[], by: number): Cue[] =>
+    cues.map((cue) => ({ ...cue, start: cue.start + by, end: cue.end + by }));
+  const timings = (cues: Cue[]) => cues.map(({ start, end }) => ({ start, end }));
+  /** Found by the video's hash, its name saying nothing of the release: linked to the video. */
+  const linkedSdh = (ms?: number) =>
+    file('sdh', SDH, { label: 'some_film_subs.srt', hashMatch: true, ms });
+  const firstStart = (subtitles: Subtitles) => subtitles.cues?.[0]?.start;
+
+  it('shows a plain file lined up against one linked to the video, from its first line', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh(300);
+    const plain = file('plain', shift(FULL, 3), { ms: 300 });
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.flush();
+    // Held while the file linked to the video is read, and then the other lined up against it.
+    expect(player.subtitles.cues).toBeNull();
+    await player.wait(400);
+    expect(player.subtitles.choice).toEqual(fileChoice(sdh));
+    expect(player.subtitles.cues).toBeNull();
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved', rate: 1 });
+    if (player.subtitles.sync?.state === 'moved') {
+      expect(player.subtitles.sync.offset).toBeCloseTo(-3, 1);
+    }
+    expect(player.subtitles.offset).toBe(0);
+    // Its row says it is in step; the one it was lined up against was checked against nothing,
+    // so its row says what is known of it (linked to the video), not that it is in step.
+    expect(player.subtitles.checkOf(fileChoice(plain)!)).toMatchObject({ synced: true });
+    expect(player.subtitles.checkOf(fileChoice(sdh)!)).not.toHaveProperty('synced');
+    const [trace] = recentSubtitleTraces();
+    expect(trace).toMatchObject({ reason: 'synced to your video', reference: 'linked' });
+    expect(Object.values(trace!.aligned ?? {})).toEqual([
+      expect.objectContaining({ language: 'en', confidence: 'sure', reference: 'linked' }),
+    ]);
+  });
+
+  it('lines a file up against the stream’s own track in another language, read but not shown', async () => {
+    const entry = streamEntry('film-hls');
+    const english = file('english', shift(FULL, -5));
+    offer(entry, [english]);
+    const player = play(entry, { engine: 'hls.js', text: [track('fr|French', 'fr')] });
+    await player.wait(300);
+    // The French track is asked for its lines while the English file is chosen.
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+    expect(player.selected[player.selected.length - 1]).toBe('fr|French');
+    expect(player.subtitles.cues).toBeNull();
+    // hls.js hands the track's lines over: the file is lined up, and shows.
+    await player.session({ streamTimings: { 'fr|French': timings(FULL) } });
+    await player.wait(300);
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+  });
+
+  it('says so where there is nothing to check a file against, and moves nothing', async () => {
+    const entry = streamEntry('film');
+    const plain = file('plain', shift(FULL, 3));
+    offer(entry, [plain]);
+    const player = play(entry);
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 3, 5);
+    expect(player.subtitles.sync).toEqual({ state: 'unchecked' });
+    expect(player.subtitles.checkOf(fileChoice(plain)!)).not.toHaveProperty('synced');
+  });
+
+  it('ranks a file whose timing matches nothing in the video’s after one that fits', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    // Another cut's lines: nothing like the video's timing.
+    const other = file(
+      'other',
+      lines(1150, 7000).map((cue, i) => ({
+        ...cue,
+        start: cue.start + (i % 7) * 0.9,
+        end: cue.end + (i % 7) * 0.9,
+      })),
+    );
+    offer(entry, [sdh, other]);
+    const player = play(entry);
+    await player.wait(2500);
+    // The file linked to the video, though for the hard of hearing, stays.
+    expect(player.subtitles.choice).toEqual(fileChoice(sdh));
+    expect(player.subtitles.checkOf(fileChoice(other)!)).not.toHaveProperty('synced');
+  });
+
+  it('leaves a version picked by hand showing, its lines lined up', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const plain = file('plain', shift(FULL, 3));
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(2500);
+    player.subtitles.choose(fileChoice(sdh), 'version');
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(sdh));
+    expect(player.subtitles.sync).toEqual({ state: 'reference' });
+    // Picked by hand, the plain one lined up is still the viewer's to choose: it is moved.
+    player.subtitles.choose(fileChoice(plain), 'version');
+    await player.wait(500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+  });
+
+  it('leaves the lines as the viewer set them where they chose the file’s drift fix', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const plain = file('plain', shift(FULL, 3));
+    await stores.subtitleDrifts.remember(subtitleFileKey(VIDEO, plain.key), 'none');
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 3, 5);
+    expect(player.subtitles.sync).toEqual({ state: 'yours' });
+  });
+
+  it('adds the viewer’s timing to the move, kept as set on lined-up lines', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const plain = file('plain', shift(FULL, 3));
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(2500);
+    player.subtitles.setOffset(0.2);
+    await player.flush();
+    expect(player.subtitles.offset).toBe(0.2);
+    // The move stays; the layer draws the viewer's timing on top of it.
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    const key = subtitleFileKey(VIDEO, plain.key);
+    expect(stores.subtitleDrifts.get(key)).toBe('aligned');
+    expect(stores.subtitleOffsets.get(key)).toBe(0.2);
+  });
+
+  it('never stacks a timing kept from another release on the move, and adds one set on a move', async () => {
+    const key = (option: SubtitleOption) => subtitleFileKey(VIDEO, option.key);
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const plain = file('plain', shift(FULL, 3));
+    // Set on the file's own lines, on another release: 3 s later still.
+    await stores.subtitleOffsets.remember(key(plain), 3);
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.offset).toBe(0);
+    // Kept, not lost: where the file cannot be lined up, it applies as before.
+    expect(stores.subtitleOffsets.get(key(plain))).toBe(3);
+    player.unmount();
+
+    // Set on lines lined up before: it adds to this stream's move.
+    await stores.subtitleOffsets.remember(key(plain), 0.4);
+    await stores.subtitleDrifts.remember(key(plain), 'aligned');
+    const again = streamEntry('film-again');
+    offer(again, [sdh, plain]);
+    const next = play(again);
+    await next.wait(2500);
+    expect(next.subtitles.offset).toBe(0.4);
+    expect(firstStart(next.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+  });
+
+  it('lets the viewer undo a stretch the move made, and keeps that choice', async () => {
+    const pal = 25 / (24000 / 1001);
+    const entry = streamEntry('film');
+    const sdh = file('sdh', lines(1200, 6800, 2), { label: 'some_film.srt', hashMatch: true });
+    // Timed for 25 frames a second on the 23.976 video: its length (7,090 s) shows no drift.
+    const stretched = lines(1200, 6800).map((cue) => ({
+      ...cue,
+      start: cue.start * pal,
+      end: cue.end * pal,
+    }));
+    const plain = file('plain', stretched);
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.subtitles.drift).toBe('behind');
+    expect(player.subtitles.autoDrift).toBe(true);
+    const last = () => player.subtitles.cues![player.subtitles.cues!.length - 1]!.start;
+    expect(last()).toBeCloseTo(stretched[stretched.length - 1]!.start / pal, 0);
+    // No fix: kept for the file, so the move goes, and the lines show as the file has them.
+    const key = subtitleFileKey(VIDEO, plain.key);
+    player.subtitles.setDrift(null);
+    await player.flush();
+    expect(stores.subtitleDrifts.get(key)).toBe('none');
+    expect(player.subtitles.drift).toBeNull();
+    expect(player.subtitles.sync).toEqual({ state: 'yours' });
+    expect(last()).toBeCloseTo(stretched[stretched.length - 1]!.start, 5);
+    // Another fix, then No fix again: the move does not come back.
+    player.subtitles.setDrift('ahead');
+    await player.flush();
+    player.subtitles.setDrift(null);
+    await player.flush();
+    expect(stores.subtitleDrifts.get(key)).toBe('none');
+    expect(last()).toBeCloseTo(stretched[stretched.length - 1]!.start, 5);
+  });
+
+  it('shows none of the drift fixes on for a stretch that is neither, and No fix undoes it', async () => {
+    const rate = 24 / (24000 / 1001);
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const timed = FULL.map((cue) => ({ ...cue, start: cue.start * rate, end: cue.end * rate }));
+    const plain = file('plain', timed);
+    const last = () => player.subtitles.cues![player.subtitles.cues!.length - 1]!.start;
+    offer(entry, [sdh, plain]);
+    const player = play(entry);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved', rate });
+    expect(player.subtitles).toMatchObject({ drift: null, stretched: true, autoDrift: false });
+    expect(last()).toBeCloseTo(FULL[FULL.length - 1]!.start, 0);
+    expect(driftOn(player.subtitles, null)).toBe(false);
+    expect(driftHintKey(player.subtitles)).toBe('player.driftAligned');
+    player.subtitles.setDrift(null);
+    await player.flush();
+    expect(stores.subtitleDrifts.get(subtitleFileKey(VIDEO, plain.key))).toBe('none');
+    expect(player.subtitles.stretched).toBe(false);
+    expect(last()).toBeCloseTo(timed[timed.length - 1]!.start, 5);
+  });
+
+  it('says the lines are left as the viewer chose once they pick a drift fix over the move', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    const plain = file('plain', shift(FULL, 3));
+    const other = file('other', shift(FULL, -2));
+    // A drift fix the viewer chose for the other file before: it would not be moved.
+    await stores.subtitleDrifts.remember(subtitleFileKey(VIDEO, other.key), 'ahead');
+    offer(entry, [sdh, plain, other]);
+    const player = play(entry);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(plain));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    // Lined up for sure, but its row does not say it is in step: picked, it would not move.
+    expect(player.subtitles.checkOf(fileChoice(other)!)).toBeDefined();
+    expect(player.subtitles.checkOf(fileChoice(other)!)).not.toHaveProperty('synced');
+    player.subtitles.setDrift('ahead');
+    await player.flush();
+    expect(player.subtitles.sync).toEqual({ state: 'yours' });
+    expect(player.subtitles.checkOf(fileChoice(plain)!)).not.toHaveProperty('synced');
+    expect(firstStart(player.subtitles)).toBeCloseTo((FULL[0]!.start + 3) / (24000 / 1001 / 25), 3);
+  });
+
+  it('moves lines as early ones, however little, while the video is before the first of them', async () => {
+    const entry = streamEntry('film-hls');
+    // 0.2 s late, its first line a minute in: near enough to leave once a line has shown.
+    const near = file(
+      'near',
+      shift(FULL, 0.2).filter((cue) => cue.start > 60),
+    );
+    offer(entry, [near]);
+    const player = play(entry, { engine: 'hls.js', text: [track('fr|French', 'fr')] });
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(near));
+    expect(player.subtitles.cues).not.toBeNull();
+    // The track's lines come late, ten seconds into the video: no line of the file has shown.
+    await player.session({ position: 10, streamTimings: { 'fr|French': timings(FULL) } });
+    await player.wait(300);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    if (player.subtitles.sync?.state === 'moved') {
+      expect(player.subtitles.sync.offset).toBeCloseTo(-0.2, 1);
+    }
+  });
+
+  it('keeps a file’s row and Timing to what is known when it is the reference with nothing else', async () => {
+    const entry = streamEntry('film');
+    const sdh = linkedSdh();
+    offer(entry, [sdh]);
+    const player = play(entry);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(sdh));
+    expect(player.subtitles.sync).toBeNull();
+    expect(player.subtitles.checkOf(fileChoice(sdh)!)).not.toHaveProperty('synced');
+  });
+
+  describe('on Android, against the lines it hands over as the video plays', () => {
+    const french = track('2:0', 'fr', { picture: false });
+    const upTo = (minutes: number, by = 0) =>
+      timings(shift(FULL, by)).filter((line) => line.end <= minutes * 60);
+
+    it('moves lines already showing once, late, when far enough out', async () => {
+      const entry = streamEntry('film-android');
+      const english = file('english', shift(FULL, 2));
+      const second = file('second', shift(FULL, -1));
+      const third = file('third', shift(FULL, 1.5));
+      offer(entry, [english, second, third]);
+      const player = play(entry, { engine: 'android', text: [french] });
+      await player.wait(2500);
+      expect(player.subtitles.choice).toEqual(fileChoice(english));
+      expect(player.selected[player.selected.length - 1]).toBe('2:0');
+      expect(player.subtitles.sync).toEqual({ state: 'checking' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 2, 5);
+      // Forty minutes in, its lines showing all along: lined up for sure, it is moved, once.
+      await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      // Another picked now is lined up before any of its lines shows: moved, as from the start.
+      for (const option of [second, third]) {
+        player.subtitles.choose(fileChoice(option), 'version');
+        await player.wait(1000);
+        expect(player.subtitles.choice).toEqual(fileChoice(option));
+        expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+        expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      }
+    });
+
+    it('leaves lines already showing that are near enough in step, and ones the viewer timed', async () => {
+      const entry = streamEntry('film-android');
+      const near = file('near', shift(FULL, 0.2));
+      offer(entry, [near]);
+      const player = play(entry, { engine: 'android', text: [french] });
+      await player.wait(2500);
+      await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toEqual({ state: 'inStep' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 0.2, 5);
+
+      const timed = streamEntry('film-android-2');
+      const out = file('out', shift(FULL, 2));
+      offer(timed, [out]);
+      const other = play(timed, { engine: 'android', text: [french] });
+      await other.wait(2500);
+      other.subtitles.setOffset(-1.5);
+      await other.flush();
+      await other.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await other.wait(300);
+      expect(other.subtitles.sync).toEqual({ state: 'yours' });
+      expect(other.subtitles.offset).toBe(-1.5);
+      expect(firstStart(other.subtitles)).toBeCloseTo(FULL[0]!.start + 2, 5);
+      // Left as the viewer set them: its row does not say it is in step.
+      expect(other.subtitles.checkOf(fileChoice(out)!)).not.toHaveProperty('synced');
+    });
+
+    it('takes the timing the viewer kept on lined-up lines into account before moving them late', async () => {
+      const entry = streamEntry('film-android');
+      // 0.25 s late, with +0.3 s set on lines lined up before: they show 0.55 s late now, and the
+      // move with that timing puts them 0.3 s late, near enough: left.
+      const near = file('near', shift(FULL, 0.25));
+      await stores.subtitleOffsets.remember(subtitleFileKey(VIDEO, near.key), 0.3);
+      await stores.subtitleDrifts.remember(subtitleFileKey(VIDEO, near.key), 'aligned');
+      offer(entry, [near]);
+      const player = play(entry, { engine: 'android', text: [french] });
+      await player.wait(2500);
+      await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toEqual({ state: 'inStep' });
+    });
+
+    it('changes nothing for a timing or drift fix pressed that is already in use', async () => {
+      const entry = streamEntry('film-android');
+      const english = file('english', shift(FULL, 2));
+      offer(entry, [english]);
+      const player = play(entry, { engine: 'android', text: [french] });
+      await player.wait(2500);
+      // No fix is on, and the timing at +0.0 s: pressing them is no choice of the viewer's.
+      player.subtitles.setDrift(null);
+      player.subtitles.setOffset(0);
+      await player.flush();
+      await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      expect(stores.subtitleDrifts.get(subtitleFileKey(VIDEO, english.key))).toBeUndefined();
+    });
+
+    it('does not let a file lined up later take over from the one showing long after its first line', async () => {
+      const entry = streamEntry('film-android');
+      // In step for a quarter of an hour, then 6 s out: two parts that line up differently.
+      const first = file(
+        'first',
+        FULL.map((cue) =>
+          cue.start < 900 ? cue : { ...cue, start: cue.start + 6, end: cue.end + 6 },
+        ),
+      );
+      const second = file('second', shift(FULL, 2));
+      offer(entry, [first, second]);
+      const player = play(entry, { engine: 'android', text: [french] });
+      await player.wait(2500);
+      expect(player.subtitles.choice).toEqual(fileChoice(first));
+      await player.session({ position: 1320, streamTimings: { '2:0': upTo(22) } });
+      await player.wait(300);
+      await player.session({ position: 2400, streamTimings: { '2:0': upTo(40) } });
+      await player.wait(300);
+      expect(player.subtitles.checkOf(fileChoice(second)!)).toMatchObject({ synced: true });
+      expect(player.subtitles.choice).toEqual(fileChoice(first));
+    });
+
+    it('lines a file up after a resume late in the film, and looks again as more lines come', async () => {
+      const entry = streamEntry('film-android');
+      const english = file('english', shift(FULL, 5));
+      offer(entry, [english]);
+      const player = play(entry, { engine: 'android', text: [french], position: 5600 });
+      await player.wait(2500);
+      const from = (seconds: number) =>
+        timings(FULL).filter((line) => line.start >= 5600 && line.end <= 5600 + seconds);
+      // Five minutes of lines, though the last passes three quarters of the video: still to come.
+      await player.session({ position: 5900, streamTimings: { '2:0': from(300) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toEqual({ state: 'checking' });
+      expect(player.subtitles.checkOf(fileChoice(english)!)).not.toHaveProperty('synced');
+      // Over twenty minutes of them: lined up, and moved.
+      await player.session({ position: 6900, streamTimings: { '2:0': from(1300) } });
+      await player.wait(300);
+      expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+      if (player.subtitles.sync?.state === 'moved') {
+        expect(player.subtitles.sync.offset).toBeCloseTo(-5, 1);
+      }
+    });
   });
 });

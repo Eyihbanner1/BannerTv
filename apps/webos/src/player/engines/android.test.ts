@@ -394,6 +394,21 @@ describe("Android's engine", () => {
     ]);
   });
 
+  it('tells picture subtitles from text by their type, or the type they had before Android read them', () => {
+    const text = (mime?: string, codecs?: string) =>
+      toEngineTrack(
+        { id: '2:0', lang: 'en', label: '', active: false, supported: true, mime, codecs },
+        false,
+      ).picture;
+    expect(text('application/pgs')).toBe(true);
+    expect(text('application/x-media3-cues', 'application/vobsub')).toBe(true);
+    expect(text('application/x-media3-cues', 'application/x-subrip')).toBe(false);
+    expect(text('text/vtt')).toBe(false);
+    // Read into Android's own cues with nothing said of what they were: unknown.
+    expect(text('application/x-media3-cues')).toBeUndefined();
+    expect(text()).toBeUndefined();
+  });
+
   it("passes Android's failures on as the player's", () => {
     const { fatal } = open();
     send({

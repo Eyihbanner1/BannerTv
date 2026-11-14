@@ -1,12 +1,14 @@
-import { languageKey } from '@bannertv/core';
+import { type AlignConfidence, languageKey } from '@bannertv/core';
 import { mark } from '../platform/marks';
 import type { HashFailure, HashSkip } from './stream-hash';
+import type { ReferenceKind } from './subtitle-align';
 
 /*
  * What happened to the subtitles of the last few plays, so a round on the
  * TV can say why each title got the file it did: whether the exact file's
  * hash was read, how many files came in each language, why the version
- * showing was chosen, and how long the first line took. Settings >
+ * showing was chosen, what the files were lined up against and what that
+ * found, and how long the first line took. Settings >
  * Diagnostics shows it, and its console line carries it. In memory only,
  * never stored, and never a link, an address or a file's name: states,
  * counts, language codes and times.
@@ -26,18 +28,33 @@ export type HashOutcome =
  * Why the version showing was chosen: picked by hand (from the list, or kept
  * for the release); the stream's own track; found by the video's hash
  * (linked to it); its name the same release as the video's, with the group
- * confirming it or loosely; the best fit of the files read; the list's
- * order, nothing telling the files apart; or none showing.
+ * confirming it or loosely; lined up against a reference for sure (synced);
+ * the best fit of the files read; the list's order, nothing telling the
+ * files apart; or none showing.
  */
 export type PickReason =
   | 'by hand'
   | 'own track'
   | 'linked to your video'
   | 'same release name'
+  | 'synced to your video'
   | 'same release name, no group'
   | 'best fit'
   | 'list order'
   | 'off';
+
+/** What lining one file up against the reference found, for Diagnostics. */
+export interface AlignTrace {
+  /** The file's language, as a key ("en", "pt-br"). */
+  language: string;
+  reference: ReferenceKind;
+  confidence: AlignConfidence;
+  /** Seconds the move puts its lines later, and the file's seconds for one of the video's. */
+  offset: number;
+  rate: number;
+  /** Milliseconds of work it took. */
+  ms: number;
+}
 
 /** One play's subtitles, as Diagnostics shows them. */
 export interface SubtitleTrace {
@@ -53,6 +70,10 @@ export interface SubtitleTrace {
   language?: string;
   /** Milliseconds from the player opening to the first subtitle line on screen. */
   firstLineMs?: number;
+  /** What the files were lined up against, last; null once there was nothing to. */
+  reference?: ReferenceKind | null;
+  /** Each file lined up, by its place in the order lined up, its last run. Never its link. */
+  aligned?: Record<number, AlignTrace>;
 }
 
 interface Running extends SubtitleTrace {
@@ -123,6 +144,22 @@ export function traceReason(
   else delete trace.language;
 }
 
+/** What the play's files are lined up against now: the stream's track, a file, or nothing. */
+export function traceReference(videoId: string, reference: ReferenceKind | null): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  trace.reference = reference;
+}
+
+/** What lining a file up found, by the file's place in the order lined up. */
+export function traceAlignment(videoId: string, file: number, outcome: AlignTrace): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  const language = languageKey(outcome.language) || outcome.language;
+  trace.aligned = { ...trace.aligned, [file]: { ...outcome, language } };
+  mark(`sub:aligned:${outcome.confidence}`);
+}
+
 /** The first subtitle line of the play now went on screen. */
 export function traceFirstLine(now = Date.now()): void {
   const trace = traces[0];
@@ -135,6 +172,7 @@ export function traceFirstLine(now = Date.now()): void {
 export function recentSubtitleTraces(): SubtitleTrace[] {
   return traces.map((trace) => {
     const copy: SubtitleTrace = { ...trace, files: { ...trace.files } };
+    if (trace.aligned) copy.aligned = { ...trace.aligned };
     delete (copy as Partial<Running>).startedAt;
     return copy;
   });
@@ -181,6 +219,33 @@ function filesText(trace: SubtitleTrace): string {
   return `files ${shown.join(', ')}${others} (${total} in all)`;
 }
 
+const REFERENCE_WORDS: Readonly<Record<ReferenceKind, string>> = {
+  track: 'the stream’s track',
+  linked: 'a file linked by hash',
+  release: 'a file named for the release',
+};
+
+/** "+2.3 s", "−0.4 s": a true minus sign. */
+const signed = (seconds: number) => `${seconds < 0 ? '−' : '+'}${Math.abs(seconds).toFixed(1)} s`;
+
+/** What the files were lined up against, and each file's last run, in the order lined up. */
+function alignText(trace: SubtitleTrace): string | undefined {
+  const runs = Object.keys(trace.aligned ?? {})
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((file) => {
+      const run = trace.aligned![file]!;
+      const rate = run.rate === 1 ? '' : ` ×${run.rate.toFixed(4)}`;
+      const move = run.confidence === 'sure' ? ` ${signed(run.offset)}${rate}` : '';
+      return `${run.language || '?'} ${run.confidence}${move} (${Math.round(run.ms)} ms)`;
+    });
+  if (trace.reference === undefined && runs.length === 0) return undefined;
+  const against = trace.reference ? REFERENCE_WORDS[trace.reference] : 'nothing';
+  return runs.length > 0
+    ? `lined up against ${against}: ${runs.join(', ')}`
+    : `lined up against ${against}`;
+}
+
 function reasonText(trace: SubtitleTrace): string {
   if (!trace.reason) return 'none chosen yet';
   const said = trace.reason === 'off' ? 'off' : `${trace.language ?? '?'}, ${trace.reason}`;
@@ -198,9 +263,12 @@ export function subtitleTraceRows(
       hashText(trace.hash),
       filesText(trace),
       reasonText(trace),
+      alignText(trace),
       trace.firstLineMs === undefined
         ? 'no line yet'
         : `first line after ${seconds(trace.firstLineMs)}`,
-    ].join(' · '),
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join(' · '),
   ]);
 }

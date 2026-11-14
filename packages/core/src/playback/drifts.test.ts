@@ -44,6 +44,10 @@ describe('createSubtitleDrifts', () => {
     expect(again.get('a')).toBe('auto');
     await again.remember('a', 'ahead');
     expect(again.get('a')).toBe('ahead');
+    await again.remember('b', 'aligned');
+    const third = createSubtitleDrifts({ storage });
+    await third.load();
+    expect(third.get('b')).toBe('aligned');
   });
 
   it('drops damaged entries and the least recently changed past the limit', async () => {

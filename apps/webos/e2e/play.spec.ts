@@ -5,6 +5,7 @@ import { DEMO_ROW, FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import {
   COMMENTARY_HLS_PATH,
   DEFAULT_STREAMS,
+  HLS_LONG_PATH,
   HLS_PATH,
   LIVE_HLS_PATH,
   MEDIA_HOST,
@@ -3858,6 +3859,157 @@ test('the file OpenSubtitles found by the video’s hash shows first and says it
   );
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`)).toHaveText(
     'OpenSubtitles v3 1Elephants.Dream.2006.720p.BluRay',
+  );
+});
+
+/**
+ * Records when each piece of text the page draws first showed, by the video's clock, so a
+ * journey can say a subtitle line came on time.
+ */
+async function recordShownAt(page: Page) {
+  await page.addInitScript(() => {
+    const shown: Array<{ text: string; at: number }> = [];
+    (window as unknown as { shownAt: typeof shown }).shownAt = shown;
+    new MutationObserver((records) => {
+      const playing = document.querySelector<HTMLVideoElement>('video:not([aria-hidden])');
+      const at = playing ? playing.currentTime : -1;
+      for (const record of records) {
+        if (record.type === 'characterData') {
+          shown.push({ text: record.target.textContent ?? '', at });
+        }
+        record.addedNodes.forEach((node) => shown.push({ text: node.textContent ?? '', at }));
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+}
+
+/** The video's time when this line first showed ("line 1", not "line 12"), or null before. */
+function shownAt(page: Page, line: string): Promise<number | null> {
+  return page.evaluate((text) => {
+    const shown = (window as unknown as { shownAt: Array<{ text: string; at: number }> }).shownAt;
+    const found = shown.find((entry) => {
+      const index = entry.text.indexOf(text);
+      return index !== -1 && !/\d/.test(entry.text.charAt(index + text.length));
+    });
+    return found ? found.at : null;
+  }, line);
+}
+
+/** Opens the Timing tab from the subtitles sheet's list of languages. */
+async function openTiming(page: Page) {
+  await openSheet(page, 'player-tracks-lang-en');
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+}
+
+test('a plain file 3 s out shows lined up against one for the hard of hearing linked to the video, on time from its first line', async ({
+  page,
+}) => {
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    // The 10-minute video: long enough for the files to be lined up.
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    subtitleList: [
+      // Found by the video's hash, its name saying nothing against it: in step with the video,
+      // but with sounds in brackets for the hard of hearing.
+      { id: 'linkedHearing', lang: 'eng', subtitleFileName: 'elephants_dream.srt', m: 'h' },
+      // The same speech, plain, from another release, its lines 3 s late.
+      { id: 'plainLate', lang: 'eng' },
+    ],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // The plain file shows, its first line (9 s into the file) moved to 6 s, with the speech.
+  await expect.poll(() => shownAt(page, 'Plain file, line 1'), { timeout: 15000 }).not.toBeNull();
+  const first = (await shownAt(page, 'Plain file, line 1'))!;
+  expect(first).toBeGreaterThan(5.5);
+  expect(first).toBeLessThan(7.5);
+  expect(await shownAt(page, 'Linked file, line 1')).toBeNull();
+
+  // Its row says it is in step with the video; the file it was lined up against keeps what it
+  // was picked for, linked to the video, as nothing checked it.
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#plainLate"]`)).toHaveText(
+    'OpenSubtitles v3 2Synced to your video',
+  );
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedHearing"]`)).toHaveText(
+    'OpenSubtitles v3 1Linked to your video · For the hard of hearing · elephants_dream',
+  );
+
+  // The Timing tab says by how much BannerTV moved the lines; the viewer's timing is untouched.
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.getByText('Lined up by BannerTV: −3.0 s')).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
+    '0.0 s · lined up',
+  );
+  expect((await readKv(page, 'subtitleOffsets')) ?? []).toEqual([]);
+});
+
+test('on HLS with a French track, an English file 5 s early shows lined up against the track, which never shows', async ({
+  page,
+}) => {
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ name: 'Test Streams\nHLS', description: 'Open Movie HLS', path: HLS_LONG_PATH }],
+    },
+    subtitleList: [{ id: 'hlsEnglishEarly', lang: 'eng' }],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  expect((await video(page)).src).toMatch(/^blob:/);
+
+  // The English file's first line, 10 s into it, shows at 15 s, with the French track's.
+  await expect.poll(() => shownAt(page, 'English line 1'), { timeout: 30000 }).not.toBeNull();
+  const first = (await shownAt(page, 'English line 1'))!;
+  expect(first).toBeGreaterThan(14.5);
+  expect(first).toBeLessThan(16.5);
+  // The French track was read for its timing, and none of its lines showed.
+  expect(await shownAt(page, 'Ligne 1 en français')).toBeNull();
+
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#hlsEnglishEarly"]`)).toHaveText(
+    'OpenSubtitles v3Synced to your video',
+  );
+  await pressBack(page);
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(page.getByText('Lined up by BannerTV: +5.0 s')).toBeVisible();
+});
+
+test('with nothing to check a file against, its lines stay as they are and the Timing tab says so', async ({
+  page,
+}) => {
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-movie-1080p.webm' }] },
+    // No hash, no release name, no track in the stream: nothing known to fit the video.
+    subtitleList: [{ id: 'plainLate', lang: 'eng' }],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+
+  // Its first line shows where the file has it, at 9 s.
+  await expect.poll(() => shownAt(page, 'Plain file, line 1'), { timeout: 20000 }).not.toBeNull();
+  expect(await shownAt(page, 'Plain file, line 1')).toBeGreaterThan(8.5);
+
+  await openTiming(page);
+  await expect(page.getByText("Couldn't check this file against your video")).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).not.toContainText(
+    'lined up',
   );
 });
 

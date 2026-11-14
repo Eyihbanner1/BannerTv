@@ -24,9 +24,12 @@ export const SUBTITLE_DRIFTS: readonly SubtitleDrift[] = ['ahead', 'behind'];
  * make: the fix stays on as they see it, and is worked out again on every
  * stream, so another release of the video, which the file may fit as it is,
  * is not stretched, and one whose length shows a drift is still fixed. A fix
- * the viewer picks replaces it.
+ * the viewer picks replaces it. 'aligned' is 'auto' for timing the viewer set
+ * on lines the player had lined up against the video itself: the timing adds
+ * to the player's move, worked out again on every stream, where the file is
+ * lined up; where it is not, the timing and the fix are as for 'auto'.
  */
-export type DriftChoice = SubtitleDrift | 'none' | 'auto';
+export type DriftChoice = SubtitleDrift | 'none' | 'auto' | 'aligned';
 
 const KEY = 'subtitleDrift';
 export const MAX_SUBTITLE_DRIFTS = 300;
@@ -47,7 +50,8 @@ export interface SubtitleDrifts {
   load(): Promise<void>;
   /**
    * The drift fix kept for the file: 'none' where the viewer took off the player's own,
-   * 'auto' where the player's own is kept with the viewer's timing.
+   * 'auto' where the player's own is kept with the viewer's timing, 'aligned' where that
+   * timing was set on lines the player lined up itself.
    */
   get(key: string): DriftChoice | undefined;
   /** Null forgets the choice: the file is as it was, and the player may fix it by itself. */
@@ -71,7 +75,13 @@ export interface DriftAdoption {
 }
 
 function isChoice(value: unknown): value is DriftChoice {
-  return value === 'ahead' || value === 'behind' || value === 'none' || value === 'auto';
+  return (
+    value === 'ahead' ||
+    value === 'behind' ||
+    value === 'none' ||
+    value === 'auto' ||
+    value === 'aligned'
+  );
 }
 
 function readDrifts(saved: unknown): SavedDrift[] {

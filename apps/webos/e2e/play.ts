@@ -33,6 +33,12 @@ export const LIVE_HLS_PATH = '/hls-live/master.m3u8';
  * "English Commentary", listed first, so the Commentary rule shows.
  */
 export const COMMENTARY_HLS_PATH = '/hls-commentary/master.m3u8';
+/**
+ * Ten minutes of HLS at MEDIA_HOST/hls-long/master.m3u8: VP9 with no audio, and a French
+ * WebVTT rendition, HLS_LONG_FRENCH, in one segment, so hls.js reads it whole at the start.
+ * See fixtures/hls-long/README.md.
+ */
+export const HLS_LONG_PATH = '/hls-long/master.m3u8';
 const HLS_TYPES: Record<string, string> = {
   m3u8: 'application/vnd.apple.mpegurl',
   mp4: 'video/mp4',
@@ -187,6 +193,69 @@ export const LONG_SUBTITLES = {
   copy: srt(dialogue('Another full file', 3, 588, 2)),
 };
 
+/** Seconds rounded to milliseconds, as subtitle files keep them. */
+const ms = (seconds: number) => Math.round(seconds * 1000) / 1000;
+
+/**
+ * When a made-up film's lines start and end, from `from` seconds until `until`: one every 2 to
+ * 6 s, lasting 1 to 3 s, as unevenly as people talk, and the same on every run. Even lines
+ * would line up as well a line or two either way, as no film's do.
+ */
+function speech(from: number, until: number): Array<[number, number]> {
+  const lines: Array<[number, number]> = [];
+  for (let at = from, n = 1; at < until; n++) {
+    const random = (salt: number) => {
+      const x = Math.sin(n * 12.9898 + salt * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const length = 1 + 2 * random(1);
+    lines.push([ms(at), ms(at + length)]);
+    at += length + 0.3 + 3 * random(2);
+  }
+  return lines;
+}
+
+/** The made-up film's lines for the 10-minute video, from 6 s. */
+const LONG_SPEECH = speech(6, 588);
+
+/**
+ * Files for lining up on the 10-minute video (any /long- path): one for the hard of hearing,
+ * with a sound in brackets every fifth line, as OpenSubtitles finds by the video's hash; and a
+ * plain one with the same speech, 3 s late, as from another release.
+ */
+export const ALIGN_SUBTITLES = {
+  linkedHearing: srt(
+    LONG_SPEECH.map(([start, end], i) => [
+      start,
+      end,
+      (i + 1) % 5 === 0 ? '[door creaks]' : `Linked file, line ${i + 1}`,
+    ]),
+  ),
+  plainLate: srt(
+    LONG_SPEECH.filter((_, i) => (i + 1) % 5 !== 0).map(([start, end], i) => [
+      ms(start + 3),
+      ms(end + 3),
+      `Plain file, line ${i + 1}`,
+    ]),
+  ),
+};
+
+/** The made-up film's lines on the long HLS, from 15 s: its French track has them on time. */
+const HLS_LONG_SPEECH = speech(15, 588);
+
+/** WebVTT time: 00:01:02.500. */
+const vttTime = (seconds: number) => srtTime(seconds).replace(',', '.');
+
+/** The long HLS's French track, served at MEDIA_HOST/hls-long/subs-fr.vtt. */
+export const HLS_LONG_FRENCH = `WEBVTT\n\n${HLS_LONG_SPEECH.map(
+  ([start, end], i) => `${vttTime(start)} --> ${vttTime(end)}\nLigne ${i + 1} en français\n`,
+).join('\n')}`;
+
+/** An English file for the long HLS, 5 s early: its lines come before the French track's. */
+export const HLS_LONG_ENGLISH = srt(
+  HLS_LONG_SPEECH.map(([start, end], i) => [ms(start - 5), ms(end - 5), `English line ${i + 1}`]),
+);
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
@@ -194,6 +263,8 @@ export const SUBTITLE_FILES: Record<string, string> = {
   fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
   fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
   ...LONG_SUBTITLES,
+  ...ALIGN_SUBTITLES,
+  hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 
 export interface PlaybackMock {
@@ -467,6 +538,20 @@ export async function mockPlayback(
     if (broken.has(path)) return route.fulfill({ status: 404, body: '' });
     if (options.refused?.[path]?.includes(route.request().resourceType())) {
       return route.fulfill({ status: 503, body: '' });
+    }
+    const long = /^\/hls-long\/([\w-]+\.(m3u8|mp4|m4s|vtt))$/.exec(path);
+    if (path.indexOf('/hls-long/') === 0) {
+      if (!long) return route.fulfill({ status: 404 });
+      const file = long[1]!;
+      return route.fulfill({
+        status: 200,
+        contentType: HLS_TYPES[long[2]!],
+        headers: { 'access-control-allow-origin': '*' },
+        body:
+          file === 'subs-fr.vtt'
+            ? HLS_LONG_FRENCH
+            : readFileSync(resolve(import.meta.dirname, 'fixtures/hls-long', file)),
+      });
     }
     const hls = /^\/hls(-live|-commentary)?\//.exec(path);
     if (hls) {
