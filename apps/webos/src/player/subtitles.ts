@@ -395,7 +395,11 @@ export function subtitleList(
           traceHash(
             videoId,
             found
-              ? { state: 'read', ms: reading.ms, ...(reading.fellBack && { fellBack: true }) }
+              ? {
+                  state: 'read',
+                  ms: reading.ms,
+                  ...(reading.fellBack && { fellBack: reading.fellBack }),
+                }
               : 'skipped' in reading
                 ? { state: 'skipped', why: reading.skipped }
                 : { state: 'failed', why: reading.failed, step: reading.step, ms: reading.ms },
@@ -409,7 +413,7 @@ export function subtitleList(
           traceHash(videoId, {
             state: 'read',
             ms: reading.ms,
-            ...(reading.fellBack && { fellBack: true }),
+            ...(reading.fellBack && { fellBack: reading.fellBack }),
             late: { askedAtMs: askedAt, askedAgain },
           });
           mark('sub:hash:late');

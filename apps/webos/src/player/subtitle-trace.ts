@@ -21,11 +21,11 @@ import type { ReferenceKind } from './subtitle-align';
  */
 export type HashOutcome =
   /**
-   * Read from the file, in so many milliseconds; `fellBack` where the link it led to refused a
-   * later read, which went through the stream's link again; `late` when it came after the files
-   * were asked for without it.
+   * Read from the file, in so many milliseconds; `fellBack`, the first later read the link it
+   * led to refused, which went through the stream's link again, as every read after it did;
+   * `late` when it came after the files were asked for without it.
    */
-  | { state: 'read'; ms: number; fellBack?: true; late?: HashLate }
+  | { state: 'read'; ms: number; fellBack?: 'size' | 'end'; late?: HashLate }
   /** The stream's addon sent it with the stream. */
   | { state: 'sent' }
   /** Still being read when the addons were asked without it. */
@@ -287,7 +287,9 @@ function hashText(hash: HashOutcome | undefined): string {
   if (!hash) return 'hash: not asked yet';
   switch (hash.state) {
     case 'read': {
-      const back = hash.fellBack ? ', the end through the stream’s link again' : '';
+      const back = hash.fellBack
+        ? `, ${hash.fellBack === 'size' ? 'the size and end' : 'the end'} through the stream’s link again`
+        : '';
       return `hash read in ${seconds(hash.ms)}${back}${hash.late ? lateText(hash.late) : ''}`;
     }
     case 'sent':

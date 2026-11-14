@@ -7,6 +7,7 @@ import {
   HASH_TIMEOUT_MS,
   hashSkip,
   hashStream,
+  NATIVE_READ_MS,
   openSubtitlesHash,
   readStreamHash,
 } from './stream-hash';
@@ -359,10 +360,36 @@ describe('reading the hash through a link that redirects twice', () => {
   it('goes back through the stream’s link once when the link it led to refuses a second read', async () => {
     const asked = serveChain({ type: 'basic', oneUse: true });
     const reading = await readStreamHash(LINK);
-    expect(reading).toMatchObject({ found: { videoHash: expected }, fellBack: true, walks: 2 });
+    expect(reading).toMatchObject({ found: { videoHash: expected }, fellBack: 'end', walks: 2 });
     expect(walks(asked)).toBe(2);
     // Start, the end refused at the first walk's link, then the end through a second walk.
     expect(toCdn(asked)).toEqual([head, tail, tail]);
+  });
+
+  it('sends every read after a refused one through the stream’s link, not to the link refused', async () => {
+    // Behind CORS with the size to read, on links good for one use: the size is refused where the
+    // first walk landed, so it and the end each walk once more, and the end is not tried there.
+    const asked = serveChain({ type: 'cors', showLength: true, oneUse: true });
+    const reading = await readStreamHash(LINK);
+    expect(reading).toMatchObject({ found: { videoHash: expected }, fellBack: 'size', walks: 3 });
+    expect(toCdn(asked)).toEqual([head, 'whole', 'whole', tail]);
+  });
+
+  it('gives each read 4 s at most through React Native’s fetch, which can’t stop at the headers', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('navigator', { product: 'ReactNative' });
+    // A host that sends the whole film for a range: the fetch answers only once it is all in.
+    vi.stubGlobal(
+      'fetch',
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('', 'AbortError'))),
+        ),
+    );
+    const reading = readStreamHash(LINK);
+    await vi.advanceTimersByTimeAsync(NATIVE_READ_MS);
+    // A range not kept to, not a refusal: not tried again through the stream's link.
+    expect(await reading).toMatchObject({ failed: 'no range', step: 'start', ms: NATIVE_READ_MS });
   });
 
   it('gives up after that one try, saying which read failed', async () => {

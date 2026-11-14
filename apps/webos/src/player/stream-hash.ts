@@ -11,8 +11,9 @@ import { requestHeadersFor } from './request-headers';
  * A stream's link often leads somewhere else (an addon's link to a debrid
  * service, which hands out a link on its own servers): the first read follows
  * those redirects once, and the size and the end are read straight from where
- * it landed, back through the stream's own link once if that is refused. The
- * link it landed on is never kept, nor said.
+ * it landed. Once that refuses a read (a link good for one use), that read and
+ * any after it go back through the stream's own link, each once. The link it
+ * landed on is never kept, nor said.
  */
 
 /** Bytes read from each end of the file. */
@@ -23,6 +24,16 @@ export const HASH_CHUNK = 64 * 1024;
  * it when it comes later, so this only bounds how late a hash is still used.
  */
 export const HASH_TIMEOUT_MS = 15000;
+/**
+ * React Native's fetch answers only once the whole body is in, so a host that
+ * sends the whole file for a range can't be stopped at the headers there: each
+ * read gives up after this long instead, as the whole reading did before
+ * HASH_TIMEOUT_MS grew. 64 KB takes far less on any network a video plays on.
+ */
+export const NATIVE_READ_MS = 4000;
+
+/** The fetch is React Native's (the phone, the native TV app), not a browser's. */
+const nativeFetch = () => typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
 
 /**
  * The OpenSubtitles hash: the file size plus every little-endian 64-bit word
@@ -136,7 +147,13 @@ interface Answer<T> {
   refused: boolean;
 }
 
-/** Runs one fetch tied to the reading's signal, with its own controller to stop it at the headers. */
+/** A read stopped by its own NATIVE_READ_MS: the host is sending more than was asked for. */
+class TooLong extends Error {}
+
+/**
+ * Runs one fetch tied to the reading's signal, with its own controller to stop it at the
+ * headers; on React Native, where the headers come with the whole body, after NATIVE_READ_MS.
+ */
 async function fetchWith<T>(
   url: string,
   init: RequestInit,
@@ -146,10 +163,21 @@ async function fetchWith<T>(
   const controller = typeof AbortController === 'undefined' ? null : new AbortController();
   const stop = () => controller?.abort();
   signal?.addEventListener('abort', stop);
+  let tooLong = false;
+  const limit =
+    controller && nativeFetch()
+      ? window.setTimeout(() => {
+          tooLong = true;
+          stop();
+        }, NATIVE_READ_MS)
+      : undefined;
   try {
     const response = await fetch(url, { ...init, signal: controller?.signal });
     return await take(response, stop);
+  } catch (error) {
+    throw tooLong && !signal?.aborted ? new TooLong() : error;
   } finally {
+    if (limit !== undefined) clearTimeout(limit);
     signal?.removeEventListener('abort', stop);
   }
 }
@@ -207,6 +235,8 @@ async function readRange(
   } catch (error) {
     // Stopped by the reading's own timer: that is the timeout, not a refusal.
     if (signal?.aborted) throw error;
+    // Still coming after NATIVE_READ_MS: the whole file for a range, which another try won't mend.
+    if (error instanceof TooLong) return { refused: false };
     return { refused: true };
   }
 }
@@ -228,7 +258,8 @@ async function readSize(url: string, signal: AbortSignal | undefined): Promise<A
 /** How a reading is going, for its record: which read it is at, and how often it went the long way. */
 interface Progress {
   step: HashStep;
-  fellBack: boolean;
+  /** The first read the link the first one landed on refused: it and every later one went back. */
+  fellBack?: 'size' | 'end';
   /** Requests made to the stream's own link, each walking its redirects. */
   walks: number;
 }
@@ -246,12 +277,13 @@ async function read(
   const { landed, bytes: head } = first.value;
   // Every later read goes straight to where the first landed, past the redirects (each walk
   // through them asks the debrid service for its link again, and its answers are rationed). A
-  // link there that refuses is tried once through the stream's own.
+  // read there that is refused goes once through the stream's own link, and so does every read
+  // after it: a link good for one use refuses each of them.
   const once = async <T>(attempt: (target: string) => Promise<Answer<T>>): Promise<Answer<T>> => {
-    if (landed !== url) {
+    if (landed !== url && progress.fellBack === undefined) {
       const direct = await attempt(landed);
       if (!direct.refused) return direct;
-      progress.fellBack = true;
+      progress.fellBack = progress.step === 'size' ? 'size' : 'end';
     }
     progress.walks++;
     return attempt(url);
@@ -287,17 +319,17 @@ async function read(
 
 /**
  * How reading a link's hash went, and how long it took: `walks` the requests
- * made to the stream's own link, each through its redirects; `fellBack` where
- * the link it led to refused a later read, which went through the stream's
- * link again; `step` the read a failure came at. Never the link, nor where it
- * led.
+ * made to the stream's own link, each through its redirects; `fellBack` the
+ * first later read the link it led to refused, which went through the
+ * stream's link again, as every read after it did; `step` the read a failure
+ * came at. Never the link, nor where it led.
  */
 export type HashReading =
   | {
       found: { videoHash: string; videoSize: number };
       ms: number;
       walks: number;
-      fellBack?: true;
+      fellBack?: 'size' | 'end';
     }
   | { found?: undefined; skipped: HashSkip; ms: 0 }
   | { found?: undefined; failed: HashFailure; step: HashStep; ms: number; walks: number };
@@ -327,7 +359,7 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
     controller?.abort();
   }, HASH_TIMEOUT_MS);
   const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
-  const progress: Progress = { step: 'start', fellBack: false, walks: 0 };
+  const progress: Progress = { step: 'start', walks: 0 };
   const reading = read(url, size, controller?.signal, progress).then(
     (found): HashReading => {
       clearTimeout(timer);
@@ -335,7 +367,7 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
         found,
         ms: Date.now() - startedAt,
         walks: progress.walks,
-        ...(progress.fellBack && { fellBack: true as const }),
+        ...(progress.fellBack && { fellBack: progress.fellBack }),
       };
     },
     (error: unknown): HashReading => {

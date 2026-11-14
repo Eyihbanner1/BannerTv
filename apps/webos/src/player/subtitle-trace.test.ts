@@ -51,8 +51,12 @@ describe('the subtitles of the last few plays', () => {
       return subtitleTraceRows()[0]![1].split(' · ')[0];
     };
     expect(rowFor({ state: 'read', ms: 1400 })).toBe('hash read in 1.4 s');
-    expect(rowFor({ state: 'read', ms: 3100, fellBack: true })).toBe(
+    expect(rowFor({ state: 'read', ms: 3100, fellBack: 'end' })).toBe(
       'hash read in 3.1 s, the end through the stream’s link again',
+    );
+    // The size read refused at the link the first landed on: the end then went the same way.
+    expect(rowFor({ state: 'read', ms: 3100, fellBack: 'size' })).toBe(
+      'hash read in 3.1 s, the size and end through the stream’s link again',
     );
     expect(rowFor({ state: 'reading', askedAtMs: 2000 })).toBe(
       'hash still being read; files asked for without it after 2.0 s',
