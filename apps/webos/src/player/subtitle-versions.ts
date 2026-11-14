@@ -7,6 +7,7 @@ import {
   linkedToVideo,
   rankSubtitles,
   type StreamEntry,
+  type SubtitleDrift,
   type SubtitleFit,
 } from '@bannertv/core';
 import type {
@@ -55,6 +56,31 @@ export const DRIFT_CHOICES = [
   { name: 'ahead', drift: 'ahead', label: 'player.driftAhead' },
   { name: 'behind', drift: 'behind', label: 'player.driftBehind' },
 ] as const;
+
+/**
+ * Whether a drift choice is the one in use, for the drift row: none of them
+ * where the player lined the lines up and stretched them to a rate that is
+ * neither fix.
+ */
+export function driftOn(
+  subtitles: Pick<Subtitles, 'drift' | 'stretched'>,
+  drift: SubtitleDrift | null,
+): boolean {
+  return !subtitles.stretched && subtitles.drift === drift;
+}
+
+/**
+ * The hint under the drift row, as a key in the strings: the lines were
+ * stretched as BannerTV lined them up; the drift was fixed as the file's
+ * length showed it; or how to choose one.
+ */
+export function driftHintKey(
+  subtitles: Pick<Subtitles, 'autoDrift' | 'sync'>,
+): 'player.driftAligned' | 'player.driftAuto' | 'player.driftHint' {
+  const { sync } = subtitles;
+  if (sync?.state === 'moved' && sync.rate !== 1) return 'player.driftAligned';
+  return subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint';
+}
 
 /** The language of the subtitles showing, for a chip or a tab; none when off. */
 export function subtitlesValue(
@@ -181,7 +207,7 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
  * what reading it found (its text in another script, signs only, part of the
  * video, longer than it) or its names or its addon say (another episode),
  * that its drift was fixed by itself, that the player lined it up against
- * the video itself or lines others up against it (synced), that its addon
+ * the video itself (synced), that its addon
  * found it by the video's hash with no name saying otherwise (linked to it)
  * or its release name is the same as the video's with enough to confirm it
  * (a guess), and that it is for the hard of hearing.
@@ -232,8 +258,9 @@ const MAX_NOTES = 2;
 /**
  * The notes on a version's row, most telling first, at most two: loading or
  * a failure alone; else what reading it found, then in step with the video
- * (lined up against it by the player, or what others are lined up against:
- * that says the drift too), else a drift fixed by itself, then linked to the
+ * (lined up against it by the player: that says the drift too; never the
+ * file the others are lined up against, which nothing checked), else a drift
+ * fixed by itself, then linked to the
  * video by its hash (`linkedToVideo`) or else the same release by a strong
  * match of the names (the same name, or the group confirming it: a loose
  * match, another group's file as often as not, says nothing), both said by

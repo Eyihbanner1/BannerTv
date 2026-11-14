@@ -3,6 +3,8 @@ import { preferences } from '@tv/data/preferences';
 import {
   createOrderMemory,
   DRIFT_CHOICES,
+  driftHintKey,
+  driftOn,
   isUnfit,
   languageFirstPick,
   type OrderMemory,
@@ -319,13 +321,13 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
               <Chip
                 key={name}
                 label={t(label)}
-                on={subtitles.drift === drift}
+                on={driftOn(subtitles, drift)}
                 onPress={() => subtitles.setDrift(drift)}
               />
             ))}
           </View>
           <Text style={styles.note}>
-            {`${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`}
+            {`${t(driftHintKey(subtitles))} ${t('player.timingKept')}`}
           </Text>
         </>
       ) : (

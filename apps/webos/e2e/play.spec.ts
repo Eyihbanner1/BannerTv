@@ -3931,13 +3931,14 @@ test('a plain file 3 s out shows lined up against one for the hard of hearing li
   expect(first).toBeLessThan(7.5);
   expect(await shownAt(page, 'Linked file, line 1')).toBeNull();
 
-  // Its row says it is in step with the video, and so does the file it was lined up against.
+  // Its row says it is in step with the video; the file it was lined up against keeps what it
+  // was picked for, linked to the video, as nothing checked it.
   await openSheet(page, 'player-tracks-lang-en');
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#plainLate"]`)).toHaveText(
     'OpenSubtitles v3 2Synced to your video',
   );
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedHearing"]`)).toHaveText(
-    'OpenSubtitles v3 1Synced to your video · For the hard of hearing · elephants_dream',
+    'OpenSubtitles v3 1Linked to your video · For the hard of hearing · elephants_dream',
   );
 
   // The Timing tab says by how much BannerTV moved the lines; the viewer's timing is untouched.

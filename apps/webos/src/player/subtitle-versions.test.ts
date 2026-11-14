@@ -136,8 +136,8 @@ describe('subtitle versions', () => {
     expect(versionNotes(matching, true, 'failed', video)).toEqual(['failed']);
     expect(versionNotes(matching, false, 'failed', video)).toEqual(['skipped']);
     expect(versionNotes(matching, false, undefined, video)).toEqual(['sameRelease']);
-    // Lined up against the video, or what others are lined up against: in step, which says
-    // more than the names do, and the drift with it.
+    // Lined up against the video: in step, which says more than the names do, and the drift
+    // with it.
     const synced = { hearing: true, synced: true, autoDrift: true };
     expect(versionNotes(matching, true, undefined, video, synced)).toEqual(['synced', 'hearing']);
     expect(versionNotes(other, false, undefined, video, { hearing: false, synced: true })).toEqual([

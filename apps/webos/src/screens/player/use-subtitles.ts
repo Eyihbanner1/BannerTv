@@ -106,8 +106,9 @@ export interface SubtitleCheck {
   /** The version showing, whose drift the player fixed by itself. */
   autoDrift?: boolean;
   /**
-   * In step with the video: lined up against a reference for sure, or the
-   * file the others are lined up against.
+   * In step with the video: lined up against a reference for sure, its lines
+   * as that put them (not a drift fix the viewer chose instead). Never the
+   * file the others are lined up against: nothing checked it.
    */
   synced?: boolean;
 }
@@ -157,7 +158,16 @@ export interface Subtitles {
    * plays: it is in step with the video, and its last line has no end to stretch yet.
    */
   canFixDrift: boolean;
-  /** What lining the file showing up against the video did; null for a track, or off. */
+  /**
+   * The player lined the file showing up and stretched its lines to a rate that is neither drift
+   * fix (24 against 23.976, 25 against 24, 30 against 29.97): none of the drift fixes is in use,
+   * and No fix undoes the stretch.
+   */
+  stretched: boolean;
+  /**
+   * What lining the file showing up against the video did; null for a track, off, or a file
+   * the others would be lined up against when there are none.
+   */
   sync: SubtitleSync | null;
   /**
    * The viewer chose; their choice becomes the language picked next time. A version picked
@@ -334,12 +344,19 @@ function readFiles(offered: readonly SubtitleOption[], checks: SubtitleChecks) {
   return files;
 }
 
+/** What was done with a sure answer, and the answer's move it was decided for. */
+interface Decided extends MoveDecision {
+  for: LineMove;
+}
+
 /** The moves decided on a stream, by file link, and how many came after lines had shown. */
 interface StreamMoves {
   entry: StreamEntry | null;
-  byLink: ReadonlyMap<string, MoveDecision>;
+  byLink: ReadonlyMap<string, Decided>;
   late: number;
 }
+
+const sameMove = (a: LineMove, b: LineMove) => a.offset === b.offset && a.rate === b.rate;
 
 const noMoves = (entry: StreamEntry | null): StreamMoves => ({ entry, byLink: new Map(), late: 0 });
 
@@ -1080,9 +1097,10 @@ export function useSubtitles(
   const unaligned = driftInUse({ canFix: canFixDrift, evidence, kept: keptDrift, offset });
 
   // The move made on the file showing, once lining it up was sure: decided once a stream for
-  // each file. Before its first line shows, the move is made; after, only when it moves the lines
-  // far enough, and only so many times a stream. Not where the viewer chose its drift fix, nor
-  // where they set its timing on this stream before the move came: theirs stands.
+  // each sure answer of the file (a later look at a stream track still arriving may find it out
+  // by a little). Before its first line shows, the move is made; after, only when it moves the
+  // lines far enough, and only so many times a stream. Not where the viewer chose its drift fix,
+  // nor where they set its timing on this stream before the move came: theirs stands.
   const fileUrl = fileOption?.url ?? null;
   const fileRecord = fileUrl !== null ? alignments.get(fileUrl) : undefined;
   const sureMove = useMemo(
@@ -1100,14 +1118,17 @@ export function useSubtitles(
   const touchedNow = (url: string) =>
     touched.current.entry === entry && touched.current.links.has(url);
   useEffect(() => {
-    if (!entry || fileUrl === null || !sureMove || movesNow.byLink.has(fileUrl)) return;
+    if (!entry || fileUrl === null || !sureMove) return;
+    const made = movesNow.byLink.get(fileUrl);
+    if (made && sameMove(made.for, sureMove)) return;
     if (viewersDrift(keptDrift)) return;
     const lines = checks.lines(fileUrl) ?? (fileCues ? timingOf(fileCues) : []);
-    // Where the lines show now, and where the move puts them, the viewer's timing with each.
-    const before: LineMove = {
-      offset,
-      rate: unaligned.drift ? DRIFT_RATES[unaligned.drift] : 1,
-    };
+    // Where the lines show now (as moved before on this stream, or as the file has them), and
+    // where the move puts them, the viewer's timing with each.
+    const shown = made?.move ?? null;
+    const before: LineMove = shown
+      ? { offset: shown.offset + (keptDrift === 'aligned' ? offset : 0), rate: shown.rate }
+      : { offset, rate: unaligned.drift ? DRIFT_RATES[unaligned.drift] : 1 };
     const after: LineMove = {
       offset: sureMove.offset + (keptDrift === 'aligned' ? offset : 0),
       rate: sureMove.rate,
@@ -1127,9 +1148,14 @@ export function useSubtitles(
       touched: touchedNow(fileUrl),
       lateMoves: movesNow.late,
     });
+    // Lines moved before stay where they are when the new answer leaves them.
+    const kept: Decided =
+      decision.move === null && made?.move
+        ? { move: made.move, ...(made.late ? { late: true } : {}), for: sureMove }
+        : { ...decision, for: sureMove };
     movesStore.set({
       entry,
-      byLink: new Map(movesNow.byLink).set(fileUrl, decision),
+      byLink: new Map(movesNow.byLink).set(fileUrl, kept),
       late: movesNow.late + (decision.late ? 1 : 0),
     });
     // Decided once for each file: what it reads of the rest is as it is at that moment.
@@ -1145,21 +1171,31 @@ export function useSubtitles(
     aligned: appliedMove,
   });
   const { drift, auto: autoDrift, move } = timing;
+  // A move to a rate that is neither drift fix (24 against 23.976, 25 against 24) stretches the
+  // lines with none of the fixes in use: the drift row shows none of its three on.
+  const stretched = !!move && move.rate !== 1 && drift === null;
+  const driftShown: SubtitleDrift | null | 'stretched' = stretched ? 'stretched' : drift;
 
-  // What lining the file showing up did, for the Timing tab.
+  /** Whether a file is what the others are lined up against. */
+  const isReference = (url: string) =>
+    !!reference && reference.kind !== 'track' && reference.id === url;
+  // What lining the file showing up did, for the Timing tab: from the timing in use, so a drift
+  // fix the viewer chose since, which leaves the lines as the file has them, says so.
   const sync = ((): SubtitleSync | null => {
     if (fileUrl === null) return null;
-    if (reference && reference.kind !== 'track' && reference.id === fileUrl) {
-      return { state: 'reference' };
+    // Checked against nothing itself: said only where there are other files it is used for.
+    if (isReference(fileUrl)) {
+      return options.some((option) => option.url !== fileUrl) ? { state: 'reference' } : null;
     }
-    if (appliedMove) {
-      return Math.abs(appliedMove.offset) < 0.05 && appliedMove.rate === 1
+    if (move) {
+      return Math.abs(move.offset) < 0.05 && move.rate === 1
         ? { state: 'inStep' }
-        : { state: 'moved', offset: appliedMove.offset, rate: appliedMove.rate };
+        : { state: 'moved', offset: move.offset, rate: move.rate };
     }
-    if (sureMove) {
+    if (appliedMove || sureMove) {
       if (viewersDrift(keptDrift)) return { state: 'yours' };
-      return decision?.left ? { state: decision.left } : { state: 'checking' };
+      if (decision?.left) return { state: decision.left };
+      if (sureMove) return { state: 'checking' };
     }
     if (aligner.pending(fileUrl)) return { state: 'checking' };
     if (fileRecord) return { state: fileRecord.final ? 'unmatched' : 'checking' };
@@ -1178,11 +1214,19 @@ export function useSubtitles(
     return { state: coming ? 'checking' : 'unchecked' };
   })();
 
-  /** Whether a file reads as in step with the video, for its row. */
+  /**
+   * Whether a file reads as in step with the video, for its row: lined up for sure, and, showing,
+   * its lines moved there; not showing, no drift fix of the viewer's own kept for it, which would
+   * leave its lines as the file has them. Not the reference itself, which nothing checked: its
+   * row says what is known of it, linked to the video or the same release.
+   */
   const syncedFile = (option: SubtitleOption, showing: boolean): boolean => {
-    if (reference && reference.kind !== 'track' && reference.id === option.url) return true;
+    if (isReference(option.url)) return false;
     if (syncedOf(alignments.get(option.url)) !== 'sure') return false;
-    return !showing || sync?.state === 'moved' || sync?.state === 'inStep';
+    if (showing) return sync?.state === 'moved' || sync?.state === 'inStep';
+    if (!entry) return false;
+    const key = subtitleFileKey(videoId, fileIdentity({ kind: 'file', key: option.key }, entry));
+    return !viewersDrift(subtitleDrifts.get(key) ?? null);
   };
 
   /**
@@ -1225,6 +1269,7 @@ export function useSubtitles(
     offset: timing.offset,
     drift,
     autoDrift,
+    stretched,
     canFixDrift,
     sync,
     statusOf(version) {
@@ -1324,7 +1369,8 @@ export function useSubtitles(
       else if (next?.kind === 'track') void subtitlePicks.forget(metaId, pickRelease);
     },
     setOffset(next) {
-      if (offsetKey === null) return;
+      // The timing already in use, set again (Reset at +0.0 s), changes nothing.
+      if (offsetKey === null || next === timing.offset) return;
       keepShowing();
       // Moving the timing of a file with no drift choice of the viewer's keeps 'auto' beside it:
       // the player's fix is worked out from each stream's own evidence, so the lines stay
@@ -1343,12 +1389,16 @@ export function useSubtitles(
     },
     setDrift(next) {
       if (offsetKey === null) return;
-      keepShowing();
       // The fix already in use, pressed again, is kept as it was: the player's own stays its own,
       // worked out on each stream, and is not made a fixed drift for the file on every release.
-      if (next === drift) return;
-      // No fix, where the file's length shows a drift, is kept: the player does not fix it again.
-      void subtitleDrifts.remember(offsetKey, next === null && evidence !== null ? 'none' : next);
+      // Lines a move stretched to another rate than the two fixes show none of them in use.
+      if (next === driftShown) return;
+      keepShowing();
+      // No fix is kept where the file's length shows a drift, or the player moved its lines on
+      // this stream: the player does not fix it again, and a drift choice of the viewer's means
+      // no move at all.
+      const keepNone = next === null && (evidence !== null || appliedMove !== null);
+      void subtitleDrifts.remember(offsetKey, keepNone ? 'none' : next);
     },
   };
 }

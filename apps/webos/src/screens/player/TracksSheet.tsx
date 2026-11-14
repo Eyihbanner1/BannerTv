@@ -13,6 +13,8 @@ import type { EngineTrack } from '../../player/engines/types';
 import {
   createOrderMemory,
   DRIFT_CHOICES,
+  driftHintKey,
+  driftOn,
   isUnfit,
   languageFirstPick,
   playingRelease,
@@ -294,7 +296,7 @@ export function TracksSheet(props: TracksSheetProps) {
             <div className={styles.steps}>
               <span className={styles.rowLabel}>{t('player.drift')}</span>
               {DRIFT_CHOICES.map(({ name, drift, label }) => {
-                const on = subtitles.drift === drift;
+                const on = driftOn(subtitles, drift);
                 return (
                   <Pressable
                     key={name}
@@ -317,7 +319,7 @@ export function TracksSheet(props: TracksSheetProps) {
           )}
           <p className={styles.kept}>
             {subtitles.canFixDrift
-              ? `${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`
+              ? `${t(driftHintKey(subtitles))} ${t('player.timingKept')}`
               : t('player.timingKept')}
           </p>
         </Pane>
