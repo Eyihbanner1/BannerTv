@@ -438,6 +438,19 @@ export type {
   VideoCodec,
 } from './streams/types';
 export { isAdCue, stripAdCues } from './subtitles/ads';
+export {
+  type AlignConfidence,
+  alignedTime,
+  type AlignOptions,
+  ALIGN_RATES,
+  alignSteps,
+  alignSubtitles,
+  alignSubtitlesInSlices,
+  type LineTiming,
+  MAX_OFFSET,
+  type Slicing,
+  type SubtitleAlignment,
+} from './subtitles/align';
 export { createCueIndex, type CueIndex } from './subtitles/cues';
 export { detectEncoding } from './subtitles/encoding';
 export {
