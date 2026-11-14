@@ -53,6 +53,12 @@ export interface SubtitleAlignment {
   score: number;
   /** Share of the file's lines, in that stretch, that land on the reference's speech. */
   matched: number;
+  /**
+   * The same share with the file moved well away from the answer (13 to 47 s
+   * either way): what chance gives, as dense dialogue lands on dense dialogue
+   * anywhere.
+   */
+  chance: number;
   /** How evenly the matches spread: the share of tenths of that stretch whose lines match. */
   spread: number;
   /** The answer's peak over the best clearly different answer's (1 is no peak at all). */
@@ -66,6 +72,8 @@ export interface SubtitleAlignment {
   split?: { at: number; jump: number };
   /** Seconds of the video both files cover, once lined up. */
   covered: number;
+  /** That stretch as a share of the file's own, from its first line to its last. */
+  coveredShare: number;
 }
 
 const FILM = 24000 / 1001;
@@ -112,8 +120,15 @@ const RATE_MARGIN = 1.02;
 const WINDOW_SECONDS = 120;
 const WINDOW_SPANS = 40;
 const MAX_WINDOWS = 10;
-/** A window is lined up on its own within this far of the answer, and this near counts as agreeing. */
-const WINDOW_RANGE = 60;
+/**
+ * A window is lined up on its own over every offset searched, so a run of the
+ * film that lines up far from the answer (a scene the video lacks, or has and
+ * the file does not) shows as off, not unclear. Its peak near the answer must
+ * stand out over the offsets within WINDOW_REACH of it, and WINDOW_NEAR of it
+ * counts as near.
+ */
+const WINDOW_RANGE = MAX_OFFSET;
+const WINDOW_REACH = 60;
 const WINDOW_NEAR = 5;
 const WINDOW_AGREE = 0.5;
 /** A window's own peak must stand this far above the rest of its range to count. */
@@ -138,12 +153,24 @@ const NONE_BELOW = 1.6;
 const NONE_FLOOR = 1.25;
 const NONE_WINDOWS = 3;
 const NONE_WINDOW_SHARE = 0.3;
+/** Under this prominence there is no peak at all: nothing lines up, however few the windows. */
+const NOTHING_BELOW = 1.15;
 /** Sure: this prominence, most windows agreeing, at most one off, no drift or split, most lines matched. */
 const SURE_PROMINENCE = 2;
 const SURE_WINDOW_SHARE = 0.6;
 const SURE_WINDOWS = 2;
 const SURE_DRIFT = 0.6;
 const SURE_MATCHED = 0.6;
+/**
+ * And that share this far beyond chance (0 is chance, 1 every line): with
+ * fewer than FEW_WINDOWS windows usable, every one of them agreeing and
+ * SURE_BEYOND_FEW beyond chance.
+ */
+const SURE_BEYOND = 0.25;
+const FEW_WINDOWS = 4;
+const SURE_BEYOND_FEW = 0.5;
+/** Seconds the file is moved from the answer to see what chance gives. */
+const CHANCE_SHIFTS: readonly number[] = [-47, -37, -23, -13, 13, 23, 37, 47];
 /**
  * Sure needs this many lines of each file in the stretch both cover, and a
  * stretch this long. A reference still arriving (the stream's own lines as
@@ -294,10 +321,16 @@ function between(curve: Float64Array, at: number): number {
   return bend < 0 ? at + (0.5 * (a - c)) / bend : at;
 }
 
-/** The peak at `at` over the highest point more than `apart` seconds from it. */
-function standsOut(curve: Float64Array, at: number, apart: number): number {
+/** The peak at `at` over the highest point more than `apart` seconds from it, in bins [from, to). */
+function standsOut(
+  curve: Float64Array,
+  at: number,
+  apart: number,
+  from = 0,
+  to = curve.length,
+): number {
   let rest = 0;
-  for (let n = 0; n < curve.length; n++) {
+  for (let n = Math.max(0, from); n < Math.min(curve.length, to); n++) {
     if (Math.abs(n - at) * BIN > apart) rest = Math.max(rest, curve[n]!);
   }
   const peak = curve[at]!;
@@ -380,12 +413,14 @@ const NOTHING: SubtitleAlignment = {
   rate: 1,
   score: 0,
   matched: 0,
+  chance: 0,
   spread: 0,
   prominence: 1,
   confidence: 'none',
   windows: [],
   drift: 0,
   covered: 0,
+  coveredShare: 0,
 };
 
 /**
@@ -453,9 +488,16 @@ export function* alignSteps(
   }
   offset = refined;
   yield;
-  // The best clearly different answer, at any rate.
-  const t0 = candidate.starts[0]!;
-  const t1 = candidate.ends[candidate.count - 1]!;
+  // The best clearly different answer, at any rate: one that puts the lines elsewhere in the
+  // stretch the reference covers. Outside it nothing tells answers apart, so against a stretch
+  // late in the film an answer that differs only at the file's start is the same answer.
+  const first = candidate.starts[0]!;
+  const last = candidate.ends[candidate.count - 1]!;
+  const fromRef = (reference.starts[0]! - offset) * rate;
+  const toRef = (reference.ends[reference.count - 1]! - offset) * rate;
+  const inside = Math.min(last, toRef) > Math.max(first, fromRef);
+  const t0 = inside ? Math.max(first, fromRef) : first;
+  const t1 = inside ? Math.min(last, toRef) : last;
   let second = 0;
   for (let r = 0; r < ALIGN_RATES.length; r++) {
     const other = curves[r]!;
@@ -532,6 +574,32 @@ function* judge(
     if (hit) tenth.matched++;
   }
   const share = lines > 0 ? matched / lines : 0;
+  // What chance gives: the share of the same lines landing on speech with the file moved well
+  // away from the answer. Dense dialogue lands on dense dialogue half the time or more anywhere.
+  let chanceSum = 0;
+  for (const shift of CHANCE_SHIFTS) {
+    let tried = 0;
+    let hits = 0;
+    let r = 0;
+    for (let j = 0; j < candidate.lineStarts.length; j++) {
+      const at = shown(candidate.lineStarts[j]!);
+      if (at < from - 1 || at > to + 1) continue;
+      const a = at + shift;
+      const b = shown(candidate.lineEnds[j]!) + shift;
+      tried++;
+      while (r < reference.count && reference.ends[r]! <= a) r++;
+      let landed = 0;
+      for (let k = r; k < reference.count && reference.starts[k]! < b; k++) {
+        landed += Math.min(b, reference.ends[k]!) - Math.max(a, reference.starts[k]!);
+      }
+      if (landed >= 0.5 * (b - a)) hits++;
+    }
+    chanceSum += tried > 0 ? hits / tried : 0;
+    yield;
+  }
+  const chance = chanceSum / CHANCE_SHIFTS.length;
+  // How far the lines landing on speech are beyond chance: 0 at chance, 1 when every one lands.
+  const beyond = chance < 1 ? (share - chance) / (1 - chance) : 0;
   const counted = tenths.filter((tenth) => tenth.lines >= 3);
   const spread =
     counted.length > 0
@@ -558,6 +626,7 @@ function* judge(
   const size = Math.round((2 * WINDOW_RANGE) / BIN) + 1;
   const centre = Math.round(WINDOW_RANGE / BIN);
   const near = Math.round(WINDOW_NEAR / BIN);
+  const reach = Math.round(WINDOW_REACH / BIN);
   let j = 0;
   for (let w = 0; w < count; w++) {
     const start = from + (w * covered) / count;
@@ -577,7 +646,14 @@ function* judge(
     const close = highest(local, centre - near, centre + near + 1);
     const anywhere = highest(local);
     const window: Window = { at, kind: 'unclear', delta: null };
-    if (standsOut(local, close, 1.5) >= WINDOW_PROMINENCE) {
+    // Its own clear peak far from the answer: this part of the film lines up elsewhere.
+    const far =
+      Math.abs(anywhere - centre) > reach &&
+      standsOut(local, anywhere, 1.5) >= WINDOW_PROMINENCE * 1.15;
+    if (
+      !far &&
+      standsOut(local, close, 1.5, centre - reach, centre + reach + 1) >= WINDOW_PROMINENCE
+    ) {
       window.delta = (between(local, close) - centre) * BIN;
       window.kind = Math.abs(window.delta) <= WINDOW_AGREE ? 'agrees' : 'off';
     } else if (
@@ -629,9 +705,12 @@ function* judge(
 
   // Enough to go on: a reference still arriving that covers too little says nothing against a file.
   const enough = lines >= MIN_LINES && referenceLines >= MIN_LINES && covered >= MIN_COVERED;
-  const thin = growing && (!enough || covered < MIN_COVERED_SHARE * ownSpan);
-  // A match, if not all the way through: a clear peak; a weaker one most windows agree with; or
-  // a split, whose two parts each peak in their windows (two equal parts peak as high as each other).
+  const coveredShare = ownSpan > 0 ? Math.min(1, covered / ownSpan) : 0;
+  const thin = growing && (!enough || coveredShare < MIN_COVERED_SHARE);
+  // A match, if not all the way through: a clear peak; a weaker one most windows agree with; a
+  // split, whose two parts each peak in their windows (two equal parts peak as high as each
+  // other); or, with too few windows to show whether they disagree, a peak at all: files for
+  // the same video and for another one both peak that high then.
   const someMatch =
     prominence >= NONE_BELOW ||
     (prominence >= NONE_FLOOR &&
@@ -639,9 +718,21 @@ function* judge(
       agreeing >= NONE_WINDOW_SHARE * usable) ||
     (split !== undefined &&
       clear.length >= NONE_WINDOWS &&
-      clear.length >= SURE_WINDOW_SHARE * usable);
+      clear.length >= SURE_WINDOW_SHARE * usable) ||
+    (usable < NONE_WINDOWS && prominence >= NOTHING_BELOW);
+  // Rates 0.1% apart (24 and 23.976, 25 against either) put the lines a second apart in twenty
+  // minutes, as close as files' timings are to each other, and far apart by the film's end: a
+  // reference covering under half of the file never says which, so only the file as it is can be
+  // sure then.
+  const rateKnown = rate === 1 || coveredShare >= MIN_COVERED_SHARE;
+  // With few windows, two blocks of lines timed alike in both (the opening and closing songs of
+  // two episodes) can carry the vote: then every window must agree, and far beyond chance.
+  const fewWindows = usable < FEW_WINDOWS;
   const sure =
     enough &&
+    rateKnown &&
+    beyond >= SURE_BEYOND &&
+    (!fewWindows || (agreeing === usable && beyond >= SURE_BEYOND_FEW)) &&
     prominence >= SURE_PROMINENCE &&
     usable >= SURE_WINDOWS &&
     agreeing >= Math.max(SURE_WINDOWS, Math.ceil(SURE_WINDOW_SHARE * usable)) &&
@@ -655,12 +746,14 @@ function* judge(
     rate,
     score,
     matched: share,
+    chance,
     spread,
     prominence,
     confidence,
     windows: windows.map((window) => window.delta),
     drift,
     covered,
+    coveredShare,
   };
   if (split) result.split = split;
   return result;
