@@ -6,6 +6,7 @@ import {
   fitsIn,
   lastResort,
   type PickContext,
+  pickReason,
   pickSubtitleFile,
   type PlanInput,
   planSubtitlePick,
@@ -19,6 +20,10 @@ interface File {
   url: string;
   lang: string;
   label?: string;
+  releaseName?: string;
+  hashMatch?: boolean;
+  season?: number;
+  episode?: number;
 }
 
 const file = (key: string, lang = 'eng', label?: string): File => ({
@@ -602,5 +607,116 @@ describe('fitsIn', () => {
       drift: 'behind',
       auto: true,
     });
+  });
+});
+
+describe('files made for the release, discs and other episodes', () => {
+  const offered = [file('a'), file('b'), file('c')];
+
+  it('shows a file its addon found by the video’s hash at once, whatever its name', () => {
+    const hashed = [
+      ...offered,
+      { ...file('hash', 'eng', 'Film.2021.720p.WEB.srt'), hashMatch: true },
+    ];
+    expect(plan(hashed, {})).toEqual({ pick: 'hash', read: [], hold: false, switched: false });
+    // Before one named for the release with its group: the hash is the file itself.
+    const named = file('named', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP-HI.srt');
+    expect(keys(rankedFiles([named, ...hashed], 'en', context()))).toEqual([
+      'hash',
+      'named',
+      'a',
+      'b',
+      'c',
+    ]);
+    // Read as drifting, it ranks by its fit like any other.
+    expect(plan(hashed, { a: FITS, hash: BEHIND }, { current: 'hash', holding: false })).toEqual({
+      pick: 'a',
+      read: ['b'],
+      hold: false,
+      switched: true,
+    });
+  });
+
+  it('shows one named for the release at once only when the group confirms it', () => {
+    // OpenSubtitles names its files: tags of its own after the release do not get in the way.
+    const named = file('named', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP-HI.srt');
+    expect(plan([...offered, named], {})).toEqual({
+      pick: 'named',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // The same episode, resolution and source with no group: read and held like any other, and
+    // only before another that fits as well.
+    const loose = file('loose', 'eng', 'Some.Film.2021.1080p.BluRay.srt');
+    expect(plan([...offered, loose], {})).toEqual({
+      pick: 'loose',
+      read: ['a', 'b'],
+      hold: true,
+      switched: false,
+    });
+    expect(
+      plan([...offered, loose], { a: FITS, b: SDH }, { current: 'loose', timeUp: true }).pick,
+    ).toBe('a');
+    expect(plan([loose, ...offered], { loose: FITS, a: FITS }, { current: 'a' }).pick).toBe(
+      'loose',
+    );
+    // Another group is no match at all.
+    const other = file('other', 'eng', 'Some.Film.2021.1080p.BluRay.x264-OTHER');
+    expect(plan([...offered, other], {}).pick).toBe('a');
+  });
+
+  it('never puts one disc of two before a whole file, until it is read against the video', () => {
+    const cd1 = file('cd1', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP.CD1.srt');
+    const whole = file('whole', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP.srt');
+    expect(keys(rankedFiles([cd1, whole, file('a')], 'en', context()))).toEqual([
+      'whole',
+      'a',
+      'cd1',
+    ]);
+    expect(plan([cd1, whole], {})).toMatchObject({ pick: 'whole', hold: false });
+    // Read and found whole, it is judged by what reading found.
+    expect(keys(rankedFiles([cd1, file('a')], 'en', context({ cd1: FITS })))).toEqual(['cd1', 'a']);
+  });
+
+  it('leaves out a file for another episode, by its name or its addon’s fields', () => {
+    const episode = {
+      filename: 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES.mkv',
+      season: 1,
+      episode: 1,
+    };
+    const files = [
+      file('e2', 'eng', 'The.Last.of.Us.S01E02.1080p.WEB.H264-CAKES.srt'),
+      { ...file('fields'), season: 1, episode: 2 },
+      { ...file('s2'), season: 2, episode: 1 },
+      file('e1', 'eng', 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt'),
+      file('plain'),
+    ];
+    const ctx = context({}, [], { video: episode });
+    expect(keys(rankedFiles(files, 'en', ctx))).toEqual(['e1', 'plain']);
+    // Never even as a last resort: its lines are never this one's.
+    expect(lastResort(files.slice(0, 3), 'en', ctx)).toBeUndefined();
+    // Unless picked by hand.
+    expect(keys(rankedFiles(files, 'en', { ...ctx, remembered: 'e2' }))[0]).toBe('e2');
+  });
+
+  it('says why the file showing was chosen', () => {
+    const hashed = { ...file('hash'), hashMatch: true };
+    const named = file('named', 'eng', 'Some.Film.2021.1080p.BluRay.x264-GROUP');
+    const loose = file('loose', 'eng', 'Some.Film.2021.1080p.BluRay');
+    const all = [file('a'), file('b'), hashed, named, loose];
+    const why = (
+      pick: File,
+      fits: Record<string, SubtitleFit> = {},
+      extra: Partial<PickContext> = {},
+    ) => pickReason(pick, all, 'en', context(fits, [], extra));
+    expect(why(all[0]!, {}, { remembered: 'a' })).toBe('by hand');
+    expect(why(hashed)).toBe('linked to your video');
+    expect(why(named)).toBe('same release name');
+    // Read as drifting, a file named for the release was chosen by its fit, if at all.
+    expect(why(named, { named: BEHIND, a: SIGNS })).not.toBe('same release name');
+    expect(why(all[0]!, { a: FITS })).toBe('best fit');
+    expect(why(loose)).toBe('same release name, no group');
+    expect(pickReason(file('a'), [file('a'), file('b')], 'en', context())).toBe('list order');
   });
 });

@@ -18,6 +18,8 @@ export type DiagnosticRow = readonly [label: string, value: string];
 export interface DiagnosticSection {
   title: string;
   rows: DiagnosticRow[];
+  /** Each row's value under its label, across the column: for long values. */
+  stacked?: boolean;
 }
 
 /** Codec strings to probe with canPlayType (native player) and MediaSource (MSE). */

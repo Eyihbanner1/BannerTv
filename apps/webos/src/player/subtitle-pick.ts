@@ -1,31 +1,37 @@
 import {
   clearlyBetter,
-  fitTier,
+  fileReleaseMatch,
+  fileTier,
   judgeSubtitleFits,
   languageKey,
+  madeForRelease,
+  type MatchedFile,
+  otherEpisode,
   rankReason,
   rankSubtitles,
-  releaseMatch,
   type SubtitleFit,
   type SubtitleProfile,
   type VideoLength,
+  type VideoRelease,
 } from '@bannertv/core';
+import type { PickReason } from './subtitle-trace';
 
-/** What picking a subtitle file needs to know of it. */
-export interface PickableSubtitle {
+/**
+ * What picking a subtitle file needs to know of it: who it is, and its names
+ * and what its addon says of it (found by the video's hash, the episode).
+ */
+export interface PickableSubtitle extends MatchedFile {
   /** Who the file is among those offered for the video. */
   key: string;
   url: string;
   lang: string;
-  /** The release name the addon sent, if any. */
-  label?: string;
 }
 
-/** The video playing, as its release name says: the file name first, then the title. */
-export interface PlayingRelease {
-  filename?: string;
-  title?: string;
-}
+/**
+ * The video playing, as its release name says (the file name first, then the
+ * title), and the season and episode playing, as its id says.
+ */
+export type PlayingRelease = VideoRelease;
 
 /** What is known of the files on offer, for picking one. */
 export interface PickContext {
@@ -49,10 +55,12 @@ export function filesIn<T extends PickableSubtitle>(offered: readonly T[], langu
 
 /**
  * The files in a language, best first (`rankSubtitles`): the version picked
- * by hand for this release, one whose release name matches the video, then
- * the best fit, in the order given where nothing tells them apart. Files
- * that could not be read are left out, and so are those that failed their
- * checks badly (in another script, or signs only), unless picked by hand.
+ * by hand for this release, one made for the release (found by the video's
+ * hash, or named for it with the group confirming it), then the best fit, in
+ * the order given where nothing tells them apart. Files that could not be
+ * read are left out, and so are those that failed their checks badly (in
+ * another script, or signs only) or are for another episode, unless picked
+ * by hand.
  */
 export function rankedFiles<T extends PickableSubtitle>(
   offered: readonly T[],
@@ -62,7 +70,8 @@ export function rankedFiles<T extends PickableSubtitle>(
   const working = filesIn(offered, language).filter(
     (option) =>
       !context.broken(option.url) &&
-      (option.key === context.remembered || !context.fit(option.url)?.unfit),
+      (option.key === context.remembered ||
+        (!context.fit(option.url)?.unfit && !otherEpisode(option, context.video))),
   );
   return rankSubtitles(working, {
     video: context.video,
@@ -87,14 +96,15 @@ export function pickSubtitleFile<T extends PickableSubtitle>(
 /**
  * When nothing better is left in a language: a file that failed its checks
  * but is in the language's script (signs only is better than nothing), then
- * one in another script, then one that could not be read.
+ * one in another script, then one that could not be read. Never one for
+ * another episode: its lines are never this one's.
  */
 export function lastResort<T extends PickableSubtitle>(
   offered: readonly T[],
   language: string,
-  context: Pick<PickContext, 'broken' | 'fit'>,
+  context: Pick<PickContext, 'broken' | 'fit' | 'video'>,
 ): T | undefined {
-  const files = filesIn(offered, language);
+  const files = filesIn(offered, language).filter((option) => !otherEpisode(option, context.video));
   const readable = files.filter((option) => !context.broken(option.url));
   return (
     readable.find((option) => context.fit(option.url)?.script !== 'wrong') ??
@@ -210,11 +220,15 @@ function keepOrSwitch<T extends PickableSubtitle>(
  * something is learnt: which file to choose, which to read for their checks,
  * and whether to hold the lines back meanwhile.
  *
- * - A version picked by hand for this release, or one whose release name
- *   matches the video, is chosen at once, and no other is read while it
- *   reads whole and plain (or for the hard of hearing, as wanted), nor,
- *   for one whose name matches, while it is on its way and not yet a slow
- *   download. The
+ * - A version picked by hand for this release, or one made for the release
+ *   (found by the video's hash, or named for it with the group confirming
+ *   it: `madeForRelease`), is chosen at once, and no other is read while it
+ *   reads whole and plain (or for the hard of hearing, as wanted), nor, for
+ *   one made for the release, while it is on its way and not yet a slow
+ *   download. A loose match on the episode and resolution alone is not
+ *   enough: such a file is read and held like any other, and only goes
+ *   before another that fits as well. A file named as one disc of two
+ *   (CD1) covers only part of the video until it is read. The
  *   first two in the list are read beside the version picked by hand, for
  *   their checks only, when its lines run on past the video's end, line
  *   after line (`runsOn`): a drift only files agreeing on an end can show
@@ -223,8 +237,8 @@ function keepOrSwitch<T extends PickableSubtitle>(
  *   hearing) takes over from it only as below: once read, and clearly
  *   better while switches are left, or at once while the one chosen has not
  *   been read. So two such files are not swapped back and forth as each is
- *   read. A file whose name matches but which reads as drifting, part of
- *   the video or another cut is judged like any other.
+ *   read. A file made for the release that reads as drifting, part of the
+ *   video or another cut is judged like any other.
  * - Otherwise files are read in the list's order, two at a time: the first
  *   two always, more only while none read fits as it is (nothing would beat
  *   it), and the lines held back until they have been read and the video's
@@ -249,7 +263,7 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
   }
   const isRead = (option: T) => input.fit(option.url) !== undefined;
   const unread = (option: T) => !isRead(option) && !input.reading(option.url);
-  const tierOf = (option: T) => fitTier(input.fit(option.url), input.hearing);
+  const tierOf = (option: T) => fileTier(option, input.fit(option.url), input.video, input.hearing);
   const reasonOf = (option: T) =>
     rankReason(option, {
       video: input.video,
@@ -285,9 +299,9 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
     return { pick: current, read: toRead, hold: false, switched: false };
   }
   if (reason < 2) {
-    // Made for the release by its name, whatever reading it found.
+    // Made for the release, by the video's hash or its name, whatever reading it found.
     const peerOf = (option: T) =>
-      reasonOf(option) === reason || (reason === 1 && releaseMatch(option.label, input.video));
+      reasonOf(option) === reason || (reason === 1 && madeForRelease(option, input.video));
     if (!current || !peerOf(current)) {
       return { pick: top, read: [], hold: false, switched: false };
     }
@@ -326,4 +340,36 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
 
   if (!current) return { pick: known[0] ?? top, read: toRead, hold: false, switched: false };
   return keepOrSwitch(ranked, current, toRead, input);
+}
+
+/**
+ * Why the file chosen automatically is the one showing, for Diagnostics:
+ * picked by hand for the release; found by the video's hash, or named for the
+ * release with the group confirming it (made for the release, while it does
+ * not read as fitting badly); a better fit than another in the list; named
+ * for the release loosely, with no group to confirm it, among files that fit
+ * as well; or nothing told it apart, and the list's order chose.
+ */
+export function pickReason<T extends PickableSubtitle>(
+  pick: T,
+  offered: readonly T[],
+  language: string,
+  context: PickContext,
+): PickReason {
+  if (pick.key === context.remembered) return 'by hand';
+  const reason = rankReason(pick, {
+    video: context.video,
+    remembered: () => false,
+    fit: (option) => context.fit(option.url),
+    hearing: context.hearing,
+  });
+  if (reason === 1) return pick.hashMatch ? 'linked to your video' : 'same release name';
+  const tierOf = (option: T) =>
+    fileTier(option, context.fit(option.url), context.video, context.hearing);
+  const tier = tierOf(pick);
+  const others = rankedFiles(offered, language, context).filter((option) => option !== pick);
+  if (others.some((option) => tierOf(option) > tier)) return 'best fit';
+  return fileReleaseMatch(pick, context.video) === 'loose'
+    ? 'same release name, no group'
+    : 'list order';
 }

@@ -10,14 +10,26 @@ import {
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
-import { hashStream } from './stream-hash';
+import { mark } from '../platform/marks';
+import { readStreamHash } from './stream-hash';
+import { traceFiles, traceHash } from './subtitle-trace';
 
 /** A subtitle file the viewer can pick. Never shows its link, which can carry account keys. */
 export interface SubtitleOption {
   /** Stable within one video: where it came from, then the addon's id for it. */
   key: string;
   lang: string;
+  /** Its name: the release it matches, or the file's own name (OpenSubtitles). */
   label?: string;
+  /** A second release name, for matching the video only, never shown. */
+  releaseName?: string;
+  /** OpenSubtitles found it by the video's hash: someone linked it to this very video. */
+  hashMatch?: boolean;
+  /** Frames a second it was timed for, as the addon says: often wrong. */
+  fps?: number;
+  /** The season and episode the addon says it is for. */
+  season?: number;
+  episode?: number;
   /** The addon that offered it, or the stream's addon for subtitles that came with the stream. */
   source: string;
   url: string;
@@ -142,11 +154,17 @@ export function plainId(id: string): string {
   return /^[\w.-]{1,64}$/.test(id) ? id : `h${subtitleFileKey('', id)}`;
 }
 
-function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleOption {
+export function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleOption {
+  const { label, releaseName, hashMatch, fps, season, episode } = subtitle;
   return {
     key: `${prefix}#${plainId(subtitle.id)}`,
     lang: subtitle.lang,
-    label: subtitle.label,
+    ...(label !== undefined && { label }),
+    ...(releaseName !== undefined && { releaseName }),
+    ...(hashMatch && { hashMatch }),
+    ...(fps !== undefined && { fps }),
+    ...(season !== undefined && { season }),
+    ...(episode !== undefined && { episode }),
     source,
     url: subtitle.url,
   };
@@ -155,9 +173,12 @@ function toOption(prefix: string, source: string, subtitle: Subtitle): SubtitleO
 /**
  * Every subtitle on offer for one stream: the stream's own first, then each
  * subtitles addon's in the collection's order. Addons are asked with the
- * stream's hash, size and file name, so they can match the exact release.
- * A stream whose addon sent no hash has it read from the file first, for a
- * few seconds at most; addons are asked without it if it can't be read.
+ * stream's hash, size and file name, so they can match the exact release
+ * (OpenSubtitles v3 is not sent the file name, which it ignores: see the
+ * addon client). A stream whose addon sent no hash has it read from the file
+ * first, for a few seconds at most; addons are asked without it if it can't
+ * be read. How that went, and the files each language has, go to the play's
+ * record for Diagnostics (`subtitle-trace`).
  */
 export function subtitleList(
   type: string,
@@ -191,10 +212,15 @@ export function subtitleList(
     });
     const pending = states.filter((s) => s.status === 'idle' || s.status === 'loading').length;
     state.set({ options, pending });
+    traceFiles(
+      videoId,
+      options.map((option) => option.lang),
+    );
   }
 
   function ask(videoHash: string | undefined, videoSize: number | undefined) {
     const { filename } = stream.behaviorHints;
+    mark('sub:asked');
     answers = addonClient.subtitles(type, videoId, { videoHash, videoSize, filename });
     unsubscribe = answers.map((answer) => answer.query.subscribe(refresh));
     answers.forEach((answer) => answer.query.load());
@@ -209,6 +235,10 @@ export function subtitleList(
       const { videoHash, videoSize } = stream.behaviorHints;
       const source = stream.source;
       if (videoHash || source.kind !== 'url') {
+        traceHash(
+          videoId,
+          videoHash ? { state: 'sent' } : { state: 'skipped', why: 'not a file link' },
+        );
         ask(videoHash, videoSize);
         return;
       }
@@ -216,9 +246,18 @@ export function subtitleList(
       hashing = true;
       // Still looking: the addons have not been asked yet.
       state.set({ ...state.get(), pending: Math.max(1, state.get().pending) });
-      void hashStream(source.url, videoSize).then((found) => {
+      void readStreamHash(source.url, videoSize).then((reading) => {
         if (current !== run) return;
         hashing = false;
+        traceHash(
+          videoId,
+          reading.found
+            ? { state: 'read', ms: reading.ms }
+            : 'skipped' in reading
+              ? { state: 'skipped', why: reading.skipped }
+              : { state: 'failed', why: reading.failed, ms: reading.ms },
+        );
+        const found = reading.found;
         ask(found?.videoHash, found?.videoSize ?? videoSize);
       });
     },

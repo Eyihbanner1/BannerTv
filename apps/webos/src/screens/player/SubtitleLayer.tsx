@@ -1,6 +1,7 @@
 import { createCueIndex, type Cue, type CueIndex } from '@bannertv/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { SubtitleStyle } from '../../data/preferences';
+import { traceFirstLine } from '../../player/subtitle-trace';
 import { nextReadDelay } from '../../player/timing';
 import styles from './SubtitleLayer.module.css';
 
@@ -66,6 +67,11 @@ export function SubtitleLayer({ video, cues, offset, look, lift, sample }: Subti
 
   // Cues read from an older file never show over a new one.
   const said = video && index && read.index === index ? read.cues : NONE;
+  // How long the play's first line took, for Diagnostics: not the sample line.
+  const speaking = said.length > 0;
+  useEffect(() => {
+    if (speaking) traceFirstLine();
+  }, [speaking]);
   const showing = said.length > 0 || !sample ? said : sampleCue(sample);
   if (showing.length === 0) return null;
   const bottom = showing.filter((cue) => !cue.top);

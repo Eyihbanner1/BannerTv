@@ -17,6 +17,7 @@ import type { Limiter } from '../limiter';
 import type { CachePolicy, Query, QueryCache } from '../query';
 import { neverSports } from '../sports/detect';
 import type { AddonCollection, InstalledAddon } from './collection';
+import { OPENSUBTITLES_V3_ID } from './defaults';
 
 /** Catalog and meta requests give up after this long. */
 export const BROWSE_TIMEOUT_MS = 10000;
@@ -175,11 +176,18 @@ export interface AddonClient {
   ): Array<AddonAnswer<Subtitle[]>>;
 }
 
-function subtitleExtra(hints: SubtitleHints): ExtraArg[] {
+/**
+ * What a subtitles request tells an addon of the video: its hash, its size
+ * and its file name. Not the file name to OpenSubtitles v3, which answers the
+ * same without it (measured: byte for byte, even for a name it lists), so
+ * every stream of a video shares one answer and the name is not sent for
+ * nothing. Other addons may use it.
+ */
+function subtitleExtra(hints: SubtitleHints, addonId: string): ExtraArg[] {
   const extra: ExtraArg[] = [];
   if (hints.videoHash) extra.push(['videoHash', hints.videoHash]);
   if (hints.videoSize) extra.push(['videoSize', String(hints.videoSize)]);
-  if (hints.filename) extra.push(['filename', hints.filename]);
+  if (hints.filename && addonId !== OPENSUBTITLES_V3_ID) extra.push(['filename', hints.filename]);
   return extra;
 }
 
@@ -314,10 +322,10 @@ export function createAddonClient(options: {
     },
 
     subtitles(type, videoId, hints = {}) {
-      const extra = subtitleExtra(hints);
       return usable()
         .filter((addon) => supportsResource(addon.manifest, 'subtitles', type, videoId))
         .map((addon) => {
+          const extra = subtitleExtra(hints, addon.manifest.id);
           const url = resourceUrl(addon.transportUrl, 'subtitles', type, videoId, extra);
           return {
             addon,

@@ -4,6 +4,7 @@ import {
   type DriftChoice,
   judgeSubtitleFit,
   languageKey,
+  otherEpisode,
   type StreamEntry,
   type SubtitleFit,
   subtitleFileKey,
@@ -31,10 +32,12 @@ import {
   fitsIn,
   MAX_EXTRA_CHECKS,
   type PickContext,
+  pickReason,
   pickSubtitleFile,
   planSubtitlePick,
   type SubtitlePlan,
 } from '../../player/subtitle-pick';
+import { type PickReason, startSubtitleTrace, traceReason } from '../../player/subtitle-trace';
 import { playingRelease, sameChoice } from '../../player/subtitle-versions';
 import {
   clearSubtitleCache,
@@ -51,15 +54,19 @@ export type SubtitleChoice = { kind: 'file'; key: string } | { kind: 'track'; id
 /** A version's state for its row: its first line still to come, or a file that could not be read. */
 export type SubtitleStatus = 'loading' | 'failed';
 
-/** What reading a file found, for its row: only for files read so far. */
+/**
+ * What reading a file found, for its row: only for files read so far, and
+ * for a file its name or its addon says is for another episode, read or not.
+ */
 export interface SubtitleCheck {
-  /** For the hard of hearing: sounds and speakers' names among the lines. */
+  /** For the hard of hearing: sounds and speakers' names among the lines. False until read. */
   hearing: boolean;
   /**
    * Why it fits the video badly: its text is in another script, it holds
-   * signs only, it covers only part of the video, or it runs well past its end.
+   * signs only, it is for another episode or season, it covers only part of
+   * the video, or it runs well past its end.
    */
-  problem?: 'script' | 'signs' | 'short' | 'long';
+  problem?: 'script' | 'signs' | 'episode' | 'short' | 'long';
   /** A drift its length gives away: the player fixes it by itself on the version showing. */
   drift?: SubtitleDrift;
   /** The version showing, whose drift the player fixed by itself. */
@@ -105,7 +112,11 @@ export interface Subtitles {
   /** Stretches the subtitles showing onto the video's frame rate, remembered for that file. */
   setDrift(drift: SubtitleDrift | null): void;
   statusOf(choice: NonNullable<SubtitleChoice>): SubtitleStatus | undefined;
-  /** What reading the file found, once it has been read; undefined for the stream's tracks. */
+  /**
+   * What reading the file found, once it has been read, or that it is for
+   * another episode, as its name or its addon says; undefined for the
+   * stream's tracks.
+   */
   checkOf(choice: NonNullable<SubtitleChoice>): SubtitleCheck | undefined;
   /** Whether it is the version picked by hand for the release playing: its language starts on it. */
   isRemembered(choice: NonNullable<SubtitleChoice>): boolean;
@@ -220,6 +231,10 @@ export function useSubtitles(
     list ? list.subscribe : noop,
     list ? list.get : () => EMPTY,
   );
+  // What happens to this play's subtitles, for Diagnostics: started before the addons are asked.
+  useEffect(() => {
+    startSubtitleTrace(videoId);
+  }, [videoId]);
   useEffect(() => {
     if (!list) return;
     list.start();
@@ -321,7 +336,7 @@ export function useSubtitles(
     const fits = fitsIn(offered, language, checks.profile, length);
     const pickRelease = pickReleaseOf(stream);
     return {
-      video: playingRelease(stream),
+      video: playingRelease(stream, videoId),
       broken: (url) => broken.current.has(url) || checks.failed(url),
       fit: (url) => fits.get(url),
       remembered: rememberedIn(offered, stream),
@@ -353,9 +368,16 @@ export function useSubtitles(
         Math.max(0, at - now) + 20,
       );
     };
-    const settle = (next: SubtitleChoice, remembered = false) => {
+    /** Settles on a choice, and says why for Diagnostics, with its language. */
+    const settle = (
+      next: SubtitleChoice,
+      why: PickReason,
+      language: string | null,
+      remembered = false,
+    ) => {
       // For a trace of starting a video: when the subtitles were settled, and how.
       mark(`sub:chosen:${next ? next.kind : 'off'}`);
+      traceReason(videoId, why, language, pressedNow !== undefined);
       decided.current = {
         entry,
         choice: next,
@@ -456,9 +478,18 @@ export function useSubtitles(
         const due = (asked.get(result.pick.url) ?? now) + HOLD_MS;
         if (due > now) wakeAt(due, now);
       }
+      const why = result.pick && pickReason(result.pick, offered, wanted, context);
       if (result.pick && result.pick.key !== current) {
         // Landing on the version picked by hand, it stays: a track listed later does not take over.
-        settle({ kind: 'file', key: result.pick.key }, result.pick.key === context.remembered);
+        settle(
+          { kind: 'file', key: result.pick.key },
+          why!,
+          result.pick.lang,
+          result.pick.key === context.remembered,
+        );
+      } else if (result.pick && why) {
+        // The same file, its reason seen again as more of the files are read.
+        traceReason(videoId, why, result.pick.lang, pressedNow !== undefined);
       }
       return result;
     };
@@ -565,17 +596,17 @@ export function useSubtitles(
       }
       if (wanted === null || !context) {
         startAuto(false);
-        settle(null);
+        settle(null, 'off', null);
         return;
       }
       if (picked) {
         startAuto(false);
-        settle({ kind: 'file', key: picked.key }, true);
+        settle({ kind: 'file', key: picked.key }, 'by hand', picked.lang, true);
         return;
       }
       if (track) {
         startAuto(false);
-        settle({ kind: 'track', id: track.id });
+        settle({ kind: 'track', id: track.id }, 'own track', track.lang);
         return;
       }
       // Addon files often arrive first, but the stream's own track wins once listed.
@@ -586,10 +617,12 @@ export function useSubtitles(
       // or are in another script): a track of forced lines only, where the stream has one.
       if (result.pick && !usable(result.pick) && forcedTrack) {
         setHolding(false);
-        settle({ kind: 'track', id: forcedTrack.id });
+        settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
       } else if (!result.pick && waiting === 0) {
         setHolding(false);
-        settle(forcedTrack ? { kind: 'track', id: forcedTrack.id } : null);
+        if (forcedTrack)
+          settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
+        else settle(null, 'off', null);
       }
     };
     wake.current = decide;
@@ -811,16 +844,20 @@ export function useSubtitles(
       const option = options.find((o) => o.key === version.key);
       if (!option) return undefined;
       const fit = fitOf(option);
-      if (!fit) return undefined;
+      // Its name or its addon says it is for another episode: that is known before it is read.
+      const episode = otherEpisode(option, playingRelease(entry, videoId));
+      if (!fit) return episode ? { hearing: false, problem: 'episode' } : undefined;
       const showing = choice?.kind === 'file' && choice.key === version.key;
       const problem =
         fit.script === 'wrong'
           ? 'script'
           : fit.signs
             ? 'signs'
-            : fit.length === 'short' || fit.length === 'long'
-              ? fit.length
-              : undefined;
+            : episode
+              ? 'episode'
+              : fit.length === 'short' || fit.length === 'long'
+                ? fit.length
+                : undefined;
       const check: SubtitleCheck = { hearing: fit.hearing };
       if (problem) check.problem = problem;
       if (fit.drift) check.drift = fit.drift;
@@ -858,10 +895,13 @@ export function useSubtitles(
         decided.current = { entry, choice: next, auto: true, wanted: language, language };
         auto.current = { entry, holding: next.kind === 'file', switches: 0 };
         setHoldingFor(next.kind === 'file' ? entry : null);
+        // A file's reason is the plan's, as it is planned again below.
+        if (next.kind === 'track') traceReason(videoId, 'own track', language, true);
       } else {
         decided.current = { entry, choice: next, auto: false };
         auto.current = { entry, holding: false, switches: 0 };
         setHoldingFor(null);
+        traceReason(videoId, next === null ? 'off' : 'by hand', language);
       }
       setChosen({ entry, choice: next });
       if (isSubtitleCheck(entry)) return;
