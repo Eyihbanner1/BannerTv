@@ -43,12 +43,13 @@ export interface Reference {
 export const MIN_REFERENCE_LINES = 40;
 
 /**
- * Minutes of a reference still arriving after which the files are lined up
- * against it again: the first look, then twice more as it grows, then once
- * it covers the video. Lined up against ten minutes, most files cannot be
- * told for sure; against forty, most can.
+ * Minutes of a reference still arriving at which the files are lined up
+ * against it: the first look, then again as it grows, then once it covers
+ * the video, so a file is lined up again twice at most. Against ten
+ * minutes most files cannot be told for sure, against twenty a quarter
+ * can, and against forty nearly all.
  */
-const GROWING_STAGES = [10, 20, 40];
+const GROWING_STAGES = [20, 40];
 /** A reference that covers the video: no more of it is coming. */
 const COMPLETE = GROWING_STAGES.length + 1;
 /** A reference reaching this share of the video's length covers it: the end credits have no lines. */

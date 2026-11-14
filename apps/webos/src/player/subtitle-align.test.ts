@@ -193,8 +193,8 @@ describe('findReference', () => {
           { start: minutes * 60 - 1, end: minutes * 60 },
         ],
       });
-    expect([stage(5), stage(12), stage(25), stage(60)]).toEqual([0, 1, 2, 3]);
-    expect(referenceStage({ kind: 'linked', id: 'x', growing: false, lines: [] })).toBe(4);
+    expect([stage(5), stage(12), stage(25), stage(60)]).toEqual([0, 0, 1, 2]);
+    expect(referenceStage({ kind: 'linked', id: 'x', growing: false, lines: [] })).toBe(3);
   });
 });
 
@@ -248,14 +248,14 @@ describe('createSubtitleAligner', () => {
       growing: true,
       lines: lines.filter((line) => line.end <= minutes * 60),
     });
-    // Five minutes in: not enough to start.
-    aligner.request(candidate, upTo(5));
+    // Ten minutes in: not enough to start.
+    aligner.request(candidate, upTo(10));
     expect(aligner.pending(url)).toBe(false);
-    aligner.request(candidate, upTo(11));
+    aligner.request(candidate, upTo(21));
     const first = await settled(aligner, url);
     expect(first!.stage).toBe(1);
     // The same stage again: nothing to do.
-    aligner.request(candidate, upTo(15));
+    aligner.request(candidate, upTo(30));
     expect(aligner.pending(url)).toBe(false);
     aligner.request(candidate, upTo(41));
     const later = await settled(aligner, url);
