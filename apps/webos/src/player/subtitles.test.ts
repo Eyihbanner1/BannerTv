@@ -1,5 +1,68 @@
+import { createStore, OPENSUBTITLES_V3_ID } from '@bannertv/core';
+import type { Stream, Subtitle } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearSubtitleCache, loadSubtitles, plainId, toOption } from './subtitles';
+import type { HashReading } from './stream-hash';
+import { forgetSubtitleTraces, recentSubtitleTraces, startSubtitleTrace } from './subtitle-trace';
+import {
+  clearSubtitleCache,
+  HASH_WAIT_MS,
+  type ListedSubtitle,
+  loadSubtitles,
+  mergeHashAnswer,
+  plainId,
+  subtitleList,
+  toOption,
+} from './subtitles';
+
+/** The subtitles addons installed, each ask to them, and the hash read the test lets finish. */
+const net = vi.hoisted(() => ({
+  addons: [] as Array<{ id: string; name: string }>,
+  asks: [] as Array<{
+    at: number;
+    hints: { videoHash?: string; videoSize?: number; filename?: string };
+    answers: Array<{
+      addon: { manifest: { id: string; name: string } };
+      query: {
+        get(): { status: string; data?: unknown };
+        subscribe(listener: () => void): () => void;
+        load(): void;
+        answer(data: unknown): void;
+      };
+    }>;
+  }>,
+  hash: null as null | ((reading: unknown) => void),
+  hashes: 0,
+}));
+
+vi.mock('../data/addons', () => ({
+  addonClient: {
+    subtitles(_type: string, _videoId: string, hints: (typeof net.asks)[number]['hints']) {
+      const answers = net.addons.map((manifest) => {
+        const store = createStore<{ status: string; data?: unknown }>({ status: 'idle' });
+        return {
+          addon: { manifest },
+          query: {
+            get: store.get,
+            subscribe: store.subscribe,
+            load: () => store.set({ status: 'loading' }),
+            answer: (data: unknown) => store.set({ status: 'success', data }),
+          },
+        };
+      });
+      net.asks.push({ at: Date.now(), hints, answers });
+      return answers;
+    },
+  },
+}));
+
+vi.mock('./stream-hash', () => ({
+  readStreamHash: () => {
+    net.hashes++;
+    return new Promise((resolve) => {
+      net.hash = resolve;
+    });
+  },
+}));
 
 const CHUNK = new Uint8Array(64 * 1024);
 const MB = 1024 * 1024;
@@ -167,5 +230,309 @@ describe('loadSubtitles', () => {
       loadSubtitles({ url: 'https://subs.example.com/bomb.srt.gz', lang: 'eng' }),
     ).rejects.toThrow('too big');
     expect(unpacked.read.bytes).toBeLessThan(6 * MB);
+  });
+});
+
+describe('the files on offer, and the video’s hash', () => {
+  const VIDEO = 'tt6151526:1:6';
+  const OTHER = { id: 'org.example.subtitles', name: 'Other subtitles' };
+  const OPENSUBTITLES = { id: OPENSUBTITLES_V3_ID, name: 'OpenSubtitles v3' };
+  const stream = (hints: Record<string, unknown> = {}) =>
+    ({
+      source: { kind: 'url', url: 'https://debrid.example.com/d/KEY/Film.mkv' },
+      subtitles: [],
+      behaviorHints: { filename: 'Film.mkv', ...hints },
+    }) as unknown as Stream;
+  const file = (id: string, hashMatch = false): Subtitle => ({
+    id,
+    url: `https://subs.example.com/${id}.srt`,
+    lang: 'eng',
+    ...(hashMatch && { hashMatch: true }),
+  });
+  const found = (ms: number): HashReading => ({
+    found: { videoHash: '8e245d9679d31e12', videoSize: 1234567890 },
+    ms,
+    walks: 1,
+  });
+  /** Lets the hash read finish now, as it reads. */
+  const hashRead = async (reading: HashReading) => {
+    net.hash!(reading);
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  const hashOf = () => recentSubtitleTraces()[0]?.hash;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: 0 });
+    vi.stubGlobal('window', globalThis);
+    net.addons = [OPENSUBTITLES, OTHER];
+    net.asks = [];
+    net.hash = null;
+    net.hashes = 0;
+    forgetSubtitleTraces();
+    startSubtitleTrace(VIDEO, 0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks once, with the hash, when it is read within the wait', async () => {
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    // Nothing asked while the hash is read, and the list says it is still looking.
+    expect(net.asks).toHaveLength(0);
+    expect(list.get().pending).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    await hashRead(found(1000));
+    expect(net.asks).toHaveLength(1);
+    expect(net.asks[0]).toMatchObject({ at: 1000, hints: { videoHash: '8e245d9679d31e12' } });
+    expect(hashOf()).toEqual({ state: 'read', ms: 1000 });
+    // The wait's timer asks nothing more.
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    expect(net.asks).toHaveLength(1);
+    expect(list.get()).toMatchObject({ pending: 2 });
+    expect(list.get().hashComing).toBeUndefined();
+  });
+
+  it('asks without the hash after the wait, then asks OpenSubtitles again when it comes, and merges the answers', async () => {
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    expect(net.asks).toHaveLength(1);
+    expect(net.asks[0]!.at).toBe(HASH_WAIT_MS);
+    expect(net.asks[0]!.hints.videoHash).toBeUndefined();
+    expect(hashOf()).toEqual({ state: 'reading', askedAtMs: HASH_WAIT_MS });
+    const [os, other] = net.asks[0]!.answers;
+    os!.query.answer([file('a'), file('b'), file('c')]);
+    other!.query.answer([file('x')]);
+    // Both answered, but the hash may still link files: the list is not done, and says so.
+    expect(list.get()).toMatchObject({ pending: 1, hashComing: true });
+    expect(list.get().options.map((option) => option.key)).toEqual([
+      `${OPENSUBTITLES_V3_ID}#a`,
+      `${OPENSUBTITLES_V3_ID}#b`,
+      `${OPENSUBTITLES_V3_ID}#c`,
+      `${OTHER.id}#x`,
+    ]);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await hashRead(found(5000));
+    // Asked again with it: OpenSubtitles only, which matches files by it.
+    expect(net.asks).toHaveLength(2);
+    expect(net.asks[1]!.at).toBe(5000);
+    expect(net.asks[1]!.hints).toMatchObject({
+      videoHash: '8e245d9679d31e12',
+      filename: 'Film.mkv',
+    });
+    expect(
+      net.asks[1]!.answers.filter((answer) => answer.query.get().status !== 'idle').map(
+        (answer) => answer.addon.manifest.id,
+      ),
+    ).toEqual([OPENSUBTITLES_V3_ID]);
+    expect(list.get()).toMatchObject({ pending: 1, hashComing: true });
+    expect(hashOf()).toEqual({
+      state: 'read',
+      ms: 5000,
+      late: { askedAtMs: HASH_WAIT_MS, askedAgain: 1 },
+    });
+
+    // Its answer: b linked, c dropped (the list is capped), d new and linked, e new.
+    net.asks[1]!.answers[0]!.query.answer([file('b', true), file('a'), file('d', true), file('e')]);
+    const state = list.get();
+    expect(state.pending).toBe(0);
+    expect(state.hashComing).toBeUndefined();
+    expect(
+      state.options.map((option) => [option.key, !!option.hashMatch, !!option.linkedLate]),
+    ).toEqual([
+      [`${OPENSUBTITLES_V3_ID}#a`, false, false],
+      [`${OPENSUBTITLES_V3_ID}#b`, true, true],
+      [`${OPENSUBTITLES_V3_ID}#c`, false, false],
+      [`${OPENSUBTITLES_V3_ID}#d`, true, true],
+      [`${OPENSUBTITLES_V3_ID}#e`, false, false],
+      [`${OTHER.id}#x`, false, false],
+    ]);
+    expect(hashOf()).toEqual({
+      state: 'read',
+      ms: 5000,
+      late: { askedAtMs: HASH_WAIT_MS, askedAgain: 1, linked: 2 },
+    });
+    expect(JSON.stringify(recentSubtitleTraces())).not.toContain('example');
+  });
+
+  it('keeps nothing open once a late read fails, and asks no one again', async () => {
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    net.asks[0]!.answers.forEach((answer) => answer.query.answer([file('a')]));
+    expect(list.get()).toMatchObject({ pending: 1, hashComing: true });
+    await vi.advanceTimersByTimeAsync(4000);
+    await hashRead({ failed: 'timed out', step: 'end', ms: 6000, walks: 1 });
+    expect(net.asks).toHaveLength(1);
+    expect(list.get().pending).toBe(0);
+    expect(list.get().hashComing).toBeUndefined();
+    expect(hashOf()).toEqual({
+      state: 'failed',
+      why: 'timed out',
+      step: 'end',
+      ms: 6000,
+      askedAtMs: HASH_WAIT_MS,
+    });
+  });
+
+  it('does not count the hash as still coming when no addon matches files by it', async () => {
+    net.addons = [OTHER];
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    net.asks[0]!.answers[0]!.query.answer([file('x')]);
+    expect(list.get().pending).toBe(0);
+    expect(list.get().hashComing).toBeUndefined();
+    await hashRead(found(2500));
+    expect(net.asks).toHaveLength(1);
+    expect(hashOf()).toMatchObject({ late: { askedAtMs: HASH_WAIT_MS, askedAgain: 0 } });
+  });
+
+  it('asks no one once stopped, before the wait or after it', async () => {
+    const early = subtitleList('series', VIDEO, stream(), 'Streams');
+    early.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    early.stop();
+    await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+    await hashRead(found(3000));
+    expect(net.asks).toHaveLength(0);
+
+    const later = subtitleList('series', VIDEO, stream(), 'Streams');
+    later.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(net.asks).toHaveLength(1);
+    later.stop();
+    await hashRead(found(5000));
+    expect(net.asks).toHaveLength(1);
+  });
+
+  it('asks at once, with no wait, when the addon sent the hash or there is no file link', async () => {
+    const sent = subtitleList(
+      'series',
+      VIDEO,
+      stream({ videoHash: '0123456789abcdef', videoSize: 99 }),
+      'Streams',
+    );
+    sent.start();
+    expect(net.asks).toHaveLength(1);
+    expect(net.asks[0]!.hints).toMatchObject({ videoHash: '0123456789abcdef', videoSize: 99 });
+    expect(net.hashes).toBe(0);
+    const torrent = subtitleList(
+      'series',
+      VIDEO,
+      {
+        source: { kind: 'torrent', infoHash: 'abc' },
+        subtitles: [],
+        behaviorHints: {},
+      } as unknown as Stream,
+      'Streams',
+    );
+    torrent.start();
+    expect(net.asks).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('asks at once when the hash is known already, or the link is not read', async () => {
+    const list = subtitleList('series', VIDEO, stream(), 'Streams');
+    list.start();
+    // A link read before answers at once: before the wait's timer, which it stops.
+    await hashRead({ ...found(0), ms: 0 });
+    expect(net.asks).toHaveLength(1);
+    expect(net.asks[0]!.at).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    const skipped = subtitleList('series', VIDEO, stream(), 'Streams');
+    skipped.start();
+    await hashRead({ skipped: 'playlist', ms: 0 });
+    expect(net.asks).toHaveLength(2);
+    expect(hashOf()).toEqual({ state: 'skipped', why: 'playlist' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('mergeHashAnswer', () => {
+  /*
+   * OpenSubtitles' answers for Night of the Living Dead (1968), asked without the video's hash
+   * and with it: each file's id, language and how it was found ('h' by the hash), in order.
+   */
+  const parse = (text: string): ListedSubtitle[] =>
+    text
+      .trim()
+      .split(/\s+/)
+      .map((entry) => {
+        const [id, lang, m] = entry.split(':') as [string, string, string];
+        return {
+          id,
+          url: `https://subs.example.com/${id}.srt`,
+          lang,
+          ...(m === 'h' && { hashMatch: true }),
+        };
+      });
+  const WITHOUT = parse(`
+    3093321:pob:i 3280670:pob:i 43905:pob:i 87559:pob:i 3367057:pob:i 3541764:pob:i
+    3763030:spa:i 75937:spa:i 3249642:spa:i 3700720:spa:i 201167:spa:i 3611607:spa:i
+    61413:spa:i 100570:spa:i 3263851:spa:i 3264512:spa:i 99835:spa:i 39530:spa:i 94118:spa:i
+    66585:spa:i 71301:spa:i 51292:spa:i 75303:spa:i 3372616:spa:i 3910290:spa:i 4025513:eng:i
+    3571789:eng:i 3614689:eng:i 55145:swe:i 4109:cze:i 3955:cze:i 4803:cze:i 9580:cze:i
+    16941:cze:i 16927:cze:i 3645:cze:i 5823:cze:i 92494:cze:i 118541:cze:i 3308823:cze:i
+    91589:cze:i 91533:cze:i 3098663:cze:i 3815064:cze:i 59227:fre:i 154339:fre:i 68456:fre:i
+    122388:fre:i 59228:fre:i 148384:fre:i 102633:fre:i 3385129:fre:i 125892:fre:i
+    3323484:fre:i 61415:por:i 117560:por:i 147174:por:i 3544344:por:i 61416:hun:i
+    3543708:hun:i 125982:bul:i 6577:slo:i 49525:srp:i 3572078:srp:i 3891584:srp:i 31853:fin:i
+    239802:ron:i 46862:lav:i 3389054:pol:i
+  `);
+  const WITH = parse(`
+    3093321:pob:h 3367057:pob:h 3280670:pob:i 43905:pob:i 87559:pob:i 3543708:hun:h
+    61416:hun:i 3572078:srp:h 3891584:srp:h 49525:srp:i 5400079:bos:h 239802:ron:h
+    4815285:ron:h 148384:fre:h 59227:fre:i 154339:fre:i 68456:fre:i 122388:fre:i 59228:fre:i
+    102633:fre:i 125892:fre:i 3263851:spa:h 3372616:spa:h 3910290:spa:h 75937:spa:i
+    3249642:spa:i 201167:spa:i 61413:spa:i 100570:spa:i 3264512:spa:i 99835:spa:i 39530:spa:i
+    94118:spa:i 66585:spa:i 71301:spa:i 51292:spa:i 75303:spa:i 3614689:eng:h 4256041:eng:h
+    4907923:ell:h 3389054:pol:h 5878054:slv:h 3815064:cze:h 4109:cze:i 3955:cze:i 4803:cze:i
+    9580:cze:i 16941:cze:i 16927:cze:i 3645:cze:i 5823:cze:i 92494:cze:i 118541:cze:i
+    3308823:cze:i 91589:cze:i 91533:cze:i 3098663:cze:i 5044849:tur:h 5005930:bul:h
+    125982:bul:i 55145:swe:i 61415:por:i 117560:por:i 147174:por:i 6577:slo:i 31853:fin:i
+    46862:lav:i
+  `);
+
+  it('keeps every file listed first in its place, marks the linked ones, and adds the rest after', () => {
+    const merged = mergeHashAnswer(WITHOUT, WITH);
+    expect(merged.slice(0, WITHOUT.length).map((file) => file.id)).toEqual(
+      WITHOUT.map((file) => file.id),
+    );
+    expect({
+      without: WITHOUT.length,
+      with: WITH.length,
+      merged: merged.length,
+      linked: merged.filter((file) => file.hashMatch).length,
+      linkedLate: merged.filter((file) => file.linkedLate).length,
+      added: merged.length - WITHOUT.length,
+      addedLinked: merged.slice(WITHOUT.length).filter((file) => file.linkedLate).length,
+    }).toEqual({
+      without: 69,
+      with: 67,
+      merged: 76,
+      linked: 20,
+      linkedLate: 20,
+      added: 7,
+      addedLinked: 7,
+    });
+    // The new ones in the second answer's order.
+    expect(merged.slice(WITHOUT.length).map((file) => file.id)).toEqual([
+      '5400079',
+      '4815285',
+      '4256041',
+      '4907923',
+      '5878054',
+      '5044849',
+      '5005930',
+    ]);
+  });
+
+  it('marks nothing late that the first answer found by the hash already', () => {
+    const first = [{ id: '1', url: 'u1', lang: 'eng', hashMatch: true }];
+    expect(mergeHashAnswer(first, first)).toEqual(first);
   });
 });

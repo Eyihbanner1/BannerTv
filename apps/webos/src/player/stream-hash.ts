@@ -17,8 +17,12 @@ import { requestHeadersFor } from './request-headers';
 
 /** Bytes read from each end of the file. */
 export const HASH_CHUNK = 64 * 1024;
-/** The whole reading gives up after this long: subtitles must not wait on it much. */
-export const HASH_TIMEOUT_MS = 4000;
+/**
+ * The whole reading gives up after this long. The subtitles are asked for
+ * without the hash after HASH_WAIT_MS at most (`subtitles.ts`), and again with
+ * it when it comes later, so this only bounds how late a hash is still used.
+ */
+export const HASH_TIMEOUT_MS = 15000;
 
 /**
  * The OpenSubtitles hash: the file size plus every little-endian 64-bit word
