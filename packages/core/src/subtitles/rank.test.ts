@@ -246,6 +246,58 @@ describe('hash, disc and episode', () => {
   });
 });
 
+describe('lined up against a reference', () => {
+  const SYNCED: SubtitleFit = { ...FITS, synced: 'sure' };
+  const UNMATCHED: SubtitleFit = { ...FITS, synced: 'none' };
+  const rank = (
+    files: File[],
+    fits: Record<string, SubtitleFit | undefined>,
+    hearing = false,
+  ): string[] =>
+    rankSubtitles(files, { video, fit: (file) => fits[file.id], hearing }).map((file) => file.id);
+
+  it('counts a file lined up for sure as made for the release, its drift fixed with it', () => {
+    const a: File = { id: 'a' };
+    expect(rankReason(a, { video, fit: () => SYNCED })).toBe(1);
+    expect(rankReason(a, { video, fit: () => FITS })).toBe(2);
+    expect(fitTier({ ...DRIFTS, synced: 'sure' }, false)).toBe(0);
+    expect(rankReason(a, { video, fit: () => ({ ...DRIFTS, synced: 'sure' }) })).toBe(1);
+    // Lined up, but covering part of the video: by its fit like any other.
+    expect(rankReason(a, { video, fit: () => ({ ...HALF, synced: 'sure' }) })).toBe(2);
+  });
+
+  it('puts a whole plain file lined up before a reference for the hard of hearing, not before a plain one', () => {
+    const linked = { id: 'linked', label: 'other.name.srt', hashMatch: true };
+    expect(rank([linked, { id: 'plain' }], { linked: SDH, plain: SYNCED })).toEqual([
+      'plain',
+      'linked',
+    ]);
+    expect(rank([{ id: 'plain' }, linked], { linked: FITS, plain: SYNCED })).toEqual([
+      'linked',
+      'plain',
+    ]);
+    // Lines for the hard of hearing asked for: the reference stays first.
+    expect(rank([linked, { id: 'plain' }], { linked: SDH, plain: SYNCED }, true)).toEqual([
+      'linked',
+      'plain',
+    ]);
+  });
+
+  it('puts a file whose timing matches nothing after every file that fits, before one passed over', () => {
+    expect(fitTier(UNMATCHED, false)).toBe(4);
+    expect(fitTier({ ...SIGNS, synced: 'none' }, false)).toBe(5);
+    expect(
+      rank([{ id: 'unmatched' }, { id: 'drifts' }, { id: 'sdh' }, { id: 'signs' }], {
+        unmatched: UNMATCHED,
+        drifts: DRIFTS,
+        sdh: SDH,
+        signs: SIGNS,
+      }),
+    ).toEqual(['sdh', 'drifts', 'unmatched', 'signs']);
+    expect(clearlyBetter(FITS, UNMATCHED, false)).toBe(true);
+  });
+});
+
 describe('clearlyBetter', () => {
   it('switches only to a file read and fitting a whole step better', () => {
     expect(clearlyBetter(FITS, DRIFTS, false)).toBe(true);

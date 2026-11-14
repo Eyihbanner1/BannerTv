@@ -14,8 +14,9 @@ import {
  * The order to try the subtitle files of one language in: the version the
  * viewer picked by hand for this release first, then one made for the
  * release (named for it with the group confirming it, or found by the
- * video's hash with no name saying otherwise), then the files that fit the
- * video best, and the addon's own order where nothing tells them apart.
+ * video's hash with no name saying otherwise) or lined up against a
+ * reference known to fit the video, then the files that fit the video best,
+ * and the addon's own order where nothing tells them apart.
  */
 
 /** Where a file not read yet sits among the tiers below. */
@@ -31,14 +32,17 @@ const UNFIT_TIER = 5;
  * round); 2 and 3 the same with a frame-rate drift to fix; 4 covers only
  * part of the video or runs well past its end; 5 is in another script or
  * signs only. A file not read yet sits between 1 and 2: it may fit, but a
- * file known to fit as it is beats it.
+ * file known to fit as it is beats it. A file lined up against a reference
+ * has its drift fixed with it ('sure'); one whose timing matched nothing in
+ * the reference's ('none') sits with files covering part of the video:
+ * after every file that fits, before one passed over.
  */
 export function fitTier(fit: SubtitleFit | undefined, hearingWanted: boolean): number {
   if (!fit) return UNREAD_TIER;
   if (fit.unfit) return UNFIT_TIER;
-  if (fit.length === 'short' || fit.length === 'long') return PART_TIER;
+  if (fit.length === 'short' || fit.length === 'long' || fit.synced === 'none') return PART_TIER;
   const other = fit.hearing !== hearingWanted ? 1 : 0;
-  return fit.drift ? 2 + other : other;
+  return fit.drift && fit.synced !== 'sure' ? 2 + other : other;
 }
 
 /**
@@ -83,9 +87,10 @@ export type ReasonOptions<T> = Pick<RankOptions<T>, 'video' | 'remembered'> &
 /**
  * Why a file ranks where it does, best first: picked before, made for the
  * release (`madeForRelease`: named for it with the group confirming it, or
- * found by the video's hash with no name saying otherwise), then neither.
- * Being made for the release is a strong hint, not proof, so it counts only
- * while the file is not read yet
+ * found by the video's hash with no name saying otherwise) or lined up
+ * against a reference known to fit the video ('sure': in step once moved),
+ * then neither. Being made for the release is a strong hint, not proof, so
+ * it counts only while the file is not read yet
  * or reads whole: once read (or named) as drifting, covering only part,
  * running long, failing its checks or for another episode, the file ranks
  * by its fit like any other. The version picked by hand stays first whatever
@@ -93,7 +98,7 @@ export type ReasonOptions<T> = Pick<RankOptions<T>, 'video' | 'remembered'> &
  */
 export function rankReason<T extends MatchedFile>(item: T, options: ReasonOptions<T>): 0 | 1 | 2 {
   if (options.remembered?.(item)) return 0;
-  if (!madeForRelease(item, options.video)) return 2;
+  if (!madeForRelease(item, options.video) && options.fit?.(item)?.synced !== 'sure') return 2;
   // A file not read yet sits below 2 (UNREAD_TIER), so its match still counts.
   const tier = fileTier(item, options.fit?.(item), options.video, options.hearing ?? false);
   return tier >= 2 ? 2 : 1;

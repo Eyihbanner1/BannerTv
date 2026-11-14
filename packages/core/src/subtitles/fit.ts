@@ -446,6 +446,14 @@ export interface SubtitleFit {
   runsOn?: boolean;
   /** Passed over like a file that could not be read: in another script, or signs only. */
   unfit: boolean;
+  /**
+   * What lining the file up against a reference known to fit the video found
+   * (`alignSubtitles`), set by the player, not by the checks: 'sure', it is in
+   * step once moved, its drift fixed with it; 'none', its timing matches
+   * nothing in the video's. Unset where it was not lined up, or the answer
+   * was not clear either way.
+   */
+  synced?: 'sure' | 'none';
 }
 
 function judgedLength(video: VideoLength): number | undefined {
