@@ -190,7 +190,8 @@ export interface PlanInput<T extends PickableSubtitle> extends PickContext {
   aligning?: (url: string) => boolean;
   /**
    * The file that files agreeing with each other would show instead of the
-   * one showing (`subtitle-agreement`): taken over to once, while that may be.
+   * one showing (`subtitle-agreement`): taken over to once, while that may
+   * be; once it shows, it stays while it can be read, as they read it whole.
    */
   agreed?: { key: string };
   /**
@@ -300,11 +301,18 @@ function keepOrSwitch<T extends PickableSubtitle>(
 export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>): SubtitlePlan<T> {
   // The file that files agreeing with each other would show: it takes over once, while it may.
   const agreed = input.agreed;
-  if (agreed && agreed.key !== input.current && agreedSwitchAllowed(input)) {
-    const pick = filesIn(input.offered, input.language).find(
-      (option) => option.key === agreed.key && !input.broken(option.url),
-    );
-    if (pick) return { pick, read: [], hold: false, switched: !input.holding, agreed: true };
+  const agreedPick = agreed
+    ? filesIn(input.offered, input.language).find(
+        (option) => option.key === agreed.key && !input.broken(option.url),
+      )
+    : undefined;
+  if (agreedPick && agreedPick.key !== input.current && agreedSwitchAllowed(input)) {
+    return { pick: agreedPick, read: [], hold: false, switched: !input.holding, agreed: true };
+  }
+  // Once taken over to, it stays while it can be read: they read it whole, and in step with
+  // theirs, though the planner may not have read it yet (a file read only by them).
+  if (agreedPick && agreedPick.key === input.current) {
+    return { pick: agreedPick, read: [], hold: false, switched: false, agreed: true };
   }
   const ranked = rankedFiles(input.offered, input.language, input);
   // Once the lines of the file showing show, files a late hash linked to the video do not take

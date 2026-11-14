@@ -840,10 +840,12 @@ export function useSubtitles(
       const playing = session.get();
       const now = Date.now();
       const language = languageKey(wanted);
-      // The file files that agree would show instead, until it has been taken over to.
+      // The file files that agree would show instead, until it has been taken over to, and while
+      // it shows after that.
       const agreedFor = agreedRef.current?.entry === entry ? agreedRef.current.decision : null;
       const agreedKey =
-        agreedFor?.state === 'switched' && standing.agreed === undefined
+        agreedFor?.state === 'switched' &&
+        (standing.agreed === undefined || standing.agreed === current)
           ? agreedFor.show
           : undefined;
       if (checkedIn.current.entry !== entry) {

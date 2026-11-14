@@ -1674,6 +1674,34 @@ describe('files that agree with each other', () => {
       expect(agreement()).toMatchObject({ state: 'moved', read: 4, aligned: 6 });
     });
 
+    it('keep the file of theirs they switched to, though the planner never read it', async () => {
+      const entry = amznVideo();
+      // The viewer's two English files line up with nothing; the English AMZN file is third, so
+      // only the files that agree read it.
+      const odd = file('odd', shift(lines(900, 7000), 30), { label: 'Show.S01E06.WEB.ODD.srt' });
+      const odd2 = file('odd2', shift(lines(700, 7000), 30), { label: 'Show.S01E06.WEB.ODD2.srt' });
+      const kings = file('kings', shift(FULL, 30), { lang: 'eng', label: `${AMZN}-KiNGS.srt` });
+      offer(entry, [
+        odd,
+        odd2,
+        file('ntb', shift(FULL, 30), { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+        file('flux', shift(FULL, 30), { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+        kings,
+      ]);
+      const player = play(entry);
+      const shown: string[] = [];
+      for (let t = 0; t < 80; t++) {
+        await player.wait(100);
+        const key = player.subtitles.choice?.kind === 'file' ? player.subtitles.choice.key : '';
+        if (shown[shown.length - 1] !== key) shown.push(key);
+      }
+      // Once switched to, it stays.
+      expect(shown).toContain(kings.key);
+      expect(shown.slice(shown.indexOf(kings.key))).toEqual([kings.key]);
+      expect(player.subtitles.sync).toEqual({ state: 'inStep', basis: 'files' });
+      expect(agreement()).toMatchObject({ state: 'switched', file: 3 });
+    });
+
     it('move the file showing instead of switching once its lines show before they hand over', async () => {
       const entry = amznVideo();
       const odd = file('odd', shift(lines(900, 7000), 30), { label: 'Show.S01E06.WEB.ODD.srt' });

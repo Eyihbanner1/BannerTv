@@ -504,7 +504,7 @@ describe('files that agree with each other', () => {
     ).toBe(false);
   });
 
-  it('never take over to a file that could not be read, or the one showing', () => {
+  it('never take over to a file that could not be read', () => {
     expect(
       plan(
         offered,
@@ -512,7 +512,30 @@ describe('files that agree with each other', () => {
         { ...agreed, agreed: { key: 'gone' }, broken: (url) => url.includes('gone') },
       ).agreed,
     ).toBeUndefined();
-    expect(plan(offered, {}, { ...agreed, current: 'theirs' }).agreed).toBeUndefined();
+  });
+
+  it('keep the file taken over to, though only they read it, while it can be read', () => {
+    // After the hold, its lines showing: the planner read the others, not this one. A file not
+    // read gives way at once to the best read, but not this one: they read it whole.
+    const showing = {
+      agreed: { key: 'theirs' },
+      current: 'theirs',
+      holding: false,
+      linesShown: true,
+      switchesLeft: 1,
+    };
+    const read = { today: FITS, second: FITS };
+    expect(plan(offered, read, showing)).toEqual({
+      pick: 'theirs',
+      read: [],
+      hold: false,
+      switched: false,
+      agreed: true,
+    });
+    // Not once it could not be read: the best read shows.
+    expect(plan(offered, read, { ...showing, broken: (url) => url.includes('theirs') }).pick).toBe(
+      'today',
+    );
   });
 });
 
