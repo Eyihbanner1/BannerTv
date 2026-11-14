@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isYtsRelease, readNameTags, releaseGroup } from './release';
+import {
+  isYtsRelease,
+  readNameTags,
+  releaseEdition,
+  releaseGroup,
+  releaseService,
+} from './release';
 
 describe('releaseGroup', () => {
   it('reads the group a release name ends on, lower case', () => {
@@ -155,5 +161,57 @@ describe('releaseGroup and a subtitle file’s tags', () => {
     ]) {
       expect(releaseGroup(name), name).toBeUndefined();
     }
+  });
+});
+
+describe('releaseService', () => {
+  it('reads the streaming service a web release names, as its own word', () => {
+    expect(
+      releaseService(
+        'The.Rainmaker.S01E06.Episode.6.2160p.10bit.AMZN.WEB-DL.DDP5.1.HEVC-Vyndros.mkv',
+      ),
+    ).toBe('amzn');
+    expect(releaseService('The.Rainmaker.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX')).toBe('amzn');
+    expect(releaseService('The.Rainmaker.S01E01.2160p.STAN.WEB-DL.DDP5.1.HDR.H265-playWEB')).toBe(
+      'stan',
+    );
+    expect(releaseService('The.Bear.S01E01.720p.HULU.WEBRip.x264-GalaxyTV')).toBe('hulu');
+    expect(releaseService('Fleabag.S01E01.2160p Amazon WEBRip DD+ 5.1 x264-TrollUHD')).toBe('amzn');
+    expect(releaseService('Show.S02E03.1080p.NF.WEBRip.DDP5.1.x264-NTb')).toBe('nf');
+    expect(releaseService('Show.S02E03.WEBRip.Netflix.pt')).toBe('nf');
+    expect(releaseService('Show.S02E03.1080p.MAX.WEB-DL.DDP5.1.H.264-FLUX')).toBe('hmax');
+    expect(releaseService('Show.S02E03.SHO.WEB-DL.AAC2.0.H.264-NTb')).toBe('sho');
+    expect(releaseService('Show.S02E03.Showtime.720p')).toBe('sho');
+    expect(releaseService('Show.S02E03.1080p.PCOK.WEBRip.x264-GRP')).toBe('pcok');
+    expect(releaseService('Show.S02E03.2160p.DSNP.WEB-DL.DDP5.1.H.265-FLUX')).toBe('dsnp');
+  });
+
+  it("reads iTunes and Movies Anywhere only in the name's own case", () => {
+    expect(releaseService('Film.2019.1080p.iT.WEB-DL.DD5.1.H.264-GRP')).toBe('itunes');
+    expect(releaseService('film.2019.1080p.it.web-dl.dd5.1.h.264-grp')).toBeUndefined();
+    expect(releaseService('Film.2019.1080p.MA.WEB-DL.DDP5.1.H.264-GRP')).toBe('ma');
+  });
+
+  it('says nothing for a name with no service, or a title word that looks like one', () => {
+    expect(releaseService('The.Rainmaker.S01E06.WEB.REAL')).toBeUndefined();
+    expect(releaseService('Mad.Max.Fury.Road.2015.1080p.BluRay')).toBeUndefined();
+    expect(releaseService('Stan.and.Ollie.2018.1080p.BluRay')).toBeUndefined();
+    expect(releaseService('Amazonia.2013.1080p.BluRay.x264-GRP')).toBeUndefined();
+    expect(releaseService('Show.S01E01.720p.HDTV.x264-NFC')).toBeUndefined();
+  });
+});
+
+describe('releaseEdition', () => {
+  it('reads an edition that changes the cut', () => {
+    expect(releaseEdition('Film.2001.Extended.Cut.1080p.BluRay.x264-GRP')).toBe('extended');
+    expect(releaseEdition("Film.2001.Director's.Cut.1080p.BluRay")).toBe('directors cut');
+    expect(releaseEdition('Film.2001.Directors.Cut.1080p.BluRay')).toBe('directors cut');
+    expect(releaseEdition('Film.2001.UNRATED.720p.BluRay')).toBe('unrated');
+    expect(releaseEdition('Film.2001.Final.Cut.2160p.UHD.BluRay')).toBe('final cut');
+  });
+
+  it('says nothing for a plain name', () => {
+    expect(releaseEdition('Film.2001.1080p.BluRay.x264-GRP')).toBeUndefined();
+    expect(releaseEdition('The.Rainmaker.S01E06.WEB.REAL')).toBeUndefined();
   });
 });

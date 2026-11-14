@@ -493,9 +493,18 @@ export {
   numberBySource,
   otherEpisode,
   releaseMatch,
+  releaseFeatures,
   type ReleaseMatch,
+  type SourceFamily,
   type VideoRelease,
 } from './subtitles/versions';
+export {
+  readNameTags,
+  releaseEdition,
+  releaseGroup,
+  releaseService,
+  type StreamingService,
+} from './streams/release';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
 export {

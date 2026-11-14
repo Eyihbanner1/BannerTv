@@ -8,8 +8,35 @@ import {
   madeForRelease,
   numberBySource,
   otherEpisode,
+  releaseFeatures,
   releaseMatch,
 } from './versions';
+
+describe('releaseFeatures', () => {
+  it('names the streaming service beside the family of source', () => {
+    const facts = releaseFeatures(
+      'The.Rainmaker.S01E06.Episode.6.2160p.10bit.AMZN.WEB-DL.DDP5.1.HEVC-Vyndros.mkv',
+    );
+    expect(facts.source).toBe('web');
+    expect(facts.service).toBe('amzn');
+    expect(facts.group).toBe('vyndros');
+    expect(releaseFeatures('The.Rainmaker.S01E06.WEB.REAL').service).toBeUndefined();
+  });
+
+  it("counts a service's tag as the web, with no WEB word beside it", () => {
+    for (const name of [
+      'Show.S01E01.1080p.PCOK.x264-GRP',
+      'Show.S01E01.1080p.HULU.x264-GRP',
+      'Show.S01E01.1080p.PMTP.x264-GRP',
+      'Show.S01E01.1080p.CRAV.x264-GRP',
+      'Show.S01E01.1080p.DSNY.x264-GRP',
+      'Show.S01E01.1080p.APTV.x264-GRP',
+    ]) {
+      expect(releaseFeatures(name).source).toBe('web');
+    }
+    expect(releaseFeatures('Show.S01E01.1080p.HDTV.x264-GRP').service).toBeUndefined();
+  });
+});
 
 describe('releaseMatch', () => {
   const episode = {

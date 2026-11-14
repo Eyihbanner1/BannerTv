@@ -4,10 +4,16 @@
  * where they were while more arrive.
  */
 
-import { isYtsRelease, readNameTags, releaseGroup } from '../streams/release';
+import {
+  isYtsRelease,
+  readNameTags,
+  releaseGroup,
+  releaseService,
+  type StreamingService,
+} from '../streams/release';
 
 /** A family of sources: releases from one family share their timing, another's differ. */
-type SourceFamily = 'web' | 'bluray' | 'hdtv' | 'dvd' | 'cam' | 'ts' | 'tc' | 'scr';
+export type SourceFamily = 'web' | 'bluray' | 'hdtv' | 'dvd' | 'cam' | 'ts' | 'tc' | 'scr';
 
 /** What a release name says about the release, where it says it. */
 interface ReleaseFeatures {
@@ -18,6 +24,8 @@ interface ReleaseFeatures {
   /** "2160p", "1080p", "720p", "576p", "480p"; none from a name that gives two ("720p/1080p"). */
   resolution?: string;
   source?: SourceFamily;
+  /** The streaming service a web release was taken from ("AMZN", "Netflix"): `releaseService`. */
+  service?: StreamingService;
   /** The group that made the release, lower case; `yts` for YTS and YIFY. */
   group?: string;
   /** The name with its tags and separators taken out, for telling two equal names. */
@@ -69,12 +77,13 @@ const word = (pattern: string) => new RegExp(`(?:^|[^a-z0-9])(?:${pattern})(?![a
 
 // The web's own words (WEB-DL, WEBRip, a service's tag) before a copy made in the cinema
 // (camcorder, telesync, telecine, screener: each timed its own way), so "The.TS.Madison…
-// WEB-DL" is from the web; "web" alone last, as it is also a word in titles.
+// WEB-DL" is from the web; "web" alone last, as it is also a word in titles. "STAN", "MAX" and
+// "SHO" count as a service only before a WEB word, which says the web already.
 const SOURCES: ReadonlyArray<readonly [SourceFamily, RegExp]> = [
   ['bluray', /blu[ ._-]?ray|b[dr][ ._-]?(?:rip|remux)|(?:^|[^a-z0-9])remux(?![a-z0-9])/],
   ['hdtv', word('hdtv|pdtv')],
   ['dvd', word('dvd(?:rip|r|5|9)?')],
-  ['web', word('web[ ._-]?(?:dl|rip)|amzn|nf|dsnp|hmax|atvp')],
+  ['web', word('web[ ._-]?(?:dl|rip)|amzn|nf|dsnp|dsny|hmax|atvp|aptv|hulu|pcok|pmtp|crav')],
   ['cam', word('(?:hd|hq)?[ ._-]?cam(?:rip)?')],
   ['ts', word('(?:hd[ ._-]?)?(?:ts|telesync|tsrip)')],
   ['tc', word('(?:hd[ ._-]?)?(?:tc|telecine)')],
@@ -120,7 +129,18 @@ function features(name: string): ReleaseFeatures {
 
   const group = isYtsRelease(name) ? 'yts' : releaseGroup(tags.release);
   if (group) found.group = group;
+  const service = releaseService(name);
+  if (service) found.service = service;
   return found;
+}
+
+/**
+ * What a release name says of its release (`features`): season, episodes,
+ * resolution, family of source, streaming service and group, where it says
+ * them.
+ */
+export function releaseFeatures(name: string): Readonly<ReleaseFeatures> {
+  return features(name);
 }
 
 /** The video's features: its file name first, its title filling the gaps. */
