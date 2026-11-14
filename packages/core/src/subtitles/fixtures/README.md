@@ -37,3 +37,20 @@ stays outside the repository.
 
 Any fixture added here follows the same rule: timings only. Text in a test is
 made up for the test.
+
+The files-that-agree decision (`agreement.ts`) has two more, from the study
+the decision was measured on. Neither holds a line's text or a link.
+
+`agreement-cases.json` holds 20 cases: the refutation's counterexamples
+(`CE1` … `CE6`, `X1`, `X2`) and the Rainmaker's ten episodes (`RM-E1` …
+`RM-E10`). Each holds the video's names, the viewer's language and files as
+the planner ranks them (`ranked`), the files offered that can be read (ids,
+language codes, file names, a count of lines), the files the decision reads in
+order (`read`), and every alignment it asks for, in order, with the answer the
+aligner gave (`[candidate, reference, offset, rate, confidence]`). `expected`
+is what the study's own implementation decided on those answers.
+
+`agreement-rainmaker-timings.json` holds the timing of every file read for
+Rainmaker E5 (12 files) and E6 (28), by episode and file id, each as
+`[gap from the previous line's end, duration, …]` in hundredths of a second,
+so the tests can run the real aligner on them.

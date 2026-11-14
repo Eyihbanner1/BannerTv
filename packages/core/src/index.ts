@@ -439,6 +439,27 @@ export type {
 } from './streams/types';
 export { isAdCue, stripAdCues } from './subtitles/ads';
 export {
+  type Agreement,
+  type AgreementCounts,
+  type AgreementDecision,
+  type AgreementFile,
+  type AgreementInput,
+  AGREEMENT_LIMITS,
+  AGREEMENT_MIN_LINES,
+  type AgreementLimits,
+  type AgreementStep,
+  type AgreementWhy,
+  createAgreement,
+  fileFacts,
+  FIRST_READ_FILES,
+  FIRST_READ_TRIES,
+  groupKeyOf,
+  type NameFacts,
+  type PairAnswer,
+  videoFacts,
+  weightOf,
+} from './subtitles/agreement';
+export {
   type AlignConfidence,
   alignedTime,
   type AlignOptions,
