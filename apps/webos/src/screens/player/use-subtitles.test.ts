@@ -16,7 +16,7 @@ import type { PlaybackSession, SessionState } from '../../player/session';
 import type { SubtitleListState, SubtitleOption } from '../../player/subtitles';
 import { recentSubtitleTraces } from '../../player/subtitle-trace';
 import { driftHintKey, driftOn, syncLine } from '../../player/subtitle-versions';
-import { type SubtitleChoice, type Subtitles, useSubtitles } from './use-subtitles';
+import { lineNear, type SubtitleChoice, type Subtitles, useSubtitles } from './use-subtitles';
 
 /*
  * The hook runs here on a small stand-in for React, enough for the hooks it
@@ -217,6 +217,7 @@ function file(
     season?: number;
     episode?: number;
     hashMatch?: boolean;
+    linkedLate?: boolean;
   } = {},
 ) {
   const option: SubtitleOption = {
@@ -229,6 +230,7 @@ function file(
   if (extra.season !== undefined) option.season = extra.season;
   if (extra.episode !== undefined) option.episode = extra.episode;
   if (extra.hashMatch) option.hashMatch = true;
+  if (extra.linkedLate) option.linkedLate = true;
   world.files.set(option.url, cues ? { cues, ms: extra.ms } : { cues: [], fail: true });
   return option;
 }
@@ -249,17 +251,28 @@ function streamEntry(name: string, addonId = 'streams'): StreamEntry {
   } as unknown as StreamEntry;
 }
 
-/** The files offered with a stream, and how many addons are still to answer. */
-function offer(entry: StreamEntry, options: SubtitleOption[], pending = 0) {
-  const store = createStore<SubtitleListState>({ options, pending });
+/**
+ * The files offered with a stream, how many addons are still to answer, and whether a hash read
+ * late may still link a file (the hash then counts among those to answer, as the list counts it).
+ */
+function offer(entry: StreamEntry, options: SubtitleOption[], pending = 0, hashComing = false) {
+  const store = createStore<SubtitleListState>({
+    options,
+    pending,
+    ...(hashComing && { hashComing: true }),
+  });
   world.lists.set(entry.stream, {
     get: store.get,
     subscribe: store.subscribe,
     start: () => undefined,
     stop: () => undefined,
   });
-  return (more: SubtitleOption[], stillPending = 0) =>
-    store.set({ options: store.get().options.concat(more), pending: stillPending });
+  return (more: SubtitleOption[], stillPending = 0, stillComing = false) =>
+    store.set({
+      options: store.get().options.concat(more),
+      pending: stillPending,
+      ...(stillComing && { hashComing: true }),
+    });
 }
 
 function track(id: string, lang: string, extra: Partial<EngineTrack> = {}): EngineTrack {
@@ -302,6 +315,7 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
     get: playing.get,
     subscribe: playing.subscribe,
     selectText: (id: string | null) => selected.push(id),
+    trustedPosition: () => playing.get().position,
   } as unknown as PlaybackSession;
   let entry = first;
   let result!: Subtitles;
@@ -365,6 +379,23 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
   mounted.push(player.unmount);
   return player;
 }
+
+describe('lineNear', () => {
+  const cue = (start: number, end: number): Cue => ({ start, end, lines: [[{ text: 'A line' }]] });
+  const cues = [cue(10, 12), cue(11, 40), cue(50, 52), cue(60, 62)];
+
+  it('says a line is on screen, or due within 2 s', () => {
+    expect(lineNear(cues, 0)).toBe(false);
+    expect(lineNear(cues, 7.9)).toBe(false);
+    expect(lineNear(cues, 8.1)).toBe(true);
+    // A long line that started before another ended.
+    expect(lineNear(cues, 30)).toBe(true);
+    expect(lineNear(cues, 45)).toBe(false);
+    expect(lineNear(cues, 61)).toBe(true);
+    expect(lineNear(cues, 70)).toBe(false);
+    expect(lineNear([], 10)).toBe(false);
+  });
+});
 
 /** Players still on screen, closed after each test. */
 const mounted: Array<() => void> = [];
@@ -1188,6 +1219,69 @@ describe('lining files up against the video', () => {
     if (player.subtitles.sync?.state === 'moved') {
       expect(player.subtitles.sync.offset).toBeCloseTo(-0.2, 1);
     }
+  });
+
+  describe('with a hash read after the files were asked for', () => {
+    /** Linked to the video by OpenSubtitles asked again with the hash: it came late. */
+    const linkedLate = (cues: Cue[]) =>
+      file('late', cues, { label: 'some_film_subs.srt', hashMatch: true, linkedLate: true });
+
+    it('says the file showing is still being checked while the hash may link one', async () => {
+      const entry = streamEntry('film');
+      const plain = file('plain', shift(FULL, 3));
+      const more = offer(entry, [plain], 1, true);
+      const player = play(entry);
+      await player.wait(2500);
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+      expect(player.subtitles.cues).not.toBeNull();
+      expect(player.subtitles.sync).toEqual({ state: 'checking' });
+      // The hash failed: nothing more can come to check it against.
+      more([], 0, false);
+      await player.flush();
+      expect(player.subtitles.sync).toEqual({ state: 'unchecked' });
+    });
+
+    it('takes the place of the file showing before its first line is due', async () => {
+      const entry = streamEntry('film');
+      // Its first line comes at 30 s; the video is at its start.
+      const plain = file('plain', shift(FULL, 30));
+      const more = offer(entry, [plain], 1, true);
+      const player = play(entry);
+      await player.wait(2500);
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+      expect(player.subtitles.cues).not.toBeNull();
+      more([linkedLate(shift(FULL, 30))]);
+      await player.wait(300);
+      expect(player.subtitles.choice).toEqual({ kind: 'file', key: 'os#late' });
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 30, 1);
+      expect(recentSubtitleTraces()[0]).toMatchObject({ reason: 'linked to your video' });
+    });
+
+    it('is read to line the file showing up against once its lines show, and never shown', async () => {
+      const entry = streamEntry('film');
+      const plain = file('plain', shift(FULL, 3));
+      const more = offer(entry, [plain], 1, true);
+      const player = play(entry, { position: 10 });
+      await player.wait(2500);
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start + 3, 5);
+      expect(player.subtitles.sync).toEqual({ state: 'checking' });
+      const late = linkedLate(FULL);
+      more([late]);
+      await player.wait(300);
+      // It stays, its lines moved once, late, onto the file the hash linked.
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+      expect(world.loads).toContain(late.url);
+      await player.wait(2000);
+      expect(player.subtitles.choice).toEqual(fileChoice(plain));
+      expect(player.subtitles.sync).toMatchObject({ state: 'moved', rate: 1 });
+      if (player.subtitles.sync?.state === 'moved') {
+        expect(player.subtitles.sync.offset).toBeCloseTo(-3, 1);
+      }
+      expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+      expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'linked' });
+      expect(player.subtitles.checkOf(fileChoice(late)!)).not.toHaveProperty('synced');
+    });
   });
 
   it('keeps a file’s row and Timing to what is known when it is the reference with nothing else', async () => {

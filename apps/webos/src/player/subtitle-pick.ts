@@ -26,6 +26,12 @@ export interface PickableSubtitle extends MatchedFile {
   key: string;
   url: string;
   lang: string;
+  /**
+   * Linked to the video by a hash read after the files were first listed
+   * without it (`subtitles.ts`): once lines show, it is the reference, not a
+   * file to take over.
+   */
+  linkedLate?: boolean;
 }
 
 /**
@@ -188,8 +194,9 @@ export interface PlanInput<T extends PickableSubtitle> extends PickContext {
    */
   agreed?: { key: string };
   /**
-   * The file showing has shown lines. SEAM(hash-path): today the hook says so once the hold
-   * is over; the hash path makes it the first line's own time, with its margin.
+   * A line of the file chosen now is on screen, or due within moments (time
+   * to read another file before it), or has been since its lines were let
+   * through: a file taking over now would be seen to.
    */
   linesShown?: boolean;
 }
@@ -253,6 +260,11 @@ function keepOrSwitch<T extends PickableSubtitle>(
  * something is learnt: which file to choose, which to read for their checks,
  * and whether to hold the lines back meanwhile.
  *
+ * - A file linked to the video by a hash read late (`linkedLate`) takes over
+ *   only in the hold, or before the first line of the one showing is due
+ *   (`linesShown`). After that it is read to line the one showing up against
+ *   (step B's reference), and never chosen for it, while that one reads.
+ *
  * - A version picked by hand for this release, or one made for the release
  *   (named for it with the group confirming it, or found by the video's hash
  *   with no name saying otherwise: `madeForRelease`), is chosen at once, and
@@ -295,6 +307,31 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
     if (pick) return { pick, read: [], hold: false, switched: !input.holding, agreed: true };
   }
   const ranked = rankedFiles(input.offered, input.language, input);
+  // Once the lines of the file showing show, files a late hash linked to the video do not take
+  // over from it: the first of them is read, to line it up against instead.
+  const current = ranked.find((option) => option.key === input.current);
+  if (!input.linesShown || input.holding || !current || input.fit(current.url) === undefined) {
+    return planAmong(ranked, input);
+  }
+  const late = ranked.filter((option) => option.linkedLate && option !== current);
+  if (late.length === 0) return planAmong(ranked, input);
+  const result = planAmong(
+    ranked.filter((option) => late.indexOf(option) === -1),
+    input,
+  );
+  const reference = late[0]!;
+  const toRead =
+    input.fit(reference.url) === undefined &&
+    !input.reading(reference.url) &&
+    result.read.indexOf(reference) === -1;
+  return toRead ? { ...result, read: result.read.concat(reference) } : result;
+}
+
+/** The plan among these files, ranked (`rankedFiles`). */
+function planAmong<T extends PickableSubtitle>(
+  ranked: readonly T[],
+  input: PlanInput<T>,
+): SubtitlePlan<T> {
   if (ranked.length === 0) {
     return {
       pick: lastResort(input.offered, input.language, input),

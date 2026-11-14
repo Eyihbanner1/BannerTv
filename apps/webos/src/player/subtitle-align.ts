@@ -359,10 +359,7 @@ export const PAGE_SLICING: Slicing = {
   sliceMs: 8,
 };
 
-/**
- * Each kind of reference by how far it is trusted, best first. SEAM(hash-path): its
- * change reads the rest of the ladder from here; files that agree come last.
- */
+/** Each kind of reference by how far it is trusted, best first: files that agree come last. */
 const RANK: Readonly<Record<ReferenceKind, number>> = {
   track: 0,
   linked: 1,
@@ -373,8 +370,12 @@ const RANK: Readonly<Record<ReferenceKind, number>> = {
 /**
  * Whether a file still needs lining up against this reference: not when its
  * answer is final, nor when it was lined up against as much of this
- * reference already, nor after MAX_RUNS. A record against files that agree,
- * sure or not, gives way to any better kind of reference.
+ * reference already, nor after MAX_RUNS. An answer that was not sure,
+ * against a worse kind of reference, gives way to a better one that will
+ * not grow (a file linked by a hash read late, after one named for the
+ * release): a sure one stands, as it was found against a file known to fit.
+ * A record against files that agree, sure or not, gives way to any better
+ * kind of reference.
  */
 export function needsRun(
   record: AlignRecord | undefined,
@@ -384,6 +385,14 @@ export function needsRun(
   if (stage === 0) return false;
   if (!record) return true;
   if (record.reference === 'agreed' && RANK[reference.kind] < RANK.agreed) return true;
+  if (
+    record.referenceId !== reference.id &&
+    record.alignment.confidence !== 'sure' &&
+    !reference.growing &&
+    RANK[reference.kind] < RANK[record.reference]
+  ) {
+    return true;
+  }
   if (record.final || record.runs >= MAX_RUNS) return false;
   if (record.referenceId !== reference.id) return true;
   return stage > record.stage;

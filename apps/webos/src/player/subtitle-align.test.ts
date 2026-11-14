@@ -451,6 +451,56 @@ describe('records handed over by files that agree', () => {
   });
 });
 
+describe('needsRun', () => {
+  const answer = (confidence: 'sure' | 'unsure' | 'none'): AlignRecord => ({
+    alignment: {
+      offset: 2,
+      rate: 1,
+      score: 0,
+      matched: 0.5,
+      chance: 0,
+      spread: 0,
+      prominence: 0,
+      confidence,
+      windows: [],
+      drift: 0,
+      covered: 0,
+      coveredShare: 1,
+    },
+    reference: 'release',
+    referenceId: 'https://subs.example/release.srt',
+    stage: COMPLETE,
+    runs: 1,
+    ms: 30,
+    final: true,
+  });
+  const lines = film(600, 3);
+  const linked: Reference = {
+    kind: 'linked',
+    id: 'https://subs.example/late.srt',
+    lines,
+    growing: false,
+  };
+
+  it('lines a file up again against a file a late hash linked, where the one named for the release was not sure', () => {
+    expect(needsRun(answer('unsure'), linked, COMPLETE)).toBe(true);
+    expect(needsRun(answer('none'), linked, COMPLETE)).toBe(true);
+    // A sure answer stands: it was found against a file known to fit.
+    expect(needsRun(answer('sure'), linked, COMPLETE)).toBe(false);
+    // Not against the same reference again, nor one no better, nor a track still arriving.
+    expect(needsRun(answer('unsure'), { ...linked, kind: 'release', id: 'other' }, COMPLETE)).toBe(
+      false,
+    );
+    expect(
+      needsRun(answer('unsure'), { ...linked, id: 'https://subs.example/release.srt' }, COMPLETE),
+    ).toBe(false);
+    expect(needsRun(answer('unsure'), { ...linked, kind: 'track', growing: true }, 1)).toBe(false);
+    // Once lined up against the better one, it is final there.
+    const again: AlignRecord = { ...answer('unsure'), reference: 'linked', referenceId: linked.id };
+    expect(needsRun(again, linked, COMPLETE)).toBe(false);
+  });
+});
+
 describe('isFinal', () => {
   const lines = film(3600, 5);
   const track = (growing: boolean, from = lines): Reference => ({

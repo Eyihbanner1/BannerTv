@@ -223,19 +223,37 @@ const MAX_SWITCHES = 2;
 /** A line due this soon (seconds) counts as showing already, for a move. */
 const FIRST_LINE_MARGIN_S = 0.5;
 /**
- * A hash read late may still link a file to the video. SEAM(hash-path): today the subtitles
- * are asked for only once the hash is read or given up on, so none is still coming once the
- * list has answered; the hash path makes this `SubtitleListState.hashComing`.
+ * A line due this soon (seconds) counts as showing already, for a file taking over from the
+ * one showing: the new file must be read before the line is due.
  */
-const HASH_COMING = false;
+const SWITCH_MARGIN_S = 2;
 /** Why files that agree changed nothing, where the Timing tab says they disagree. */
 const DISAGREE: ReadonlySet<string> = new Set(['close', 'apart', 'unlinked', 'rate', 'wider']);
 
 /**
- * Whether the file showing has shown lines, for a file taking over from it. SEAM(hash-path):
- * today once the hold is over; the hash path makes it the first line's own time.
+ * Whether a line of these cues is on screen at `position`, or due within SWITCH_MARGIN_S.
+ * The cues are sorted by start.
  */
-const linesShownOf = (standing: AutoState): boolean => !standing.holding;
+export function lineNear(cues: readonly Cue[], position: number): boolean {
+  const due = position + SWITCH_MARGIN_S;
+  // The first cue starting after the margin: those before it have started by then.
+  let low = 0;
+  let high = cues.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (cues[middle]!.start <= due) low = middle + 1;
+    else high = middle;
+  }
+  for (let at = low - 1; at >= 0; at--) {
+    if (cues[at]!.end > position) return true;
+    // A line that long is no line: the rest started too early to still show.
+    if (cues[at]!.start < position - LONGEST_LINE_S) return false;
+  }
+  return false;
+}
+
+/** Lines that last longer than this (seconds) are not looked for, when telling a line near. */
+const LONGEST_LINE_S = 60;
 
 /**
  * BannerTV Demo's subtitle tracks only check how subtitles look. They wait for
@@ -601,6 +619,12 @@ export function useSubtitles(
     byHand?: boolean;
   } | null>(null);
   const auto = useRef<AutoState>({ entry: null, holding: false, switches: 0 });
+  // The file showing whose lines have shown on this stream, or been due within moments, since
+  // they were let through: a file taking over from it now would be seen to. By link.
+  const linesShown = useRef<{ entry: StreamEntry | null; url: string } | null>(null);
+  /** Whether lines of this file have shown on the stream (`linesShown`). */
+  const shownOn = (stream: StreamEntry | null, url: string | undefined) =>
+    url !== undefined && linesShown.current?.entry === stream && linesShown.current.url === url;
   // Files read for their checks in each language, by link, for the stream playing: another
   // stream of the video reads its own file and the addon's first again. And when each file
   // being read was asked for, by link, to tell a slow download.
@@ -786,7 +810,7 @@ export function useSubtitles(
             : 0,
         ...sync,
         agreed: agreedKey === undefined ? undefined : { key: agreedKey },
-        linesShown: linesShownOf(standing),
+        linesShown: shownOn(entry, offered.find((option) => option.key === current)?.url),
       });
       if (result.agreed && result.pick) standing.agreed = result.pick.key;
       for (const file of result.read) {
@@ -858,12 +882,12 @@ export function useSubtitles(
         (isSubtitleCheck(entry) ? null : wantedSubtitle(metaId, heardLanguages(audio, entry)));
       wantedNow = wanted;
       pressedNow = pressed;
-      const { options: offered, pending: waiting } = list.get();
+      const { options: offered, pending: waiting, hashComing } = list.get();
       // What files that agree decided, handed over once no addon is still to answer and no hash
       // may still link a file: the record for the file shown first, so step B does not line it up
       // against their first file again.
       const agreedDecision = runner.decision();
-      if (agreedDecision && agreedRef.current?.entry !== entry && waiting === 0 && !HASH_COMING) {
+      if (agreedDecision && agreedRef.current?.entry !== entry && waiting === 0 && !hashComing) {
         // Kept first: seeding tells the aligner's listeners, this among them.
         agreedRef.current = { entry, decision: agreedDecision };
         setHanded(agreedRef.current);
@@ -1276,10 +1300,14 @@ export function useSubtitles(
           standing.shownAt !== undefined && now - standing.shownAt < EARLY_MS
             ? MAX_SWITCHES - standing.switches
             : 0;
+        const made = decided.current;
+        const showing =
+          made?.entry === entry && made.choice?.kind === 'file' ? made.choice.key : undefined;
+        const url = list?.get().options.find((option) => option.key === showing)?.url;
         return agreedSwitchAllowed({
           holding: standing.holding,
           switchesLeft,
-          linesShown: linesShownOf(standing),
+          linesShown: shownOn(entry, url),
         });
       },
     });
@@ -1458,7 +1486,8 @@ export function useSubtitles(
     if (aligner.pending(fileUrl)) return { state: 'checking', ...basis };
     if (fileRecord) return { state: fileRecord.final ? 'unmatched' : 'checking', ...basis };
     if (reference) return { state: 'checking', ...basis };
-    if (coming) return { state: 'checking' };
+    // A file to check it against may still come: one to read, or one a hash read late links.
+    if (coming || listState.hashComing) return { state: 'checking' };
     // Files that agree with each other, still deciding, or what they found.
     if (runnerState.active && !agreedNow) return { state: 'checking', basis: 'files' };
     if (agreedNow?.state === 'none') {
@@ -1530,6 +1559,18 @@ export function useSubtitles(
           : (stretchCues(rawCues, drift) as Cue[]),
     [rawCues, drift, move],
   );
+  // Whether a line of the file showing, let through, is on screen or due within moments: from
+  // then on, on this stream, a file taking over from it would be seen to.
+  const shownNow =
+    trackId === null &&
+    fileUrl !== null &&
+    cues !== null &&
+    lineNear(cues, session?.trustedPosition() ?? state.position);
+  useEffect(() => {
+    if (shownNow && fileUrl !== null && !shownOn(entry, fileUrl)) {
+      linesShown.current = { entry, url: fileUrl };
+    }
+  }, [shownNow, entry, fileUrl]);
 
   return {
     options,
