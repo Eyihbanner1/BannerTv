@@ -18,6 +18,7 @@ import {
   versionGroups,
   versionDetail,
   versionId,
+  syncLine,
   versionNotes,
 } from './subtitle-versions';
 
@@ -135,6 +136,13 @@ describe('subtitle versions', () => {
     expect(versionNotes(matching, true, 'failed', video)).toEqual(['failed']);
     expect(versionNotes(matching, false, 'failed', video)).toEqual(['skipped']);
     expect(versionNotes(matching, false, undefined, video)).toEqual(['sameRelease']);
+    // Lined up against the video, or what others are lined up against: in step, which says
+    // more than the names do, and the drift with it.
+    const synced = { hearing: true, synced: true, autoDrift: true };
+    expect(versionNotes(matching, true, undefined, video, synced)).toEqual(['synced', 'hearing']);
+    expect(versionNotes(other, false, undefined, video, { hearing: false, synced: true })).toEqual([
+      'synced',
+    ]);
     expect(versionNotes(other, false, undefined, video)).toEqual([]);
     expect(versionNotes(matching, false, undefined, {})).toEqual([]);
     // A loose match, with no group on one side to confirm it, is as often another group's
@@ -431,5 +439,24 @@ describe('subtitle versions', () => {
     } as unknown as StreamEntry;
     expect(playingRelease(entry)).toEqual({ filename: 'Film.mkv', title: 'Film 1080p WEB-DL' });
     expect(playingRelease(null)).toEqual({});
+  });
+});
+
+describe('syncLine', () => {
+  it('says how far the lines were moved, and when they were stretched too', () => {
+    expect(syncLine({ state: 'moved', offset: 2.34, rate: 1 })).toEqual({
+      key: 'player.syncMoved',
+      amount: '+2.3 s',
+    });
+    expect(syncLine({ state: 'moved', offset: -0.7, rate: 25 / 24 })).toEqual({
+      key: 'player.syncMovedRate',
+      amount: '−0.7 s',
+    });
+  });
+
+  it('says why nothing moved, and nothing for a track or with subtitles off', () => {
+    expect(syncLine({ state: 'unchecked' })).toEqual({ key: 'player.syncUnchecked' });
+    expect(syncLine({ state: 'reference' })).toEqual({ key: 'player.syncReference' });
+    expect(syncLine(null)).toBeNull();
   });
 });

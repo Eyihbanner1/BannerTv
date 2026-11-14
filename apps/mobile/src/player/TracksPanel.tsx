@@ -9,6 +9,7 @@ import {
   playingRelease,
   sameChoice,
   subtitleVersions,
+  syncLine,
   type SubtitleVersion,
   VERSION_NOTES,
   versionDetail,
@@ -75,9 +76,17 @@ export function TracksPanel(props: TracksPanelProps) {
 
   const { choice, offset, drift } = subtitles;
   const moved = choice !== null && (offset !== 0 || drift !== null);
-  const timingName = moved
-    ? `${t('player.timing')} ${formatOffset(offset)}${drift ? ` · ${t('player.driftFixed')}` : ''}`
-    : t('player.timing');
+  const linedUp = choice !== null && subtitles.sync?.state === 'moved';
+  const timingName =
+    moved || linedUp
+      ? [
+          `${t('player.timing')} ${formatOffset(offset)}`,
+          linedUp ? t('player.linedUp') : null,
+          drift ? t('player.driftFixed') : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(' · ')
+      : t('player.timing');
 
   return (
     <View style={styles.root}>
@@ -264,6 +273,8 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
 
   const { offset } = subtitles;
   const { way, amount } = offsetWay(offset);
+  // What lining the file up against the video did: moved by BannerTV, or why not.
+  const sync = syncLine(subtitles.sync);
   const step = (by: number) => (
     <Step
       key={by}
@@ -293,6 +304,11 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
           onPress={() => subtitles.setOffset(0)}
         />
       </View>
+      {sync ? (
+        <Text style={styles.note}>
+          {t(sync.key, sync.amount !== undefined ? { amount: sync.amount } : undefined)}
+        </Text>
+      ) : null}
       {/* For a file timed for another frame rate, which slides further out as the film goes on.
           Not for a track inside the file, whose lines Android shows and clears itself. */}
       {subtitles.canFixDrift ? (
