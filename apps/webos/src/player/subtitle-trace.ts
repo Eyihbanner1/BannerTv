@@ -293,7 +293,7 @@ const STEP_WORDS: Readonly<Record<HashStep, string>> = {
 };
 
 /** The addons were asked without the hash after so long. */
-const askedWithout = (ms: number) => `files asked for without it after ${seconds(ms)}`;
+const askedWithout = (ms: number) => `asked without it at ${seconds(ms)}`;
 
 /** What a hash read late brought: the addons asked again with it, and the files they linked. */
 function lateText(late: HashLate): string {
@@ -317,9 +317,9 @@ function hashText(hash: HashOutcome | undefined): string {
     case 'sent':
       return 'hash sent by the addon';
     case 'reading':
-      return `hash still being read; ${askedWithout(hash.askedAtMs)}`;
+      return `hash still being read, ${askedWithout(hash.askedAtMs)}`;
     case 'failed': {
-      const late = hash.askedAtMs === undefined ? '' : `; ${askedWithout(hash.askedAtMs)}`;
+      const late = hash.askedAtMs === undefined ? '' : `, ${askedWithout(hash.askedAtMs)}`;
       return `hash failed after ${seconds(hash.ms)} (${hash.why}, ${STEP_WORDS[hash.step]})${late}`;
     }
     case 'skipped':
@@ -357,17 +357,21 @@ const REFERENCE_WORDS: Readonly<Record<ReferenceKind, string>> = {
 /** "+2.3 s", "−0.4 s": a true minus sign. */
 const signed = (seconds: number) => `${seconds < 0 ? '−' : '+'}${Math.abs(seconds).toFixed(1)} s`;
 
-/** What the files were lined up against, and each file's last run, in the order lined up. */
+/**
+ * What the files were lined up against, and each file's last run, in the order lined up: the
+ * work it took for a file lined up alone (the TV's cost of one), not for each of several.
+ */
 function alignText(trace: SubtitleTrace): string | undefined {
-  const runs = Object.keys(trace.aligned ?? {})
+  const files = Object.keys(trace.aligned ?? {})
     .map(Number)
-    .sort((a, b) => a - b)
-    .map((file) => {
-      const run = trace.aligned![file]!;
-      const rate = run.rate === 1 ? '' : ` ×${run.rate.toFixed(4)}`;
-      const move = run.confidence === 'sure' ? ` ${signed(run.offset)}${rate}` : '';
-      return `${run.language || '?'} ${run.confidence}${move} (${Math.round(run.ms)} ms)`;
-    });
+    .sort((a, b) => a - b);
+  const runs = files.map((file) => {
+    const run = trace.aligned![file]!;
+    const rate = run.rate === 1 ? '' : ` ×${run.rate.toFixed(4)}`;
+    const move = run.confidence === 'sure' ? ` ${signed(run.offset)}${rate}` : '';
+    const work = files.length === 1 ? ` (${Math.round(run.ms)} ms)` : '';
+    return `${run.language || '?'} ${run.confidence}${move}${work}`;
+  });
   if (trace.reference === undefined && runs.length === 0) return undefined;
   const against = trace.reference ? REFERENCE_WORDS[trace.reference] : 'nothing';
   return runs.length > 0

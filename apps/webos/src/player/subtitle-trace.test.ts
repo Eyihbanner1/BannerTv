@@ -59,7 +59,7 @@ describe('the subtitles of the last few plays', () => {
       'hash read in 3.1 s, the size and end through the stream’s link again',
     );
     expect(rowFor({ state: 'reading', askedAtMs: 2000 })).toBe(
-      'hash still being read; files asked for without it after 2.0 s',
+      'hash still being read, asked without it at 2.0 s',
     );
     const late = { askedAtMs: 2000, askedAgain: 1 };
     expect(rowFor({ state: 'read', ms: 5100, late })).toBe('hash read in 5.1 s, asked again');
@@ -90,9 +90,7 @@ describe('the subtitles of the last few plays', () => {
     );
     expect(
       rowFor({ state: 'failed', why: 'timed out', step: 'end', ms: 15000, askedAtMs: 2000 }),
-    ).toBe(
-      'hash failed after 15.0 s (timed out, end read); files asked for without it after 2.0 s',
-    );
+    ).toBe('hash failed after 15.0 s (timed out, end read), asked without it at 2.0 s');
     // Linked files are counted only for a hash read late.
     expect(rowFor({ state: 'read', ms: 1400 }, 2)).toBe('hash read in 1.4 s');
   });
@@ -165,8 +163,19 @@ describe('the subtitles of the last few plays', () => {
     expect(recentSubtitleTraces()[0]?.aligned?.[0]).toMatchObject({ confidence: 'sure', ms: 12.2 });
     expect(subtitleTraceRows()[0]).toEqual([
       'tt0816692',
-      'hash: not asked yet · files en 2 (2 in all) · en, synced to your video · lined up against a file linked by hash: en sure −3.0 s ×0.9590 (12 ms), en none (8 ms) · no line yet',
+      'hash: not asked yet · files en 2 (2 in all) · en, synced to your video · lined up against a file linked by hash: en sure −3.0 s ×0.9590, en none · no line yet',
     ]);
+    // The work each took is said for a file lined up alone: the TV's cost of one.
+    startSubtitleTrace('tt0816694');
+    traceAlignment('tt0816694', 0, {
+      language: 'eng',
+      reference: 'linked',
+      confidence: 'sure',
+      offset: 1,
+      rate: 1,
+      ms: 12.2,
+    });
+    expect(subtitleTraceRows()[0]?.[1]).toContain('en sure +1.0 s (12 ms)');
     // Nothing to line up against: said, with no runs.
     startSubtitleTrace('tt0816693');
     traceFiles('tt0816693', ['eng']);

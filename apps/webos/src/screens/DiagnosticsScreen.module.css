@@ -29,20 +29,21 @@
   color: var(--bt-text-subtle);
 }
 
-/* A long value under its label, across the column. */
+/* A long value after its label, across the column: the label starts its first line. */
 .stacked {
   margin-bottom: 8px;
   font: 500 24px/1.3 var(--bt-font);
+  overflow-wrap: break-word;
 }
 
 .stacked .label {
-  display: block;
+  display: inline;
   width: auto;
+  margin-right: 12px;
 }
 
 .stacked .value {
-  display: block;
-  overflow-wrap: break-word;
+  display: inline;
 }
 
 .value {

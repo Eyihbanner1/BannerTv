@@ -15,11 +15,12 @@ import { recentSubtitleTraces, subtitleTraceRows } from '../player/subtitle-trac
 import screenStyles from './Screen.module.css';
 import styles from './DiagnosticsScreen.module.css';
 
-// Sections per column, so the whole report fits on one 1920x1080 screen.
+// Sections per column, so the whole report fits on one 1920x1080 screen: the TV, the skip
+// timings and the newest play's subtitles in the middle, the Lab's speeds under the media.
 const COLUMNS = [
   [0, 1],
-  [2, 4, 5],
-  [3, 6],
+  [2, 6, 5],
+  [3, 4],
 ];
 
 const CHECKING = 'checking…';
@@ -42,9 +43,9 @@ function speedSection(results: SpeedResults): DiagnosticSection {
 }
 
 /**
- * Plays the Subtitles section shows on screen, newest first. Beside a TV's
- * ten rows and the Lab's speeds, its column has room for one; the console
- * line carries every play kept.
+ * Plays the Subtitles section shows on screen, newest first. Under a TV's
+ * ten rows and the skip timings, its column has room for one, its label
+ * starting the row; the console line carries every play kept.
  */
 const PLAYS_ON_SCREEN = 1;
 

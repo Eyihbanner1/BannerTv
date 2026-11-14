@@ -3792,7 +3792,7 @@ test('on an LG TV, Diagnostics shows the newest play’s subtitles inside the sc
       report.push(String(await body?.jsonValue()));
     }
   });
-  // The TV's own section has its ten rows there, as on a real TV, above the Lab's speeds.
+  // The TV's own section has its ten rows there, as on a real TV, above the skip timings.
   await openAsLgTv(page);
   await mockAddons(page);
   await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
@@ -4120,6 +4120,40 @@ test('files that agree move a late file onto their timing', async ({ page }) => 
   for (const name of ['http', 'example.com', 'AMZN', 'FLUX', '.srt']) {
     expect(shown).not.toContain(name);
   }
+});
+
+test('on an LG TV, the subtitles row of a play whose hash failed while files that agree moved its lines stays inside the screen', async ({
+  page,
+}) => {
+  test.setTimeout(120000);
+  await openAsLgTv(page);
+  await recordShownAt(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  // E6's files among as many as E6 had, its row as long as a real one: 28 files, 9 of them in
+  // English, in 20 languages; the 23 more for another release, never read.
+  const others = ['eng', 'eng', 'eng', 'eng', 'eng', 'eng', 'fre', 'ger', 'ita', 'por', 'pob']
+    .concat(['pol', 'rum', 'hun', 'cze', 'gre', 'tur', 'ara', 'heb', 'swe', 'nor', 'dan', 'fin'])
+    .map((lang, n) => named(`other${n}`, lang, `Show.S01E06.720p.HDTV.x264-G${n}`));
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [agreeStream(AGREE_RELEASE)] },
+    // Longer than the hash is waited for: it fails, and nothing more can link a file.
+    hashDelayMs: 16000,
+    subtitleList: [...E6_FILES, ...others],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+  await expect.poll(() => shownAt(page, 'Test line 1'), { timeout: 60000 }).not.toBeNull();
+  // Moved once the hash failed, before the first line was due.
+  expect(Math.abs((await shownAt(page, 'Test line 1'))! - AGREE_SPEECH[0]![0])).toBeLessThan(0.6);
+
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash failed after 15\.0 s \(timed out, \w+ read\)/);
+  await expect(section).toContainText(/files that agree: \d+ vs \d+ \(amzn\), .*; moved −8\.0 s/);
+  // Inside the screen's safe area, with a line or so to spare.
+  const box = await section.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(1080 - 54);
 });
 
 test('a version picked by hand is left as picked, and the Timing tab says how far BannerTV would move it', async ({
