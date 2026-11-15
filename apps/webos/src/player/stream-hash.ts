@@ -131,7 +131,7 @@ function totalFrom(response: Response): number | undefined {
 }
 
 /** The link an answer came from, past every redirect; the link asked when the fetch can't say. */
-function landedAt(response: Response, asked: string): string {
+export function landedAt(response: Response, asked: string): string {
   const url = typeof response.url === 'string' ? response.url : '';
   return /^https?:\/\//i.test(url) ? url : asked;
 }
