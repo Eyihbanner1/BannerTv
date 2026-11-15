@@ -378,6 +378,29 @@ describe('reading the hash through a link that redirects twice', () => {
     expect(toCdn(asked)).toEqual([head, 'whole', 'whole', tail]);
   });
 
+  it('keeps every read out of the browser’s cache, but for React Native’s fetch, which would change the link', async () => {
+    const caches: Array<RequestCache | undefined> = [];
+    const watch = () => {
+      const chain = globalThis.fetch;
+      vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+        caches.push(init?.cache);
+        return chain(url, init);
+      });
+    };
+    serveChain({ type: 'cors', showLength: true });
+    watch();
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(caches.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(caches)).toEqual(new Set(['no-store']));
+    forgetHashes();
+    caches.length = 0;
+    vi.stubGlobal('navigator', { product: 'ReactNative' });
+    serveChain({ type: 'default' });
+    watch();
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(new Set(caches)).toEqual(new Set([undefined]));
+  });
+
   it('gives each read 4 s at most through React Native’s fetch, which can’t stop at the headers', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('navigator', { product: 'ReactNative' });

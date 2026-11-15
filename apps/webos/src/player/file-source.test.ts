@@ -40,6 +40,7 @@ interface Asked {
   range: string;
   aborted: boolean;
   bodyPulls: number;
+  cache: RequestCache | undefined;
 }
 
 function answer(response: Response, url: string): Response {
@@ -70,7 +71,13 @@ function serve(server: Server = {}) {
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     const range = (init?.headers as Record<string, string>).Range!;
-    const entry: Asked = { url, range, aborted: !!init?.signal?.aborted, bodyPulls: 0 };
+    const entry: Asked = {
+      url,
+      range,
+      aborted: !!init?.signal?.aborted,
+      bodyPulls: 0,
+      cache: init?.cache,
+    };
     asked.push(entry);
     init?.signal?.addEventListener('abort', () => (entry.aborted = true));
     if (init?.signal?.aborted) throw new DOMException('', 'AbortError');
@@ -287,6 +294,14 @@ describe('reading a file by ranges', () => {
     const before = asked.length;
     expect(await failure(source.read(0, 100, AbortSignal.abort()))).toBe('aborted');
     expect(asked).toHaveLength(before);
+  });
+
+  it('asks every read to be kept out of the browser’s cache', async () => {
+    const { asked, fetcher } = serve({ directReads: 1 });
+    const source = createFetchSource({ link: LINK }, fetcher);
+    for (let at = 0; at < 5000; at += 1000) await source.read(at, 100);
+    expect(asked.length).toBeGreaterThanOrEqual(4);
+    expect(asked.map(({ cache }) => cache)).toEqual(asked.map(() => 'no-store'));
   });
 
   it('never says the link nor where it led', async () => {

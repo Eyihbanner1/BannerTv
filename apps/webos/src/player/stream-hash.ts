@@ -173,7 +173,10 @@ async function fetchWith<T>(
         }, NATIVE_READ_MS)
       : undefined;
   try {
-    const response = await fetch(url, { ...init, signal: controller?.signal });
+    // Kept out of the browser's cache, which would write the link it landed on to the TV's disk.
+    // Not through React Native's fetch, whose polyfill adds a "_=" to the link for that.
+    const cache: RequestInit = nativeFetch() ? {} : { cache: 'no-store' };
+    const response = await fetch(url, { ...init, ...cache, signal: controller?.signal });
     return await take(response, stop);
   } catch (error) {
     throw tooLong && !signal?.aborted ? new TooLong() : error;

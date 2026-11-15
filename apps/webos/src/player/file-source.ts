@@ -157,6 +157,8 @@ export function createFetchSource(
       try {
         response = await fetcher(target, {
           headers: { Range: `bytes=${start}-${start + length - 1}` },
+          // The link, its token and all, would be written to the TV's disk with the bytes.
+          cache: 'no-store',
           signal: controller?.signal,
         });
       } catch (error) {
