@@ -13,7 +13,8 @@ import { requestHeadersFor } from './request-headers';
  * those redirects once, and the size and the end are read straight from where
  * it landed. Once that refuses a read (a link good for one use), that read and
  * any after it go back through the stream's own link, each once. The link it
- * landed on is never kept, nor said.
+ * landed on is never kept, nor said: only handed, with the first 64 KB, to the
+ * same play's reader of the file's own subtitles (`takeLanding`), once.
  */
 
 /** Bytes read from each end of the file. */
@@ -264,17 +265,46 @@ interface Progress {
   walks: number;
 }
 
+/**
+ * What the newest hash read found at its first read, for the same play's reader of the file's
+ * own subtitles (file-subtitles.ts): the first 64 KB, the link the redirects led to (dropped
+ * once that refused a read), and the file's size where a Content-Range gave it. One slot, in
+ * memory only: replaced by the next read, taken once, and never stored, traced or logged.
+ */
+export interface Landing {
+  /** Where the first read landed, past every redirect. Never kept past the play, nor said. */
+  landed?: string;
+  head: Uint8Array;
+  /** The file's size, from the first read's Content-Range when the page could read it. */
+  total?: number;
+}
+
+/** The reading whose landing the slot may hold: each read started makes a new one. */
+interface Slot {
+  url: string;
+  landing?: Landing;
+}
+
+let slot: Slot | null = null;
+/** The newest reading started, kept after it failed (`known` forgets a failure) for its outcome. */
+let newest: { url: string; reading: Promise<HashReading> } | null = null;
+
 async function read(
   url: string,
   knownSize: number | undefined,
   signal: AbortSignal | undefined,
   progress: Progress,
+  mine: Slot,
 ): Promise<{ videoHash: string; videoSize: number }> {
   progress.walks++;
   const first = await readRange(url, 0, signal);
   if (first.refused) throw new HashError('refused', 'start');
   if (!first.value?.bytes) throw new HashError('no range', 'start');
   const { landed, bytes: head } = first.value;
+  if (slot === mine) {
+    mine.landing = { landed, head };
+    if (first.value.total !== undefined) mine.landing.total = first.value.total;
+  }
   // Every later read goes straight to where the first landed, past the redirects (each walk
   // through them asks the debrid service for its link again, and its answers are rationed). A
   // read there that is refused goes once through the stream's own link, and so does every read
@@ -284,6 +314,8 @@ async function read(
       const direct = await attempt(landed);
       if (!direct.refused) return direct;
       progress.fellBack = progress.step === 'size' ? 'size' : 'end';
+      // Refused once, it is no link to read the file by: only the bytes are handed on.
+      delete mine.landing?.landed;
     }
     progress.walks++;
     return attempt(url);
@@ -360,7 +392,9 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
   }, HASH_TIMEOUT_MS);
   const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
   const progress: Progress = { step: 'start', walks: 0 };
-  const reading = read(url, size, controller?.signal, progress).then(
+  const mine: Slot = { url };
+  slot = mine;
+  const reading = read(url, size, controller?.signal, progress, mine).then(
     (found): HashReading => {
       clearTimeout(timer);
       return {
@@ -384,8 +418,35 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
     },
   );
   known.set(url, reading);
+  newest = { url, reading };
   while (known.size > KEPT) known.delete(known.keys().next().value!);
   return reading;
+}
+
+/**
+ * The reading of `url`'s hash, in flight or done: the one kept, or the newest started when it
+ * was of this link (one that failed is not kept). Never starts one: a stream whose addon sent
+ * its hash has none.
+ */
+export function hashReadingFor(url: string): Promise<HashReading> | undefined {
+  return known.get(url) ?? (newest?.url === url ? newest.reading : undefined);
+}
+
+/**
+ * What the newest hash read found at its first read of `url` (`Landing`), once: the slot is
+ * emptied, and holds nothing for another link, nor for a hash kept from before.
+ */
+export function takeLanding(url: string): Landing | undefined {
+  if (!slot || slot.url !== url || !slot.landing) return undefined;
+  const { landing } = slot;
+  slot = null;
+  return landing;
+}
+
+/** Lets go of the newest reading's landing and outcome: the player closed. */
+export function forgetLanding(): void {
+  slot = null;
+  newest = null;
 }
 
 /**
@@ -402,4 +463,5 @@ export function hashStream(
 /** For tests: forgets every hash read. */
 export function forgetHashes(): void {
   known.clear();
+  forgetLanding();
 }

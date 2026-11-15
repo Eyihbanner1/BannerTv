@@ -35,6 +35,7 @@ import {
 } from '../../player/drift';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
+import { forgetLanding } from '../../player/stream-hash';
 import {
   type AgreementRunner,
   type AgreementStart,
@@ -1151,8 +1152,15 @@ export function useSubtitles(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, session, list, metaId, runtimeSeconds, videoId, checks, aligner, runner]);
 
-  // The files read stay in memory only while the player is open.
-  useEffect(() => () => clearSubtitleCache(), []);
+  // The files read stay in memory only while the player is open, and so does what the hash read
+  // found at the file's start.
+  useEffect(
+    () => () => {
+      clearSubtitleCache();
+      forgetLanding();
+    },
+    [],
+  );
 
   // Load the chosen file, moving to the next in its language if it fails.
   useEffect(() => {

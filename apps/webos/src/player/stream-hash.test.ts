@@ -4,12 +4,15 @@ import {
   canHash,
   forgetHashes,
   HASH_CHUNK,
+  forgetLanding,
   HASH_TIMEOUT_MS,
+  hashReadingFor,
   hashSkip,
   hashStream,
   NATIVE_READ_MS,
   openSubtitlesHash,
   readStreamHash,
+  takeLanding,
 } from './stream-hash';
 import { noteRequestHeaders } from './request-headers';
 
@@ -403,6 +406,63 @@ describe('reading the hash through a link that redirects twice', () => {
     });
     expect(await readStreamHash(LINK)).toMatchObject({ failed: 'refused', step: 'end', walks: 2 });
     expect(walks(asked)).toBe(1);
+  });
+
+  it('hands the first bytes, where they came from and the size, once, to the same link’s reader', async () => {
+    serveChain({ type: 'basic' });
+    // Nothing before a read has started, and asking never starts one.
+    expect(hashReadingFor(LINK)).toBeUndefined();
+    expect(takeLanding(LINK)).toBeUndefined();
+    const reading = readStreamHash(LINK);
+    expect(hashReadingFor(LINK)).toBe(reading);
+    await reading;
+    // Another link's reader gets nothing, and leaves it for this one's.
+    expect(takeLanding(`${LINK}?other`)).toBeUndefined();
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBe(`${CDN}?token=t1`);
+    expect(landing?.total).toBe(size);
+    expect(Array.from(landing!.head)).toEqual(Array.from(bytes.slice(0, HASH_CHUNK)));
+    // Once only, and none from a hash kept from before.
+    expect(takeLanding(LINK)).toBeUndefined();
+    expect(await readStreamHash(LINK)).toBe(await reading);
+    expect(takeLanding(LINK)).toBeUndefined();
+  });
+
+  it('hands no size it did not see in a Content-Range', async () => {
+    serveChain({ type: 'cors', showLength: true });
+    await readStreamHash(LINK);
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBe(`${CDN}?token=t1`);
+    expect(landing?.total).toBeUndefined();
+  });
+
+  it('hands the bytes but not the link once that refused a read', async () => {
+    serveChain({ type: 'basic', oneUse: true });
+    expect(await readStreamHash(LINK)).toMatchObject({ fellBack: 'end' });
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBeUndefined();
+    expect(landing?.head.length).toBe(HASH_CHUNK);
+  });
+
+  it('keeps the newest reading’s outcome after it failed, until the player closes', async () => {
+    serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      await chain(url, init);
+      return answer(new Response('', { status: 403 }), `${CDN}?token=t1`, 'basic');
+    });
+    const reading = readStreamHash(LINK);
+    expect(await hashReadingFor(LINK)).toMatchObject({ failed: 'refused', step: 'start' });
+    expect(hashReadingFor(LINK)).toBe(reading);
+    expect(takeLanding(LINK)).toBeUndefined();
+    // Another link's reading takes its place.
+    serve(file(3 * HASH_CHUNK));
+    await readStreamHash(`${LINK}?next`);
+    expect(hashReadingFor(LINK)).toBeUndefined();
+    forgetLanding();
+    expect(takeLanding(`${LINK}?next`)).toBeUndefined();
+    // The hash read is still kept by its link, for the subtitles asked again.
+    expect(await hashReadingFor(`${LINK}?next`)).toMatchObject({ found: {} });
   });
 
   it('says the start read failed when the first one is refused, and walks no more', async () => {
