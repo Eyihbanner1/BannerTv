@@ -323,6 +323,25 @@ export const HASH_SUBTITLES = {
   linkedLate: timed(LATE_SPEECH, 0, 'Linked late, line'),
 };
 
+/**
+ * The made-up film's lines muxed into the journeys' MKV files (fixtures/mkv/lines.json), each
+ * a start and an end in seconds: 150 over the 10-minute video, from 3 s.
+ */
+export const MKV_LINES = (
+  JSON.parse(readFileSync(resolve(import.meta.dirname, 'fixtures/mkv/lines.json'), 'utf8')) as {
+    lines: Array<[number, number]>;
+  }
+).lines;
+
+/**
+ * Files for the MKV files' video: on MKV_LINES, one on time and one 3 s late, as from another
+ * release. Test lines only.
+ */
+export const MKV_SUBTITLES = {
+  mkvEnglish: timed(MKV_LINES, 0, 'English file, line'),
+  mkvEnglishLate: timed(MKV_LINES, 3, 'Late file, line'),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
@@ -333,6 +352,7 @@ export const SUBTITLE_FILES: Record<string, string> = {
   ...ALIGN_SUBTITLES,
   ...AGREE_SUBTITLES,
   ...HASH_SUBTITLES,
+  ...MKV_SUBTITLES,
   hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 
@@ -748,12 +768,48 @@ export interface RedirectChain {
   fetched: Array<{ server: ChainServer; range?: string }>;
 }
 
-/** Starts a RedirectChain serving the 10-minute film at any /film- path, until the page closes. */
-export async function serveRedirects(page: Page): Promise<RedirectChain> {
+/** How the media server of a RedirectChain answers the page's own reads. */
+export interface RedirectOptions {
+  /** Every request is answered with the whole file, its range left out (200). */
+  ignoreRange?: boolean;
+  /**
+   * Milliseconds the page's reads take, past the hash read's (its first and last 64 KB, and
+   * the size): the reads of the video file's own subtitles.
+   */
+  slowReads?: number;
+  /** Each link the debrid service leads to answers the page one read, and refuses the next. */
+  oneUse?: boolean;
+}
+
+/** The journeys' MKV files (fixtures/mkv/make-mkv.sh), by name, as served at /mkv-<name>. */
+const MKV_FILES = new Map<string, Buffer>();
+function mkvFile(name: string): Buffer | undefined {
+  if (!/^[\w-]+\.mkv$/.test(name)) return undefined;
+  if (!MKV_FILES.has(name)) {
+    MKV_FILES.set(name, readFileSync(resolve(import.meta.dirname, 'fixtures/mkv', name)));
+  }
+  return MKV_FILES.get(name);
+}
+
+/**
+ * Starts a RedirectChain serving the 10-minute film at any /film- path, and the journeys' MKV
+ * files at /mkv-<name> (own.mkv, no-index.mkv, pictures.mkv, spanish.mkv), until the page
+ * closes.
+ */
+export async function serveRedirects(
+  page: Page,
+  options: RedirectOptions = {},
+): Promise<RedirectChain> {
   const fetched: RedirectChain['fetched'] = [];
   let walks = 0;
+  // The page's reads each link the debrid service led to has answered.
+  const answered = new Map<string, number>();
   const origins = {} as Record<ChainServer, string>;
-  const answer = (server: ChainServer, request: IncomingMessage, response: ServerResponse) => {
+  const answer = async (
+    server: ChainServer,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) => {
     const cors = {
       'access-control-allow-origin': '*',
       'access-control-allow-headers': 'range',
@@ -761,10 +817,10 @@ export async function serveRedirects(page: Page): Promise<RedirectChain> {
     };
     if (request.method === 'OPTIONS') return response.writeHead(204, cors).end();
     const range = request.headers.range;
-    if (request.headers['sec-fetch-dest'] === 'empty') {
-      fetched.push({ server, ...(range && { range }) });
-    }
-    const path = new URL(request.url ?? '/', origins[server]).pathname;
+    const own = request.headers['sec-fetch-dest'] === 'empty';
+    if (own) fetched.push({ server, ...(range && { range }) });
+    const url = new URL(request.url ?? '/', origins[server]);
+    const path = url.pathname;
     if (server === 'resolve') {
       return response
         .writeHead(302, { ...cors, location: `${origins.debrid}${path.replace(/^\/resolve/, '')}` })
@@ -776,25 +832,44 @@ export async function serveRedirects(page: Page): Promise<RedirectChain> {
         .writeHead(307, { ...cors, location: `${origins.media}${path}?token=t${walks}` })
         .end();
     }
-    if (path.indexOf('/film-') !== 0) return response.writeHead(404, cors).end();
-    const bytes = /bytes=(\d+)-(\d*)/.exec(range ?? '');
+    const mkv = path.indexOf('/mkv-') === 0 ? mkvFile(path.slice('/mkv-'.length)) : undefined;
+    const file = mkv ?? (path.indexOf('/film-') === 0 ? FILM_FIXTURE : undefined);
+    if (!file) return response.writeHead(404, cors).end();
+    const size = file.length;
+    if (own && options.oneUse) {
+      const reads = (answered.get(url.search) ?? 0) + 1;
+      answered.set(url.search, reads);
+      if (reads > 1) return response.writeHead(403, cors).end();
+    }
+    const hashRead =
+      !range || range === 'bytes=0-65535' || range === `bytes=${size - 65536}-${size - 1}`;
+    if (own && options.slowReads && !hashRead) {
+      await new Promise((done) => setTimeout(done, options.slowReads));
+      if (response.destroyed) return;
+    }
+    const bytes = options.ignoreRange ? null : /bytes=(\d+)-(\d*)/.exec(range ?? '');
     const start = bytes ? Number(bytes[1]) : 0;
-    const end = bytes?.[2] ? Math.min(Number(bytes[2]), FILM_SIZE - 1) : FILM_SIZE - 1;
+    const end = bytes?.[2] ? Math.min(Number(bytes[2]), size - 1) : size - 1;
+    if (start >= size) {
+      return response.writeHead(416, { ...cors, 'content-range': `bytes */${size}` }).end();
+    }
     return response
       .writeHead(bytes ? 206 : 200, {
         ...cors,
-        'content-type': 'video/webm',
+        'content-type': mkv ? 'video/x-matroska' : 'video/webm',
         'accept-ranges': 'bytes',
         'content-length': String(end - start + 1),
-        ...(bytes && { 'content-range': `bytes ${start}-${end}/${FILM_SIZE}` }),
+        ...(bytes && { 'content-range': `bytes ${start}-${end}/${size}` }),
       })
-      .end(FILM_FIXTURE.subarray(start, end + 1));
+      .end(file.subarray(start, end + 1));
   };
   const servers = await Promise.all(
     (['resolve', 'debrid', 'media'] as const).map(
       (server) =>
         new Promise<ReturnType<typeof createServer>>((started) => {
-          const http = createServer((request, response) => answer(server, request, response));
+          const http = createServer((request, response) => {
+            void answer(server, request, response);
+          });
           http.listen(0, '127.0.0.1', () => {
             origins[server] = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
             started(http);
