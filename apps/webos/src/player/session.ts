@@ -1105,7 +1105,6 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             return;
           }
           engine = created;
-          patch({ engine: created.name });
           if (takingOver) {
             // It trusts no reading from the element the first engine reset.
             tracker = createProgressTracker({ startAt: at });
@@ -1115,7 +1114,15 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             lastPosition = undefined;
           }
           playMark(finder, 'load', created.name);
-          await created.load(url, at);
+          const loading = created.load(url, at);
+          // Named with what its load knows at once: a video file whose own tracks are to be read
+          // holds the subtitle choice from the start, not from when the stream tells its length.
+          patch({
+            engine: created.name,
+            textComing: created.textComing?.() ?? false,
+            fileText: created.fileText?.() ?? null,
+          });
+          await loading;
         } catch (error) {
           listener.fatal(
             error instanceof PlaybackError ? error : new PlaybackError('other', String(error)),

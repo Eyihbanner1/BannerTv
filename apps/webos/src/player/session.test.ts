@@ -48,10 +48,12 @@ interface FakeEngine extends Engine {
 
 // plays: whether load() starts the video, as the TV's player does at once.
 // fallback: the engine that takes over, once, from one that refuses a stream.
+// holds: whether load() says the file's own tracks may still come, as a Matroska file's do.
 const fake = vi.hoisted(() => ({
   engines: [] as FakeEngine[],
   plays: false,
   fallback: undefined as Engine['name'] | undefined,
+  holds: false,
 }));
 
 // What the session keeps: where playback was, which addons worked, and how much data plays smoothly.
@@ -120,6 +122,10 @@ vi.mock('./engines/choose', () => ({
       },
       load: (_url, startAt) => {
         engine.startAt = startAt;
+        if (fake.holds) {
+          engine.coming = true;
+          engine.report = { state: 'waiting' };
+        }
         if (fake.plays) void video.play();
         return Promise.resolve();
       },
@@ -299,6 +305,7 @@ beforeEach(() => {
   fake.engines.length = 0;
   fake.plays = false;
   fake.fallback = undefined;
+  fake.holds = false;
   kept.progress.mockClear();
   kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
@@ -621,6 +628,22 @@ describe("the video file's own subtitles", () => {
     });
     session.play(second, 0);
     expect(session.get()).toMatchObject({ textComing: false, fileText: null, streamTimings: {} });
+  });
+
+  it('hold the choice from the moment the engine is named, before it lists any track', async () => {
+    fake.holds = true;
+    const { session } = setup();
+    const seen: Array<{ engine: string | null; textComing: boolean }> = [];
+    session.subscribe(() => {
+      const { engine, textComing } = session.get();
+      seen.push({ engine, textComing });
+    });
+    session.play(first, 0);
+    await settle();
+    const named = seen.filter((state) => state.engine === 'hls.js');
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.every((state) => state.textComing)).toBe(true);
+    expect(session.get()).toMatchObject({ textComing: true, fileText: { state: 'waiting' } });
   });
 
   it('are not read for the Lab’s test streams, nor for BannerTV Demo’s', async () => {
