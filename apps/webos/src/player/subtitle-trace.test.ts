@@ -368,6 +368,7 @@ describe('the subtitles of the last few plays', () => {
         blocked: 'couldn’t read the file here',
         refused: 'the server refused the reads',
         'one-use': 'the link allows one read',
+        unanswered: 'the server didn’t answer',
         'timed-out': 'gave up after 20 s',
       };
       for (const why of Object.keys(words) as FileTextSkip[]) {

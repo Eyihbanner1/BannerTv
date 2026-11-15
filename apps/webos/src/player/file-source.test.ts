@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFetchSource, FileReadError, type FileReadFailure, MAX_WALKS } from './file-source';
 
 // As on the TV: the addon's resolve link, which leads to the debrid service's CDN.
@@ -33,6 +33,13 @@ interface Server {
   /** Every request rejects as a blocked one does. */
   blocked?: boolean;
   contentType?: string;
+  /**
+   * The answer to the request numbered `n` (from 1), in its stead: a status with no body, or no
+   * answer at all ('network', as a moment with no network).
+   */
+  instead?: (n: number, url: string) => number | 'network' | undefined;
+  /** Milliseconds a walk through the link takes (real time). */
+  walkMs?: number;
 }
 
 interface Asked {
@@ -82,6 +89,18 @@ function serve(server: Server = {}) {
     init?.signal?.addEventListener('abort', () => (entry.aborted = true));
     if (init?.signal?.aborted) throw new DOMException('', 'AbortError');
     if (server.blocked) throw new TypeError('Failed to fetch');
+    if (url === LINK && server.walkMs) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, server.walkMs);
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new DOMException('', 'AbortError'));
+        });
+      });
+    }
+    const instead = server.instead?.(asked.length, url);
+    if (instead === 'network') throw new TypeError('Failed to fetch');
+    if (instead !== undefined) return answer(new Response('', { status: instead }), url);
     let landed = url;
     if (url === LINK) landed = `${CDN}?token=t${++minted}`;
     else {
@@ -275,6 +294,31 @@ describe('reading a file by ranges', () => {
 
   it('aborts the fetch with the caller’s signal, and reads on after', async () => {
     let release!: () => void;
+    let held: Promise<void> = Promise.resolve();
+    const { asked, fetcher } = serve();
+    const slow: typeof fetch = async (input, init) => {
+      await held;
+      return fetcher(input, init);
+    };
+    const source = createFetchSource({ link: LINK }, slow);
+    await source.read(0, 100);
+    held = new Promise<void>((resolve) => (release = resolve));
+    const controller = new AbortController();
+    const reading = source.read(1000, 100, controller.signal);
+    controller.abort();
+    release();
+    expect(await failure(reading)).toBe('aborted');
+    expect(asked[1]!.aborted).toBe(true);
+    expect(source.failure()).toBeUndefined();
+    expect((await source.read(0, 100)).length).toBe(100);
+    // A signal aborted before the read makes no request.
+    const before = asked.length;
+    expect(await failure(source.read(5000, 100, AbortSignal.abort()))).toBe('aborted');
+    expect(asked).toHaveLength(before);
+  });
+
+  it('drops a read whose walk is still going, and lets the walk land for the reads after', async () => {
+    let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
     const { asked, fetcher } = serve();
     const slow: typeof fetch = async (input, init) => {
@@ -285,23 +329,14 @@ describe('reading a file by ranges', () => {
     const controller = new AbortController();
     const reading = source.read(0, 100, controller.signal);
     controller.abort();
-    release();
     expect(await failure(reading)).toBe('aborted');
-    expect(asked[0]!.aborted).toBe(true);
-    expect(source.failure()).toBeUndefined();
-    expect((await source.read(0, 100)).length).toBe(100);
-    // A signal aborted before the read makes no request.
-    const before = asked.length;
-    expect(await failure(source.read(0, 100, AbortSignal.abort()))).toBe('aborted');
-    expect(asked).toHaveLength(before);
-  });
-
-  it('asks every read to be kept out of the browser’s cache', async () => {
-    const { asked, fetcher } = serve({ directReads: 1 });
-    const source = createFetchSource({ link: LINK }, fetcher);
-    for (let at = 0; at < 5000; at += 1000) await source.read(at, 100);
-    expect(asked.length).toBeGreaterThanOrEqual(4);
-    expect(asked.map(({ cache }) => cache)).toEqual(asked.map(() => 'no-store'));
+    release();
+    expect(Array.from(await source.read(1000, 100))).toEqual(slice(1000, 100));
+    expect(asked.map(({ url, aborted }) => [url === LINK, aborted])).toEqual([
+      [true, false],
+      [false, false],
+    ]);
+    expect(source.stats.walks).toBe(1);
   });
 
   it('never says the link nor where it led', async () => {
@@ -318,5 +353,136 @@ describe('reading a file by ranges', () => {
         expect(text).not.toContain(secret);
       }
     }
+  });
+});
+
+describe('reads that fail for a moment', () => {
+  const urls = (asked: Asked[]) =>
+    asked.map(({ url }) => (url === LINK ? 'link' : url.replace(`${CDN}?token=`, 'cdn ')));
+
+  it('asks every read to be kept out of the browser’s cache', async () => {
+    const { asked, fetcher } = serve({ directReads: 1 });
+    const source = createFetchSource({ link: LINK }, fetcher);
+    for (let at = 0; at < 5000; at += 1000) await source.read(at, 100);
+    expect(asked.length).toBeGreaterThanOrEqual(4);
+    expect(asked.map(({ cache }) => cache)).toEqual(asked.map(() => 'no-store'));
+  });
+
+  it('takes no answer, straight after the walk, as a moment with no network: not a link good for one use', async () => {
+    const { asked, fetcher } = serve({ instead: (n) => (n === 2 ? 'network' : undefined) });
+    const source = createFetchSource({ link: LINK }, fetcher);
+    await source.read(0, 100);
+    expect(await failure(source.read(1000, 100))).toBe('transient');
+    expect(source.failure()).toBeUndefined();
+    // Read again, straight: no walk.
+    expect(Array.from(await source.read(1000, 100))).toEqual(slice(1000, 100));
+    expect(urls(asked)).toEqual(['link', 'cdn t1', 'cdn t1']);
+    expect(source.stats.walks).toBe(1);
+  });
+
+  it('never walks for a busy server (429, 503), on the link it led to or the link itself', async () => {
+    for (const status of [429, 503, 502, 408]) {
+      const { asked, fetcher } = serve({
+        instead: (n) => (n === 2 || n === 3 ? status : undefined),
+      });
+      const source = createFetchSource({ link: LINK }, fetcher);
+      await source.read(0, 100);
+      expect(await failure(source.read(1000, 100))).toBe('transient');
+      expect(await failure(source.read(2000, 100))).toBe('transient');
+      expect(Array.from(await source.read(3000, 100))).toEqual(slice(3000, 100));
+      expect(urls(asked)).toEqual(['link', 'cdn t1', 'cdn t1', 'cdn t1']);
+      expect(source.failure()).toBeUndefined();
+    }
+    // A link with no redirect, busy once: read again after, not given up on.
+    const plain = serve({ instead: (n) => (n === 2 ? 503 : undefined) });
+    const direct = createFetchSource({ link: CDN }, plain.fetcher);
+    await direct.read(0, 100);
+    expect(await failure(direct.read(1000, 100))).toBe('transient');
+    expect(Array.from(await direct.read(1000, 100))).toEqual(slice(1000, 100));
+    expect(direct.failure()).toBeUndefined();
+  });
+
+  it('a walk that fails for a moment is not counted, and does not end the source', async () => {
+    const { asked, fetcher } = serve({ instead: (n) => (n === 1 ? 503 : undefined) });
+    const source = createFetchSource({ link: LINK }, fetcher);
+    expect(await failure(source.read(0, 100))).toBe('transient');
+    expect(source.failure()).toBeUndefined();
+    expect(Array.from(await source.read(0, 100))).toEqual(slice(0, 100));
+    expect(urls(asked)).toEqual(['link', 'link']);
+  });
+
+  it('takes reads with no answer for 10 s, after the link served, as an expiry it cannot see', async () => {
+    // As a refusal hidden by cross-origin checks would look.
+    let now = 0;
+    const clock = {
+      now: () => now,
+      setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms),
+      clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    const { asked, fetcher } = serve({
+      instead: (n, url) => (url !== LINK && n >= 3 && n <= 7 ? 'network' : undefined),
+    });
+    const source = createFetchSource({ link: LINK, clock }, fetcher);
+    await source.read(0, 100);
+    await source.read(1000, 100);
+    // Three in a second: a moment with no network, never a walk.
+    for (let i = 0; i < 3; i++) expect(await failure(source.read(2000, 100))).toBe('transient');
+    now = 9000;
+    expect(await failure(source.read(2000, 100))).toBe('transient');
+    // Still none 10 s after the first: walked, and read on from where that led.
+    now = 10000;
+    expect(Array.from(await source.read(2000, 100))).toEqual(slice(2000, 100));
+    expect(urls(asked)).toEqual(['link', ...Array<string>(6).fill('cdn t1'), 'link']);
+    expect(source.stats.walks).toBe(2);
+  });
+});
+
+describe('the walks of a play', () => {
+  it('counts the hash read’s walks against the play’s', async () => {
+    const { asked, fetcher } = serve({ directReads: 1 });
+    // The hash read walked once, and its link served.
+    const source = createFetchSource({ link: LINK, landed: `${CDN}?token=t0`, walked: 1 }, fetcher);
+    // Each walk's link answers one read straight to it, then refuses: two walks are left.
+    for (let at = 0; at <= 4000; at += 1000) {
+      expect(Array.from(await source.read(at, 100))).toEqual(slice(at, 100));
+    }
+    expect(await failure(source.read(5000, 100))).toBe('refused');
+    expect(asked.filter(({ url }) => url === LINK)).toHaveLength(MAX_WALKS - 1);
+    expect(source.stats.walks).toBe(MAX_WALKS - 1);
+  });
+
+  it('finishes a walk whose read was dropped, and reads on from where it led', async () => {
+    vi.useRealTimers();
+    // The link the hash read landed on (and read by) has expired; a walk takes 80 ms.
+    const { asked, fetcher } = serve({
+      walkMs: 80,
+      instead: (_n, url) => (url === `${CDN}?token=t0` ? 403 : undefined),
+    });
+    const source = createFetchSource({ link: LINK, landed: `${CDN}?token=t0` }, fetcher);
+    // Three seeks in a row, each dropping its read before the walk is back.
+    for (let i = 0; i < 3; i++) {
+      const controller = new AbortController();
+      const reading = source.read(10000 + i * 1000, 100, controller.signal);
+      setTimeout(() => controller.abort(), 20);
+      expect(await failure(reading)).toBe('aborted');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(source.failure()).toBeUndefined();
+    expect(Array.from(await source.read(20000, 100))).toEqual(slice(20000, 100));
+    // One walk for the three, and what it led to answers the next read.
+    expect(asked.filter(({ url }) => url === LINK)).toHaveLength(1);
+    expect(asked[asked.length - 1]!.url).toBe(`${CDN}?token=t1`);
+    expect(source.stats.walks).toBe(1);
+  });
+
+  it('stops a walk in flight once closed', async () => {
+    vi.useRealTimers();
+    const { asked, fetcher } = serve({ walkMs: 200 });
+    const source = createFetchSource({ link: LINK }, fetcher);
+    const reading = source.read(0, 100);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    source.close();
+    expect(await failure(reading)).toBe('aborted');
+    expect(asked[0]!.aborted).toBe(true);
   });
 });

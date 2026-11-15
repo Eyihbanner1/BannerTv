@@ -17,6 +17,7 @@ import {
   openMatroska,
   type ReadCanceller,
   readCanceller,
+  type ReadSignal,
   readableTextTracks,
   readMatroskaCues,
 } from '@bannertv/core';
@@ -50,6 +51,8 @@ export const START_AFTER_MS = 1500;
 export const FILE_WAIT_MS = 6000;
 /** The head and the Cues are given this long together. */
 export const OPEN_MS = 20000;
+/** A read of the head or the Cues the server was too busy for is tried again this often, 1 s then 2 s. */
+const OPEN_RETRIES = 2;
 /** A track's Cues give this share of its lines an end, or its timing is not taken as whole. */
 export const DURATION_SHARE = 0.9;
 /** A line the Cues give no end lasts this long at most, or until the next. */
@@ -95,8 +98,9 @@ function nameOfLink(url: string): string {
  * it is not a Matroska file; its subtitles have no index; it is a recording
  * with no index; it has no subtitles; it could not be read, or its index is
  * too large; the server refused byte ranges, could not be read here (blocked),
- * refused the reads, or gave a link good for one read; or the head and the
- * index took longer than OPEN_MS.
+ * refused the reads, gave a link good for one read, or did not answer them
+ * (busy, or no network) even when asked again; or the head and the index took
+ * longer than OPEN_MS.
  */
 export type FileTextSkip =
   | 'named'
@@ -110,6 +114,7 @@ export type FileTextSkip =
   | 'blocked'
   | 'refused'
   | 'one-use'
+  | 'unanswered'
   | 'timed-out';
 
 /**
@@ -144,6 +149,7 @@ export type FileTextReport =
       ms: number;
       afterFirstFrameMs: number;
       cost: FileTextCost;
+      dropped?: FileTextSkip;
     }
   | { state: 'none'; why: FileTextSkip; ms: number; cost: FileTextCost };
 
@@ -312,6 +318,7 @@ export function withFileSubtitles(
   function reset() {
     generation++;
     closeWindow();
+    source?.close();
     undo.forEach((stop) => stop());
     undo = [];
     report = null;
@@ -347,6 +354,8 @@ export function withFileSubtitles(
     let startedAt: number | undefined;
     let stopStart: (() => void) | null = null;
     let landing: Landing | undefined;
+    // Walks through the stream's link the hash read made: the play's walks count them in.
+    let hashWalks = 0;
     // The hash read's outcome, looked at once: before the first picture where it is in already.
     let heard: Promise<boolean> | undefined;
     // Whether that outcome is in.
@@ -369,6 +378,7 @@ export function withFileSubtitles(
       if (!current() || done) return;
       done = true;
       canceller?.abort();
+      source?.close();
       if (source) {
         cost.requests = source.stats.requests;
         cost.bytes = source.stats.bytes;
@@ -417,20 +427,26 @@ export function withFileSubtitles(
       heard = reading.then((outcome) => {
         hashIn = true;
         if (!current() || done) return false;
+        if ('walks' in outcome) hashWalks = outcome.walks;
         if (outcome.found) {
           if (outcome.fellBack) {
             giveUp('one-use');
             return false;
           }
-          landing = deps.takeLanding(url);
-          return landing ? fromHead(landing) : true;
+        } else if ('failed' in outcome) {
+          if (outcome.step === 'start') {
+            if (outcome.failed === 'refused') giveUp('blocked');
+            else if (outcome.failed === 'no range') giveUp('no-range');
+          } else if (outcome.failed === 'refused' && outcome.step === 'end') {
+            // Its read of the end was refused by the stream's own link too: so would ours be.
+            giveUp('refused');
+          }
+          if (done) return false;
         }
-        if ('failed' in outcome && outcome.step === 'start') {
-          if (outcome.failed === 'refused') giveUp('blocked');
-          else if (outcome.failed === 'no range') giveUp('no-range');
-          return !done;
-        }
-        return true;
+        // Its first bytes are good whatever came after, and where they landed, unless that
+        // refused a read later.
+        landing = deps.takeLanding(url);
+        return landing ? fromHead(landing) : true;
       });
       return heard;
     }
@@ -486,7 +502,14 @@ export function withFileSubtitles(
       if (holding) timer(release, FILE_WAIT_MS);
       if (!(await hashing) || !current() || done) return;
       source = createFetchSource(
-        { link: url, landed: landing?.landed, head: landing?.head, size: landing?.total },
+        {
+          link: url,
+          landed: landing?.landed,
+          head: landing?.head,
+          size: landing?.total,
+          walked: hashWalks,
+          clock,
+        },
         deps.fetcher,
       );
       canceller = readCanceller();
@@ -497,14 +520,33 @@ export function withFileSubtitles(
       }, OPEN_MS);
       try {
         const fetched = source;
+        const tryRead = async (
+          start: number,
+          length: number,
+          readSignal: ReadSignal | undefined,
+          tries: number,
+        ): Promise<Uint8Array> => {
+          try {
+            return await fetched.read(start, length, readSignal);
+          } catch (error) {
+            // The walks are used up, or the link is good for one use: no line can be read now.
+            const failure = fetched.failure();
+            if (current() && done && failure !== undefined) lost(failure);
+            // The head and the Cues, which nothing else tries again, are asked for again after a
+            // busy answer, or none; a line is, by the window.
+            const again =
+              !done &&
+              tries < OPEN_RETRIES &&
+              error instanceof FileReadError &&
+              error.code === 'transient';
+            if (!again) throw error;
+            await pause(1000 * Math.pow(2, tries), readSignal);
+            return tryRead(start, length, readSignal, tries + 1);
+          }
+        };
         const watched: ByteSource = {
           size: fetched.size,
-          read: (start, length, readSignal) =>
-            fetched.read(start, length, readSignal).catch((error: unknown) => {
-              // The walks are used up, or the link is good for one use: no line can be read now.
-              if (current() && done && fetched.failure() !== undefined) lost();
-              throw error;
-            }),
+          read: (start, length, readSignal) => tryRead(start, length, readSignal, 0),
         };
         const opened = await openMatroska(watched, { signal, inflate: deps.inflate });
         if (!current() || done) return;
@@ -570,7 +612,15 @@ export function withFileSubtitles(
       } catch (error) {
         if (!current() || done) return;
         if (error instanceof FileReadError) {
-          giveUp(error.code === 'aborted' ? (timedOut ? 'timed-out' : 'refused') : error.code);
+          giveUp(
+            error.code === 'aborted'
+              ? timedOut
+                ? 'timed-out'
+                : 'refused'
+              : error.code === 'transient'
+                ? 'unanswered'
+                : error.code,
+          );
         } else {
           giveUp(timedOut ? 'timed-out' : 'corrupt');
         }
@@ -579,14 +629,38 @@ export function withFileSubtitles(
       }
     }
 
-    /** The source gave up after the tracks were listed: they go, and a file takes their place. */
-    function lost() {
+    /**
+     * The source gave up after the tracks were listed: they go, and a file takes their place.
+     * Diagnostics says why.
+     */
+    function lost(why: FileTextSkip) {
       if (!current() || listed.length === 0) return;
       closeWindow();
       listed = [];
       selected = null;
       fold();
+      if (report?.state === 'read') report = { ...report, dropped: why };
+      mark(`sub:file:dropped:${why}`);
       tell();
+    }
+
+    /** Waits `ms`, or rejects ('aborted') once `signal` aborts. */
+    function pause(ms: number, signal: ReadSignal | undefined): Promise<void> {
+      return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new FileReadError('aborted'));
+          return;
+        }
+        const stop = () => {
+          clock.clearTimeout(handle);
+          reject(new FileReadError('aborted'));
+        };
+        const handle = clock.setTimeout(() => {
+          signal?.removeEventListener('abort', stop);
+          resolve();
+        }, ms);
+        signal?.addEventListener('abort', stop);
+      });
     }
 
     const on = (type: 'playing' | 'waiting' | 'timeupdate' | 'seeking', handler: () => void) => {

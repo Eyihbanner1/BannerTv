@@ -86,6 +86,11 @@ interface ServerOptions {
   delayMs?: (start: number) => number;
   /** Content-Range hidden, as behind cross-origin checks. */
   hideRange?: boolean;
+  /**
+   * The answer to a request, in its stead, by its number (from 1): a status with no body, or
+   * none at all ('network', a moment with no network).
+   */
+  instead?: (n: number, url: string, start: number) => number | 'network' | undefined;
 }
 
 interface Asked {
@@ -148,6 +153,9 @@ function serve(file: Served, options: ServerOptions = {}) {
       entry.aborted = true;
       throw new DOMException('', 'AbortError');
     }
+    const instead = options.instead?.(asked.length, url, start);
+    if (instead === 'network') throw new TypeError('Failed to fetch');
+    if (instead !== undefined) return answer(instead, {}, new Uint8Array(0), url);
     let landed = url;
     if (url === LINK) {
       if (options.link === 'blocked') throw new TypeError('Failed to fetch');
@@ -542,6 +550,90 @@ describe('a track’s lines', () => {
   });
 });
 
+describe('reads that fail for a moment', () => {
+  const tenMinutes = () =>
+    syntheticFile({
+      length: 600000,
+      tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],
+      lines: lines(2, 590),
+    });
+
+  it('keep a track listed through a moment with no network, its lines read again after', async () => {
+    let offline = false;
+    const world = await played({
+      file: tenMinutes(),
+      server: { instead: () => (offline ? 'network' : undefined) },
+    });
+    const { engine, video, told, asked } = world;
+    engine.selectText('mkv:2');
+    await pass(200);
+    const before = asked.length;
+    // A seek far ahead, as the Wi-Fi drops for a second.
+    offline = true;
+    video.currentTime = 400;
+    video.fire('seeking');
+    await pass(800);
+    offline = false;
+    expect(asked.length).toBeGreaterThan(before);
+    await pass(3000);
+    expect(engine.textTracks().map(({ id }) => id)).toEqual(['mkv:2']);
+    const handed = lastCues(told)!.cues;
+    expect(handed.some((cue) => cue.start <= 401 && cue.end >= 400)).toBe(true);
+    // No walk: the link it led to was there all along.
+    expect(asked.filter(({ url }) => url === LINK)).toHaveLength(1);
+    expect(reportOf(engine)).toMatchObject({ state: 'read', cost: { walks: 1 } });
+    expect(
+      (reportOf(engine) as { cost: { failedReads: number } }).cost.failedReads,
+    ).toBeGreaterThan(0);
+  });
+
+  it('drop the tracks once the link refuses for good, and say why', async () => {
+    let refusing = false;
+    const world = await played({
+      file: tenMinutes(),
+      server: { instead: () => (refusing ? 403 : undefined) },
+    });
+    const { engine, told } = world;
+    expect(engine.textTracks()).toHaveLength(1);
+    const tellings = told.tracks;
+    refusing = true;
+    engine.selectText('mkv:2');
+    await pass(200);
+    expect(engine.textTracks()).toEqual([]);
+    expect(told.tracks).toBeGreaterThan(tellings);
+    expect(reportOf(engine)).toMatchObject({ state: 'read', dropped: 'refused' });
+  });
+
+  it('read the Cues again after a busy answer, and list the tracks', async () => {
+    let busyOnce = true;
+    const { engine, asked } = await played({
+      file: await file('mkvmerge.mkv'),
+      server: {
+        instead: (_n, url) => {
+          if (url === LINK || !busyOnce) return undefined;
+          busyOnce = false;
+          return 503;
+        },
+      },
+    });
+    await pass(2500);
+    expect(engine.textTracks()).toHaveLength(5);
+    expect(asked.filter(({ url }) => url === LINK)).toHaveLength(1);
+  });
+
+  it('give up quietly when the server stays busy for the head and the Cues', async () => {
+    const { engine, asked } = await played({
+      file: await file('mkvmerge.mkv'),
+      server: { instead: (_n, url) => (url === LINK ? undefined : 503) },
+    });
+    await pass(8000);
+    expect(reportOf(engine)).toMatchObject({ state: 'none', why: 'unanswered' });
+    expect(engine.textTracks()).toEqual([]);
+    // The walk, then the Cues three times straight to where it led.
+    expect(asked.map(({ url }) => url === LINK)).toEqual([true, false, false, false]);
+  });
+});
+
 describe('a file that cannot give its subtitles', () => {
   const cases: Array<[string, () => Promise<Setup>, string]> = [
     ['not Matroska', async () => ({ file: await file('text/eng.srt') }), 'not-matroska'],
@@ -736,6 +828,39 @@ describe('what the hash read found', () => {
     await pass(6000);
     expect(engine.textTracks()).toHaveLength(1);
     expect(told.tracks).toBeGreaterThan(tellings);
+    expect(asked.map(({ url }) => url)).toEqual([`${CDN}?token=t0`]);
+  });
+
+  it('makes no request where the hash read was refused through the stream’s link at its end', async () => {
+    const mkv = await file('mkvmerge.mkv');
+    const head = await mkv.read(0, 65536);
+    const { engine, video, asked } = setup({
+      file: mkv,
+      // The link it landed on refused the end; the stream's link refused it too.
+      landing: { head, total: mkv.size },
+      reading: { failed: 'refused', step: 'end', ms: 900, walks: 2 },
+    });
+    await engine.load(LINK, 0);
+    await pass(10);
+    expect(reportOf(engine)).toMatchObject({ state: 'none', why: 'refused' });
+    expect(engine.textComing?.()).toBe(false);
+    video.fire('playing');
+    await pass(START_AFTER_MS + 100);
+    expect(asked).toEqual([]);
+  });
+
+  it('reads from the hash’s first bytes, and where they landed, after it failed later', async () => {
+    const long = syntheticFile({
+      tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],
+      lines: lines(2, 30),
+    });
+    const head = await long.read(0, 65536);
+    const { engine, asked } = await played({
+      file: long,
+      landing: { landed: `${CDN}?token=t0`, head, total: long.size },
+      reading: { failed: 'timed out', step: 'end', ms: 15000, walks: 1 },
+    });
+    expect(engine.textTracks()).toHaveLength(1);
     expect(asked.map(({ url }) => url)).toEqual([`${CDN}?token=t0`]);
   });
 
