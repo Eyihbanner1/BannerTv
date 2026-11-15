@@ -401,6 +401,33 @@ describe('subtitle versions', () => {
     expect(firstOf([forced], options, { failed: ['file:os#1'] })).toBe('track:t1');
   });
 
+  it('says a stream track holds only a few lines, or is a commentary, where its name does not', () => {
+    const [signs, commentary, named, plain] = subtitleVersions(
+      {
+        tracks: [
+          { ...track('t1', 'eng'), forced: true },
+          { ...track('t2', 'eng'), commentary: true },
+          { ...track('t3', 'eng', 'Commentary by the director'), commentary: true },
+          track('t4', 'eng'),
+        ],
+        options: [],
+      },
+      IN_THE_STREAM,
+    );
+    expect(versionNotes(signs!, false, undefined, {})).toEqual(['signs']);
+    expect(versionNotes(commentary!, false, undefined, {})).toEqual(['commentary']);
+    // Its name says so already.
+    expect(versionNotes(named!, false, undefined, {})).toEqual([]);
+    expect(versionNotes(plain!, false, undefined, {})).toEqual([]);
+  });
+
+  it('passes over a commentary when a language is turned on', () => {
+    const options = [option('os#1', 'eng')];
+    const commentary = { ...track('t1', 'eng'), commentary: true };
+    expect(firstOf([commentary], options)).toBe('file:os#1');
+    expect(firstOf([commentary, track('t2', 'eng')], options)).toBe('track:t2');
+  });
+
   it('puts the notes before the release name, which a row may cut short', () => {
     expect(versionDetail(['Looks like another language'], 'Film.2023.1080p.BluRay-GROUP')).toBe(
       'Looks like another language · Film.2023.1080p.BluRay-GROUP',
