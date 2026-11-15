@@ -249,7 +249,8 @@ const zeroCost = (): FileTextCost => ({
  * whose name says it is another kind (`fileKindOf`). The reader starts
  * START_AFTER_MS after the first picture, never while the video waits for
  * data, and while a file named as Matroska may still list tracks the
- * automatic choice waits (`textComing`), FILE_WAIT_MS at most.
+ * automatic choice waits (`textComing`), FILE_WAIT_MS at most, and not at
+ * all where the hash read is still going when the reader starts.
  */
 export function withFileSubtitles(
   engine: Engine,
@@ -348,6 +349,8 @@ export function withFileSubtitles(
     let landing: Landing | undefined;
     // The hash read's outcome, looked at once: before the first picture where it is in already.
     let heard: Promise<boolean> | undefined;
+    // Whether that outcome is in.
+    let hashIn = false;
     let canceller: ReadCanceller | null = null;
     let timedOut = false;
     let done = false;
@@ -412,6 +415,7 @@ export function withFileSubtitles(
       const reading = deps.hashReadingFor(url);
       if (!reading) return Promise.resolve(true);
       heard = reading.then((outcome) => {
+        hashIn = true;
         if (!current() || done) return false;
         if (outcome.found) {
           if (outcome.fellBack) {
@@ -474,9 +478,13 @@ export function withFileSubtitles(
       startedAt = clock.now();
       mark('sub:file:start');
       report = { state: 'reading' };
+      const hashing = hear();
+      // A hash read still going this late is slow, and so would be the head after it: the
+      // choice waits no longer, and tracks found later are listed all the same.
+      if (heard && !hashIn) holding = false;
       tell();
       if (holding) timer(release, FILE_WAIT_MS);
-      if (!(await hear()) || !current() || done) return;
+      if (!(await hashing) || !current() || done) return;
       source = createFetchSource(
         { link: url, landed: landing?.landed, head: landing?.head, size: landing?.total },
         deps.fetcher,

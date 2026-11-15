@@ -175,8 +175,8 @@ interface Setup {
   server?: ServerOptions;
   /** What the hash read found at the file's start, handed over once. */
   landing?: Landing;
-  /** The hash read's outcome for the link. */
-  reading?: HashReading;
+  /** The hash read's outcome for the link, or one that comes in only after so many milliseconds. */
+  reading?: HashReading | { after: number; outcome: HashReading };
   inflate?: null;
 }
 
@@ -220,7 +220,12 @@ function setup(options: Setup) {
         landing = undefined;
         return taken;
       },
-      hashReadingFor: () => (options.reading ? Promise.resolve(options.reading) : undefined),
+      hashReadingFor: () => {
+        const { reading } = options;
+        if (!reading) return undefined;
+        if (!('after' in reading)) return Promise.resolve(reading);
+        return new Promise((done) => setTimeout(() => done(reading.outcome), reading.after));
+      },
       ...(options.inflate === null && { inflate: null }),
     },
   );
@@ -703,6 +708,35 @@ describe('what the hash read found', () => {
       await pass(START_AFTER_MS + 100);
       expect(asked).toEqual([]);
     }
+  });
+
+  it('lets the choice go at once where it is still going when the reader starts, and lists later', async () => {
+    const long = syntheticFile({
+      tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],
+      lines: lines(2, 30),
+    });
+    const head = await long.read(0, 65536);
+    const { engine, video, told, asked } = setup({
+      file: long,
+      landing: { landed: `${CDN}?token=t0`, head, total: long.size },
+      reading: {
+        after: 6000,
+        outcome: { found: { videoHash: '0', videoSize: long.size }, ms: 6000, walks: 1 },
+      },
+    });
+    await engine.load(LINK, 0);
+    video.fire('playing');
+    await pass(START_AFTER_MS - 100);
+    expect(engine.textComing?.()).toBe(true);
+    await pass(200);
+    expect(engine.textComing?.()).toBe(false);
+    expect(reportOf(engine)).toEqual({ state: 'reading' });
+    const tellings = told.tracks;
+    expect(asked).toEqual([]);
+    await pass(6000);
+    expect(engine.textTracks()).toHaveLength(1);
+    expect(told.tracks).toBeGreaterThan(tellings);
+    expect(asked.map(({ url }) => url)).toEqual([`${CDN}?token=t0`]);
   });
 
   it('walks itself after a hash read that timed out or failed later', async () => {
