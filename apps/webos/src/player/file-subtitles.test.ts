@@ -457,12 +457,75 @@ describe('the tracks of an mkvmerge file', () => {
     expect(reportOf(engine)).toMatchObject({ state: 'read', unreadable: 1, picture: 1 });
   });
 
-  it('counts zlib text as unreadable where the engine cannot inflate it', async () => {
-    const { engine, asked } = await played({ file: await file('zlib.mkv'), inflate: null });
+  it('lists no zlib text where the engine cannot inflate it, but hands its timing over', async () => {
+    const { engine, told, asked } = await played({ file: await file('zlib.mkv'), inflate: null });
     expect(engine.textTracks()).toEqual([]);
+    expect(engine.timedTracks?.()).toEqual([
+      { id: 'mkv:2', lang: 'en', label: '', active: false, picture: false, timed: true },
+    ]);
+    expect(Object.keys(told.timings[0]!)).toEqual(['mkv:2']);
+    expect(told.timings[0]!['mkv:2']!.length).toBeGreaterThan(5);
     expect(reportOf(engine)).toMatchObject({ state: 'read', text: [], unreadable: 1, picture: 0 });
-    // No Cues read for nothing to show.
-    expect(asked).toHaveLength(1);
+    // The head, and the Cues for the timing.
+    expect(asked).toHaveLength(2);
+  });
+
+  it('lists only tracks whose lines the index says where to find, and keeps the timing of others', async () => {
+    // As muxers other than mkvmerge and ffmpeg write it: no CueRelativePosition.
+    const { engine, told } = await played({
+      file: syntheticFile({
+        tracks: [
+          { number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' },
+          { number: 3, codecId: 'S_TEXT/UTF8', language: 'spa' },
+        ],
+        lines: [...lines(2, 12), ...lines(3, 12, 1500)],
+        noCueRelative: true,
+      }),
+    });
+    expect(engine.textTracks()).toEqual([]);
+    expect(engine.timedTracks?.().map(({ id }) => id)).toEqual(['mkv:2', 'mkv:3']);
+    expect(Object.keys(told.timings[0]!).sort()).toEqual(['mkv:2', 'mkv:3']);
+    expect(reportOf(engine)).toMatchObject({ state: 'read', text: [], unreadable: 2 });
+  });
+
+  it('lists no track the index leaves out', async () => {
+    const { engine, told } = await played({
+      file: syntheticFile({
+        tracks: [
+          { number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' },
+          { number: 3, codecId: 'S_TEXT/UTF8', language: 'spa' },
+        ],
+        lines: [...lines(2, 12), ...lines(3, 12, 1500)],
+        uncuedTracks: [3],
+      }),
+    });
+    expect(engine.textTracks().map(({ id }) => id)).toEqual(['mkv:2']);
+    expect(engine.timedTracks?.()).toEqual([]);
+    expect(Object.keys(told.timings[0]!)).toEqual(['mkv:2']);
+    expect(reportOf(engine)).toMatchObject({ state: 'read', text: ['eng'], unreadable: 1 });
+  });
+
+  it('marks a commentary track, by its flag or its name, lists it last in its language, and gives no timing', async () => {
+    const { engine, told } = await played({
+      file: syntheticFile({
+        tracks: [
+          { number: 2, codecId: 'S_TEXT/UTF8', language: 'eng', commentary: true },
+          { number: 3, codecId: 'S_TEXT/UTF8', language: 'eng', name: 'English' },
+          { number: 4, codecId: 'S_TEXT/UTF8', language: 'spa', name: 'Comentario del director' },
+          { number: 5, codecId: 'S_TEXT/UTF8', language: 'spa', name: 'Español' },
+        ],
+        lines: [...lines(2, 20), ...lines(3, 10), ...lines(4, 20, 1200), ...lines(5, 10, 1300)],
+      }),
+    });
+    expect(
+      engine.textTracks().map(({ id, commentary, timed }) => ({ id, commentary, timed })),
+    ).toEqual([
+      { id: 'mkv:3', commentary: undefined, timed: true },
+      { id: 'mkv:2', commentary: true, timed: undefined },
+      { id: 'mkv:5', commentary: undefined, timed: true },
+      { id: 'mkv:4', commentary: true, timed: undefined },
+    ]);
+    expect(Object.keys(told.timings[0]!).sort()).toEqual(['mkv:3', 'mkv:5']);
   });
 
   it('reads no Cues for a file of picture subtitles only', async () => {
@@ -602,6 +665,8 @@ describe('reads that fail for a moment', () => {
     expect(engine.textTracks()).toEqual([]);
     expect(told.tracks).toBeGreaterThan(tellings);
     expect(reportOf(engine)).toMatchObject({ state: 'read', dropped: 'refused' });
+    // Its timing came from the index: files are still lined up against it.
+    expect(engine.timedTracks?.().map(({ id, timed }) => [id, timed])).toEqual([['mkv:2', true]]);
   });
 
   it('read the Cues again after a busy answer, and list the tracks', async () => {

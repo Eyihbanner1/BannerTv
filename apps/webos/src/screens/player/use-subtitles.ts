@@ -324,11 +324,22 @@ function fitsByUrl(
   return byUrl;
 }
 
-type StreamTracks = Pick<SessionState, 'text' | 'engine' | 'streamTimings' | 'textComing'>;
+type StreamTracks = Pick<
+  SessionState,
+  'text' | 'timedText' | 'engine' | 'streamTimings' | 'textComing'
+>;
 
-/** The stream's track to line files up against (`referenceTrack`): in `language` first. */
+/**
+ * The stream's track to line files up against (`referenceTrack`): in `language` first. The
+ * video file's own tracks the TV can only time count too.
+ */
 const referenceTrackOf = (playing: StreamTracks, language?: string | null): EngineTrack | null =>
-  referenceTrack(playing.text, playing.engine, playing.streamTimings, language);
+  referenceTrack(
+    playing.text.concat(playing.timedText),
+    playing.engine,
+    playing.streamTimings,
+    language,
+  );
 
 /** What finding the reference needs to know of the files, besides the stream. */
 interface FilesKnown {
@@ -393,6 +404,7 @@ function referenceComing(
 ): boolean {
   if (playing.textComing) return true;
   if (playing.text.some((track) => readableTrack(track, playing.engine))) return true;
+  if (playing.timedText.some((track) => readableTrack(track, playing.engine))) return true;
   if (language === null) return false;
   return filesIn(files.offered, language).some((option) => {
     if (files.broken(option.url) || files.fits.has(option.url)) return false;
@@ -610,7 +622,10 @@ export function useSubtitles(
       // A track of the video file's own, its every line's timing from the file's index.
       const own =
         reference?.kind === 'track'
-          ? session?.get().text.find((track) => track.id === reference.id && track.timed)
+          ? session
+              ?.get()
+              .text.concat(session.get().timedText)
+              .find((track) => track.id === reference.id && track.timed)
           : undefined;
       traceFileReference(videoId, own ? own.lang : null);
     }
@@ -1054,8 +1069,9 @@ export function useSubtitles(
       // The stream's own track in the language; one of forced lines only (signs, the
       // foreign-language scenes) only when the language has nothing else.
       const inLanguage = (t: EngineTrack) => key !== null && languageKey(t.lang) === key;
-      const track = text.find((t) => inLanguage(t) && !t.forced);
-      const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced);
+      // Never a commentary: the viewer picks one by hand.
+      const track = text.find((t) => inLanguage(t) && !t.forced && !t.commentary);
+      const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced && !t.commentary);
       // A file that can be shown: one that could be read, in the language's script. A track of
       // forced lines only comes before one that cannot.
       const usable = (option: SubtitleOption | undefined) =>
@@ -1155,9 +1171,21 @@ export function useSubtitles(
     // The session tells of every step of the clock; only what the choice weighs counts.
     const nothingNew = sameAsLast();
     const onSession = () => {
-      const { text, audio, status, engine, duration, live, streamTimings, textComing } =
+      const { text, timedText, audio, status, engine, duration, live, streamTimings, textComing } =
         session.get();
-      if (nothingNew([text, audio, status, engine, duration, live, streamTimings, textComing])) {
+      if (
+        nothingNew([
+          text,
+          timedText,
+          audio,
+          status,
+          engine,
+          duration,
+          live,
+          streamTimings,
+          textComing,
+        ])
+      ) {
         return;
       }
       decide();
@@ -1298,7 +1326,12 @@ export function useSubtitles(
   const trackId = choice?.kind === 'track' ? choice.id : null;
   const readTrack =
     choice?.kind === 'file'
-      ? referenceTrack(tracks, state.engine, state.streamTimings, fileOption?.lang)
+      ? referenceTrack(
+          tracks.concat(state.timedText),
+          state.engine,
+          state.streamTimings,
+          fileOption?.lang,
+        )
       : null;
   const readTrackId = readTrack && !readTrack.timed ? readTrack.id : null;
   useEffect(() => {
@@ -1323,11 +1356,11 @@ export function useSubtitles(
   const fitOf = (option: SubtitleOption) => fits.get(languageKey(option.lang))?.get(option.url);
 
   // What the files are lined up against, and each file read lined up as the reference grows.
-  const { text: streamText, engine, streamTimings, textComing } = state;
+  const { text: streamText, timedText, engine, streamTimings, textComing } = state;
   const reference = useMemo(
     () =>
       referenceIn(
-        { text: streamText, engine, streamTimings, textComing, duration },
+        { text: streamText, timedText, engine, streamTimings, textComing, duration },
         {
           offered: options,
           fits: fitsByLink,
@@ -1345,6 +1378,7 @@ export function useSubtitles(
       fileKey,
       agreedNow,
       streamText,
+      timedText,
       engine,
       streamTimings,
       textComing,
@@ -1371,7 +1405,7 @@ export function useSubtitles(
   // to the video or named for its release still to be read.
   const video = useMemo(() => playingRelease(entry, videoId), [entry, videoId]);
   const coming = referenceComing(
-    { text: streamText, engine, streamTimings, textComing },
+    { text: streamText, timedText, engine, streamTimings, textComing },
     fileOption?.lang ?? null,
     {
       offered: options,

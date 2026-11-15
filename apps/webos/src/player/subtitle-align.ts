@@ -83,10 +83,11 @@ const FINAL_SHARE = 0.5;
  * draws every line); Android only for a track it says is text, as it draws
  * picture subtitles (PGS, VobSub, DVB) itself; the TV's own player for the
  * video file's own text tracks (`withFileSubtitles`), which list no others.
- * Never a track of forced lines only.
+ * Never a track of forced lines only, nor a commentary: neither is the
+ * film's own lines.
  */
 export function readableTrack(track: EngineTrack, engine: string | null): boolean {
-  if (track.forced) return false;
+  if (track.forced || track.commentary) return false;
   if (engine === 'hls.js' || engine === 'shaka') return true;
   return (engine === 'android' || engine === 'native') && track.picture === false;
 }

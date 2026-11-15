@@ -12,7 +12,10 @@ export interface EngineTrack {
   channels?: string;
   /** Audio only, when the engine knows, as boxes print it: 'AAC', 'DD+', 'Atmos'. */
   format?: string;
-  /** Audio only: the stream marks it as commentary (its kind or DASH role). */
+  /**
+   * The stream marks it as commentary (an audio track's kind or DASH role, a
+   * file's own subtitle track's flag), or a subtitle track's name says so.
+   */
   commentary?: boolean;
   /**
    * Subtitles only: it holds forced lines only (signs, foreign-language
@@ -99,6 +102,14 @@ export interface Engine {
   seeked?(): void;
   /** Subtitle tracks may still be listed soon (the file's own, being read): the automatic choice waits. */
   textComing?(): boolean;
+  /**
+   * The video file's own text tracks whose every line's timing its index
+   * gives (`timed`), but whose lines this TV can't show: their text
+   * compressed in a way it can't undo, or the index not saying where each
+   * line is. Never listed with textTracks: references to line files up
+   * against, and nothing else.
+   */
+  timedTracks?(): EngineTrack[];
   /** How reading the video file's own subtitles went, for Diagnostics; null where it is not tried. */
   fileText?(): FileTextReport | null;
   /**

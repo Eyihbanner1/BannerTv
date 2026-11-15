@@ -22,6 +22,7 @@ import {
   readMatroskaCues,
 } from '@bannertv/core';
 import { mark } from '../platform/marks';
+import { isCommentary } from './audio';
 import type { Engine, EngineListener, EngineTrack } from './engines/types';
 import { createFetchSource, FileReadError, type FetchSource } from './file-source';
 import {
@@ -53,7 +54,10 @@ export const FILE_WAIT_MS = 6000;
 export const OPEN_MS = 20000;
 /** A read of the head or the Cues the server was too busy for is tried again this often, 1 s then 2 s. */
 const OPEN_RETRIES = 2;
-/** A track's Cues give this share of its lines an end, or its timing is not taken as whole. */
+/**
+ * A track's Cues give this share of its lines an end, or its timing is not taken as whole; and
+ * a place in the file, or its lines are not listed to show.
+ */
 export const DURATION_SHARE = 0.9;
 /** A line the Cues give no end lasts this long at most, or until the next. */
 const NO_END_S = 4;
@@ -215,7 +219,8 @@ export function wholeTimings(
 /**
  * The listed tracks in their order: by the first appearance of each
  * language, then within it the full track, the one for the hard of hearing,
- * the forced one; then the file's default first, then the file's order.
+ * the forced one, a commentary; then the file's default first, then the
+ * file's order.
  */
 function inOrder(listed: Listed[], defaults: ReadonlySet<number>): Listed[] {
   const firstSeen = new Map<string, number>();
@@ -223,7 +228,8 @@ function inOrder(listed: Listed[], defaults: ReadonlySet<number>): Listed[] {
     const key = languageKey(entry.track.lang);
     if (!firstSeen.has(key)) firstSeen.set(key, index);
   });
-  const kind = (track: EngineTrack) => (track.forced ? 2 : track.hearing ? 1 : 0);
+  const kind = (track: EngineTrack) =>
+    track.commentary ? 3 : track.forced ? 2 : track.hearing ? 1 : 0;
   return listed
     .map((entry, index) => ({ entry, index }))
     .sort(
@@ -272,6 +278,8 @@ export function withFileSubtitles(
   let report: FileTextReport | null = null;
   let holding = false;
   let listed: Listed[] = [];
+  // Tracks whose timing the index gives, but whose lines can't be shown here.
+  let timedOnly: EngineTrack[] = [];
   let file: MatroskaFile | null = null;
   let source: FetchSource | null = null;
   let selected: string | null = null;
@@ -328,6 +336,7 @@ export function withFileSubtitles(
     report = null;
     holding = false;
     listed = [];
+    timedOnly = [];
     file = null;
     source = null;
     selected = null;
@@ -394,11 +403,23 @@ export function withFileSubtitles(
       tell();
     }
 
-    function finish(opened: MatroskaFile, tracks: Listed[], whole: Record<string, LineTiming[]>) {
+    /**
+     * The tracks to list, the timing of those the index timed, the tracks only timed, and how
+     * many readable text tracks could not be listed (the index says nothing of where their
+     * lines are).
+     */
+    function finish(
+      opened: MatroskaFile,
+      tracks: Listed[],
+      whole: Record<string, LineTiming[]>,
+      timing: EngineTrack[] = [],
+      unlisted = 0,
+    ) {
       if (!current() || done) return;
       done = true;
       file = opened;
       listed = tracks;
+      timedOnly = timing;
       if (source) {
         cost.requests = source.stats.requests;
         cost.bytes = source.stats.bytes;
@@ -408,9 +429,10 @@ export function withFileSubtitles(
       report = {
         state: 'read',
         text: tracks.map((entry) => entry.track.lang),
-        unreadable: subtitles.filter(
-          (track) => track.subtitle !== 'picture' && track.unreadable !== undefined,
-        ).length,
+        unreadable:
+          subtitles.filter(
+            (track) => track.subtitle !== 'picture' && track.unreadable !== undefined,
+          ).length + unlisted,
         picture: subtitles.filter((track) => track.subtitle === 'picture').length,
         ms: elapsed(),
         afterFirstFrameMs:
@@ -487,7 +509,7 @@ export function withFileSubtitles(
      * subtitles at all, or pictures and tracks this TV can't read only. Whether it did.
      */
     function endsAtHead(opened: MatroskaFile): boolean {
-      if (textTracksOf(opened).length > 0) return false;
+      if (textTracksOf(opened).length > 0 || timingTracksOf(opened).length > 0) return false;
       if (opened.tracks.some((track) => track.kind === 'subtitle')) finish(opened, [], {});
       else giveUp('no-subtitles');
       return true;
@@ -566,9 +588,10 @@ export function withFileSubtitles(
         }
         if (endsAtHead(opened.file)) return;
         const tracks = textTracksOf(opened.file);
+        const timingOnly = timingTracksOf(opened.file);
         const cues = await readMatroskaCues(
           opened.file,
-          tracks.map((track) => track.number),
+          tracks.concat(timingOnly).map((track) => track.number),
           { signal },
         );
         if (!current() || done) return;
@@ -583,7 +606,10 @@ export function withFileSubtitles(
         }
         const whole: Record<string, LineTiming[]> = {};
         const defaults = new Set<number>();
-        const made: Listed[] = tracks.map((track) => {
+        const made: Listed[] = [];
+        const timing: EngineTrack[] = [];
+        let unlisted = 0;
+        for (const track of tracks.concat(timingOnly)) {
           const id = `mkv:${track.number}`;
           const entries = cues.cues.entries.get(track.number) ?? [];
           const forced = track.forced || isForcedName(track.name ?? '');
@@ -596,12 +622,16 @@ export function withFileSubtitles(
           };
           if (forced) listedTrack.forced = true;
           if (track.hearingImpaired || hearingName(track.name)) listedTrack.hearing = true;
+          if (track.commentary || isCommentary(listedTrack)) listedTrack.commentary = true;
           const count = cues.cues.counts.get(track.number);
+          const points = count?.points ?? 0;
+          // Neither forced lines nor a commentary are the film's lines to line files up against.
           if (
             !forced &&
+            !listedTrack.commentary &&
             count &&
-            count.points > 0 &&
-            count.duration >= DURATION_SHARE * count.points
+            points > 0 &&
+            count.duration >= DURATION_SHARE * points
           ) {
             const timings = wholeTimings(opened.file, entries);
             if (timings.length > 0) {
@@ -609,10 +639,26 @@ export function withFileSubtitles(
               listedTrack.timed = true;
             }
           }
-          if (track.default) defaults.add(track.number);
-          return { track: listedTrack, number: track.number, entries };
-        });
-        finish(opened.file, inOrder(made, defaults), whole);
+          // Lines the index gives no place in the file for are never found: such a track would
+          // draw nothing, in place of a file that would.
+          const shown =
+            track.unreadable === undefined &&
+            !!count &&
+            points > 0 &&
+            count.relative >= DURATION_SHARE * points;
+          if (shown) {
+            if (track.default) defaults.add(track.number);
+            made.push({ track: listedTrack, number: track.number, entries });
+          } else {
+            if (track.unreadable === undefined) unlisted++;
+            if (listedTrack.timed) timing.push(listedTrack);
+          }
+        }
+        if (made.length === 0 && timing.length === 0 && timingOnly.length === 0) {
+          giveUp('no-index');
+          return;
+        }
+        finish(opened.file, inOrder(made, defaults), whole, timing, unlisted);
       } catch (error) {
         if (!current() || done) return;
         if (error instanceof FileReadError) {
@@ -640,6 +686,10 @@ export function withFileSubtitles(
     function lost(why: FileTextSkip) {
       if (!current() || listed.length === 0) return;
       closeWindow();
+      // Their timing came from the index, read already: still a reference, though not shown.
+      timedOnly = timedOnly.concat(
+        listed.filter((entry) => entry.track.timed).map((entry) => entry.track),
+      );
       listed = [];
       selected = null;
       fold();
@@ -705,6 +755,16 @@ export function withFileSubtitles(
     return readableTextTracks(opened).filter((track) => track.enabled);
   }
 
+  /**
+   * The enabled text tracks this TV can't read the lines of only for how they are compressed
+   * (zlib on webOS 5): their timing, in the index, needs none of their text.
+   */
+  function timingTracksOf(opened: MatroskaFile) {
+    return opened.tracks.filter(
+      (track) => track.subtitle === 'text' && track.unreadable === 'compression' && track.enabled,
+    );
+  }
+
   return {
     get name() {
       return engine.name;
@@ -716,6 +776,7 @@ export function withFileSubtitles(
     selectAudio: (id) => engine.selectAudio(id),
     textTracks: () =>
       listed.map((entry) => ({ ...entry.track, active: entry.track.id === selected })),
+    timedTracks: () => timedOnly.slice(),
     selectText(id) {
       closeWindow();
       selected = null;

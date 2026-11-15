@@ -118,6 +118,12 @@ export interface SessionState {
    * listed soon: the automatic subtitle choice waits for them.
    */
   textComing: boolean;
+  /**
+   * The video file's own text tracks whose every line's timing is in
+   * streamTimings, but whose lines this TV can't show (`Engine.timedTracks`):
+   * references to line files up against, never listed.
+   */
+  timedText: EngineTrack[];
   /** How reading the video file's own subtitles went, for Diagnostics; null where not tried. */
   fileText: FileTextReport | null;
   /** The playback speed; every stream starts at 1. */
@@ -271,6 +277,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   streamCues: {},
   streamTimings: {},
   textComing: false,
+  timedText: [],
   fileText: null,
   rate: 1,
   clip: false,
@@ -917,6 +924,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       audio: engine.audioTracks(),
       text: engine.textTracks(),
       textComing: engine.textComing?.() ?? false,
+      timedText: engine.timedTracks?.() ?? [],
       fileText: engine.fileText?.() ?? null,
     });
   }
@@ -997,6 +1005,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         streamCues: {},
         streamTimings: {},
         textComing: false,
+        timedText: [],
         fileText: null,
         rate: 1,
         clip: false,

@@ -354,7 +354,7 @@ describe('the subtitles of the last few plays', () => {
         dropped: 'refused',
       });
       expect(segment(dropped, 'en')).toBe(
-        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB; 120 lines in 63 requests, 40 KB, 3 reads failed; dropped while playing (the server refused the reads)',
+        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB; 120 lines in 63 requests, 40 KB, 3 reads failed; dropped while playing (the server refused the reads); files lined up against en',
       );
     });
 

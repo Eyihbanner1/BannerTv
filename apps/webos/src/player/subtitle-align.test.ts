@@ -54,6 +54,7 @@ const track = (
   id: string,
   extra: Partial<{
     forced: boolean;
+    commentary: boolean;
     picture: boolean;
     lang: string;
     hearing: boolean;
@@ -120,6 +121,19 @@ describe('which tracks can be a reference', () => {
     expect(readableTrack(track('a', { picture: false, timed: true, forced: true }), 'native')).toBe(
       false,
     );
+  });
+
+  it('never takes a commentary for a reference, however many lines it has', () => {
+    const text = { picture: false, timed: true, lang: 'en' };
+    const main = track('main', text);
+    const commentary = track('commentary', { ...text, commentary: true });
+    const timings = { main: film(600), commentary: film(1800) };
+    for (const engine of ['native', 'hls.js', 'shaka', 'android']) {
+      expect(readableTrack(track('a', { picture: false, commentary: true }), engine)).toBe(false);
+      expect(referenceTrack([commentary, main], engine, timings, 'en')?.id).toBe('main');
+      expect(referenceTrack([commentary, main], engine, timings, 'fr')?.id).toBe('main');
+    }
+    expect(referenceTrack([commentary], 'native', timings, null)).toBeNull();
   });
 
   it('takes a track the index timed: in the language asked for, plain before hearing, most lines', () => {

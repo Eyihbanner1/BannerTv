@@ -450,7 +450,8 @@ function fileText(file: FileTrace | undefined): string | undefined {
         );
       }
       if (report.dropped) parts.push(`dropped while playing (${FILE_WORDS[report.dropped]})`);
-      else if (file.reference) parts.push(`files lined up against ${file.reference}`);
+      // Its timing, from the index, still lines files up once the tracks are dropped.
+      if (file.reference) parts.push(`files lined up against ${file.reference}`);
       return `${said}: ${parts.join('; ')}`;
     }
   }

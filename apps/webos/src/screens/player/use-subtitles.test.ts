@@ -309,6 +309,7 @@ const BASE: SessionState = {
   streamCues: {},
   streamTimings: {},
   textComing: false,
+  timedText: [],
   fileText: null,
   rate: 1,
   clip: false,
@@ -1108,6 +1109,45 @@ describe('lining files up against the video', () => {
       file: { report, reference: 'fr' },
     });
     expect(player.subtitles.checkOf(fileChoice(english)!)).toMatchObject({ synced: 'video' });
+  });
+
+  it('lines a file up against a track of the video file’s the TV can only time, never listed', async () => {
+    const entry = streamEntry('film-own-timed');
+    const english = file('english', shift(FULL, -5));
+    offer(entry, [english]);
+    // Its text is compressed in a way this TV can't undo: the index's timing only.
+    const french = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [],
+      timedText: [french],
+      streamTimings: { 'mkv:3': timings(FULL) },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.tracks).toEqual([]);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.selected).not.toContain('mkv:3');
+    expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+  });
+
+  it('never shows a commentary track by itself, nor lines files up against it', async () => {
+    const entry = streamEntry('film-own-commentary');
+    const late = file('late', shift(FULL, 3));
+    offer(entry, [late]);
+    // The commentary has more lines, and comes first.
+    const commentary = track('mkv:2', 'en', { picture: false, commentary: true });
+    const main = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [commentary, main],
+      streamTimings: { 'mkv:2': timings(lines(1600, 7000)), 'mkv:3': timings(FULL) },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(late));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
   });
 
   it('lines files up against the video file’s own track in the language showing first', async () => {
