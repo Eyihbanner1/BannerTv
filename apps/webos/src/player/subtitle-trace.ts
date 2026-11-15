@@ -369,14 +369,14 @@ function hashText(hash: HashOutcome | undefined): string {
 }
 
 const FILE_WORDS: Readonly<Record<FileTextSkip, string>> = {
-  named: 'its name says it isn’t one',
-  'not-matroska': 'not a Matroska file',
+  named: 'its name says it’s another kind of video file',
+  'not-matroska': 'not a kind of video file BannerTV reads them from',
   'no-index': 'the file’s subtitles have no index',
   live: 'a recording with no index',
   'no-subtitles': 'no subtitles in the file',
   corrupt: 'the file couldn’t be read',
   'too-large': 'its index is too large',
-  'no-range': 'the server refused byte ranges',
+  'no-range': 'the server sends only the whole file',
   blocked: 'couldn’t read the file here',
   refused: 'the server refused the reads',
   'one-use': 'the link allows one read',
@@ -408,7 +408,8 @@ const walksText = (cost: FileTextCost) =>
 /**
  * What the video file's own subtitles held and what reading them cost: its text tracks and
  * their languages, those this TV can't read, its picture tracks; the head and the index's
- * reads; the lines read for a track shown; what the files were lined up against.
+ * reads; the lines read for a track shown; what the files were lined up against, or why the
+ * tracks were dropped while the video played.
  */
 function fileText(file: FileTrace | undefined): string | undefined {
   if (!file) return undefined;
@@ -448,7 +449,8 @@ function fileText(file: FileTrace | undefined): string | undefined {
           )}${failed}`,
         );
       }
-      if (file.reference) parts.push(`files lined up against ${file.reference}`);
+      if (report.dropped) parts.push(`dropped while playing (${FILE_WORDS[report.dropped]})`);
+      else if (file.reference) parts.push(`files lined up against ${file.reference}`);
       return `${said}: ${parts.join('; ')}`;
     }
   }

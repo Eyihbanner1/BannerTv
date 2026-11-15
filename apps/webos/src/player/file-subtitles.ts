@@ -278,7 +278,7 @@ export function withFileSubtitles(
   let window: MatroskaWindow | null = null;
   let stopWindow: (() => void) | null = null;
   // The lines read by windows closed before the one open now.
-  let before = { lines: 0, requests: 0, bytes: 0, failedReads: 0 };
+  let before = { lines: 0, failedReads: 0 };
   let cost = zeroCost();
 
   const timer = (callback: () => void, ms: number) => {
@@ -294,8 +294,6 @@ export function withFileSubtitles(
       const stats = window.stats();
       before = {
         lines: before.lines + stats.lines,
-        requests: before.requests + stats.requests,
-        bytes: before.bytes + stats.bytes,
         failedReads: before.failedReads + stats.failedReads,
       };
       window.close();
@@ -305,14 +303,20 @@ export function withFileSubtitles(
     stopWindow = null;
   }
 
-  /** The lines read so far, into the tally Diagnostics holds. */
+  /**
+   * The lines read so far, into the tally Diagnostics holds: the requests and bytes are the
+   * source's own since the head and the index, so a read the hash's first bytes answered from
+   * memory costs nothing.
+   */
   function fold() {
     const stats = window?.stats();
     cost.lines = before.lines + (stats?.lines ?? 0);
-    cost.lineRequests = before.requests + (stats?.requests ?? 0);
-    cost.lineBytes = before.bytes + (stats?.bytes ?? 0);
     cost.failedReads = before.failedReads + (stats?.failedReads ?? 0);
-    if (source) cost.walks = source.stats.walks;
+    if (source && file) {
+      cost.lineRequests = source.stats.requests - cost.requests;
+      cost.lineBytes = source.stats.bytes - cost.bytes;
+      cost.walks = source.stats.walks;
+    }
   }
 
   function reset() {
@@ -327,7 +331,7 @@ export function withFileSubtitles(
     file = null;
     source = null;
     selected = null;
-    before = { lines: 0, requests: 0, bytes: 0, failedReads: 0 };
+    before = { lines: 0, failedReads: 0 };
     cost = zeroCost();
   }
 

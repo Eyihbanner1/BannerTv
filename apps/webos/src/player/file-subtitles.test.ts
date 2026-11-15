@@ -831,6 +831,30 @@ describe('what the hash read found', () => {
     expect(asked.map(({ url }) => url)).toEqual([`${CDN}?token=t0`]);
   });
 
+  it('counts the line reads it made, not those its first bytes answered', async () => {
+    const long = syntheticFile({
+      tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],
+      lines: lines(2, 30),
+    });
+    const head = await long.read(0, 65536);
+    const { engine, asked } = await played({
+      file: long,
+      landing: { landed: `${CDN}?token=t0`, head, total: long.size },
+      reading: { found: { videoHash: '0', videoSize: long.size }, ms: 10, walks: 1 },
+    });
+    const opened = asked.length;
+    engine.selectText('mkv:2');
+    await pass(200);
+    const report = reportOf(engine) as Extract<FileTextReport, { state: 'read' }>;
+    expect(report.cost.lines).toBe(30);
+    const made = asked.slice(opened);
+    // Some lines lie in the first 64 KB: no request for them.
+    expect(made.length).toBeGreaterThan(0);
+    expect(made.every(({ start }) => start >= 65536)).toBe(true);
+    expect(report.cost.lineRequests).toBe(made.length);
+    expect(report.cost.lineBytes).toBe(made.reduce((sum, { length }) => sum + length, 0));
+  });
+
   it('makes no request where the hash read was refused through the stream’s link at its end', async () => {
     const mkv = await file('mkvmerge.mkv');
     const head = await mkv.read(0, 65536);

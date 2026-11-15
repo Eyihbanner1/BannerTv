@@ -348,6 +348,16 @@ describe('the subtitles of the last few plays', () => {
       expect(segment(null)).toMatch(/^no files/);
     });
 
+    it('says when the tracks were dropped while the video played, and why', () => {
+      const dropped = read({
+        cost: cost({ lines: 120, lineRequests: 63, lineBytes: 40960, failedReads: 3 }),
+        dropped: 'refused',
+      });
+      expect(segment(dropped, 'en')).toBe(
+        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB; 120 lines in 63 requests, 40 KB, 3 reads failed; dropped while playing (the server refused the reads)',
+      );
+    });
+
     it('names four languages at most, each once', () => {
       const many = read({ text: ['en', 'eng', 'fr-CA', 'de', 'es', 'it', 'ja'], picture: 0 });
       expect(segment(many)).toBe(
@@ -357,20 +367,24 @@ describe('the subtitles of the last few plays', () => {
 
     it('says why none were read, in the words Diagnostics uses', () => {
       const words: Record<FileTextSkip, string> = {
-        named: 'its name says it isn’t one',
-        'not-matroska': 'not a Matroska file',
+        named: 'its name says it’s another kind of video file',
+        'not-matroska': 'not a kind of video file BannerTV reads them from',
         'no-index': 'the file’s subtitles have no index',
         live: 'a recording with no index',
         'no-subtitles': 'no subtitles in the file',
         corrupt: 'the file couldn’t be read',
         'too-large': 'its index is too large',
-        'no-range': 'the server refused byte ranges',
+        'no-range': 'the server sends only the whole file',
         blocked: 'couldn’t read the file here',
         refused: 'the server refused the reads',
         'one-use': 'the link allows one read',
         unanswered: 'the server didn’t answer',
         'timed-out': 'gave up after 20 s',
       };
+      // No word a viewer would have to look up.
+      for (const said of Object.values(words)) {
+        expect(said).not.toMatch(/matroska|byte range|cues|ebml/i);
+      }
       for (const why of Object.keys(words) as FileTextSkip[]) {
         expect(segment({ state: 'none', why, ms: 300, cost: cost({ requests: 0 }) })).toBe(
           `the video file’s own subtitles: none (${words[why]})`,
@@ -378,7 +392,9 @@ describe('the subtitles of the last few plays', () => {
       }
       expect(
         segment({ state: 'none', why: 'not-matroska', ms: 300, cost: cost({ requests: 1 }) }),
-      ).toBe('the video file’s own subtitles: none (not a Matroska file, 1 request)');
+      ).toBe(
+        'the video file’s own subtitles: none (not a kind of video file BannerTV reads them from, 1 request)',
+      );
       expect(
         segment({ state: 'none', why: 'refused', ms: 300, cost: cost({ requests: 5, walks: 3 }) }),
       ).toBe(
