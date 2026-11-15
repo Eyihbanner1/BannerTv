@@ -1171,6 +1171,72 @@ describe('lining files up against the video', () => {
     expect(player.selected[player.selected.length - 1]).toBeNull();
   });
 
+  it('keeps the video file’s own track picked by hand through Try again', async () => {
+    const entry = streamEntry('film-own-again');
+    const english = file('english', FULL);
+    offer(entry, [english]);
+    const plain = track('mkv:2', 'en', { picture: false, timed: true });
+    const sdh = track('mkv:4', 'en', { picture: false, timed: true, hearing: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [plain, sdh],
+      streamTimings: { 'mkv:2': timings(FULL), 'mkv:4': timings(FULL) },
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:4' }, 'version');
+    await player.wait(1000);
+    // Try again on the same stream: the TV's player starts over, the file's tracks read again.
+    await player.session({ text: [], streamTimings: {}, fileText: { state: 'waiting' } });
+    await player.wait(2000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    await player.session({ fileText: { state: 'reading' } });
+    await player.wait(2000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    await player.session({
+      text: [plain, sdh],
+      streamTimings: { 'mkv:2': timings(FULL), 'mkv:4': timings(FULL) },
+      fileText: null,
+    });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+  });
+
+  it('gives a track picked by hand up once the video file’s tracks cannot be read again', async () => {
+    const entry = streamEntry('film-own-again-none');
+    const english = file('english', FULL);
+    offer(entry, [english]);
+    const plain = track('mkv:2', 'en', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [plain],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:2' }, 'version');
+    await player.wait(1000);
+    await player.session({ text: [], streamTimings: {}, fileText: { state: 'reading' } });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    await player.session({
+      fileText: {
+        state: 'none',
+        why: 'refused',
+        ms: 900,
+        cost: {
+          requests: 1,
+          bytes: 0,
+          walks: 1,
+          lines: 0,
+          lineRequests: 0,
+          lineBytes: 0,
+          failedReads: 0,
+        },
+      },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+  });
+
   it('waits for the video file’s own tracks before files that agree may decide', async () => {
     const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
     const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';

@@ -1090,11 +1090,13 @@ export function useSubtitles(
         context.fit(option.url)?.script !== 'wrong';
       if (ours) {
         // A track that left with its engine (hls.js handing the stream to the
-        // TV's player) gives way to a file.
+        // TV's player) gives way to a file; one of the video file's own, read
+        // again as the stream starts over (Try again), only once they cannot be.
         const chosenTrack = ours.choice;
         const lost =
           chosenTrack?.kind === 'track' &&
           tracksKnown &&
+          !fileTracksComing(playing) &&
           !text.some((t) => t.id === chosenTrack.id);
         // A file or Off picked while the TV's player listed no tracks gives way
         // to the stream's own track once another engine (hls.js) lists one,
