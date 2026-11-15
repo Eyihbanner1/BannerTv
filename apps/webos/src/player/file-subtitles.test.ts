@@ -31,6 +31,7 @@ const CDN = 'https://cdn.example.com/f/1/Film.2023.1080p.WEB-DL.mkv';
 /** The parts of a media element the reader listens to. */
 class FakeVideo extends EventTarget {
   currentTime = 0;
+  paused = false;
 
   fire(type: string) {
     this.dispatchEvent(new Event(type));
@@ -362,6 +363,45 @@ describe('which files are read', () => {
     await pass(START_AFTER_MS + 200);
     expect(asked.length).toBeGreaterThan(0);
     expect(engine.textTracks().length).toBe(5);
+  });
+
+  it('holds nothing back for a play that opens into the film, and reads it all the same', async () => {
+    // A stream changed mid-film, a resume, Try again: lines are due as it opens.
+    const { engine, video } = setup({ file: await file('mkvmerge.mkv') });
+    await engine.load(LINK, 1800);
+    expect(engine.textComing?.()).toBe(false);
+    expect(reportOf(engine)).toEqual({ state: 'waiting' });
+    video.fire('playing');
+    await pass(START_AFTER_MS + 200);
+    expect(engine.textTracks().length).toBe(5);
+  });
+
+  it('reads a play opened paused once the video has its length, not only after Play', async () => {
+    const { engine, video, asked } = setup({ file: await file('mkvmerge.mkv') });
+    video.paused = true;
+    await engine.load(LINK, 0);
+    expect(engine.textComing?.()).toBe(true);
+    video.fire('loadedmetadata');
+    await pass(START_AFTER_MS - 100);
+    expect(asked).toEqual([]);
+    await pass(300);
+    expect(engine.textTracks().length).toBe(5);
+    expect(engine.textComing?.()).toBe(false);
+    // Played later, it reads nothing again.
+    const before = asked.length;
+    video.paused = false;
+    video.fire('playing');
+    await pass(START_AFTER_MS + 200);
+    expect(asked.length).toBe(before);
+  });
+
+  it('waits for the first picture where the video plays as it opens', async () => {
+    const { engine, video, asked } = setup({ file: await file('mkvmerge.mkv') });
+    await engine.load(LINK, 0);
+    video.fire('loadedmetadata');
+    await pass(START_AFTER_MS + 200);
+    expect(asked).toEqual([]);
+    expect(engine.textComing?.()).toBe(true);
   });
 });
 

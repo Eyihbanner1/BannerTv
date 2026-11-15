@@ -50,6 +50,11 @@ import {
 export const START_AFTER_MS = 1500;
 /** The automatic choice waits for the file's tracks this long at most after the reader starts. */
 export const FILE_WAIT_MS = 6000;
+/**
+ * A play that opens this far into the video (a resume, a stream changed mid-film, Try again)
+ * holds no choice back: lines are due as it opens, and the file's tracks take over once listed.
+ */
+export const HOLD_BEFORE_S = 1;
 /** The head and the Cues are given this long together. */
 export const OPEN_MS = 20000;
 /** A read of the head or the Cues the server was too busy for is tried again this often, 1 s then 2 s. */
@@ -260,9 +265,11 @@ const zeroCost = (): FileTextCost => ({
  * itself. Not for a playlist, a link needing request headers, or a file
  * whose name says it is another kind (`fileKindOf`). The reader starts
  * START_AFTER_MS after the first picture, never while the video waits for
- * data, and while a file named as Matroska may still list tracks the
- * automatic choice waits (`textComing`), FILE_WAIT_MS at most, and not at
- * all where the hash read is still going when the reader starts.
+ * data, or as long after the video knows its length where it opened paused.
+ * While a file named as Matroska may still list tracks the automatic choice
+ * waits (`textComing`), FILE_WAIT_MS at most, only for a play that opens at
+ * the start of the video, and not at all where the hash read is still going
+ * when the reader starts.
  */
 export function withFileSubtitles(
   engine: Engine,
@@ -362,7 +369,7 @@ export function withFileSubtitles(
       return engine.load(url, startAt);
     }
     report = { state: 'waiting' };
-    holding = kind === 'matroska';
+    holding = kind === 'matroska' && startAt < HOLD_BEFORE_S;
     let firstPlayingAt: number | undefined;
     let startedAt: number | undefined;
     let stopStart: (() => void) | null = null;
@@ -717,9 +724,20 @@ export function withFileSubtitles(
       });
     }
 
-    const on = (type: 'playing' | 'waiting' | 'timeupdate' | 'seeking', handler: () => void) => {
+    const on = (
+      type: 'playing' | 'waiting' | 'timeupdate' | 'seeking' | 'loadedmetadata',
+      handler: () => void,
+    ) => {
       video.addEventListener(type, handler);
       undo.push(() => video.removeEventListener(type, handler));
+    };
+    const startSoon = () => {
+      void hear();
+      if (startedAt !== undefined || done || stopStart) return;
+      stopStart = timer(() => {
+        stopStart = null;
+        void read();
+      }, START_AFTER_MS);
     };
     on('playing', () => {
       if (firstPlayingAt === undefined) {
@@ -727,12 +745,11 @@ export function withFileSubtitles(
         // However often the video waits for data before it plays on, the choice waits no longer.
         if (holding) timer(release, START_AFTER_MS + FILE_WAIT_MS);
       }
-      void hear();
-      if (startedAt !== undefined || done || stopStart) return;
-      stopStart = timer(() => {
-        stopStart = null;
-        void read();
-      }, START_AFTER_MS);
+      startSoon();
+    });
+    // Opened paused, the video takes nothing more for now: the reader need not wait for Play.
+    on('loadedmetadata', () => {
+      if (video.paused) startSoon();
     });
     on('waiting', () => {
       stopStart?.();
