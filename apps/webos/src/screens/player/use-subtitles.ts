@@ -80,6 +80,8 @@ import {
   startSubtitleTrace,
   traceAgreement,
   traceAlignment,
+  traceFileReference,
+  traceFileText,
   traceReason,
   traceReference,
 } from '../../player/subtitle-trace';
@@ -508,6 +510,11 @@ export function useSubtitles(
   useEffect(() => {
     startSubtitleTrace(videoId);
   }, [videoId]);
+  // What the video file's own subtitles held, and what reading them cost so far.
+  const fileText = state.fileText;
+  useEffect(() => {
+    traceFileText(videoId, fileText);
+  }, [videoId, fileText]);
   useEffect(() => {
     if (!list) return;
     list.start();
@@ -600,6 +607,12 @@ export function useSubtitles(
     referenceUsed.current = reference;
     if (before?.id !== reference?.id || before?.kind !== reference?.kind) {
       setUsedReference({ entry, reference });
+      // A track of the video file's own, its every line's timing from the file's index.
+      const own =
+        reference?.kind === 'track'
+          ? session?.get().text.find((track) => track.id === reference.id && track.timed)
+          : undefined;
+      traceFileReference(videoId, own ? own.lang : null);
     }
     const kind = reference ? reference.kind : null;
     if (kind === tracedReference.current) return;

@@ -12,6 +12,7 @@ import {
 } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineTrack } from '../../player/engines/types';
+import type { FileTextReport } from '../../player/file-subtitles';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import type { SubtitleListState, SubtitleOption } from '../../player/subtitles';
 import { recentSubtitleTraces } from '../../player/subtitle-trace';
@@ -1072,10 +1073,28 @@ describe('lining files up against the video', () => {
     const player = play(entry, { engine: 'native', textComing: true });
     await player.wait(300);
     expect(player.subtitles.choice).toBeNull();
+    const report: FileTextReport = {
+      state: 'read',
+      text: ['fr'],
+      unreadable: 0,
+      picture: 0,
+      ms: 900,
+      afterFirstFrameMs: 2400,
+      cost: {
+        requests: 2,
+        bytes: 70000,
+        walks: 1,
+        lines: 0,
+        lineRequests: 0,
+        lineBytes: 0,
+        failedReads: 0,
+      },
+    };
     await player.session({
       textComing: false,
       text: [french],
       streamTimings: { 'mkv:3': timings(FULL) },
+      fileText: report,
     });
     await player.wait(2500);
     expect(player.subtitles.choice).toEqual(fileChoice(english));
@@ -1083,7 +1102,11 @@ describe('lining files up against the video', () => {
     expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
     // Whole already: the engine is never asked for the track.
     expect(player.selected).not.toContain('mkv:3');
-    expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+    // Diagnostics says what the file held, and that the files were lined up against its track.
+    expect(recentSubtitleTraces()[0]).toMatchObject({
+      reference: 'track',
+      file: { report, reference: 'fr' },
+    });
     expect(player.subtitles.checkOf(fileChoice(english)!)).toMatchObject({ synced: 'video' });
   });
 
