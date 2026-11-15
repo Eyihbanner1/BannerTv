@@ -1483,7 +1483,12 @@ export function useSubtitles(
   const keptDrift = useSyncExternalStore(subtitleDrifts.subscribe, (): DriftChoice | null =>
     offsetKey === null ? null : (subtitleDrifts.get(offsetKey) ?? null),
   );
-  const canFixDrift = !(trackId !== null && state.engine === 'android');
+  // Not for the stream's own track where it comes in step with the video: Android's, and on the
+  // TV's player the video file's own (ADR 0005, decision 6).
+  const canFixDrift = !(
+    trackId !== null &&
+    (state.engine === 'android' || state.engine === 'native')
+  );
   // A drift the file's length gives away is fixed by itself, unless the viewer set a drift
   // or a timing on this file: theirs stands.
   const evidence = fileOption ? (fitOf(fileOption)?.drift ?? null) : null;

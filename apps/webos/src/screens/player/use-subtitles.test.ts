@@ -1214,6 +1214,24 @@ describe('lining files up against the video', () => {
     expect(player.selected[player.selected.length - 1]).toBeNull();
   });
 
+  it('offers no drift fix for the video file’s own track, as for Android’s', async () => {
+    const entry = streamEntry('film-own-drift');
+    offer(entry, [file('english', FULL)]);
+    const own = track('mkv:2', 'en', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [own],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    expect(player.subtitles.canFixDrift).toBe(false);
+    // An addon file still has it.
+    player.subtitles.choose(fileChoice(file('english', FULL)), 'version');
+    await player.wait(1000);
+    expect(player.subtitles.canFixDrift).toBe(true);
+  });
+
   it('keeps the video file’s own track picked by hand through Try again', async () => {
     const entry = streamEntry('film-own-again');
     const english = file('english', FULL);
