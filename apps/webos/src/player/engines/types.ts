@@ -1,4 +1,5 @@
-import type { Cue, LiveWindow } from '@bannertv/core';
+import type { Cue, LineTiming, LiveWindow } from '@bannertv/core';
+import type { FileTextReport } from '../file-subtitles';
 
 /** An audio or subtitle track the stream itself carries. */
 export interface EngineTrack {
@@ -24,6 +25,13 @@ export interface EngineTrack {
    * cannot tell.
    */
   picture?: boolean;
+  /** Subtitles only: for the hard of hearing, as the stream marks it or its name says ("SDH"). */
+  hearing?: boolean;
+  /**
+   * Subtitles only: every line's timing is known already, from the file's
+   * index (`EngineListener.timings`), and is whole: nothing more of it is to come.
+   */
+  timed?: boolean;
 }
 
 /**
@@ -56,6 +64,11 @@ export interface EngineListener {
   cues(trackId: string, cues: Cue[], replace?: boolean): void;
   /** A failure the engine could not recover from. The player fails over or explains. */
   fatal(error: PlaybackError): void;
+  /**
+   * Every line's timing of these tracks, by track id, at once, before their
+   * text is read: nothing handed over later adds to them.
+   */
+  timings?(byTrack: Record<string, LineTiming[]>): void;
 }
 
 /**
@@ -76,11 +89,18 @@ export interface Engine {
   liveWindow(): LiveWindow | null;
   audioTracks(): EngineTrack[];
   selectAudio(id: string): void;
-  /** Subtitles carried by the stream (HLS or DASH renditions). Cues arrive through the listener. */
+  /**
+   * Subtitles carried by the stream (HLS or DASH renditions, a file's own
+   * tracks). Cues arrive through the listener.
+   */
   textTracks(): EngineTrack[];
   selectText(id: string | null): void;
   /** The viewer moved the clock: any correction the engine makes to its start must leave it. */
   seeked?(): void;
+  /** Subtitle tracks may still be listed soon (the file's own, being read): the automatic choice waits. */
+  textComing?(): boolean;
+  /** How reading the video file's own subtitles went, for Diagnostics; null where it is not tried. */
+  fileText?(): FileTextReport | null;
   /**
    * Stops loading, detaches from the video element and frees the decoder.
    * Shaka finishes later, so the player waits before attaching another engine.

@@ -307,6 +307,8 @@ const BASE: SessionState = {
   text: [],
   streamCues: {},
   streamTimings: {},
+  textComing: false,
+  fileText: null,
   rate: 1,
   clip: false,
   attempts: [],
@@ -909,6 +911,46 @@ describe('the stream’s own tracks', () => {
     expect(player.subtitles.choice).toEqual(fileChoice(full));
     await player.session({ text: [forced, track('en|English', 'en')] });
     expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'en|English' });
+  });
+});
+
+describe('the video file’s own tracks on the TV’s player', () => {
+  const english = track('mkv:2', 'en', { picture: false, timed: true });
+
+  it('are waited for while they may still be listed, then chosen before a file', async () => {
+    const entry = streamEntry('film-own');
+    const full = file('full', FULL);
+    offer(entry, [full]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toBeNull();
+    expect(player.subtitles.textComing).toBe(true);
+    await player.session({ textComing: false, text: [english] });
+    await player.wait(100);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    expect(player.selected[player.selected.length - 1]).toBe('mkv:2');
+    expect(player.subtitles.textComing).toBe(false);
+  });
+
+  it('give way to a file once none was found', async () => {
+    const entry = streamEntry('film-none');
+    const full = file('full', FULL);
+    offer(entry, [full]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(1000);
+    await player.session({ textComing: false });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(full));
+  });
+
+  it('say which is for the hard of hearing', async () => {
+    const entry = streamEntry('film-hearing');
+    offer(entry, []);
+    const hearing = track('mkv:5', 'en', { picture: false, hearing: true });
+    const player = play(entry, { engine: 'native', text: [english, hearing] });
+    await player.wait(100);
+    expect(player.subtitles.checkOf({ kind: 'track', id: 'mkv:5' })).toEqual({ hearing: true });
+    expect(player.subtitles.checkOf({ kind: 'track', id: 'mkv:2' })).toBeUndefined();
   });
 });
 

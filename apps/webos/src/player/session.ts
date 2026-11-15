@@ -1,4 +1,5 @@
 import {
+  BANNERTV_DEMO_ID,
   clampToWindow,
   createProgressTracker,
   createStore,
@@ -19,6 +20,7 @@ import { pushAccountSoon } from '../data/sync';
 import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
 import { type Engine, type EngineTrack, PlaybackError } from './engines/types';
+import type { FileTextReport } from './file-subtitles';
 import { entryKey, type StreamFinder } from './finder';
 import {
   createLandingWatch,
@@ -111,6 +113,13 @@ export interface SessionState {
    * kept), so files can be lined up against the track (`findReference`).
    */
   streamTimings: Readonly<Record<string, readonly LineTiming[]>>;
+  /**
+   * The video file's own subtitle tracks are still being read, and may be
+   * listed soon: the automatic subtitle choice waits for them.
+   */
+  textComing: boolean;
+  /** How reading the video file's own subtitles went, for Diagnostics; null where not tried. */
+  fileText: FileTextReport | null;
   /** The playback speed; every stream starts at 1. */
   rate: number;
   /**
@@ -143,6 +152,12 @@ export interface SessionOptions {
    * never listed it for its page and streams.
    */
   continueRow?: boolean;
+  /**
+   * Whether the TV's own player reads a direct-play file's own subtitle
+   * tracks (`withFileSubtitles`). False for the Lab's test streams; never for
+   * BannerTV Demo's, whose tracks only check how subtitles look.
+   */
+  fileSubtitles?: boolean;
 }
 
 export interface PlaybackSession {
@@ -255,6 +270,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   text: [],
   streamCues: {},
   streamTimings: {},
+  textComing: false,
+  fileText: null,
   rate: 1,
   clip: false,
   attempts: [],
@@ -896,7 +913,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
   function refreshTracks() {
     if (!engine) return;
-    patch({ audio: engine.audioTracks(), text: engine.textTracks() });
+    patch({
+      audio: engine.audioTracks(),
+      text: engine.textTracks(),
+      textComing: engine.textComing?.() ?? false,
+      fileText: engine.fileText?.() ?? null,
+    });
   }
 
   /** A new engine starts on the stream's default tracks, so the viewer's are chosen again. */
@@ -974,6 +996,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         text: [],
         streamCues: {},
         streamTimings: {},
+        textComing: false,
+        fileText: null,
         rate: 1,
         clip: false,
       });
@@ -986,8 +1010,12 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       const seenCues: Record<string, Record<string, true>> = {};
       // Each track's lines handed over so far, by when they start and end, for streamTimings.
       const timedCues: Record<string, Record<string, true>> = {};
+      // Tracks whose every line's timing came at once (`timings`): their lines add none.
+      const whole: Record<string, true> = {};
       /** Adds the lines with an end that the track has not handed over before. */
       const keepTimings = (trackId: string, cues: readonly Cue[]) => {
+        // A block's own length can differ from its index's a little: a near copy of a line.
+        if (whole[trackId]) return;
         const seen = (timedCues[trackId] = timedCues[trackId] ?? {});
         const fresh: LineTiming[] = [];
         for (const cue of cues) {
@@ -1035,6 +1063,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
             const known = state.get().streamCues[trackId] ?? [];
             patch({ streamCues: { ...state.get().streamCues, [trackId]: known.concat(fresh) } });
           },
+          timings: (byTrack: Record<string, LineTiming[]>) => {
+            if (current !== attempt) return;
+            for (const trackId of Object.keys(byTrack)) whole[trackId] = true;
+            patch({ streamTimings: { ...state.get().streamTimings, ...byTrack } });
+          },
           fatal: (error: PlaybackError) => {
             if (current !== attempt) return;
             // One HLS engine refused the stream before it played: the other may still open it.
@@ -1051,7 +1084,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           release();
           await releasing;
           if (current !== attempt || destroyed) return;
-          const created = createEngine(name, video, listener);
+          // The file's own subtitles, read where the TV's player is the engine: not for the Lab's
+          // test streams, nor BannerTV Demo's, which only check how subtitles look.
+          const fileReadable =
+            options.fileSubtitles !== false && entry.addonId !== BANNERTV_DEMO_ID;
+          const created = createEngine(name, video, listener, {
+            file: fileReadable ? { name: entry.stream.behaviorHints.filename } : undefined,
+          });
           if (current !== attempt || destroyed) {
             await created.destroy();
             return;

@@ -1,4 +1,5 @@
 import { isAndroid } from '../../platform/android';
+import { type FileHints, withFileSubtitles } from '../file-subtitles';
 import { guessMimeType } from '../media';
 import { requestHeadersFor } from '../request-headers';
 import { createAndroidEngine } from './android';
@@ -121,16 +122,26 @@ function create(name: EngineName, video: HTMLVideoElement, listener: EngineListe
   }
 }
 
+export type { FileHints };
+
 /**
  * Creates an engine. The hls.js and Shaka engines are small; their libraries
  * load as separate scripts when they first open a stream. Off Android, streams
- * that need request headers go through the stream helper.
+ * that need request headers go through the stream helper. The TV's own player,
+ * given `file` hints, reads a direct-play Matroska file's own subtitle tracks
+ * (`withFileSubtitles`), which it would never show: hls.js and Shaka list a
+ * playlist's, and Android's player a file's, themselves.
  */
 export function createEngine(
   name: EngineName,
   video: HTMLVideoElement,
   listener: EngineListener,
+  options: { file?: FileHints } = {},
 ): Engine {
   const engine = create(name, video, listener);
-  return name === 'android' ? engine : throughStreamHelper(engine);
+  if (name === 'android') return engine;
+  const relayed = throughStreamHelper(engine);
+  return name === 'native' && options.file
+    ? withFileSubtitles(relayed, video, listener, options.file)
+    : relayed;
 }

@@ -166,6 +166,8 @@ export interface Subtitles {
    * it: it may yet bring files made for the video.
    */
   hashReading: boolean;
+  /** The video file's own subtitle tracks are still being looked for, and may be listed soon. */
+  textComing: boolean;
   choice: SubtitleChoice;
   /** What to draw, or null when off or still loading: on the video's clock, drift fix applied. */
   cues: Cue[] | null;
@@ -320,7 +322,7 @@ function fitsByUrl(
   return byUrl;
 }
 
-type StreamTracks = Pick<SessionState, 'text' | 'engine' | 'streamTimings'>;
+type StreamTracks = Pick<SessionState, 'text' | 'engine' | 'streamTimings' | 'textComing'>;
 
 /** The stream's track to line files up against (`referenceTrack`). */
 const referenceTrackOf = (playing: StreamTracks): EngineTrack | null =>
@@ -374,14 +376,15 @@ function strongFile(offered: readonly SubtitleOption[], video: PlayingRelease): 
 
 /**
  * Whether a reference may yet come: the stream has a track the engine can
- * read, or a file in the language linked to the video or named for its
- * release is still to be read.
+ * read, or the video file's own tracks may still be listed, or a file in the
+ * language linked to the video or named for its release is still to be read.
  */
 function referenceComing(
   playing: StreamTracks,
   language: string | null,
   files: FilesKnown,
 ): boolean {
+  if (playing.textComing) return true;
   if (playing.text.some((track) => readableTrack(track, playing.engine))) return true;
   if (language === null) return false;
   return filesIn(files.offered, language).some((option) => {
@@ -395,9 +398,12 @@ function referenceComing(
 /**
  * Whether the stream's track, through hls.js or Shaka, is still to hand over
  * enough lines to line files up against: its lines come within moments, so
- * the hold waits for them. Android hands them over only as the video plays.
+ * the hold waits for them. On the TV's own player, while the video file's own
+ * tracks may still be listed with their timing. Android hands them over only
+ * as the video plays.
  */
 function trackComing(playing: StreamTracks): boolean {
+  if (playing.engine === 'native') return playing.textComing;
   if (playing.engine !== 'hls.js' && playing.engine !== 'shaka') return false;
   const track = referenceTrackOf(playing);
   return !!track && (playing.streamTimings[track.id]?.length ?? 0) < MIN_REFERENCE_LINES;
@@ -946,8 +952,11 @@ export function useSubtitles(
       const playing = session.get();
       const { text, status, engine, audio } = playing;
       // hls.js and Shaka list the stream's tracks before its first picture; the
-      // TV's player never lists any.
-      const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
+      // TV's player lists none, but for a video file whose own tracks are being
+      // read, which may be listed soon after the first picture (at most
+      // FILE_WAIT_MS after reading starts): the choice waits for them.
+      const tracksKnown =
+        (status === 'playing' || status === 'paused' || engine === 'native') && !playing.textComing;
       const made = decided.current;
       const ours = made?.entry === entry ? made : null;
       // A language the viewer turned on from the sheet: its version is chosen in it.
@@ -1127,8 +1136,11 @@ export function useSubtitles(
     // The session tells of every step of the clock; only what the choice weighs counts.
     const nothingNew = sameAsLast();
     const onSession = () => {
-      const { text, audio, status, engine, duration, live, streamTimings } = session.get();
-      if (nothingNew([text, audio, status, engine, duration, live, streamTimings])) return;
+      const { text, audio, status, engine, duration, live, streamTimings, textComing } =
+        session.get();
+      if (nothingNew([text, audio, status, engine, duration, live, streamTimings, textComing])) {
+        return;
+      }
       decide();
     };
     const stopList = list.subscribe(decide);
@@ -1290,11 +1302,11 @@ export function useSubtitles(
   const fitOf = (option: SubtitleOption) => fits.get(languageKey(option.lang))?.get(option.url);
 
   // What the files are lined up against, and each file read lined up as the reference grows.
-  const { text: streamText, engine, streamTimings } = state;
+  const { text: streamText, engine, streamTimings, textComing } = state;
   const reference = useMemo(
     () =>
       referenceIn(
-        { text: streamText, engine, streamTimings, duration },
+        { text: streamText, engine, streamTimings, textComing, duration },
         {
           offered: options,
           fits: fitsByLink,
@@ -1311,6 +1323,7 @@ export function useSubtitles(
       streamText,
       engine,
       streamTimings,
+      textComing,
       duration,
       options,
       fitsByLink,
@@ -1334,7 +1347,7 @@ export function useSubtitles(
   // to the video or named for its release still to be read.
   const video = useMemo(() => playingRelease(entry, videoId), [entry, videoId]);
   const coming = referenceComing(
-    { text: streamText, engine, streamTimings },
+    { text: streamText, engine, streamTimings, textComing },
     fileOption?.lang ?? null,
     {
       offered: options,
@@ -1644,6 +1657,7 @@ export function useSubtitles(
     // The hash still being read is not an addon still asked.
     pending: pending - (listState.hashReading ? 1 : 0),
     hashReading: !!listState.hashReading,
+    textComing,
     choice,
     cues,
     loading: fileKey !== null && (fileCues === null || holding) && !fileFailed,
@@ -1673,7 +1687,11 @@ export function useSubtitles(
       return showing && (fileCues === null || holding) ? 'loading' : undefined;
     },
     checkOf(version) {
-      if (version.kind !== 'file') return undefined;
+      if (version.kind !== 'file') {
+        // A track marked, or named, for the hard of hearing says so: nothing else is checked.
+        const track = tracks.find((candidate) => candidate.id === version.id);
+        return track?.hearing ? { hearing: true } : undefined;
+      }
       const option = options.find((o) => o.key === version.key);
       if (!option) return undefined;
       const fit = fitOf(option);

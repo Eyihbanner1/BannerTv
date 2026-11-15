@@ -57,7 +57,7 @@ export interface FetchStats {
 export interface FetchSource extends ByteSource {
   readonly stats: FetchStats;
   /** Why the source gave up, once it has: every read after rejects with it. */
-  failure(): FileReadFailure | undefined;
+  failure(): Exclude<FileReadFailure, 'aborted'> | undefined;
 }
 
 /** Kinds of file a server names that are never Matroska: the reader stops at the headers. */
@@ -130,7 +130,7 @@ export function createFetchSource(
   // The hash read's walk landed there and its later reads were answered there.
   let served = landed !== undefined;
   let size = options.size;
-  let failed: FileReadFailure | undefined;
+  let failed: Exclude<FileReadFailure, 'aborted'> | undefined;
   // A walk in flight, which reads refused meanwhile wait for rather than walk again.
   let walking: Promise<void> | null = null;
   // The kind of file is checked on the first answer when the head is read here.
@@ -231,7 +231,7 @@ export function createFetchSource(
     start: number,
     length: number,
     signal: ReadSignal | undefined,
-    then?: FileReadFailure,
+    then?: 'one-use',
   ) {
     let done!: () => void;
     walking = new Promise<void>((resolve) => (done = resolve));

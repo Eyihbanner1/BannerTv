@@ -1,8 +1,14 @@
-import type { LiveWindow, Resolution, StreamEntry } from '@bannertv/core';
+import {
+  BANNERTV_DEMO_ID,
+  type LiveWindow,
+  type Resolution,
+  type StreamEntry,
+} from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labStream } from '../lab/player';
 import { type Tuning, TUNING_DEFAULTS } from '../platform/tuning';
 import { type Engine, type EngineListener, type EngineTrack, PlaybackError } from './engines/types';
+import type { FileTextCost, FileTextReport } from './file-subtitles';
 import { entryKey, type StreamFinder } from './finder';
 import {
   clearLandings,
@@ -33,6 +39,11 @@ interface FakeEngine extends Engine {
   window?: LiveWindow;
   /** How often the session told it the viewer moved the clock. */
   seeks: number;
+  /** What the session asked of it beside the engine's name: the file whose own subtitles to read. */
+  options?: { file?: { name?: string } };
+  /** Whether the file's own tracks may still be listed, and how reading them went. */
+  coming: boolean;
+  report: FileTextReport | null;
 }
 
 // plays: whether load() starts the video, as the TV's player does at once.
@@ -87,13 +98,23 @@ vi.mock('./engines/choose', () => ({
   chooseEngine: () => Promise.resolve('hls.js'),
   fallbackEngine: (_name: Engine['name'], _url: string, tried: ReadonlySet<Engine['name']>) =>
     fake.fallback && !tried.has(fake.fallback) ? fake.fallback : undefined,
-  createEngine: (name: Engine['name'], video: HTMLVideoElement, listener: EngineListener) => {
+  createEngine: (
+    name: Engine['name'],
+    video: HTMLVideoElement,
+    listener: EngineListener,
+    options?: { file?: { name?: string } },
+  ) => {
     const engine: FakeEngine = {
       name,
       listener,
+      options,
       audio: [],
       text: [],
       seeks: 0,
+      coming: false,
+      report: null,
+      textComing: () => engine.coming,
+      fileText: () => engine.report,
       seeked: () => {
         engine.seeks++;
       },
@@ -170,6 +191,7 @@ interface SetupOptions {
   autoFailover?: boolean;
   remember?: boolean;
   continueRow?: boolean;
+  fileSubtitles?: boolean;
   /** The running time the title's page gives, in seconds. None by default. */
   runtime?: number;
   /** A film, tt1, by default. */
@@ -201,6 +223,7 @@ function setup(options: SetupOptions = {}) {
     autoFailover: options.autoFailover ?? true,
     remember: options.remember,
     continueRow: options.continueRow,
+    fileSubtitles: options.fileSubtitles,
   });
   return { video, session, markFailed, lighter };
 }
@@ -523,6 +546,30 @@ describe("cues of the stream's own subtitles", () => {
     expect(session.get().streamCues).toEqual({ '2:0': [], '2:1': [cue(2, Infinity, 'Bonjour')] });
   });
 
+  it('take a whole track’s timing at once, which the lines it hands over later add none to', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    const { listener } = lastEngine();
+    listener.cues('eng', [cue(1, 2, 'One')]);
+    listener.timings?.({
+      'mkv:2': [
+        { start: 1, end: 2.5 },
+        { start: 4, end: 5 },
+      ],
+    });
+    // A block's own length can differ from the index's: no near copy of the line.
+    listener.cues('mkv:2', [cue(1, 2.49, 'One'), cue(4, 5, 'Two')], true);
+    expect(session.get().streamTimings).toEqual({
+      eng: [{ start: 1, end: 2 }],
+      'mkv:2': [
+        { start: 1, end: 2.5 },
+        { start: 4, end: 5 },
+      ],
+    });
+    expect(session.get().streamCues['mkv:2']).toEqual([cue(1, 2.49, 'One'), cue(4, 5, 'Two')]);
+  });
+
   it('from a stream played before are dropped', async () => {
     const { session } = setup();
     session.play(first, 0);
@@ -533,6 +580,58 @@ describe("cues of the stream's own subtitles", () => {
     await settle();
     before.listener.cues('2:0', [cue(1, Infinity, 'Old, late')], true);
     expect(session.get().streamCues).toEqual({});
+  });
+});
+
+describe("the video file's own subtitles", () => {
+  const cost: FileTextCost = {
+    requests: 1,
+    bytes: 65536,
+    walks: 1,
+    lines: 0,
+    lineRequests: 0,
+    lineBytes: 0,
+    failedReads: 0,
+  };
+
+  it('are asked for by the file’s name, and their state comes in with the tracks', async () => {
+    const { session } = setup();
+    const named = {
+      ...first,
+      stream: {
+        ...first.stream,
+        behaviorHints: { ...first.stream.behaviorHints, filename: 'Film.2023.1080p.mkv' },
+      },
+    };
+    session.play(named, 0);
+    await settle();
+    const engine = lastEngine();
+    expect(engine.options).toEqual({ file: { name: 'Film.2023.1080p.mkv' } });
+    engine.coming = true;
+    engine.report = { state: 'reading' };
+    engine.listener.tracks();
+    expect(session.get()).toMatchObject({ textComing: true, fileText: { state: 'reading' } });
+    engine.coming = false;
+    engine.text = [{ id: 'mkv:2', lang: 'en', label: '', active: false, picture: false }];
+    engine.report = { state: 'none', why: 'no-index', ms: 10, cost };
+    engine.listener.tracks();
+    expect(session.get()).toMatchObject({
+      textComing: false,
+      fileText: { state: 'none', why: 'no-index' },
+    });
+    session.play(second, 0);
+    expect(session.get()).toMatchObject({ textComing: false, fileText: null, streamTimings: {} });
+  });
+
+  it('are not read for the Lab’s test streams, nor for BannerTV Demo’s', async () => {
+    const lab = setup({ fileSubtitles: false });
+    lab.session.play(first, 0);
+    await settle();
+    expect(lastEngine().options).toEqual({ file: undefined });
+    const demo = setup();
+    demo.session.play({ ...first, addonId: BANNERTV_DEMO_ID }, 0);
+    await settle();
+    expect(lastEngine().options).toEqual({ file: undefined });
   });
 });
 
