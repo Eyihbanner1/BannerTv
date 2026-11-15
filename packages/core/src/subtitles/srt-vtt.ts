@@ -58,15 +58,24 @@ function isTopLine(settings: string): boolean {
   return false;
 }
 
-function toCue(block: Block): Cue | undefined {
-  if (!(block.end > block.start)) return undefined;
-  const markup = parseMarkup(block.text.join('\n'), { html: true });
+/**
+ * One SRT or WebVTT cue's text as a cue: its inline markup read, and placed
+ * at the top by WebVTT's line setting or an {\an8}-style override. Undefined
+ * when the times are not in order or nothing is left to draw. A Matroska
+ * text track holds one such cue in each block.
+ */
+export function textCue(start: number, end: number, text: string, settings = ''): Cue | undefined {
+  if (!(end > start)) return undefined;
+  const markup = parseMarkup(text, { html: true });
   if (markup.lines.length === 0) return undefined;
-  const cue: Cue = { start: block.start, end: block.end, lines: markup.lines };
-  const top =
-    isTopLine(block.settings) || (markup.alignment !== undefined && markup.alignment >= 7);
+  const cue: Cue = { start, end, lines: markup.lines };
+  const top = isTopLine(settings) || (markup.alignment !== undefined && markup.alignment >= 7);
   if (top) cue.top = true;
   return cue;
+}
+
+function toCue(block: Block): Cue | undefined {
+  return textCue(block.start, block.end, block.text.join('\n'), block.settings);
 }
 
 /**

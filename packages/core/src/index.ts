@@ -528,6 +528,52 @@ export {
   type StreamingService,
 } from './streams/release';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
+export {
+  type ByteSource,
+  bytesSource,
+  countedSource,
+  type ReadCanceller,
+  readCanceller,
+  type ReadSignal,
+  type ReadStats,
+} from './media/source';
+export {
+  cueTimings,
+  type CueEntry as MatroskaCueEntry,
+  type CuesOptions as MatroskaCuesOptions,
+  engineInflate,
+  type Inflate,
+  type LineTiming as MatroskaLineTiming,
+  type MatroskaCompression,
+  type MatroskaCues,
+  type MatroskaCuesRead,
+  type MatroskaFile,
+  type MatroskaOpened,
+  type MatroskaOptions,
+  type MatroskaRejection,
+  type MatroskaTrack,
+  type MatroskaTrackKind,
+  type MatroskaUnreadable,
+  openMatroska,
+  readableTextTracks,
+  readMatroskaCues,
+} from './media/matroska';
+export type {
+  BlockReaderOptions as MatroskaReadOptions,
+  BlockReaderStats as MatroskaReadStats,
+  LineProblem as MatroskaLineProblem,
+  LineResult as MatroskaLineResult,
+} from './media/matroska-blocks';
+export {
+  createMatroskaWindow,
+  type MatroskaLines,
+  type MatroskaWindow,
+  type WindowClock as MatroskaWindowClock,
+  type MatroskaWindowOptions,
+  type MatroskaWindowStats,
+  readMatroskaLines,
+} from './media/matroska-window';
+export type { MatroskaTextFormat } from './media/matroska-text';
 export type { Listener, Store, Updater } from './store';
 export {
   createTmdbClient,
