@@ -1198,6 +1198,33 @@ describe('lining files up against the video', () => {
     expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
   });
 
+  it('waits for the video file’s own tracks being read, where the choice does not', async () => {
+    // A link not named as a video file, or a reader still going after the choice let go.
+    const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+    const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    offer(entry, [
+      real,
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+      file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt` }),
+    ]);
+    const player = play(entry, { engine: 'native', fileText: { state: 'reading' } });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+    await player.session({
+      text: [track('mkv:2', 'fr', { picture: false, timed: true })],
+      streamTimings: { 'mkv:2': timings(FULL) },
+      fileText: null,
+    });
+    await player.wait(3000);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.subtitles.sync?.basis).toBeUndefined();
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+  });
+
   it('says so where there is nothing to check a file against, and moves nothing', async () => {
     const entry = streamEntry('film');
     const plain = file('plain', shift(FULL, 3));

@@ -326,8 +326,17 @@ function fitsByUrl(
 
 type StreamTracks = Pick<
   SessionState,
-  'text' | 'timedText' | 'engine' | 'streamTimings' | 'textComing'
+  'text' | 'timedText' | 'engine' | 'streamTimings' | 'textComing' | 'fileText'
 >;
+
+/**
+ * Whether the video file's own tracks may still be listed: the choice waits for them
+ * (`textComing`), or the reader is still at them where it does not.
+ */
+const fileTracksComing = (playing: StreamTracks): boolean =>
+  playing.textComing ||
+  playing.fileText?.state === 'waiting' ||
+  playing.fileText?.state === 'reading';
 
 /**
  * The stream's track to line files up against (`referenceTrack`): in `language` first. The
@@ -402,7 +411,7 @@ function referenceComing(
   language: string | null,
   files: FilesKnown,
 ): boolean {
-  if (playing.textComing) return true;
+  if (fileTracksComing(playing)) return true;
   if (playing.text.some((track) => readableTrack(track, playing.engine))) return true;
   if (playing.timedText.some((track) => readableTrack(track, playing.engine))) return true;
   if (language === null) return false;
@@ -1184,6 +1193,7 @@ export function useSubtitles(
           live,
           streamTimings,
           textComing,
+          session.get().fileText?.state,
         ])
       ) {
         return;
@@ -1357,10 +1367,19 @@ export function useSubtitles(
 
   // What the files are lined up against, and each file read lined up as the reference grows.
   const { text: streamText, timedText, engine, streamTimings, textComing } = state;
+  const fileTextState = state.fileText;
   const reference = useMemo(
     () =>
       referenceIn(
-        { text: streamText, timedText, engine, streamTimings, textComing, duration },
+        {
+          text: streamText,
+          timedText,
+          engine,
+          streamTimings,
+          textComing,
+          fileText: fileTextState,
+          duration,
+        },
         {
           offered: options,
           fits: fitsByLink,
@@ -1382,6 +1401,7 @@ export function useSubtitles(
       engine,
       streamTimings,
       textComing,
+      fileTextState,
       duration,
       options,
       fitsByLink,
@@ -1405,7 +1425,7 @@ export function useSubtitles(
   // to the video or named for its release still to be read.
   const video = useMemo(() => playingRelease(entry, videoId), [entry, videoId]);
   const coming = referenceComing(
-    { text: streamText, timedText, engine, streamTimings, textComing },
+    { text: streamText, timedText, engine, streamTimings, textComing, fileText: fileTextState },
     fileOption?.lang ?? null,
     {
       offered: options,
