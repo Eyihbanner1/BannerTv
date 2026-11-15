@@ -202,9 +202,10 @@ test('the file’s full English track is chosen over its forced one, and lines u
   await expect(page.locator('[data-focus-key="player-tracks-track-mkv:2"]')).toHaveText(
     'In the stream 1',
   );
-  // The forced one is listed, by its name, after the full one; never the reference.
+  // The forced one is listed, by its name, after the full one, saying it holds only a few
+  // lines; never the reference.
   await expect(page.locator('[data-focus-key="player-tracks-track-mkv:3"]')).toHaveText(
-    'In the stream 2Signs',
+    'In the stream 2Only a few lines · Signs',
   );
   await press(page, 'ArrowDown', 'player-tracks-track-mkv:3');
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#mkvEnglishLate`);
@@ -255,7 +256,7 @@ test('a server that answers a range with the whole file is read no further, and 
   expect(chain.fetched.filter(({ server }) => server === 'media')).toHaveLength(1);
   const section = await subtitlesDiagnostics(page);
   await expect(section).toContainText(
-    'the video file’s own subtitles: none (the server refused byte ranges)',
+    'the video file’s own subtitles: none (the server sends only the whole file)',
   );
 });
 
