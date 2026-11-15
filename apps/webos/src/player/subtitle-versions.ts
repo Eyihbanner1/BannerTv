@@ -350,7 +350,8 @@ function fitOfCheck(check: SubtitleCheck | undefined): SubtitleFit | undefined {
  * The version a language starts with when it is picked, as the automatic
  * choice would rank them, of those that have not failed: the version picked
  * by hand for the release; the stream's own track (always in step), unless it
- * holds forced lines only; then the files, one made for the release first,
+ * holds forced lines only or is a commentary, one for the hard of hearing
+ * first where such lines are wanted; then the files, one made for the release first,
  * then the best fit, in the list's order where nothing tells them apart (so
  * a file known to cover only part falls below one not read yet). One passed
  * over for its checks, or a forced track, only when nothing else is left;
@@ -365,9 +366,14 @@ export function languageFirstPick(
   const working = group.items.filter((item) => subtitles.statusOf(item.choice) !== 'failed');
   const remembered = working.find((item) => subtitles.isRemembered(item.choice));
   if (remembered) return remembered;
-  const track = working.find(
+  const tracks = working.filter(
     (item) => item.choice.kind === 'track' && !item.forced && !item.commentary,
   );
+  // One for the hard of hearing first where such lines are wanted.
+  const track =
+    (subtitles.wantsHearing()
+      ? tracks.find((item) => !!subtitles.checkOf(item.choice)?.hearing)
+      : undefined) ?? tracks[0];
   if (track) return track;
   const files = working.filter(
     (item) => item.choice.kind === 'file' && !isUnfit(subtitles.checkOf(item.choice)),

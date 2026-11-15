@@ -67,6 +67,28 @@ describe('createSubtitlePickMemory', () => {
     expect(memory.wantsHearing('film', 'video:film')).toBe(false);
   });
 
+  it('keeps the wish of a stream track picked for a release, with no file to try first', async () => {
+    const storage = memoryKeyValueStore();
+    const memory = createSubtitlePickMemory({ storage });
+    await memory.remember({ metaId: 'tt1', release: 'group:flux', file: 'k1' });
+    // The stream's own track for the hard of hearing, picked over the file.
+    await memory.remember({ metaId: 'tt1', release: 'group:flux', hearing: true });
+    expect(memory.get('tt1', 'group:flux')?.file).toBeUndefined();
+    expect(memory.wantsHearing('tt1', 'group:flux')).toBe(true);
+    // Another release of the title, with nothing picked for it.
+    expect(memory.wantsHearing('tt1', 'group:ntb')).toBe(true);
+    const again = createSubtitlePickMemory({ storage });
+    await again.load();
+    expect(again.get('tt1', 'group:flux')).toEqual({
+      metaId: 'tt1',
+      release: 'group:flux',
+      hearing: true,
+    });
+    // A plain track picked later says the lines for the hard of hearing are not wanted.
+    await again.remember({ metaId: 'tt1', release: 'group:flux' });
+    expect(again.wantsHearing('tt1', 'group:flux')).toBe(false);
+  });
+
   it('never keeps a link, drops damaged entries and the least recently picked past the limit', async () => {
     const storage = memoryKeyValueStore();
     await storage.set('subtitlePicks', [

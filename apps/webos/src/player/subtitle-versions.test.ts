@@ -392,6 +392,14 @@ describe('subtitle versions', () => {
     expect(firstOf([track('t1', 'eng')], options)).toBe('track:t1');
   });
 
+  it('starts a language on the stream’s track for the hard of hearing where those are wanted', () => {
+    const options = [option('os#1', 'eng')];
+    const tracks = [track('t1', 'eng'), { ...track('t2', 'eng'), hearing: true }];
+    const checks = { 'track:t2': { hearing: true } };
+    expect(firstOf(tracks, options, { checks })).toBe('track:t1');
+    expect(firstOf(tracks, options, { checks, hearing: true })).toBe('track:t2');
+  });
+
   it('passes over the stream’s own track of forced lines only, as over an unfit file', () => {
     const options = [option('os#1', 'eng')];
     const forced = { ...track('t1', 'eng', 'English (Forced)'), forced: true };

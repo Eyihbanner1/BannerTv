@@ -956,6 +956,49 @@ describe('the video file’s own tracks on the TV’s player', () => {
   });
 });
 
+describe('the video file’s own tracks, for a viewer who wants lines for the hard of hearing', () => {
+  const plainTrack = track('mkv:2', 'en', { picture: false, timed: true });
+  const sdhTrack = track('mkv:3', 'en', { picture: false, timed: true, hearing: true });
+
+  it('show the track for the hard of hearing first, where the viewer picked such a version', async () => {
+    const entry = streamEntry('film-own-hearing');
+    const plain = file('plain', FULL);
+    const sdh = file('sdh', SDH);
+    offer(entry, [plain, sdh]);
+    // Picked by hand for this title before: a file for the hard of hearing.
+    await stores.subtitlePicks.remember({
+      metaId: META,
+      release: 'video:another',
+      file: 'another-file',
+      hearing: true,
+    });
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack] });
+    await player.wait(1000);
+    expect(player.subtitles.wantsHearing()).toBe(true);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:3' });
+  });
+
+  it('keep the wish where the viewer picks the track for the hard of hearing by hand', async () => {
+    const entry = streamEntry('film-own-pick');
+    const plain = file('plain', FULL);
+    offer(entry, [plain]);
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack] });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    player.subtitles.choose({ kind: 'track', id: 'mkv:3' }, 'version');
+    await player.flush();
+    const release = subtitleRelease(entry, VIDEO);
+    expect(player.subtitles.wantsHearing()).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(true);
+    // No file is tried first for the release.
+    expect(stores.subtitlePicks.get(META, release)?.file).toBeUndefined();
+    // And the plain track picked later says they are not wanted.
+    player.subtitles.choose({ kind: 'track', id: 'mkv:2' }, 'version');
+    await player.flush();
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(false);
+  });
+});
+
 describe('files for another episode', () => {
   it('are said to be before they are read, and never chosen', async () => {
     // The stream's name says nothing of the episode: the video's id does.

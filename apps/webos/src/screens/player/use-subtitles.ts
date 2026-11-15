@@ -1078,8 +1078,11 @@ export function useSubtitles(
       // The stream's own track in the language; one of forced lines only (signs, the
       // foreign-language scenes) only when the language has nothing else.
       const inLanguage = (t: EngineTrack) => key !== null && languageKey(t.lang) === key;
-      // Never a commentary: the viewer picks one by hand.
-      const track = text.find((t) => inLanguage(t) && !t.forced && !t.commentary);
+      // Never a commentary: the viewer picks one by hand. One for the hard of hearing first where
+      // the viewer asked for such lines.
+      const fullTracks = text.filter((t) => inLanguage(t) && !t.forced && !t.commentary);
+      const track =
+        (context?.hearing ? fullTracks.find((t) => !!t.hearing) : undefined) ?? fullTracks[0];
       const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced && !t.commentary);
       // A file that can be shown: one that could be read, in the language's script. A track of
       // forced lines only comes before one that cannot.
@@ -1841,13 +1844,17 @@ export function useSubtitles(
       chooseSubtitleLanguage(metaId, language);
       if (pressed) wake.current?.();
       // A version picked from the list is the one for this release; the stream's own track
-      // picked over it takes its place. Not for Lab streams, which remember nothing. Picking a
+      // picked over it takes its place, no file tried first, and whether it is for the hard of
+      // hearing says what is wanted. Not for Lab streams, which remember nothing. Picking a
       // language keeps no version.
       if (way !== 'version' || metaId === undefined || !entry) return;
       const pickRelease = subtitleRelease(entry, videoId);
       if (next?.kind === 'file')
         handPicked.current = { entry, key: next.key, release: pickRelease };
-      else if (next?.kind === 'track') void subtitlePicks.forget(metaId, pickRelease);
+      else if (next?.kind === 'track') {
+        const picked = tracks.find((t) => t.id === next.id);
+        void subtitlePicks.remember({ metaId, release: pickRelease, hearing: !!picked?.hearing });
+      }
     },
     setOffset(next) {
       // The timing already in use, set again (Reset at +0.0 s), changes nothing.
