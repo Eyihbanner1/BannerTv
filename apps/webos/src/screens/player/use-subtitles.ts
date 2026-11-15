@@ -324,9 +324,9 @@ function fitsByUrl(
 
 type StreamTracks = Pick<SessionState, 'text' | 'engine' | 'streamTimings' | 'textComing'>;
 
-/** The stream's track to line files up against (`referenceTrack`). */
-const referenceTrackOf = (playing: StreamTracks): EngineTrack | null =>
-  referenceTrack(playing.text, playing.engine, playing.streamTimings);
+/** The stream's track to line files up against (`referenceTrack`): in `language` first. */
+const referenceTrackOf = (playing: StreamTracks, language?: string | null): EngineTrack | null =>
+  referenceTrack(playing.text, playing.engine, playing.streamTimings, language);
 
 /** What finding the reference needs to know of the files, besides the stream. */
 interface FilesKnown {
@@ -337,18 +337,23 @@ interface FilesKnown {
   video: PlayingRelease;
 }
 
-/** The reference to line files up against, now (`findReference`): last, the files that agree. */
+/**
+ * The reference to line files up against, now (`findReference`): last, the
+ * files that agree. A track the video file's index timed is whole, and one
+ * in `language`, the language wanted or showing, comes first.
+ */
 function referenceIn(
   playing: StreamTracks & Pick<SessionState, 'duration'>,
   files: FilesKnown,
   previous: Reference | null,
   agreed: RunnerDecision | null,
+  language: string | null,
 ): Reference | null {
-  const track = referenceTrackOf(playing);
+  const track = referenceTrackOf(playing, language);
   const lines = track ? playing.streamTimings[track.id] : undefined;
   return findReference(
     {
-      track: track && lines ? { id: track.id, lines } : null,
+      track: track && lines ? { id: track.id, lines, whole: !!track.timed } : null,
       duration: playing.duration > 0 && isFinite(playing.duration) ? playing.duration : 0,
       offered: files.offered,
       fit: (option) => files.fits.get(option.url),
@@ -984,6 +989,7 @@ export function useSubtitles(
         known,
         referenceUsed.current,
         agreedRef.current?.entry === entry ? agreedRef.current.decision : null,
+        wanted,
       );
       // What files that agree decided, handed over once no addon is still to answer and no hash
       // may still link a file, and only where it was decided for the files offered now and they
@@ -1009,7 +1015,7 @@ export function useSubtitles(
           if ('record' in agreedDecision && agreedDecision.record) {
             aligner.seed(agreedDecision.showUrl, agreedDecision.record);
           }
-          reference = referenceIn(playing, known, referenceUsed.current, agreedDecision);
+          reference = referenceIn(playing, known, referenceUsed.current, agreedDecision, wanted);
         }
       }
       noteReference(reference);
@@ -1274,12 +1280,14 @@ export function useSubtitles(
   const holding = fileKey !== null && holdingFor !== null && holdingFor === entry;
 
   // The stream's own tracks: tell the engine, and read the cues it hands over. While a file
-  // shows, the track to line files up against is read for its lines, and not shown.
+  // shows, the track to line files up against is read for its lines, and not shown; one the
+  // video file's index timed is whole already, and needs no reading.
   const trackId = choice?.kind === 'track' ? choice.id : null;
-  const readTrackId =
+  const readTrack =
     choice?.kind === 'file'
-      ? (referenceTrack(tracks, state.engine, state.streamTimings)?.id ?? null)
+      ? referenceTrack(tracks, state.engine, state.streamTimings, fileOption?.lang)
       : null;
+  const readTrackId = readTrack && !readTrack.timed ? readTrack.id : null;
   useEffect(() => {
     session?.selectText(trackId ?? readTrackId);
   }, [session, trackId, readTrackId]);
@@ -1317,8 +1325,11 @@ export function useSubtitles(
         // The one the automatic choice settled on: it is kept while it still is one.
         usedReference.entry === entry ? usedReference.reference : null,
         agreedNow,
+        // The language showing: a track the file's index timed in it comes first.
+        options.find((option) => option.key === fileKey)?.lang ?? null,
       ),
     [
+      fileKey,
       agreedNow,
       streamText,
       engine,

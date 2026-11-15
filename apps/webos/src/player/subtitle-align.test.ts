@@ -12,6 +12,7 @@ import {
   moveSize,
   needsRun,
   readableTrack,
+  MIN_REFERENCE_LINES,
   readsWhole,
   type Reference,
   referenceStage,
@@ -49,7 +50,16 @@ function film(seconds: number, seed = 1): LineTiming[] {
 const shifted = (lines: readonly LineTiming[], by: number) =>
   lines.map((line) => ({ start: line.start + by, end: line.end + by }));
 
-const track = (id: string, extra: Partial<{ forced: boolean; picture: boolean }> = {}) => ({
+const track = (
+  id: string,
+  extra: Partial<{
+    forced: boolean;
+    picture: boolean;
+    lang: string;
+    hearing: boolean;
+    timed: boolean;
+  }> = {},
+) => ({
   id,
   lang: 'fr',
   label: 'Français',
@@ -100,6 +110,47 @@ describe('which tracks can be a reference', () => {
     // The one that has handed over the most lines.
     expect(referenceTrack(tracks, 'hls.js', { other: film(600) })?.id).toBe('other');
     expect(referenceTrack(tracks, 'native', {})).toBeNull();
+    // A language asked for changes nothing where no track's every line is known.
+    expect(referenceTrack(tracks, 'hls.js', { other: film(600) }, 'fr')?.id).toBe('other');
+  });
+
+  it('reads the video file’s own text tracks on the TV’s player, never a forced one', () => {
+    expect(readableTrack(track('a', { picture: false }), 'native')).toBe(true);
+    expect(readableTrack(track('a', { picture: false, forced: true }), 'native')).toBe(false);
+    expect(readableTrack(track('a', { picture: false, timed: true, forced: true }), 'native')).toBe(
+      false,
+    );
+  });
+
+  it('takes a track the index timed: in the language asked for, plain before hearing, most lines', () => {
+    const text = { picture: false, timed: true };
+    const english = track('en', { ...text, lang: 'en' });
+    const englishSdh = track('en-sdh', { ...text, lang: 'eng', hearing: true });
+    const french = track('fr', text);
+    const frenchSdh = track('fr-sdh', { ...text, hearing: true });
+    const spanish = track('es', { ...text, lang: 'es' });
+    const untimed = track('de', { picture: false, lang: 'de' });
+    const timings = {
+      en: film(600),
+      'en-sdh': film(1800),
+      fr: film(600),
+      'fr-sdh': film(1800),
+      es: film(1800),
+      de: film(3600),
+    };
+    const all = [untimed, frenchSdh, english, englishSdh, french, spanish];
+    // The viewer's language, plain first; the untimed one, though it has more lines, never.
+    expect(referenceTrack(all, 'native', timings, 'eng')?.id).toBe('en');
+    expect(referenceTrack([untimed, englishSdh], 'native', timings, 'en')?.id).toBe('en-sdh');
+    // None in the language: plain before hearing, then the one with the most lines.
+    expect(referenceTrack(all, 'native', timings, 'ja')?.id).toBe('es');
+    expect(referenceTrack([frenchSdh, french], 'native', timings, null)?.id).toBe('fr');
+    // Equal on all: the first listed.
+    expect(referenceTrack([french, english], 'native', timings)?.id).toBe('fr');
+    // No timed track: the one with the most lines, as for Android.
+    expect(referenceTrack([untimed, track('it', { picture: false })], 'native', timings)?.id).toBe(
+      'de',
+    );
   });
 });
 
@@ -126,6 +177,28 @@ describe('findReference', () => {
   it('takes the stream’s own track once its lines cover the video, in any language', () => {
     const reference = findReference({ ...base, track: { id: 'fr', lines } });
     expect(reference).toMatchObject({ kind: 'track', id: 'fr', growing: false });
+  });
+
+  it('takes a track whose every line came at once as whole, however little of the video it covers', () => {
+    // Lines over the first 12 minutes of 30: as a growing track, not complete.
+    const early = film(720);
+    expect(findReference({ ...base, track: { id: 'fr', lines: early } })).toMatchObject({
+      kind: 'linked',
+    });
+    expect(
+      findReference({ ...base, offered: [], track: { id: 'fr', lines: early } }),
+    ).toMatchObject({
+      kind: 'track',
+      growing: true,
+    });
+    const whole = findReference({ ...base, track: { id: 'fr', lines: early, whole: true } });
+    expect(whole).toMatchObject({ kind: 'track', id: 'fr', growing: false });
+    expect(referenceStage(whole!)).toBe(COMPLETE);
+    // Still not with fewer lines than a reference needs.
+    const few = early.slice(0, MIN_REFERENCE_LINES - 1);
+    expect(findReference({ ...base, track: { id: 'fr', lines: few, whole: true } })).toMatchObject({
+      kind: 'linked',
+    });
   });
 
   it('takes a file linked to the video by its hash, then one named for its release', () => {

@@ -2,6 +2,7 @@ import {
   alignSubtitlesInSlices,
   type Cue,
   fileReleaseMatch,
+  languageKey,
   type LineTiming,
   linkedToVideo,
   otherEpisode,
@@ -80,33 +81,51 @@ const FINAL_SHARE = 0.5;
  * Whether the engine can hand over a track's lines without showing them, so
  * it can be a reference while a file shows: hls.js and Shaka always (BannerTV
  * draws every line); Android only for a track it says is text, as it draws
- * picture subtitles (PGS, VobSub, DVB) itself. Never a track of forced lines
- * only. The TV's own player lists no tracks.
+ * picture subtitles (PGS, VobSub, DVB) itself; the TV's own player for the
+ * video file's own text tracks (`withFileSubtitles`), which list no others.
+ * Never a track of forced lines only.
  */
 export function readableTrack(track: EngineTrack, engine: string | null): boolean {
   if (track.forced) return false;
   if (engine === 'hls.js' || engine === 'shaka') return true;
-  return engine === 'android' && track.picture === false;
+  return (engine === 'android' || engine === 'native') && track.picture === false;
 }
 
 /**
  * The stream's track to line files up against, and to read while a file
- * shows: of those the engine can read without showing them, the one that
- * has handed over the most lines, else the first.
+ * shows. Where the video file's index gave tracks their every line's timing
+ * (`timed`), only those count: the one in `language` first, then one not
+ * for the hard of hearing (whose sounds in brackets are lines no file has),
+ * then the one with the most lines, then the first. Otherwise, of those the
+ * engine can read without showing them, the one that has handed over the
+ * most lines, else the first.
  */
 export function referenceTrack(
   tracks: readonly EngineTrack[],
   engine: string | null,
   timings: Readonly<Record<string, readonly LineTiming[]>>,
+  language?: string | null,
 ): EngineTrack | null {
+  const readable = tracks.filter((track) => readableTrack(track, engine));
+  const timed = readable.filter((track) => track.timed);
+  const wanted = language ? languageKey(language) : null;
+  const score = (track: EngineTrack): number[] =>
+    timed.length > 0
+      ? [
+          Number(wanted !== null && languageKey(track.lang) === wanted),
+          Number(!track.hearing),
+          timings[track.id]?.length ?? 0,
+        ]
+      : [timings[track.id]?.length ?? 0];
   let best: EngineTrack | null = null;
-  let most = -1;
-  for (const track of tracks) {
-    if (!readableTrack(track, engine)) continue;
-    const lines = timings[track.id]?.length ?? 0;
-    if (lines > most) {
+  let bestScore: number[] = [];
+  for (const track of timed.length > 0 ? timed : readable) {
+    const next = score(track);
+    // Ahead only where strictly better, so the first stays first among equals.
+    const ahead = next.findIndex((value, i) => value !== bestScore[i]);
+    if (best === null || (ahead >= 0 && next[ahead]! > bestScore[ahead]!)) {
       best = track;
-      most = lines;
+      bestScore = next;
     }
   }
   return best;
@@ -176,8 +195,11 @@ function trackComplete(lines: readonly LineTiming[], duration: number): boolean 
 }
 
 export interface ReferenceInput<T extends PickableSubtitle> {
-  /** The stream's track read for a reference, and its lines so far, if any. */
-  track: { id: string; lines: readonly LineTiming[] } | null;
+  /**
+   * The stream's track read for a reference, and its lines so far, if any:
+   * all of them at once (`whole`) where the video file's index gave them.
+   */
+  track: { id: string; lines: readonly LineTiming[]; whole?: boolean } | null;
   /** The video's length in seconds, 0 while unknown. */
   duration: number;
   offered: readonly T[];
@@ -193,7 +215,8 @@ export interface ReferenceInput<T extends PickableSubtitle> {
 
 /**
  * The reference to line files up against, if any: the stream's own track
- * once its lines cover the video (`trackComplete`); a file read whole and linked to the video
+ * once its lines cover the video (`trackComplete`), or from the moment they
+ * all came at once (`whole`), the index holding every line it has; a file read whole and linked to the video
  * by its hash (`linkedToVideo`); one read whole and named for its release
  * (the same name, or the group confirming it); else the stream's track while
  * its lines still arrive, once it has enough of them; last, the first of the
@@ -209,7 +232,7 @@ export function findReference<T extends PickableSubtitle>(
   const found: Array<{ rank: number; reference: Reference }> = [];
   const { track } = input;
   if (track && track.lines.length >= MIN_REFERENCE_LINES) {
-    const growing = !trackComplete(track.lines, input.duration);
+    const growing = !track.whole && !trackComplete(track.lines, input.duration);
     const reference: Reference = { kind: 'track', id: track.id, lines: track.lines, growing };
     found.push({ rank: growing ? 3 : 0, reference });
   }

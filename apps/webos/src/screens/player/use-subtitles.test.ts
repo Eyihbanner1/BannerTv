@@ -1063,6 +1063,78 @@ describe('lining files up against the video', () => {
     expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
   });
 
+  it('lines a file up against the video file’s own track in another language, never asked for its lines', async () => {
+    const entry = streamEntry('film-own-french');
+    const english = file('english', shift(FULL, -5));
+    offer(entry, [english]);
+    // On the TV's own player: the file's French track, every line's timing from its index.
+    const french = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(300);
+    expect(player.subtitles.choice).toBeNull();
+    await player.session({
+      textComing: false,
+      text: [french],
+      streamTimings: { 'mkv:3': timings(FULL) },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    // Whole already: the engine is never asked for the track.
+    expect(player.selected).not.toContain('mkv:3');
+    expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+    expect(player.subtitles.checkOf(fileChoice(english)!)).toMatchObject({ synced: 'video' });
+  });
+
+  it('lines files up against the video file’s own track in the language showing first', async () => {
+    const entry = streamEntry('film-own-two');
+    const english = file('english', shift(FULL, 3));
+    offer(entry, [english]);
+    // The Spanish track is out with this cut by 4 s; the English one, listed after, is in step.
+    const spanish = track('mkv:2', 'es', { picture: false, timed: true });
+    const own = track('mkv:4', 'en', { picture: false, timed: true, hearing: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [spanish, own],
+      streamTimings: { 'mkv:2': timings(shift(FULL, 4)), 'mkv:4': timings(FULL) },
+    });
+    await player.wait(2500);
+    // The viewer's language is embedded: its track shows, for the hard of hearing or not.
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    player.subtitles.choose(fileChoice(english), 'version');
+    await player.wait(1000);
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.selected[player.selected.length - 1]).toBeNull();
+  });
+
+  it('waits for the video file’s own tracks before files that agree may decide', async () => {
+    const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+    const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    offer(entry, [
+      real,
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+      file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt` }),
+    ]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(5000);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+    // The file's own track comes: the late file is lined up against it, not against the files.
+    await player.session({
+      textComing: false,
+      text: [track('mkv:2', 'fr', { picture: false, timed: true })],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.subtitles.sync?.basis).toBeUndefined();
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+  });
+
   it('says so where there is nothing to check a file against, and moves nothing', async () => {
     const entry = streamEntry('film');
     const plain = file('plain', shift(FULL, 3));
