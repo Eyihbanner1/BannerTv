@@ -31,6 +31,8 @@ export interface SyntheticTrack {
   language?: string;
   name?: string;
   forced?: boolean;
+  /** FlagCommentary. */
+  commentary?: boolean;
   codecPrivate?: Uint8Array;
   /** ContentCompAlgo 3: these bytes are taken off the front of every block of the track. */
   stripped?: Uint8Array;
@@ -83,6 +85,8 @@ export interface SyntheticOptions {
   hugeCuesPosition?: boolean;
   /** Track numbers the file does not have, given a position in every cue point too. */
   strayCueTracks?: number[];
+  /** Tracks the Cues leave out, as `mkvmerge --cues N:none` does. */
+  uncuedTracks?: number[];
   docType?: string;
 }
 
@@ -103,6 +107,7 @@ function trackEntry(track: SyntheticTrack): Built {
   if (track.language) fields.push(el(ID.LANGUAGE, ascii(track.language)));
   if (track.name) fields.push(str(ID.NAME, track.name));
   if (track.forced) fields.push(uint(ID.FLAG_FORCED, 1));
+  if (track.commentary) fields.push(uint(ID.FLAG_COMMENTARY, 1));
   if (track.codecPrivate) fields.push(el(ID.CODEC_PRIVATE, track.codecPrivate));
   if (track.stripped || track.encrypted || track.zlib) {
     const encoding: Built[] = [uint(ID.CONTENT_ENCODING_SCOPE, track.zlib?.scope ?? 1)];
@@ -266,7 +271,10 @@ export function synthesize(options: SyntheticOptions): { parts: Part[]; cues: Cu
   let clusterAt = tracksAt + tracks.length;
   const places: CuePlace[] = [];
   for (const cluster of clusters) {
-    for (const cue of cluster.cues) places.push({ ...cue, cluster: clusterAt });
+    for (const cue of cluster.cues) {
+      if ((options.uncuedTracks ?? []).indexOf(cue.track) < 0)
+        places.push({ ...cue, cluster: clusterAt });
+    }
     clusterAt += cluster.built.length;
   }
   const cuesAt = clusterAt;

@@ -53,6 +53,20 @@ function expected(list: readonly SyntheticLine[]) {
 }
 
 describe('synthetic files', () => {
+  it('reads FlagCommentary, and Cues that leave a track out', async () => {
+    const { file } = await fileOf({
+      tracks: [SRT, { number: 3, codecId: 'S_TEXT/UTF8', language: 'eng', commentary: true }],
+      lines: [...lines(6), ...lines(6, 3)],
+      uncuedTracks: [3],
+    });
+    expect(file.tracks.map((track) => track.commentary)).toEqual([false, false, true]);
+    const read = await readMatroskaCues(file, [2, 3]);
+    if (!read.ok) throw new Error(read.reason);
+    expect(read.cues.entries.get(2)).toHaveLength(6);
+    expect(read.cues.entries.get(3)).toEqual([]);
+    expect(read.cues.counts.has(3)).toBe(false);
+  });
+
   it('reads a header-stripped text track, putting the stripped bytes back', async () => {
     const list = lines(12);
     const { file } = await fileOf({ tracks: [{ ...SRT, stripped: ascii('Line ') }], lines: list });

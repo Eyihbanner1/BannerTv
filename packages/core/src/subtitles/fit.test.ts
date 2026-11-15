@@ -120,9 +120,35 @@ describe('profileSubtitles', () => {
     expect(isForcedName('English (Forced)')).toBe(true);
     expect(isForcedName('Forced Subs')).toBe(true);
     expect(isForcedName('Signs & Songs')).toBe(true);
+    expect(isForcedName('English (Signs and Songs)')).toBe(true);
     expect(isForcedName('English SDH')).toBe(false);
-    expect(isForcedName('Signs')).toBe(false);
     expect(isForcedName('')).toBe(false);
+  });
+
+  it('takes signs or songs alone for forced lines, and a name saying the dialogue too for a full track', () => {
+    for (const name of [
+      'Signs',
+      'Songs',
+      'Songs only',
+      'English Signs',
+      'Signs (ENG)',
+      'Signs/Songs',
+    ]) {
+      expect(isForcedName(name)).toBe(true);
+    }
+    for (const name of [
+      'English (Dialogue + Signs & Songs)',
+      'Dialogue, Signs & Songs',
+      'Full Subs + Signs & Songs',
+      'Full Subs + Songs',
+      'Karaoke',
+      'Lyrics',
+      'English',
+    ]) {
+      expect(isForcedName(name)).toBe(false);
+    }
+    // A release name with more to it than signs: the film "Signs" is not a forced file.
+    expect(profileSubtitles([], 'Signs.2002.1080p.BluRay.x264').forcedLabel).toBe(false);
   });
 });
 

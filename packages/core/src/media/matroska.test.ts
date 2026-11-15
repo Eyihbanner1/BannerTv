@@ -54,6 +54,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: false,
         enabled: true,
         hearingImpaired: false,
+        commentary: false,
         encrypted: false,
         unreadable: 'not-text',
         frameDuration: 100000000,
@@ -72,6 +73,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: true,
         enabled: true,
         hearingImpaired: false,
+        commentary: false,
         encrypted: false,
       },
       {
@@ -87,6 +89,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: false,
         enabled: true,
         hearingImpaired: false,
+        commentary: false,
         encrypted: false,
       },
       {
@@ -102,6 +105,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: false,
         enabled: true,
         hearingImpaired: false,
+        commentary: false,
         encrypted: false,
       },
       {
@@ -116,6 +120,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: false,
         enabled: true,
         hearingImpaired: true,
+        commentary: false,
         encrypted: false,
       },
       {
@@ -130,6 +135,7 @@ describe('openMatroska on an mkvmerge file', () => {
         default: false,
         enabled: true,
         hearingImpaired: false,
+        commentary: false,
         encrypted: false,
       },
     ]);

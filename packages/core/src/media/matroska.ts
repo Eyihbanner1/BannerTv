@@ -72,6 +72,8 @@ export interface MatroskaTrack {
   default: boolean;
   enabled: boolean;
   hearingImpaired: boolean;
+  /** FlagCommentary: commentary on the film (a director's, the cast's), not its own words. */
+  commentary: boolean;
   /** How the track's frames are compressed, if they are. */
   compression?: MatroskaCompression;
   encrypted: boolean;
@@ -369,6 +371,7 @@ function readTrack(
     default: true,
     enabled: true,
     hearingImpaired: false,
+    commentary: false,
     encrypted: false,
   };
   let encodings: ContentEncoding[] = [];
@@ -408,6 +411,9 @@ function readTrack(
         break;
       case ID.FLAG_HEARING_IMPAIRED:
         track.hearingImpaired = readUint(bytes, dataStart, fieldEnd) !== 0;
+        break;
+      case ID.FLAG_COMMENTARY:
+        track.commentary = readUint(bytes, dataStart, fieldEnd) !== 0;
         break;
       case ID.DEFAULT_DURATION:
         track.frameDuration = readUint(bytes, dataStart, fieldEnd) || undefined;
