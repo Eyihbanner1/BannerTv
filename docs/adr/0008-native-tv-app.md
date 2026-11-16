@@ -66,6 +66,14 @@ Four facts shaped the design:
      and whether the file was lined up or its drift fixed. Only a press changes them. As ADR
      0005 decision 6 says, Android's own lines can be shown later but not earlier: a line comes
      as it starts, with no end of its own.
+     Above the steps, Match a line (ADR 0003, item 10): the lines around now as options, the one
+     on screen marked, and OK on the line just heard sets the timing to it, reading the video's
+     clock at the press; a second press much later in the film fixes a drift too, and Undo comes
+     after Reset while a press is the last change. The option with focus stays in the list as
+     the lines move on, and focus starts on the line last shown. Above that, last episode's
+     timing for the same release is offered ("Use it", with focus first, and "No thanks"), with
+     a toast for 8 s as the episode starts. A picture track says only that its timing can't be
+     changed.
 8. **A test package.** `com.bannertv.app.tvnative`, "BannerTV native test", installs beside the
    Android TV app. CI's `TV APK (React Native)` job type-checks, tests and builds a release APK
    signed with the Expo template's debug key, and uploads it as `bannertv-tv-native-apk`.
