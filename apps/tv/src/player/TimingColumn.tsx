@@ -12,9 +12,17 @@ import {
 } from '@tv/player/timing';
 import { type MatchClock, useMatchRows } from '@tv/screens/player/use-match-rows';
 import type { MatchResult, Subtitles } from '@tv/screens/player/use-subtitles';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SheetColumn, SheetNote, SheetOption } from '../ui/Sheet';
+import {
+  OFFER_FOCUS,
+  openingFocus,
+  type OpeningFocus,
+  SPENT,
+  takesFocus,
+  WAITING,
+} from './opening-focus';
 
 /** What matching a line did, in the words the LG uses. */
 function matchNote(result: MatchResult): { key: string; again: boolean } {
@@ -49,6 +57,27 @@ export function TimingColumn({
     clock,
     pinned,
   );
+  // What takes focus as the sheet opens, decided once (`openingFocus`) and handed out for that
+  // draw only: React Native moves the remote's focus each time an option's preferred focus turns
+  // on, so it must never follow the lines as they go by, nor take focus from the viewer.
+  const [opening, setOpening] = useState<OpeningFocus>(WAITING);
+  const focus = openingFocus(opening, {
+    offer: subtitles.offer !== null,
+    matching: subtitles.canMatch && subtitles.cues !== null,
+    read: match.read,
+    line: () =>
+      subtitles.cues
+        ? preferredRow(match.rows, subtitles.cues, (clock()?.time ?? 0) - subtitles.offset)?.key
+        : undefined,
+  });
+  if (focus !== opening) setOpening(focus);
+  const handing = focus.kind === 'decided' && focus.key !== null;
+  useEffect(() => {
+    if (!handing) return;
+    // Once drawn with it, nothing takes focus again while the sheet stays open.
+    const timer = setTimeout(() => setOpening(SPENT), 0);
+    return () => clearTimeout(timer);
+  }, [handing]);
   const summary = timingSummary(subtitles);
   const title = [
     t('player.timing'),
@@ -98,10 +127,6 @@ export function TimingColumn({
       : formatOffset(offer.offset)
     : '';
   const matchCues = subtitles.canMatch ? cues : null;
-  const preferred =
-    !offer && matchCues && match.rows.length > 0
-      ? preferredRow(match.rows, matchCues, (clock()?.time ?? 0) - offset)
-      : undefined;
   const said = lastMatch ? matchNote(lastMatch) : null;
   return (
     <SheetColumn title={title}>
@@ -111,7 +136,7 @@ export function TimingColumn({
           <SheetOption
             label={t('player.offerUse')}
             selected={false}
-            preferred
+            preferred={takesFocus(focus, OFFER_FOCUS)}
             onPress={change(() => subtitles.takeOffer())}
           />
           <SheetOption
@@ -134,7 +159,7 @@ export function TimingColumn({
                 label={lineText(matchCues[row.index]!)}
                 {...(row.onScreen ? { detail: t('player.matchOnScreen') } : {})}
                 selected={false}
-                preferred={row.key === preferred?.key}
+                preferred={takesFocus(focus, row.key)}
                 onFocus={() => setPinned(row.key)}
                 onBlur={() => setPinned((key) => (key === row.key ? undefined : key))}
                 onPress={() => {

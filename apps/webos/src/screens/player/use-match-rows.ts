@@ -9,6 +9,13 @@ export interface MatchClock {
   paused: boolean;
 }
 
+/** The lines to match, whether the video is paused, and whether they were read yet since opening. */
+export interface MatchList {
+  rows: MatchRow[];
+  paused: boolean;
+  read: boolean;
+}
+
 /** Read no sooner than this, nor later, while playing (ms). */
 const SOONEST_MS = 250;
 const LATEST_MS = 1000;
@@ -33,7 +40,7 @@ export function useMatchRows(
   offset: number,
   read: () => MatchClock | null,
   pinnedKey: string | undefined,
-): { rows: MatchRow[]; paused: boolean } {
+): MatchList {
   // Kept with the cues they were read for, and the moment on the lines' clock they were read at
   // (null with no clock to read).
   const [state, setState] = useState<{
@@ -95,8 +102,8 @@ export function useMatchRows(
     [cues, state, pinnedKey],
   );
   if (!cues || !state.cues) return NONE;
-  return { rows: carried ?? state.rows, paused: state.paused };
+  return { rows: carried ?? state.rows, paused: state.paused, read: true };
 }
 
 const EMPTY = { cues: null, rows: [], paused: false, at: null };
-const NONE: { rows: MatchRow[]; paused: boolean } = { rows: [], paused: false };
+const NONE: MatchList = { rows: [], paused: false, read: false };
