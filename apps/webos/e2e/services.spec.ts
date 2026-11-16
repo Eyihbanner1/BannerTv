@@ -26,10 +26,11 @@ async function expectTitleFocused(page: Page): Promise<void> {
   await expect(page.locator('[data-focused="true"]')).not.toHaveAttribute('aria-label', 'Loading');
 }
 
-/** From Settings' first button to the Services group on the right. */
+/** From Settings' first button to the Services group on the right, past SubDL's row. */
 async function openServices(page: Page, first: string): Promise<void> {
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'ArrowDown', 'settings-subdl');
   await press(page, 'ArrowDown', first);
 }
 
@@ -73,7 +74,7 @@ test('Trakt signs in with a code shown on the TV, then brings in My List and whe
   // Trakt's watchlist is in My List.
   await pressBack(page);
   await expectFocus(page, 'settings-trakt');
-  await press(page, 'ArrowLeft', 'settings-subtitle-style');
+  await press(page, 'ArrowLeft', 'settings-still-watching');
   await press(page, 'ArrowLeft', 'rail-settings');
   await press(page, 'ArrowUp', 'rail-addons');
   await press(page, 'ArrowUp', 'rail-library');
@@ -192,7 +193,7 @@ test('TMDB adds the UK rating, studio and cast photos to Details, and can be tur
     page.getByText(/not endorsed, certified, or otherwise approved by TMDB/),
   ).toHaveCount(0);
 
-  await press(page, 'ArrowLeft', 'settings-subtitle-style');
+  await press(page, 'ArrowLeft', 'settings-still-watching');
   await press(page, 'ArrowLeft', 'rail-settings');
   for (const item of ['addons', 'library', 'discover', 'search', 'home']) {
     await press(page, 'ArrowUp', `rail-${item}`);

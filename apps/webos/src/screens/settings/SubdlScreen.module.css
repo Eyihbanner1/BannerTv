@@ -1,0 +1,38 @@
+/* Where to get a key, with the code that opens SubDL's API page beside it. */
+.getKey {
+  margin-bottom: 40px;
+}
+
+.help {
+  display: inline-block;
+  vertical-align: middle;
+  width: 640px;
+  font: 500 24px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+}
+
+.qr {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 48px;
+  border-radius: 16px;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Margins, not flex gap: webOS 5 (Chromium 68) has no flex gap. */
+.actions > * + * {
+  margin-top: 16px;
+}
+
+.note {
+  color: var(--bt-text-muted);
+}
+
+.status {
+  min-height: 1.4em;
+  color: var(--bt-text);
+}

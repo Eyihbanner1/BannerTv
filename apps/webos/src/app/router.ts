@@ -120,7 +120,9 @@ export type Route =
   /** Settings > Stream helper: run it (Android) or pair with one (the LG). */
   | { name: 'stream-helper' }
   /** Settings > Languages and picture: the profile's audio, subtitles and picture limits. */
-  | { name: 'languages' };
+  | { name: 'languages' }
+  /** Settings > SubDL subtitles: the profile's own SubDL key. */
+  | { name: 'subdl' };
 
 export type PlayerRoute = Extract<Route, { name: 'player' }>;
 

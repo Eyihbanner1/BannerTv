@@ -10,9 +10,11 @@ import { serviceStatus } from '../data/api';
 import { homebrewUpdatesShown } from '../data/homebrew';
 import { type Preferences, preferences, setPreference } from '../data/preferences';
 import { activeProfileId, isKidsProfile } from '../data/profiles';
+import { subdlKey } from '../data/subdl';
 import { accountSection, checkAccountSection } from '../data/sync';
 import { SubtitleStylePanel } from './player/SubtitleStylePanel';
 import { HomebrewUpdates } from './settings/HomebrewUpdates';
+import { subdlSettingsValue } from './settings/subdl-status';
 import styles from './Screen.module.css';
 import settings from './SettingsScreen.module.css';
 
@@ -60,6 +62,8 @@ function FullSettings() {
   const prefs = useSyncExternalStore(preferences.subscribe, preferences.get);
   const service = useSyncExternalStore(serviceStatus.subscribe, serviceStatus.get);
   const section = useSyncExternalStore(accountSection.subscribe, accountSection.get);
+  const subdlRecord = useSyncExternalStore(subdlKey.subscribe, subdlKey.get);
+  const subdlValue = subdlSettingsValue(subdlRecord);
   const [open, setOpen] = useState<Open>(null);
   useScreenFocus('settings-stream-choice');
   // The account is Main's to manage: other profiles, kids or not, never see it (ADR 0006).
@@ -157,9 +161,15 @@ function FullSettings() {
             onPress={() => push({ name: 'account' })}
           />
         )}
-        {(service.trakt || service.tmdb) && (
-          <h2 className={`${settings.heading} ${settings.later}`}>{t('settings.services')}</h2>
-        )}
+        <h2 className={`${settings.heading} ${settings.later}`}>{t('settings.services')}</h2>
+        <Button
+          block
+          focusKey="settings-subdl"
+          label={t('settings.subdl', {
+            value: t(subdlValue === 'refused' ? 'settings.subdlRefused' : `common.${subdlValue}`),
+          })}
+          onPress={() => push({ name: 'subdl' })}
+        />
         {service.trakt && (
           <Button
             block
