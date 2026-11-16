@@ -87,6 +87,10 @@ function setup(
     kv,
     usage,
     runs,
+    record: () => record,
+    setRecord(next: SubdlKeyRecord | null) {
+      record = next;
+    },
     pass(ms: number) {
       clock += ms;
       for (const timer of timers) {
@@ -228,6 +232,26 @@ describe('createSubdlClient', () => {
       why: 'key refused',
     });
     expect(requests).toHaveLength(1);
+  });
+
+  it('asks again, with the key saved since, a title the old key was refused for', async () => {
+    let status = 401;
+    const { client, requests, setRecord } = setup({
+      record: { key: FAKE_SUBDL_KEY, state: 'unchecked' },
+      answer: () => ({ status, body: status === 200 ? filmAnswer() : undefined }),
+    });
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toMatchObject({
+      status: 'failed',
+      why: 'refused',
+    });
+    setRecord({ key: 'FAKE-SUBDL-KEY-0002', state: 'works' });
+    status = 200;
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toMatchObject({
+      status: 'answered',
+      saved: false,
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.headers).toMatchObject({ 'X-API-Key': 'FAKE-SUBDL-KEY-0002' });
   });
 
   it('rests on a slow-down and on a daily limit', async () => {

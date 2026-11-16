@@ -125,7 +125,7 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
     clearTimer = (timer) => clearTimeout(timer),
     route,
   } = options;
-  // The asks that failed this session, and when, by their cache key.
+  // The asks that failed this session, and when, by their cache key (a refusal is the key's).
   const failures = new Map<string, { failure: SubdlFailure; at: number }>();
   // Fetches started for each cache key, and those running, to tell a saved answer.
   const started = new Map<string, number>();
@@ -173,8 +173,13 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
         return { value: outcome.files, hints: {} };
       }
       const failure = outcome.failure;
-      if (failure === 'refused') setKeyState('refused');
-      else if (failure === 'limit') usage.rest('limit');
+      // A refusal is the key's, not the ask's: the key's state stops the
+      // searches, and a key saved since is asked with straight away.
+      if (failure === 'refused') {
+        setKeyState('refused');
+        throw new SubdlFailureError(failure);
+      }
+      if (failure === 'limit') usage.rest('limit');
       else if (failure === 'busy') usage.rest('busy');
       else usage.failed();
       throw remember(cacheKey, failure);
