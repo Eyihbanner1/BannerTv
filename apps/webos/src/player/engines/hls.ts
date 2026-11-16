@@ -1,4 +1,4 @@
-import { type Cue, isForcedName, parseCueMarkup } from '@bannertv/core';
+import { type Cue, hearingName, isForcedName, parseCueMarkup } from '@bannertv/core';
 import type Hls from 'hls.js';
 import type { CuesParsedData, ErrorData, MediaPlaylist } from 'hls.js';
 import { isWebOS } from '../../platform/webos';
@@ -60,7 +60,10 @@ function trackId(track: MediaPlaylist): string {
   return `${track.lang ?? ''}|${track.name}`;
 }
 
-/** A subtitle rendition as the player lists it: forced lines only by FORCED=YES or its name. */
+/**
+ * A subtitle rendition as the player lists it: forced lines only by FORCED=YES or its name, and
+ * for the hard of hearing by its name ("English SDH").
+ */
 export function hlsTextTrack(track: MediaPlaylist, active: boolean): EngineTrack {
   const listed: EngineTrack = {
     id: trackId(track),
@@ -69,6 +72,7 @@ export function hlsTextTrack(track: MediaPlaylist, active: boolean): EngineTrack
     active,
   };
   if (track.forced || isForcedName(track.name)) listed.forced = true;
+  if (hearingName(track.name)) listed.hearing = true;
   return listed;
 }
 

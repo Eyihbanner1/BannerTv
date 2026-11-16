@@ -94,6 +94,14 @@ describe('hlsTextTrack', () => {
     expect(hlsTextTrack(rendition('English', true), false).forced).toBe(true);
     expect(hlsTextTrack(rendition('English (Forced)', false), false).forced).toBe(true);
   });
+
+  it('marks a rendition for the hard of hearing by its name', () => {
+    const rendition = (name: string) =>
+      ({ id: 0, lang: 'en', name, forced: false }) as unknown as Parameters<typeof hlsTextTrack>[0];
+    expect(hlsTextTrack(rendition('English SDH'), false).hearing).toBe(true);
+    expect(hlsTextTrack(rendition('English (CC)'), false).hearing).toBe(true);
+    expect(hlsTextTrack(rendition('English'), false)).not.toHaveProperty('hearing');
+  });
 });
 
 describe('the hls.js engine', () => {

@@ -1,4 +1,4 @@
-import { type Cue, isForcedName, parseCueMarkup } from '@bannertv/core';
+import { type Cue, hearingName, isForcedName, parseCueMarkup } from '@bannertv/core';
 import {
   type AndroidCue,
   type AndroidPlayerEvent,
@@ -58,6 +58,7 @@ export function toEngineTrack(track: AndroidTrack, audio: boolean): EngineTrack 
     if (track.commentary) listed.commentary = true;
   } else {
     if (track.forced || isForcedName(track.label)) listed.forced = true;
+    if (hearingName(track.label)) listed.hearing = true;
     const picture = subtitleKind(track);
     if (picture !== undefined) listed.picture = picture;
   }

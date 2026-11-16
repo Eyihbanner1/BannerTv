@@ -11,6 +11,8 @@ import {
   subtitleRelease,
 } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MediaPlaylist } from 'hls.js';
+import { hlsTextTrack } from '../../player/engines/hls';
 import type { EngineTrack } from '../../player/engines/types';
 import type { FileTextReport } from '../../player/file-subtitles';
 import type { PlaybackSession, SessionState } from '../../player/session';
@@ -996,6 +998,22 @@ describe('the video file’s own tracks, for a viewer who wants lines for the ha
     player.subtitles.choose({ kind: 'track', id: 'mkv:2' }, 'version');
     await player.flush();
     expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(false);
+  });
+
+  it('keep the wish where the viewer picks a stream’s rendition named for it by hand', async () => {
+    const entry = streamEntry('film-hls-sdh');
+    offer(entry, [file('plain', FULL)]);
+    const rendition = (name: string) =>
+      hlsTextTrack({ lang: 'en', name, forced: false } as unknown as MediaPlaylist, false);
+    const player = play(entry, {
+      engine: 'hls.js',
+      text: [rendition('English'), rendition('English SDH')],
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'en|English SDH' }, 'version');
+    await player.flush();
+    expect(stores.subtitlePicks.wantsHearing(META, subtitleRelease(entry, VIDEO))).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, 'video:another')).toBe(true);
   });
 });
 

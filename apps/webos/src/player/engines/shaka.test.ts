@@ -73,6 +73,15 @@ describe('shakaTextTrack', () => {
     expect(shakaTextTrack(track('English', true)).forced).toBe(true);
     expect(shakaTextTrack(track('Signs & Songs', false)).forced).toBe(true);
   });
+
+  it('marks a track for the hard of hearing by its name', () => {
+    const track = (label: string) =>
+      ({ id: 3, language: 'en', label, forced: false, active: false }) as unknown as Parameters<
+        typeof shakaTextTrack
+      >[0];
+    expect(shakaTextTrack(track('English SDH')).hearing).toBe(true);
+    expect(shakaTextTrack(track('English'))).not.toHaveProperty('hearing');
+  });
 });
 
 describe('the Shaka engine', () => {
