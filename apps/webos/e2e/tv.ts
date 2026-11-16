@@ -7,6 +7,39 @@ export const APP_URL = pathToFileURL(resolve(import.meta.dirname, '../dist/index
 // A person's pace between presses. Quicker presses all count too; a journey tests that.
 const KEY_GAP_MS = 120;
 
+/**
+ * Adds a script, run in each document of the page, that reads or writes localStorage or
+ * sessionStorage: it runs once the page's HTML is parsed, still before the app's own script
+ * (deferred) starts. Over file://, this test browser sometimes gives a document that touches its
+ * storage earlier than that, as a plain init script does when the document is created, storage
+ * apart from the page's: after a reload the page then has none of what the document before it
+ * saved (a journey's seeded preferences gone, or its "seeded once" mark gone and the seed stored
+ * again over what the app saved since). Touched from here, it almost never does. One plain init
+ * script that touches storage is enough to bring it back for the whole journey, so every such
+ * script of a file:// journey comes through here. IndexedDB is not affected, so a script that
+ * only opens it can stay a plain init script, and so can one for the Android page, served over
+ * https, where storage is not lost.
+ */
+export async function addStorageInitScript<Arg>(
+  page: Page,
+  script: (arg: Arg) => void,
+  arg?: Arg,
+): Promise<void> {
+  const whenParsed = (run: (value: unknown) => void, value: unknown) => {
+    // A document already past loading when the script runs (none of the app's is) runs it now.
+    if (document.readyState !== 'loading') return run(value);
+    const parsed = () => {
+      if (document.readyState === 'loading') return;
+      document.removeEventListener('readystatechange', parsed);
+      run(value);
+    };
+    document.addEventListener('readystatechange', parsed);
+  };
+  await page.addInitScript({
+    content: `(${whenParsed.toString()})(${script.toString()}, ${JSON.stringify(arg ?? null)});`,
+  });
+}
+
 /** Collects page errors and console errors, which should stay empty. */
 export function watchErrors(page: Page): string[] {
   const errors: string[] = [];

@@ -25,7 +25,12 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { addonCollection } from '../../data/addons';
 import { subtitleDrifts, subtitleOffsets } from '../../data/library';
 import { releaseTimings, subtitlePicks } from '../../data/playback';
-import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
+import {
+  chooseSubtitleLanguage,
+  heardLanguages,
+  subtitleLanguagesToAsk,
+  wantedSubtitle,
+} from '../../data/tracks';
 import { mark } from '../../platform/marks';
 import { streamTitle } from '../../player/describe';
 import {
@@ -96,8 +101,11 @@ import {
 } from '../../player/subtitle-trace';
 import { playingRelease, sameChoice } from '../../player/subtitle-versions';
 import {
+  capSubdlFiles,
   clearSubtitleCache,
   loadSubtitles,
+  SUBDL_AGREEMENT_FILES,
+  type SubdlAskInput,
   subtitleList,
   type SubtitleListState,
   type SubtitleOption,
@@ -189,6 +197,8 @@ export interface Subtitles {
   tracks: EngineTrack[];
   /** Addons still looking for subtitles. */
   pending: number;
+  /** SubDL is still being asked: not an addon, so not among `pending`. */
+  subdlAsking: boolean;
   /**
    * The video's hash is still being read after the addons were asked without
    * it: it may yet bring files made for the video.
@@ -535,6 +545,30 @@ interface AutoState {
 }
 
 /**
+ * SubDL's languages for one play of a video: those wanted as it started,
+ * and those turned on since that made SubDL ask once more or list its files
+ * in another variety, for each stream of the video in turn.
+ */
+function createSubdlPlay() {
+  let video = '';
+  let languages: string[] = [];
+  let turnedOn: string[] = [];
+  return {
+    forVideo(id: string, wanted: () => string[]): Pick<SubdlAskInput, 'languages' | 'turnedOn'> {
+      if (id !== video) {
+        video = id;
+        languages = wanted();
+        turnedOn = [];
+      }
+      return { languages, ...(turnedOn.length > 0 && { turnedOn: turnedOn.slice() }) };
+    },
+    turnOn(language: string) {
+      turnedOn.push(language);
+    },
+  };
+}
+
+/**
  * Which subtitles show, and their cues. For each stream it picks the language
  * last chosen: the version the viewer picked by hand for this release first,
  * even when its addon answers after the stream lists its own track; then the
@@ -564,13 +598,34 @@ export function useSubtitles(
   /** The title's running time from its page, in seconds, for the checks before the video's own. */
   runtimeSeconds?: number,
 ): Subtitles {
+  // SubDL's languages for this play of the video, kept through another stream of it (a
+  // failover, another quality or source), with those turned on since: asked again from the
+  // cache, so a stream change sends no search more.
+  const [subdlPlay] = useState(createSubdlPlay);
   const list = useMemo(() => {
     if (!entry) return null;
     const addon = addonCollection
       .get()
       .addons.find((candidate) => candidate.manifest.id === entry.addonId);
-    return subtitleList(type, videoId, entry.stream, addon?.manifest.name ?? entry.addonId);
-  }, [type, videoId, entry]);
+    // SubDL is asked for titles with a page, not for Lab streams or BannerTV Demo's checks.
+    const subdlAsk: SubdlAskInput | undefined =
+      metaId !== undefined && !isSubtitleCheck(entry)
+        ? {
+            ...subdlPlay.forVideo(`${type}/${videoId}/${metaId}`, () =>
+              subtitleLanguagesToAsk(metaId),
+            ),
+            release: playingRelease(entry, videoId),
+          }
+        : undefined;
+    return subtitleList(
+      type,
+      videoId,
+      entry.stream,
+      addon?.manifest.name ?? entry.addonId,
+      subdlAsk,
+    );
+    // The languages are those wanted as the play starts: a choice made later asks once more.
+  }, [type, videoId, metaId, entry, subdlPlay]);
   const listState = useSyncExternalStore(
     list ? list.subscribe : noop,
     list ? list.get : () => EMPTY,
@@ -836,7 +891,13 @@ export function useSubtitles(
       length,
       today: showing,
       ranked: rankedFiles(offered, showing.lang, contextIn(offered, showing.lang, stream, length)),
-      files: offered.filter((option) => !unreadable(option.url) && !otherEpisode(option, release)),
+      // A few of SubDL's only, so its files never outnumber the reads it allows: the
+      // language showing first.
+      files: capSubdlFiles(
+        offered.filter((option) => !unreadable(option.url) && !otherEpisode(option, release)),
+        SUBDL_AGREEMENT_FILES,
+        showing.lang,
+      ),
       known: (url) => {
         const lines = checks.lines(url);
         const profile = checks.profile(url);
@@ -1056,7 +1117,7 @@ export function useSubtitles(
         (isSubtitleCheck(entry) ? null : wantedSubtitle(metaId, heardLanguages(audio, entry)));
       wantedNow = wanted;
       pressedNow = pressed;
-      const { options: offered, pending: waiting, hashComing } = list.get();
+      const { options: offered, pending: waiting, hashComing, subdlAsking = 0 } = list.get();
       const length = videoLength(playing.duration, playing.live, runtimeSeconds);
       const context = wanted === null ? null : contextIn(offered, wanted, entry, length);
       const key = wanted === null ? null : languageKey(wanted);
@@ -1218,15 +1279,18 @@ export function useSubtitles(
       startAuto(true);
       const result = plan(offered, wanted, context, undefined, sync);
       // Nothing in the language can be shown (none at all, or only files that could not be read
-      // or are in another script): a track of forced lines only, where the stream has one.
+      // or are in another script): a track of forced lines only, where the stream has one. It is
+      // not held back for SubDL, whose file takes over if it brings one; Off waits for SubDL too,
+      // as nothing would plan it again.
       if (result.pick && !usable(result.pick) && forcedTrack) {
+        setHolding(false);
+        settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
+      } else if (!result.pick && forcedTrack && waiting - subdlAsking === 0) {
         setHolding(false);
         settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
       } else if (!result.pick && waiting === 0) {
         setHolding(false);
-        if (forcedTrack)
-          settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
-        else settle(null, 'off', null);
+        settle(null, 'off', null);
       }
     };
     wake.current = decide;
@@ -2049,8 +2113,9 @@ export function useSubtitles(
   return {
     options,
     tracks,
-    // The hash still being read is not an addon still asked.
-    pending: pending - (listState.hashReading ? 1 : 0),
+    // The hash still being read is not an addon still asked, nor is SubDL.
+    pending: pending - (listState.hashReading ? 1 : 0) - (listState.subdlAsking ?? 0),
+    subdlAsking: (listState.subdlAsking ?? 0) > 0,
     hashReading: !!listState.hashReading,
     textComing,
     choice,
@@ -2154,6 +2219,9 @@ export function useSubtitles(
       setChosen({ entry, choice: next });
       if (isSubtitleCheck(entry)) return;
       chooseSubtitleLanguage(metaId, language);
+      // A language SubDL was not asked for, turned on: it is asked once more, and again from
+      // the cache for another stream of the video.
+      if (language !== null && list?.askSubdl(language)) subdlPlay.turnOn(language);
       if (pressed) wake.current?.();
       // A version picked from the list is the one for this release; the stream's own track
       // picked over it takes its place, no file tried first, and whether it is for the hard of

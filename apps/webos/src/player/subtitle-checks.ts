@@ -3,7 +3,7 @@ import { timingOf } from './subtitle-align';
 import { loadSubtitles, type SubtitleOption } from './subtitles';
 
 /** What reading a file for its checks needs of it. */
-export type CheckedFile = Pick<SubtitleOption, 'url' | 'lang' | 'label'>;
+export type CheckedFile = Pick<SubtitleOption, 'url' | 'lang' | 'label' | 'season' | 'episode'>;
 
 /**
  * The subtitle files read for one video, and what their lines say about

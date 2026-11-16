@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { APP_URL, expectFocus, press, pressBack } from './tv';
+import { addStorageInitScript, APP_URL, expectFocus, press, pressBack } from './tv';
 
 /**
  * Whether a season tab sits wholly inside the row that clips it. Playwright's
@@ -71,7 +71,8 @@ for (const heroFade of [true, false]) {
     await mockAddons(page);
     // The keys are timed against a 250 ms hero wait. By default quick presses
     // wait 800 ms, which a single press after a rest can still race.
-    await page.addInitScript(
+    await addStorageInitScript(
+      page,
       (stored) => localStorage.setItem('bannertv.tuning', stored),
       JSON.stringify({ heroBusyMs: 250, heroFade }),
     );
@@ -233,7 +234,7 @@ test.describe('on a 4K TV', () => {
 
   test('the hero can still ask for large backdrops from tuning', async ({ page }) => {
     await mockAddons(page);
-    await page.addInitScript(() =>
+    await addStorageInitScript(page, () =>
       localStorage.setItem('bannertv.tuning', JSON.stringify({ heroArt: 'large' })),
     );
     await page.goto(APP_URL);
@@ -246,7 +247,7 @@ test.describe('on a 4K TV', () => {
     page,
   }) => {
     await mockAddons(page);
-    await page.addInitScript(() =>
+    await addStorageInitScript(page, () =>
       localStorage.setItem('bannertv.tuning', JSON.stringify({ wideArt: 'small' })),
     );
     await page.goto(APP_URL);

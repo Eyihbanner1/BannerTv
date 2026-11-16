@@ -5,6 +5,7 @@ import {
   chooseAudioLanguage,
   chooseSubtitleLanguage,
   heardLanguages,
+  subtitleLanguagesToAsk,
   wantedAudio,
   wantedSubtitle,
 } from './tracks';
@@ -54,5 +55,23 @@ describe('subtitles only when the audio is in another language', () => {
     expect(heardLanguages([{ lang: 'jpn', active: true }], entry)).toEqual(['jpn']);
     expect(heardLanguages([{ lang: 'und', active: true }], entry)).toEqual(['es']);
     expect(heardLanguages([], null)).toEqual([]);
+  });
+});
+
+describe('the languages SubDL is asked for', () => {
+  it("are the title's last choice, then the profile's own, once each, none for off", async () => {
+    expect(subtitleLanguagesToAsk('tt-subdl')).toEqual([]);
+    setPreference('subtitleLanguage', 'en');
+    expect(subtitleLanguagesToAsk(undefined)).toEqual(['en']);
+    chooseSubtitleLanguage('tt-subdl', 'fr');
+    await vi.waitFor(() => expect(subtitleLanguagesToAsk('tt-subdl')).toEqual(['fr', 'en']));
+    chooseSubtitleLanguage('tt-subdl-same', 'en');
+    await vi.waitFor(() => expect(subtitleLanguagesToAsk('tt-subdl-same')).toEqual(['en']));
+    chooseSubtitleLanguage('tt-subdl-off', null);
+    await vi.waitFor(() => expect(wantedSubtitle('tt-subdl-off')).toBeNull());
+    expect(subtitleLanguagesToAsk('tt-subdl-off')).toEqual(['en']);
+    // "Only when the audio isn't in that language" does not narrow it.
+    setPreference('subtitleWhen', 'foreign');
+    expect(subtitleLanguagesToAsk('tt-next')).toEqual(['en']);
   });
 });

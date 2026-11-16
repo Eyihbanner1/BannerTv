@@ -746,6 +746,8 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
             })}
             {subtitles.pending > 0 ? (
               <SheetNote>{t('player.stillAsking', { count: subtitles.pending })}</SheetNote>
+            ) : subtitles.subdlAsking ? (
+              <SheetNote>{t('player.stillSubdl')}</SheetNote>
             ) : null}
           </SheetColumn>
           <TimingColumn

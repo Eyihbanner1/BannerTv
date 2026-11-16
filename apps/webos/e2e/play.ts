@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
 import { API_SERVICE } from '../src/data/api-service';
+import { addStorageInitScript } from './tv';
 
 /**
  * A fake stream addon, subtitle files and media for the playback journeys.
@@ -161,7 +162,7 @@ function srtTime(seconds: number): string {
 }
 
 /** SRT text of these lines: start and end in seconds, then the text. */
-function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
+export function srt(lines: ReadonlyArray<readonly [number, number, string]>): string {
   return lines
     .map(([start, end, text], i) => `${i + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`)
     .join('\n');
@@ -219,7 +220,7 @@ const ms = (seconds: number) => Math.round(seconds * 1000) / 1000;
  * 6 s, lasting 1 to 3 s, as unevenly as people talk, and the same on every run. Even lines
  * would line up as well a line or two either way, as no film's do.
  */
-function speech(from: number, until: number): Array<[number, number]> {
+export function speech(from: number, until: number): Array<[number, number]> {
   const lines: Array<[number, number]> = [];
   for (let at = from, n = 1; at < until; n++) {
     const random = (salt: number) => {
@@ -550,7 +551,8 @@ export async function seedStreamAddon(
     updatedAt: 1000 + i,
   }));
   const cards = (options.played ?? []).map((card, i) => ({ ...card, updatedAt: 1000 + i }));
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     ({ stored, saved, played, chosen, extra }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');

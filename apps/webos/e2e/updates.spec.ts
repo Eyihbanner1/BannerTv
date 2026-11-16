@@ -31,13 +31,14 @@ const installed = (page: Page) => updates(page).getByText('BannerTV 0.1.0 is on 
 /** The line under it: what Homebrew Channel has, or why it didn't open. */
 const status = (page: Page) => updates(page).getByRole('status');
 
-/** From Home's first tile to Settings, then across to the Updates button. */
+/** From Home's first tile to Settings, then across and past SubDL's row to the Updates button. */
 async function openUpdates(page: Page): Promise<void> {
   await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await openSection(page, 'settings');
   await expectFocus(page, 'settings-stream-choice');
   await press(page, 'ArrowRight', 'settings-profiles');
   await press(page, 'ArrowDown', 'settings-home-rows');
+  await press(page, 'ArrowDown', 'settings-subdl');
   await press(page, 'ArrowDown', 'settings-homebrew');
   await expectFocusLabel(page, 'Get updates in Homebrew Channel');
 }
@@ -87,6 +88,7 @@ test('on an LG TV, Settings says a newer build is ready and opens Homebrew Chann
   expect(await launches(page)).toHaveLength(3);
 
   // One read for the visit, through a screen opened from Settings and back.
+  await press(page, 'ArrowUp', 'settings-subdl');
   await press(page, 'ArrowUp', 'settings-home-rows');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Home rows' })).toBeVisible();

@@ -54,3 +54,8 @@ is what the study's own implementation decided on those answers.
 Rainmaker E5 (12 files) and E6 (28), by episode and file id, each as
 `[gap from the previous line's end, duration, …]` in hundredths of a second,
 so the tests can run the real aligner on them.
+
+`zip-writer.ts` builds the ZIP archives the archive tests open, in the test
+itself: stored and deflated entries, data descriptors, UTF-8 names and the
+flags a real archive may carry. Their files hold seeded lines ("Line 1",
+"Line 2", …) only, never a real subtitle file's text.

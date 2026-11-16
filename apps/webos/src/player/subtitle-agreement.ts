@@ -48,7 +48,7 @@ import type { SubtitleOption } from './subtitles';
 /** What the runner needs of a file: who it is, its names, and its link (never traced). */
 export type AgreementOption = Pick<
   SubtitleOption,
-  'key' | 'url' | 'lang' | 'label' | 'releaseName'
+  'key' | 'url' | 'lang' | 'label' | 'releaseName' | 'season' | 'episode'
 >;
 
 /** What deciding for the stream playing needs. */

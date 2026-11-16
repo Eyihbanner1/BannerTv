@@ -1,9 +1,17 @@
-import { createStore, OPENSUBTITLES_V3_ID } from '@bannertv/core';
+import {
+  crc32,
+  createStore,
+  OPENSUBTITLES_V3_ID,
+  type SubdlFile,
+  type SubdlSearchState,
+} from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HashReading } from './stream-hash';
 import { forgetSubtitleTraces, recentSubtitleTraces, startSubtitleTrace } from './subtitle-trace';
 import {
+  bestSubdlRelease,
+  capSubdlFiles,
   clearSubtitleCache,
   HASH_WAIT_MS,
   type ListedSubtitle,
@@ -56,6 +64,55 @@ vi.mock('../data/addons', () => ({
     },
   },
 }));
+
+/** SubDL's searches made, each one the test answers by hand, and whether downloads are left. */
+const subdlNet = vi.hoisted(() => ({
+  searches: [] as Array<{
+    wanted: readonly string[];
+    languages: readonly string[];
+    loaded: boolean;
+    stopped: boolean;
+    set(state: unknown): void;
+  }>,
+  downloadsLeft: true,
+  resting: false,
+}));
+
+vi.mock('../data/subdl', async () => {
+  const core = await import('@bannertv/core');
+  return {
+    subdl: {
+      search(_type: string, _videoId: string, wanted: readonly string[]) {
+        const store = core.createStore<SubdlSearchState>({ status: 'asking' });
+        const languages = wanted
+          .map((language) => core.subdlCodeFor(language))
+          .filter((code): code is string => code !== undefined);
+        const made = {
+          wanted,
+          languages,
+          loaded: false,
+          stopped: false,
+          set: (state: unknown) => store.set(state as SubdlSearchState),
+        };
+        subdlNet.searches.push(made);
+        return {
+          get: store.get,
+          subscribe: store.subscribe,
+          load: () => {
+            made.loaded = true;
+          },
+          stop: () => {
+            made.stopped = true;
+          },
+          languages,
+        };
+      },
+    },
+    subdlUsage: { takeDownload: () => subdlNet.downloadsLeft },
+    subdlResting: () => (subdlNet.resting ? { why: 'busy', until: Infinity } : null),
+    isSubdlDownload: (url: string) => url.startsWith('https://dl.subdl.com/'),
+  };
+});
 
 vi.mock('./stream-hash', () => ({
   readStreamHash: () => {
@@ -557,5 +614,471 @@ describe('mergeHashAnswer', () => {
   it('marks nothing late that the first answer found by the hash already', () => {
     const first = [{ id: '1', url: 'u1', lang: 'eng', hashMatch: true }];
     expect(mergeHashAnswer(first, first)).toEqual(first);
+  });
+});
+
+describe('SubDL in the files on offer', () => {
+  const VIDEO = 'tt9900001';
+  const RELEASE = 'Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPA';
+  const OPENSUBTITLES = { id: OPENSUBTITLES_V3_ID, name: 'OpenSubtitles v3' };
+  const stream = {
+    source: { kind: 'url', url: 'https://debrid.example.com/d/KEY/Film.mkv' },
+    subtitles: [{ id: 'own', url: 'https://streams.example.com/own.srt', lang: 'eng' }],
+    behaviorHints: { filename: `${RELEASE}.mkv`, videoHash: '0123456789abcdef', videoSize: 9 },
+  } as unknown as Stream;
+  const ask = { languages: ['en'], release: { filename: `${RELEASE}.mkv`, title: 'Test Film' } };
+  const subdlFile = (id: string, label: string, extra: Partial<SubdlFile> = {}): SubdlFile => ({
+    id,
+    url: `https://dl.subdl.com/subtitle/${id}`,
+    lang: 'en',
+    label,
+    releases: [],
+    ...extra,
+  });
+  const osFile = (id: string): Subtitle => ({
+    id,
+    url: `https://subs.example.com/${id}.srt`,
+    lang: 'eng',
+    label: `Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPB.${id}.srt`,
+  });
+
+  beforeEach(() => {
+    net.addons = [OPENSUBTITLES];
+    net.asks = [];
+    subdlNet.searches = [];
+    subdlNet.resting = false;
+    subdlNet.downloadsLeft = true;
+    forgetSubtitleTraces();
+    startSubtitleTrace(VIDEO, 0);
+  });
+
+  it('comes after the stream’s and the addons’ files, by match, without the same link twice', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    list.start();
+    expect(subdlNet.searches).toHaveLength(1);
+    expect(subdlNet.searches[0]).toMatchObject({ wanted: ['en'], loaded: true });
+    net.asks[0]!.answers[0]!.query.answer([osFile('os1')]);
+    subdlNet.searches[0]!.set({
+      status: 'answered',
+      ms: 600,
+      saved: false,
+      files: [
+        subdlFile('1', 'Test.Film.2026.720p.HDTV-OTHER'),
+        { ...subdlFile('2', 'Test.Film.2026.Remux'), url: 'https://subs.example.com/os1.srt' },
+        subdlFile('3', 'Test.Film.2026', { releases: [RELEASE, 'Test.Film.2026.BluRay-X'] }),
+      ],
+    });
+    const { options, pending } = list.get();
+    expect(pending).toBe(0);
+    expect(options.map((option) => option.key)).toEqual([
+      'stream#own',
+      `${OPENSUBTITLES_V3_ID}#os1`,
+      'subdl#3',
+      'subdl#1',
+    ]);
+    expect(options[2]).toMatchObject({ source: 'SubDL', releaseName: RELEASE, lang: 'en' });
+    expect(recentSubtitleTraces()[0]!.subdl).toEqual({
+      state: 'answered',
+      files: { en: 3 },
+      ms: 600,
+      saved: false,
+    });
+  });
+
+  it('lists at most 20 of its files in a language', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    list.start();
+    const files = Array.from({ length: 30 }, (_, i) => subdlFile(`e${i}`, `Test.Film.${i}`));
+    files.push(subdlFile('fr1', 'Test.Film.fr', { lang: 'fr' }));
+    subdlNet.searches[0]!.set({ status: 'answered', ms: 1, saved: false, files });
+    const options = list.get().options.filter((option) => option.source === 'SubDL');
+    expect(options.filter((option) => option.lang === 'en')).toHaveLength(20);
+    expect(options.filter((option) => option.lang === 'fr')).toHaveLength(1);
+  });
+
+  it('files its one Spanish and its Chinese under Latin American Spanish and simplified Chinese when those were asked first', () => {
+    for (const [wanted, sent, listed] of [
+      [['es-419'], 'es', 'es-419'],
+      [['zh-hans'], 'zh', 'zh-hans'],
+      [['es-419', 'es'], 'es', 'es-419'],
+      [['es', 'es-419'], 'es', 'es'],
+      [['en'], 'es', 'es'],
+    ] as const) {
+      subdlNet.searches = [];
+      const list = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, languages: wanted });
+      list.start();
+      subdlNet.searches[0]!.set({
+        status: 'answered',
+        ms: 1,
+        saved: false,
+        files: [subdlFile('s1', 'Test.Film.2026', { lang: sent })],
+      });
+      const [file] = list.get().options.filter((option) => option.source === 'SubDL');
+      expect(file?.lang).toBe(listed);
+      list.stop();
+    }
+  });
+
+  it('files its one Spanish under the variety turned on, with no search more', () => {
+    for (const [wanted, turnedOn] of [
+      [['es-419'], 'es'],
+      [['es'], 'es-419'],
+      [['es-419', 'es'], 'spa'],
+    ] as const) {
+      subdlNet.searches = [];
+      const list = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, languages: wanted });
+      list.start();
+      subdlNet.searches[0]!.set({
+        status: 'answered',
+        ms: 1,
+        saved: false,
+        files: [subdlFile('s1', 'Test.Film.2026', { lang: 'es' })],
+      });
+      list.askSubdl(turnedOn);
+      expect(subdlNet.searches).toHaveLength(1);
+      const [file] = list.get().options.filter((option) => option.source === 'SubDL');
+      expect(file?.lang).toBe(turnedOn === 'spa' ? 'es' : turnedOn);
+      list.stop();
+    }
+  });
+
+  it('counts its search as still to answer until it answers, fails or gives up', () => {
+    for (const end of [
+      { status: 'answered', files: [], ms: 1, saved: false },
+      { status: 'failed', why: 'timeout', ms: 8000 },
+      { status: 'off', why: 'resting' },
+    ]) {
+      subdlNet.searches = [];
+      net.asks = [];
+      const list = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+      list.start();
+      net.asks[0]!.answers[0]!.query.answer([]);
+      expect(list.get().pending).toBe(1);
+      // Of those, SubDL's: not an addon.
+      expect(list.get().subdlAsking).toBe(1);
+      subdlNet.searches[0]!.set(end);
+      expect(list.get().pending).toBe(0);
+      expect(list.get().subdlAsking).toBeUndefined();
+      list.stop();
+    }
+  });
+
+  it('leaves the addons’ files as they were when it fails, showing an older answer meanwhile', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    list.start();
+    net.asks[0]!.answers[0]!.query.answer([osFile('os1'), osFile('os2')]);
+    const before = list.get().options;
+    subdlNet.searches[0]!.set({ status: 'failed', why: 'server', ms: 300 });
+    expect(list.get().options).toEqual(before);
+    subdlNet.searches[0]!.set({
+      status: 'failed',
+      why: 'server',
+      ms: 300,
+      files: [subdlFile('old', 'Test.Film.old')],
+    });
+    expect(list.get().options.slice(0, before.length)).toEqual(before);
+    expect(list.get().options[list.get().options.length - 1]!.key).toBe('subdl#old');
+    expect(recentSubtitleTraces()[0]!.subdl).toEqual({
+      state: 'failed',
+      why: 'server',
+      ms: 300,
+      saved: { en: 1 },
+    });
+  });
+
+  it('is never asked again by a hash read late', async () => {
+    vi.useFakeTimers({ now: 0 });
+    try {
+      const reading = { ...stream, behaviorHints: { filename: `${RELEASE}.mkv` } } as Stream;
+      const list = subtitleList('movie', VIDEO, reading, 'Streams', ask);
+      list.start();
+      expect(subdlNet.searches).toHaveLength(1);
+      // SubDL answering while the hash is read leaves the addons still to be asked.
+      subdlNet.searches[0]!.set({ status: 'answered', files: [], ms: 1, saved: false });
+      expect(list.get().pending).toBe(1);
+      await vi.advanceTimersByTimeAsync(HASH_WAIT_MS);
+      net.hash!({ found: { videoHash: '8e245d9679d31e12', videoSize: 1 }, ms: 3000, walks: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(net.asks).toHaveLength(2);
+      expect(subdlNet.searches).toHaveLength(1);
+      list.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks once more for a language turned on that it was not asked for, and never a third time', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    list.start();
+    list.askSubdl('eng');
+    expect(subdlNet.searches).toHaveLength(1);
+    list.askSubdl('und');
+    expect(subdlNet.searches).toHaveLength(1);
+    list.askSubdl('fre');
+    expect(subdlNet.searches).toHaveLength(2);
+    expect(subdlNet.searches[1]).toMatchObject({ wanted: ['fre'], loaded: true });
+    expect(list.get().pending).toBe(1 + 1 + 1);
+    subdlNet.searches[1]!.set({
+      status: 'answered',
+      files: [subdlFile('f', 'Test.Film.fr', { lang: 'fr' })],
+      ms: 2,
+      saved: false,
+    });
+    expect(recentSubtitleTraces()[0]!.subdlMore).toEqual({ language: 'fr', files: 1 });
+    list.askSubdl('de');
+    expect(subdlNet.searches).toHaveLength(2);
+    list.stop();
+    expect(subdlNet.searches.every((search) => search.stopped)).toBe(true);
+  });
+
+  it('asks again, for another stream of the video, the language turned on, and no third', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, turnedOn: ['fre'] });
+    list.start();
+    expect(subdlNet.searches.map((search) => search.wanted)).toEqual([['en'], ['fre']]);
+    subdlNet.searches[1]!.set({
+      status: 'answered',
+      files: [subdlFile('f', 'Test.Film.fr', { lang: 'fr' })],
+      ms: 2,
+      saved: true,
+    });
+    expect(recentSubtitleTraces()[0]!.subdlMore).toEqual({ language: 'fr', files: 1 });
+    expect(list.askSubdl('de')).toBe(false);
+    expect(subdlNet.searches).toHaveLength(2);
+    list.stop();
+    subdlNet.searches = [];
+    const spanish = subtitleList('movie', VIDEO, stream, 'Streams', {
+      ...ask,
+      languages: ['es-419'],
+      turnedOn: ['es'],
+    });
+    spanish.start();
+    subdlNet.searches[0]!.set({
+      status: 'answered',
+      ms: 1,
+      saved: true,
+      files: [subdlFile('s1', 'Test.Film.2026', { lang: 'es' })],
+    });
+    expect(subdlNet.searches).toHaveLength(1);
+    expect(spanish.get().options.find((option) => option.source === 'SubDL')?.lang).toBe('es');
+    spanish.stop();
+  });
+
+  it('asks once more after a play with subtitles off, but not without a key or while resting', () => {
+    const off = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, languages: [] });
+    off.start();
+    subdlNet.searches[0]!.set({ status: 'off', why: 'subtitles off' });
+    off.askSubdl('en');
+    expect(subdlNet.searches).toHaveLength(2);
+    subdlNet.searches = [];
+    const noKey = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    noKey.start();
+    subdlNet.searches[0]!.set({ status: 'off', why: 'no key' });
+    noKey.askSubdl('fr');
+    expect(subdlNet.searches).toHaveLength(1);
+    subdlNet.searches = [];
+    subdlNet.resting = true;
+    const resting = subtitleList('movie', VIDEO, stream, 'Streams', ask);
+    resting.start();
+    resting.askSubdl('fr');
+    expect(subdlNet.searches).toHaveLength(1);
+  });
+
+  it('is not asked without what to ask', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams');
+    list.start();
+    list.askSubdl('fr');
+    expect(subdlNet.searches).toHaveLength(0);
+    expect(recentSubtitleTraces()[0]!.subdl).toBeUndefined();
+  });
+});
+
+describe('bestSubdlRelease', () => {
+  const video = { filename: 'Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPA.mkv' };
+  it('takes the release that matches the video best, other than the label', () => {
+    expect(
+      bestSubdlRelease(
+        {
+          label: 'Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPA',
+          releases: [
+            'Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPA',
+            'Test.Film.2026.720p.BluRay.x264-GRPB',
+            'Test.Film.2026.1080p.WEB-DL.H.264-GRPA',
+          ],
+        },
+        video,
+      ),
+    ).toBe('Test.Film.2026.1080p.WEB-DL.H.264-GRPA');
+    expect(
+      bestSubdlRelease(
+        { label: 'x', releases: ['Test.Film.2026.720p.BluRay-GRPB', 'Other'] },
+        video,
+      ),
+    ).toBe('Test.Film.2026.720p.BluRay-GRPB');
+    expect(bestSubdlRelease({ label: 'x', releases: [] }, video)).toBeUndefined();
+  });
+});
+
+describe('capSubdlFiles', () => {
+  it('keeps every file not SubDL’s, and the first of SubDL’s', () => {
+    const files = ['os#1', 'subdl#1', 'subdl#2', 'os#2', 'subdl#3'].map((key) => ({
+      key,
+      lang: 'en',
+    }));
+    expect(capSubdlFiles(files, 2).map((file) => file.key)).toEqual([
+      'os#1',
+      'subdl#1',
+      'subdl#2',
+      'os#2',
+    ]);
+    expect(capSubdlFiles(files, 0).map((file) => file.key)).toEqual(['os#1', 'os#2']);
+  });
+
+  it('keeps SubDL’s files in the language showing first, then others in their order', () => {
+    const files = [
+      { key: 'os#1', lang: 'ger' },
+      ...['en1', 'en2', 'en3'].map((id) => ({ key: `subdl#${id}`, lang: 'en' })),
+      { key: 'subdl#de1', lang: 'de' },
+      { key: 'subdl#de2', lang: 'de' },
+    ];
+    expect(capSubdlFiles(files, 3, 'ger').map((file) => file.key)).toEqual([
+      'os#1',
+      'subdl#en1',
+      'subdl#de1',
+      'subdl#de2',
+    ]);
+    expect(capSubdlFiles(files, 1, 'de').map((file) => file.key)).toEqual(['os#1', 'subdl#de1']);
+  });
+});
+
+describe('a SubDL download', () => {
+  const FAKE = 'FAKE-SUBDL-KEY-0000';
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const srt = (line: string) => `1\n00:00:01,000 --> 00:00:02,000\n${line}\n`;
+
+  /** A ZIP of stored files, as SubDL sends a release. */
+  function storedZip(files: Array<[string, string]>): Uint8Array {
+    const parts: Uint8Array[] = [];
+    const central: Uint8Array[] = [];
+    let offset = 0;
+    for (const [name, text] of files) {
+      const data = encode(text);
+      const nameBytes = encode(name);
+      const local = new Uint8Array(30 + nameBytes.length + data.length);
+      const lv = new DataView(local.buffer);
+      lv.setUint32(0, 0x04034b50, true);
+      lv.setUint32(14, crc32(data), true);
+      lv.setUint32(18, data.length, true);
+      lv.setUint32(22, data.length, true);
+      lv.setUint16(26, nameBytes.length, true);
+      local.set(nameBytes, 30);
+      local.set(data, 30 + nameBytes.length);
+      const entry = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(entry.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint32(16, crc32(data), true);
+      cv.setUint32(20, data.length, true);
+      cv.setUint32(24, data.length, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cv.setUint32(42, offset, true);
+      entry.set(nameBytes, 46);
+      parts.push(local);
+      central.push(entry);
+      offset += local.length;
+    }
+    const size = central.reduce((sum, part) => sum + part.length, 0);
+    const end = new Uint8Array(22);
+    const ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(8, files.length, true);
+    ev.setUint16(10, files.length, true);
+    ev.setUint32(12, size, true);
+    ev.setUint32(16, offset, true);
+    const all = [...parts, ...central, end];
+    const out = new Uint8Array(all.reduce((sum, part) => sum + part.length, 0));
+    let at = 0;
+    for (const part of all) {
+      out.set(part, at);
+      at += part.length;
+    }
+    return out;
+  }
+
+  const fetched: string[] = [];
+  beforeEach(() => {
+    fetched.length = 0;
+    subdlNet.downloadsLeft = true;
+    clearSubtitleCache();
+  });
+  const serveBytes = (bytes: Uint8Array) =>
+    vi.stubGlobal('fetch', (url: string) => {
+      fetched.push(url);
+      return Promise.resolve(new Response(bytes.slice()));
+    });
+  const lines = (cues: Awaited<ReturnType<typeof loadSubtitles>>) =>
+    cues.map((cue) => cue.lines[0]![0]!.text);
+
+  it('opens a ZIP, and takes the episode of a pack from the link, which it never sends', async () => {
+    serveBytes(
+      storedZip([
+        ['Test.Show.S02E02.srt', srt('Line 2')],
+        ['Test.Show.S02E03.srt', srt('Line 3')],
+      ]),
+    );
+    const cues = await loadSubtitles({
+      url: 'https://dl.subdl.com/subtitle/9000002-9100002.zip#s2e3',
+      lang: 'en',
+    });
+    expect(lines(cues)).toEqual(['Line 3']);
+    expect(fetched).toEqual(['https://dl.subdl.com/subtitle/9000002-9100002.zip']);
+    serveBytes(storedZip([['Test.Film.srt', srt('Line 1')]]));
+    expect(
+      lines(await loadSubtitles({ url: 'https://dl.subdl.com/subtitle/1-2.zip', lang: 'en' })),
+    ).toEqual(['Line 1']);
+    for (const url of fetched) expect(url).not.toContain(FAKE);
+  });
+
+  it('opens a ZIP listed for the episode alone at its file, never one named for another', async () => {
+    serveBytes(
+      storedZip([
+        ['Test.Show.S01E04.srt', srt('Line 4') + '\n' + srt('Line 4 again')],
+        ['Test.Show.S01E05.srt', srt('Line 5')],
+      ]),
+    );
+    const episode = { lang: 'en', season: 1, episode: 5 };
+    expect(
+      lines(await loadSubtitles({ url: 'https://dl.subdl.com/subtitle/5-6.zip', ...episode })),
+    ).toEqual(['Line 5']);
+    // An addon's file that turns out to be a ZIP, likewise.
+    expect(
+      lines(await loadSubtitles({ url: 'https://subs.example.com/e5.zip', ...episode })),
+    ).toEqual(['Line 5']);
+    serveBytes(storedZip([['Test.Show.S01E04.srt', srt('Line 4')]]));
+    await expect(
+      loadSubtitles({ url: 'https://dl.subdl.com/subtitle/7-8.zip', ...episode }),
+    ).rejects.toThrow('The subtitle archive could not be read');
+    serveBytes(storedZip([['Test.Show.srt', srt('Line 1')]]));
+    expect(
+      lines(await loadSubtitles({ url: 'https://dl.subdl.com/subtitle/9-10.zip', ...episode })),
+    ).toEqual(['Line 1']);
+  });
+
+  it('says an archive that cannot be read could not be, and a pack without the episode', async () => {
+    serveBytes(storedZip([['Test.Show.S02E02.srt', srt('Line 2')]]));
+    await expect(
+      loadSubtitles({ url: 'https://dl.subdl.com/subtitle/3-4.zip#s2e3', lang: 'en' }),
+    ).rejects.toThrow('The subtitle archive could not be read');
+  });
+
+  it('makes no request once the day’s SubDL downloads are used up', async () => {
+    serveBytes(encode(srt('Line 1')));
+    subdlNet.downloadsLeft = false;
+    await expect(
+      loadSubtitles({ url: 'https://dl.subdl.com/subtitle/9000001/9300001', lang: 'en' }),
+    ).rejects.toThrow('SubDL files are used up for today');
+    expect(fetched).toEqual([]);
+    // Another addon's files are not counted.
+    expect(
+      lines(await loadSubtitles({ url: 'https://subs.example.com/a.srt', lang: 'en' })),
+    ).toEqual(['Line 1']);
   });
 });

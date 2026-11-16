@@ -422,6 +422,7 @@
     "versions_other": "{{count}} versions",
     "stillAsking_one": "Still asking {{count}} addon…",
     "stillAsking_other": "Still asking {{count}} addons…",
+    "stillSubdl": "Still looking on SubDL…",
     "stillLinking": "Still looking for subtitles linked to your video…",
     "stillReadingVideo": "Still looking for subtitles inside the video…",
     "noSubtitles": "No subtitles found",
@@ -661,6 +662,8 @@
     "services": "Services",
     "trakt": "Trakt",
     "tmdb": "Extra details from TMDB: {{value}}",
+    "subdl": "SubDL subtitles: {{value}}",
+    "subdlRefused": "Key not accepted",
     "stillWatching": "Ask \"Still watching?\": {{value}}",
     "nextAtCredits": "Start next episode at the credits: {{value}}",
     "streamHelper": "Stream helper",
@@ -846,6 +849,26 @@
   },
   "kids": {
     "notForKids": "This title isn't available in a kids profile."
+  },
+  "subdl": {
+    "title": "SubDL subtitles",
+    "lead": "SubDL has more subtitles for many films and series, often made for the exact version you're watching. To use it, add your own free SubDL key.",
+    "getKey": "On your phone or computer, sign in at subdl.com (it's free), open the API page and copy your key. This code opens SubDL's API page.",
+    "key": "Your SubDL key",
+    "placeholder": "Type or paste your key",
+    "save": "Save key",
+    "saved": "A key is saved. Type a new one to replace it.",
+    "badFormat": "That doesn't look like a SubDL key. Check it and try again.",
+    "checking": "Checking your key…",
+    "works": "Your key works. BannerTV will look on SubDL too.",
+    "refused": "SubDL didn't accept this key. Check it and try again.",
+    "unreachable": "Can't reach SubDL right now. Your key is saved and will be tried when you watch.",
+    "resting": "SubDL asked BannerTV to slow down. It'll look there again later.",
+    "usedUp": "This key's searches for today are used up. SubDL will be asked again tomorrow.",
+    "checkAgain": "Check again",
+    "private": "Your key stays with this profile and is never shown. With a BannerTV account it goes to your other screens, encrypted like your add-ons.",
+    "remove": "Remove key",
+    "removed": "Key removed. BannerTV won't look on SubDL."
   },
   "trakt": {
     "title": "Trakt",

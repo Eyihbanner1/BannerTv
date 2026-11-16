@@ -3,17 +3,38 @@ import {
   createStore,
   type Cue,
   detectEncoding,
+  fileReleaseMatch,
   HASH_MATCHING_ADDON_IDS,
+  isZip,
+  languageKey,
   parseSubtitleText,
   type QueryState,
+  type ReleaseMatch,
   stripAdCues,
+  subdlCodeFor,
+  type SubdlFile,
+  subdlFileLanguage,
+  type SubdlSearch,
+  type SubdlSearchState,
   subtitleFileKey,
+  subtitleFromZip,
+  type VideoRelease,
+  ZipError,
+  type ZipPick,
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
+import { isSubdlDownload, subdl, subdlResting, subdlUsage } from '../data/subdl';
 import { mark } from '../platform/marks';
 import { readStreamHash } from './stream-hash';
-import { traceFiles, traceHash, traceHashLinked } from './subtitle-trace';
+import {
+  type SubdlTrace,
+  traceFiles,
+  traceHash,
+  traceHashLinked,
+  traceSubdl,
+  traceSubdlMore,
+} from './subtitle-trace';
 
 /** A subtitle file the viewer can pick. Never shows its link, which can carry account keys. */
 export interface SubtitleOption {
@@ -55,6 +76,11 @@ export interface SubtitleListState {
   hashComing?: boolean;
   /** Of those in `pending`, the hash still being read after the addons were asked without it. */
   hashReading?: boolean;
+  /**
+   * Of those in `pending`, SubDL's searches still asking: not addons, and a
+   * track of forced lines only is not held back for them.
+   */
+  subdlAsking?: number;
 }
 
 /**
@@ -116,11 +142,34 @@ async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayB
   return readCapped(stream);
 }
 
-async function download(url: string, lang: string): Promise<Cue[]> {
+/** The episode wanted from a ZIP that may hold others, as SubDL's list marks it on the link: "#s2e3". */
+const PACK_EPISODE = /#s(\d+)e(\d+)$/;
+
+async function download(option: LoadedOption): Promise<Cue[]> {
+  const { url, lang } = option;
+  // The fragment says which file of a pack is wanted; it is never sent.
+  const cut = url.indexOf('#');
+  const fetchUrl = cut === -1 ? url : url.slice(0, cut);
+  const packed = PACK_EPISODE.exec(url);
+  // A file for one episode that is a ZIP (a SubDL row for the episode alone, or an addon's) is
+  // opened at that episode's file, or one named for none: never one named for another.
+  const pick: ZipPick = packed
+    ? { season: Number(packed[1]), episode: Number(packed[2]) }
+    : option.episode !== undefined
+      ? {
+          ...(option.season !== undefined && { season: option.season }),
+          episode: option.episode,
+          loose: true,
+        }
+      : {};
+  // A SubDL file counts against the day's downloads; never with the key.
+  if (isSubdlDownload(fetchUrl) && !subdlUsage.takeDownload()) {
+    throw new SubtitleLoadError('SubDL files are used up for today');
+  }
   const controller = typeof AbortController === 'undefined' ? null : new AbortController();
   const timer = window.setTimeout(() => controller?.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal: controller?.signal }).catch(() => {
+    const response = await fetch(fetchUrl, { signal: controller?.signal }).catch(() => {
       throw new SubtitleLoadError('The subtitle file could not be reached');
     });
     if (!response.ok)
@@ -131,7 +180,16 @@ async function download(url: string, lang: string): Promise<Cue[]> {
       ? await readCapped(response.body)
       : new Uint8Array(await response.arrayBuffer());
     if (bytes.length > MAX_BYTES) throw new SubtitleLoadError('The subtitle file is too big');
-    if (isGzip(bytes)) bytes = await gunzip(bytes);
+    if (isZip(bytes)) {
+      try {
+        bytes = subtitleFromZip(bytes, pick) as Uint8Array<ArrayBuffer>;
+      } catch (error) {
+        if (error instanceof ZipError) {
+          throw new SubtitleLoadError('The subtitle archive could not be read');
+        }
+        throw error;
+      }
+    } else if (isGzip(bytes)) bytes = await gunzip(bytes);
     const text = new TextDecoder(detectEncoding(bytes, lang)).decode(bytes);
     // The lines subtitle sites add (adverts, the site's address, credits for the file) never show.
     const cues = stripAdCues(parseSubtitleText(text));
@@ -149,8 +207,11 @@ async function download(url: string, lang: string): Promise<Cue[]> {
  * dozens, which would push out those the viewer switches between): one kept
  * already, or being read, is still shared.
  */
+/** What reading a file needs: the season and episode it is for open a ZIP at that file. */
+type LoadedOption = Pick<SubtitleOption, 'url' | 'lang' | 'season' | 'episode'>;
+
 export function loadSubtitles(
-  option: Pick<SubtitleOption, 'url' | 'lang'>,
+  option: LoadedOption,
   { keep = true }: { keep?: boolean } = {},
 ): Promise<Cue[]> {
   const existing = cache.get(option.url);
@@ -161,7 +222,7 @@ export function loadSubtitles(
     return existing;
   }
   const reading = passing.get(option.url);
-  const promise = reading ?? download(option.url, option.lang);
+  const promise = reading ?? download(option);
   if (!keep) {
     if (!reading) {
       passing.set(option.url, promise);
@@ -249,6 +310,95 @@ export function mergeHashAnswer<T extends ListedSubtitle>(
   return merged;
 }
 
+/** At most this many of SubDL's files in a language are listed. */
+const SUBDL_PER_LANGUAGE = 20;
+/** At most this many of SubDL's files are read by the files that agree. */
+export const SUBDL_AGREEMENT_FILES = 6;
+
+const MATCH_RANK: Readonly<Record<ReleaseMatch, number>> = { exact: 3, group: 2, loose: 1 };
+const matchRank = (match: ReleaseMatch | undefined) => (match ? MATCH_RANK[match] : 0);
+
+/**
+ * The release SubDL says a file was made for that matches the video best, as
+ * its second release name: an exact match over one by group over a loose
+ * one, the first of equals; the first release when none matches.
+ */
+export function bestSubdlRelease(
+  file: Pick<SubdlFile, 'label' | 'releases'>,
+  video: VideoRelease,
+): string | undefined {
+  let best: string | undefined;
+  let bestRank = 0;
+  for (const name of file.releases) {
+    if (name === file.label) continue;
+    const rank = matchRank(fileReleaseMatch({ label: name }, video));
+    if (rank > bestRank) {
+      best = name;
+      bestRank = rank;
+    }
+  }
+  return best ?? file.releases[0];
+}
+
+/**
+ * Every file not SubDL's, and `max` of SubDL's, in their order: those in
+ * `language` (the one showing) first, then the first of the others.
+ */
+export function capSubdlFiles<T extends { key: string; lang: string }>(
+  files: readonly T[],
+  max: number,
+  language?: string,
+): T[] {
+  const ours = files.filter((file) => file.key.startsWith('subdl#'));
+  const wanted = language === undefined ? undefined : languageKey(language);
+  const kept = new Set<T>();
+  for (const file of ours) {
+    if (kept.size < max && languageKey(file.lang) === wanted) kept.add(file);
+  }
+  for (const file of ours) if (kept.size < max) kept.add(file);
+  return files.filter((file) => !file.key.startsWith('subdl#') || kept.has(file));
+}
+
+/** What SubDL's search says for Diagnostics: counts by language, never a link. */
+function subdlTraceOf(state: SubdlSearchState): SubdlTrace {
+  const counts = (files: readonly SubdlFile[] | undefined) => {
+    if (!files || files.length === 0) return undefined;
+    const out: Record<string, number> = {};
+    for (const file of files) out[file.lang] = (out[file.lang] ?? 0) + 1;
+    return out;
+  };
+  switch (state.status) {
+    case 'asking':
+      return { state: 'asking' };
+    case 'answered':
+      return {
+        state: 'answered',
+        files: counts(state.files) ?? {},
+        ms: state.ms,
+        saved: state.saved,
+      };
+    case 'off': {
+      const saved = counts(state.files);
+      return { state: 'off', why: state.why, ...(saved && { saved }) };
+    }
+    case 'failed': {
+      const saved = counts(state.files);
+      return { state: 'failed', why: state.why, ms: state.ms, ...(saved && { saved }) };
+    }
+  }
+}
+
+/** What SubDL is asked as a play starts: the languages, and the video its files are matched to. */
+export interface SubdlAskInput {
+  languages: readonly string[];
+  release: VideoRelease;
+  /**
+   * Languages turned on from the sheet earlier in the play, on another
+   * stream of the video: asked as then (from the cache), never one more.
+   */
+  turnedOn?: readonly string[];
+}
+
 const settled = (state: QueryState<unknown>) =>
   state.status !== 'idle' && state.status !== 'loading';
 
@@ -269,11 +419,17 @@ export function subtitleList(
   videoId: string,
   stream: Stream,
   streamAddon: string,
+  subdlAsk?: SubdlAskInput,
 ): {
   get(): SubtitleListState;
   subscribe(listener: () => void): () => void;
   start(): void;
   stop(): void;
+  /**
+   * Asks SubDL once more, for a language the viewer turned on that it was
+   * not asked for: true when it asked, or its files moved to that language.
+   */
+  askSubdl(language: string): boolean;
 } {
   const own = stream.subtitles.map((subtitle) => toOption('stream', streamAddon, subtitle));
   const state = createStore<SubtitleListState>({ options: own, pending: 0 });
@@ -287,6 +443,73 @@ export function subtitleList(
   // When the addons were asked without the hash, as it was still being read (ms from start).
   let askedAt: number | undefined;
   let waitTimer: number | undefined;
+  // SubDL's search as the play started, then at most one more for a language turned on.
+  let subdlSearches: SubdlSearch[] = [];
+  let subdlUnsubscribe: Array<() => void> = [];
+  let subdlMoreLanguage: string | undefined;
+  // The languages the first search's files are listed in, first first: a variety turned on
+  // whose SubDL code was asked already (its one Spanish or Chinese) comes first.
+  let subdlFirstWanted: readonly string[] = subdlAsk?.languages ?? [];
+
+  function askSubdlFor(languages: readonly string[]) {
+    const search = subdl.search(type, videoId, languages);
+    subdlSearches.push(search);
+    subdlUnsubscribe.push(search.subscribe(refresh));
+    search.load();
+  }
+
+  /** SubDL's files, after the stream's and the addons': by match to the release, then its order. */
+  function addSubdlFiles(options: SubtitleOption[], seen: Set<string>): number {
+    let asking = 0;
+    const perLanguage = new Map<string, number>();
+    const release = subdlAsk?.release ?? {};
+    subdlSearches.forEach((search, nth) => {
+      const now = search.get();
+      if (now.status === 'asking') asking++;
+      const files = 'files' in now && now.files ? now.files : [];
+      // The languages this search was asked for, to list its files in the one wanted.
+      const wanted = nth === 0 ? subdlFirstWanted : subdlMoreLanguage ? [subdlMoreLanguage] : [];
+      const ranked = files
+        .map((file, index) => {
+          const releaseName = bestSubdlRelease(file, release);
+          const lang = subdlFileLanguage(file.lang, wanted);
+          const listed: ListedSubtitle =
+            releaseName === undefined && lang === file.lang
+              ? file
+              : {
+                  ...file,
+                  lang,
+                  ...(releaseName !== undefined && { releaseName }),
+                };
+          return {
+            listed,
+            index,
+            rank: matchRank(fileReleaseMatch(listed, release)),
+          };
+        })
+        .sort((a, b) => b.rank - a.rank || a.index - b.index);
+      for (const { listed } of ranked) {
+        if (seen.has(listed.url)) continue;
+        const count = perLanguage.get(listed.lang) ?? 0;
+        if (count >= SUBDL_PER_LANGUAGE) continue;
+        perLanguage.set(listed.lang, count + 1);
+        seen.add(listed.url);
+        options.push(toOption('subdl', 'SubDL', listed));
+      }
+    });
+    const [first, more] = subdlSearches;
+    if (first) traceSubdl(videoId, subdlTraceOf(first.get()));
+    if (more && subdlMoreLanguage !== undefined) {
+      const state = more.get();
+      traceSubdlMore(videoId, {
+        language: subdlMoreLanguage,
+        ...(state.status === 'answered' && { files: state.files.length }),
+        ...(state.status === 'failed' && { failed: state.why }),
+        ...(state.status === 'off' && { off: state.why }),
+      });
+    }
+    return asking;
+  }
 
   function refresh() {
     const options = own.slice();
@@ -310,6 +533,8 @@ export function subtitleList(
         options.push(toOption(answer.addon.manifest.id, answer.addon.manifest.name, subtitle));
       }
     });
+    const subdlAsking = addSubdlFiles(options, seen);
+    pending += subdlAsking;
     // Asked without the hash while it is still being read: it may yet link files, but only
     // through an addon that matches by it.
     const hashLate =
@@ -317,11 +542,14 @@ export function subtitleList(
       askedAt !== undefined &&
       answers.some((answer) => HASH_MATCHING_ADDON_IDS.has(answer.addon.manifest.id));
     const hashComing = hashLate || askingAgain > 0;
+    // Still reading the hash before the addons are asked (SubDL answered meanwhile): they count.
+    const notAsked = hashing && askedAt === undefined && answers.length === 0 ? 1 : 0;
     state.set({
       options,
-      pending: pending + askingAgain + (hashLate ? 1 : 0),
+      pending: pending + askingAgain + (hashLate ? 1 : 0) + notAsked,
       ...(hashComing && { hashComing: true }),
       ...(hashLate && { hashReading: true }),
+      ...(subdlAsking > 0 && { subdlAsking }),
     });
     traceFiles(
       videoId,
@@ -367,11 +595,40 @@ export function subtitleList(
     return asked.length;
   }
 
+  function askSubdl(language: string): boolean {
+    const [first] = subdlSearches;
+    if (!subdlAsk || !first) return false;
+    const code = subdlCodeFor(language);
+    if (code === undefined) return false;
+    if (first.languages.indexOf(code) !== -1) {
+      // Asked already: its files are listed in the variety turned on (es-419 or es, say).
+      const key = languageKey(language);
+      if (subdlFirstWanted.length > 0 && languageKey(subdlFirstWanted[0]!) === key) return false;
+      subdlFirstWanted = [language, ...subdlFirstWanted.filter((w) => languageKey(w) !== key)];
+      refresh();
+      return true;
+    }
+    if (subdlSearches.length > 1) return false;
+    const now = first.get();
+    // Not asked for a reason another language would not change (no key, a kids profile).
+    if (now.status === 'off' && now.why !== 'subtitles off') return false;
+    if (subdlResting()) return false;
+    subdlMoreLanguage = languageKey(language);
+    askSubdlFor([language]);
+    refresh();
+    return true;
+  }
+
   return {
     get: state.get,
     subscribe: state.subscribe,
     start() {
       if (answers.length > 0 || hashing) return;
+      // SubDL is asked at once, beside the hash and the addons: it never waits for either.
+      if (subdlAsk && subdlSearches.length === 0) {
+        askSubdlFor(subdlAsk.languages);
+        subdlAsk.turnedOn?.forEach((language) => askSubdl(language));
+      }
       const { videoHash, videoSize } = stream.behaviorHints;
       const source = stream.source;
       if (videoHash || source.kind !== 'url') {
@@ -460,6 +717,13 @@ export function subtitleList(
       // Starting again asks the query cache, which still holds the answers.
       answers = [];
       again = new Map();
+      subdlUnsubscribe.forEach((undo) => undo());
+      subdlUnsubscribe = [];
+      subdlSearches.forEach((search) => search.stop());
+      subdlSearches = [];
+      subdlMoreLanguage = undefined;
+      subdlFirstWanted = subdlAsk?.languages ?? [];
     },
+    askSubdl,
   };
 }

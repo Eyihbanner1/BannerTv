@@ -6,6 +6,7 @@ import demoWorker from '../../../services/demo/src/worker';
 import { API_SERVICE } from '../src/data/api-service';
 import { PAIR_SERVICE } from '../src/data/pairing';
 import { SYNC_SERVICE } from '../src/data/sync-service';
+import { addStorageInitScript } from './tv';
 
 /**
  * A fake Cinemeta and OpenSubtitles for the journeys, so they never touch the
@@ -280,29 +281,33 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
   const requests: AddonRequests = { catalogs: [], phone: relay };
 
   if (!options.firstRun) {
-    await page.addInitScript(() => localStorage.setItem('bannertv.welcomed', '1'));
+    await addStorageInitScript(page, () => localStorage.setItem('bannertv.welcomed', '1'));
     // Stored once per test, and only if nothing else (seedStreamAddon) stored a list first.
-    await page.addInitScript((stored) => {
-      if (sessionStorage.getItem('bannertv.test.addons')) return;
-      sessionStorage.setItem('bannertv.test.addons', '1');
-      const request = indexedDB.open('bannertv', 1);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
-        if (!db.objectStoreNames.contains('cache')) {
-          db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
-        }
-      };
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction('kv', 'readwrite');
-        // add() rather than get() then put(): it never reads, so a journey holding the
-        // app's read of 'addons' cannot hold this write too.
-        const added = tx.objectStore('kv').add(stored, 'addons');
-        added.onerror = (event) => event.preventDefault(); // a list is already stored
-        tx.oncomplete = () => db.close();
-      };
-    }, EARLIER_ADDONS);
+    await addStorageInitScript(
+      page,
+      (stored) => {
+        if (sessionStorage.getItem('bannertv.test.addons')) return;
+        sessionStorage.setItem('bannertv.test.addons', '1');
+        const request = indexedDB.open('bannertv', 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+          if (!db.objectStoreNames.contains('cache')) {
+            db.createObjectStore('cache').createIndex('storedAt', 'storedAt');
+          }
+        };
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('kv', 'readwrite');
+          // add() rather than get() then put(): it never reads, so a journey holding the
+          // app's read of 'addons' cannot hold this write too.
+          const added = tx.objectStore('kv').add(stored, 'addons');
+          added.onerror = (event) => event.preventDefault(); // a list is already stored
+          tx.oncomplete = () => db.close();
+        };
+      },
+      EARLIER_ADDONS,
+    );
   }
 
   // Anything not mocked below fails, so a stray request shows up as an error.

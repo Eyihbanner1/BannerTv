@@ -57,6 +57,8 @@ const TV = {
     testBuild:
       'A test build of the native TV app. It installs beside BannerTV and never replaces it.',
   },
+  subdlNote:
+    'To add or change your SubDL key, use BannerTV on your phone or LG TV, signed in to the same account.',
   stillWatching: 'Still watching?',
   stillWatchingLead: 'The next episode is ready.',
   stop: 'Stop',

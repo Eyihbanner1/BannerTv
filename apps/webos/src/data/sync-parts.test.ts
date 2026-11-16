@@ -1,7 +1,14 @@
 import {
+  createPersisted,
   createStore,
+  type KeyValueStore,
   type KidsRating,
   type LiveItem,
+  memoryKeyValueStore,
+  profileKeyPrefix,
+  profileKeyValueStore,
+  readSubdlKey,
+  type SubdlKeyRecord,
   type PartChange,
   type Profile,
   type ProfilesState,
@@ -9,7 +16,13 @@ import {
 import { describe, expect, it } from 'vitest';
 import { NO_FILTER } from '../player/stream-filter';
 import { DEFAULT_PREFERENCES, type Preferences } from './preferences';
-import { preferencesPart, profilesPart, type SportsChoices, sportsPart } from './sync-parts';
+import {
+  preferencesPart,
+  profilesPart,
+  type SportsChoices,
+  sportsPart,
+  subdlPart,
+} from './sync-parts';
 
 const MAIN = 'Main';
 
@@ -491,5 +504,68 @@ describe('sportsPart', () => {
     expect(plain(part.snapshot())).toEqual({ 's/com.films': { v: 'no' } });
     void part.adopt(change([['s/odd', { t: 2, v: 'maybe' }]]));
     expect(adopted).toHaveLength(1);
+  });
+});
+
+describe('the SubDL key part', () => {
+  const FAKE = 'FAKE-SUBDL-KEY-0000';
+  const keyStore = (storage: KeyValueStore = memoryKeyValueStore()) =>
+    createPersisted<SubdlKeyRecord | null>({
+      storage,
+      key: 'subdl/key',
+      initial: null,
+      read: readSubdlKey,
+    });
+
+  it("holds only the key, in the profile's settings", async () => {
+    const store = keyStore();
+    const part = subdlPart('p1', store, () => false);
+    await part.load();
+    expect(part.document).toBe('p/p1/settings');
+    expect(part.prefixes).toEqual(['subdl/']);
+    expect(plain(part.snapshot())).toEqual({});
+    await store.update(() => ({ key: FAKE, state: 'refused' }));
+    expect(plain(part.snapshot())).toEqual({ 'subdl/key': { v: FAKE } });
+  });
+
+  it("takes the account's key as not yet tried, and its removal", async () => {
+    const store = keyStore();
+    const part = subdlPart('p1', store, () => false);
+    await part.load();
+    await part.adopt(change([['subdl/key', { v: ` ${FAKE} `, t: 1 }]]));
+    expect(store.get()).toEqual({ key: FAKE, state: 'unchecked' });
+    await store.update((record) => record && { ...record, state: 'works' });
+    // The same key again leaves what this screen found out.
+    await part.adopt(change([['subdl/key', { v: FAKE, t: 2 }]]));
+    expect(store.get()).toEqual({ key: FAKE, state: 'works' });
+    await part.adopt(change([], ['subdl/key']));
+    expect(store.get()).toBeNull();
+  });
+
+  it('ignores a value that cannot be a key, and other keys', async () => {
+    const store = keyStore();
+    const part = subdlPart('p1', store, () => false);
+    await part.load();
+    await part.adopt(change([['subdl/key', { v: 'not a key', t: 1 }]]));
+    await part.adopt(change([['subdl/key', { v: 42, t: 1 }]]));
+    await part.adopt(change([['subdl/other', { v: FAKE, t: 1 }]]));
+    expect(store.get()).toBeNull();
+  });
+
+  it('never takes a key on a kids profile', async () => {
+    const store = keyStore();
+    const part = subdlPart('p1', store, () => true);
+    await part.load();
+    await part.adopt(change([['subdl/key', { v: FAKE, t: 1 }]]));
+    expect(store.get()).toBeNull();
+  });
+
+  it('reads a profile not in use from its own store, so deleting it reaches the key', async () => {
+    const base = memoryKeyValueStore();
+    const own = profileKeyValueStore(base, Promise.resolve(profileKeyPrefix('p2')));
+    await own.set('subdl/key', { key: FAKE, state: 'works' });
+    const part = subdlPart('p2', keyStore(own), () => false);
+    await part.load();
+    expect(plain(part.snapshot())).toEqual({ 'subdl/key': { v: FAKE } });
   });
 });

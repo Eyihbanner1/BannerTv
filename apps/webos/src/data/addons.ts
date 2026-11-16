@@ -208,3 +208,11 @@ export function startAddons(): void {
     }, IDLE_DELAY_MS);
   });
 }
+
+/**
+ * Runs a request about a video in its turn among the app's, ahead of the
+ * others while a player has that video (as the addons' are): SubDL's search.
+ */
+export function runForPlay<T>(type: string, videoId: string, task: () => Promise<T>): Promise<T> {
+  return requestLimiter.run(task, playerFirst && (() => playerFirst.priority(type, videoId)));
+}

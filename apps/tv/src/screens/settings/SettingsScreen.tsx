@@ -8,6 +8,7 @@ import {
   type SubtitleStyle,
 } from '@tv/data/preferences';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
+import { subdlKey } from '@tv/data/subdl';
 import { accountState, checkAccountSection } from '@tv/data/sync';
 import { traktAccount } from '@tv/data/trakt';
 import { androidHostInfo } from '@tv/platform/android';
@@ -22,6 +23,7 @@ import { useNow } from '../../ui/use-now';
 import { color, layout, px, radii, spacing, type } from '../../ui/theme';
 import { nextChoice } from './choices';
 import { SettingNote, SettingRow } from './SettingRow';
+import { subdlRowValue } from './subdl-row';
 
 type SectionKey =
   | 'profiles'
@@ -260,6 +262,23 @@ function SubtitlesSection() {
       {row('background', BACKGROUNDS)}
       {row('position', POSITIONS)}
       <SettingNote>{t('player.styleKept')}</SettingNote>
+      {isKidsProfile() ? null : <SubdlNote />}
+    </>
+  );
+}
+
+/** SubDL, read only: the key is typed on the phone or the LG, and reaches this TV with the account. */
+function SubdlNote() {
+  const { t } = useTranslation();
+  const value = subdlRowValue(useSyncExternalStore(subdlKey.subscribe, subdlKey.get));
+  return (
+    <>
+      <SettingNote>
+        {t('settings.subdl', {
+          value: t(value === 'refused' ? 'settings.subdlRefused' : `common.${value}`),
+        })}
+      </SettingNote>
+      <SettingNote>{t('tv.subdlNote')}</SettingNote>
     </>
   );
 }

@@ -158,6 +158,9 @@ const PHONE = {
   learnLanguages: 'Use player choices for every title',
   yourTv: 'Your TV',
   streamHelperDetail: 'Your LG plays some add-on streams through this phone',
+  subdlDetail: 'More subtitles, with your own free key',
+  subdlGetKey: "Sign in at subdl.com (it's free), open the API page and copy your key.",
+  subdlOpenSite: 'Open subdl.com',
   streamHelperSwitch: 'Use the stream helper',
   streamHelperNotificationsOff:
     'Notifications are off for this app, so the helper’s notification and its Stop button won’t show. Turn the helper off here when you finish watching.',
