@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { languageOfSubdl, subdlCodeFor } from './languages';
+import { languageOfSubdl, subdlCodeFor, subdlFileLanguage } from './languages';
 
 describe('languageOfSubdl', () => {
   it("reads SubDL's codes as our keys", () => {
@@ -34,5 +34,16 @@ describe('subdlCodeFor', () => {
   it('gives none for a language with no ISO 639-1 code', () => {
     expect(subdlCodeFor('haw')).toBeUndefined();
     expect(subdlCodeFor('und')).toBeUndefined();
+  });
+});
+
+describe('subdlFileLanguage', () => {
+  it('lists Spanish and Chinese files as the variety asked, unless the plain one was asked too', () => {
+    expect(subdlFileLanguage('es', ['es-419'])).toBe('es-419');
+    expect(subdlFileLanguage('es', ['spa', 'es-419'])).toBe('es');
+    expect(subdlFileLanguage('zh', ['zh-hans'])).toBe('zh-hans');
+    expect(subdlFileLanguage('zh', ['zh'])).toBe('zh');
+    expect(subdlFileLanguage('zh-hant', ['zh-hans'])).toBe('zh-hant');
+    expect(subdlFileLanguage('en', ['es-419'])).toBe('en');
   });
 });

@@ -633,7 +633,7 @@ export {
   SUBDL_KEY_PATTERN,
   type SubdlKeyRecord,
 } from './integrations/subdl/key';
-export { languageOfSubdl, subdlCodeFor } from './integrations/subdl/languages';
+export { languageOfSubdl, subdlCodeFor, subdlFileLanguage } from './integrations/subdl/languages';
 export {
   classifySubdlAnswer,
   parseSubdlFiles,

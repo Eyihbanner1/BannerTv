@@ -26,3 +26,19 @@ export function languageOfSubdl(code: string): string | undefined {
   if (upper.indexOf('_') !== -1) return undefined;
   return languageKey(upper.toLowerCase());
 }
+
+// SubDL's one code asked for these of ours, by what its files are read as.
+const ASKED_AS: Readonly<Record<string, string>> = { es: 'es-419', zh: 'zh-hans' };
+
+/**
+ * The language a SubDL file is listed in for a viewer who wanted `wanted`:
+ * SubDL's one Spanish, asked for Latin American Spanish, is listed as that,
+ * and its Chinese, asked for simplified Chinese, likewise, unless the plain
+ * language was wanted too. Otherwise the file's own.
+ */
+export function subdlFileLanguage(lang: string, wanted: readonly string[]): string {
+  const asked = ASKED_AS[lang];
+  if (asked === undefined) return lang;
+  const keys = wanted.map(languageKey);
+  return keys.indexOf(asked) !== -1 && keys.indexOf(lang) === -1 ? asked : lang;
+}

@@ -13,6 +13,7 @@ import {
   stripAdCues,
   subdlCodeFor,
   type SubdlFile,
+  subdlFileLanguage,
   type SubdlSearch,
   type SubdlSearchState,
   subtitleFileKey,
@@ -418,15 +419,25 @@ export function subtitleList(
     let asking = 0;
     const perLanguage = new Map<string, number>();
     const release = subdlAsk?.release ?? {};
-    for (const search of subdlSearches) {
+    subdlSearches.forEach((search, nth) => {
       const now = search.get();
       if (now.status === 'asking') asking++;
       const files = 'files' in now && now.files ? now.files : [];
+      // The languages this search was asked for, to list its files in the one wanted.
+      const wanted =
+        nth === 0 ? (subdlAsk?.languages ?? []) : subdlMoreLanguage ? [subdlMoreLanguage] : [];
       const ranked = files
         .map((file, index) => {
           const releaseName = bestSubdlRelease(file, release);
+          const lang = subdlFileLanguage(file.lang, wanted);
           const listed: ListedSubtitle =
-            releaseName === undefined ? file : { ...file, releaseName };
+            releaseName === undefined && lang === file.lang
+              ? file
+              : {
+                  ...file,
+                  lang,
+                  ...(releaseName !== undefined && { releaseName }),
+                };
           return {
             listed,
             index,
@@ -442,7 +453,7 @@ export function subtitleList(
         seen.add(listed.url);
         options.push(toOption('subdl', 'SubDL', listed));
       }
-    }
+    });
     const [first, more] = subdlSearches;
     if (first) traceSubdl(videoId, subdlTraceOf(first.get()));
     if (more && subdlMoreLanguage !== undefined) {
