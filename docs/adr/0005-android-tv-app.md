@@ -40,6 +40,12 @@ Four facts shaped the design:
     - The page takes the link only once someone is watching, so a link survives the reload that asks "Who's watching?". It asks first by the rule a relaunch from the launcher follows: with more than one profile, when the profile in use has a PIN or the picker shows at launch.
     - The page then opens the title's Details over Home, so the person sees what plays before it does. Details puts focus where it always does: on Resume when there is a place to resume, and for a series whose last episode was finished (a "next" card), on its episode list, which does not yet pick out the next episode. Back goes to Home. A link never starts a stream by itself.
     - Another app on the device can send such a link, so both sides check it: a short lowercase type and ids of 1 to 300 characters with no control characters. Nothing else in the link is read.
+16. **The video's hash, read by the app.** Subtitle addons such as OpenSubtitles find the files made for the very file playing by its OpenSubtitles hash (ADR 0003). On the LG the page reads it with two byte-range requests. In the WebView that mostly fails: a debrid link redirects to a host on another origin, which sends no cross-origin headers, so the page can neither see where the link led nor read the bytes, and a link whose addon asked for request headers can't be read at all. So the page asks the app instead, with `hash(json)`, and makes no request of its own.
+    - The app reads it as the page would (`StreamHash.kt`, plain Kotlin that the JVM tests run against a file server): the first 64 KB through the stream's link, with redirects followed by hand (five at most, http and https only), then the size and the last 64 KB straight from where it landed, and through the stream's link again once that refuses. It sends the addon's request headers, as the player does, and asks for the bytes as they are (`Accept-Encoding: identity`). It never reads past the 64 KB asked for: a host that sends the whole file is stopped at the headers.
+    - One thread at background priority does the reads, so seeking and playing never wait on them. Only the newest play matters, so a new request cancels the one in flight. Each read gives up after 4 s, and the whole of it after 12 s.
+    - The answer is a `hash` event with the request's id: the hash, size and how many times it went through the stream's link, or why it failed and at which read. Never the link, nor where it led. The page checks it: anything that is not 16 hex digits and a size of at least 128 KB counts as a refusal.
+    - The page's own rules are unchanged: it gives up waiting after 15 s and ignores a later answer, asks the subtitles without the hash after 2 s, and asks the addons that match by the hash again when it comes later. A hash read is kept by the stream's link, and a failure is forgotten.
+    - The phone and the native TV app keep reading it through React Native's fetch, which has no cross-origin rules to stop it.
 
 ## Protocol (version 1)
 
@@ -57,6 +63,7 @@ Four facts shaped the design:
 | `helperState()` | JSON | `on`, `address`, `port`, `code` and `paired` (how many TVs). Added later. |
 | `watchNext(json)` | | `{ "cards": [ … ] }`: every card for the Watch Next row, below. It replaces BannerTV's cards there, and an empty list empties the row. Ignored where the device has no row. Added later (see "Additions"). |
 | `takeLink()` | string | The link the app was opened with, as JSON (`{ "type", "meta", "video" }`), once; `""` when there is none. Added later. |
+| `hash(json)` | | `{ "id", "url", "size"?, "headers"? }`: reads the video's OpenSubtitles hash on its own thread at background priority, two 64 KB ranges, redirects followed by hand, at most 12 s (decision 16). Answers with a `hash` event. Added later. |
 
 Player commands:
 
@@ -92,6 +99,12 @@ A Watch Next card, newest first by `watchedAt`:
 { "type": "keyboard", "visible": true }       the on-screen keyboard opened or closed
 { "type": "relaunch" }                        opened again from the launcher while running
 { "type": "open" }                            opened from a link while running: takeLink() has it
+{ "type": "hash", "id": 3, "hash": "8e245d9679d31e12", "size": 12909756, "walks": 1, "fellBack": "end" }
+{ "type": "hash", "id": 3, "failed": "busy", "step": "end", "walks": 2 }
+    the answer to hash(): the hash and size, or why it failed (no range, no size, too small,
+    refused, busy, timed out) and at which read (start, size, end); walks counts the requests
+    through the stream's link; fellBack (optional) the first read the link it landed on
+    refused. Never the link
 { "type": "player", "event": "state", "playWhenReady", "playing", "buffering", "ready", "ended",
   "position", "duration", "live" }            duration: seconds, null while unknown, -1 when live
 { "type": "player", "event": "time", "position", "duration" }    every 250 ms while playing
@@ -121,7 +134,7 @@ Android's error codes map to the kinds the session already acts on: network erro
 
 ### Additions
 
-`helper(command)`, `helperState()`, `watchNext(json)`, `takeLink()` and the `open` event came after version 1 first shipped, and joined it without a new version number. A method added later is optional. The page checks that it is there before calling it (`typeof BannerAndroid.watchNext === 'function'`), so an older app keeps working, and so does the phone app's player, which speaks the same protocol (`apps/mobile/src/player/phone-host.ts`) without `watchNext` and `takeLink`, and has `helper` and `helperState` only where its stream helper module is built in (ADR 0007). The page ignores an event it does not know. The version number changes only when something already in the protocol changes its meaning.
+`helper(command)`, `helperState()`, `watchNext(json)`, `takeLink()`, `hash(json)` and the `open` and `hash` events came after version 1 first shipped, and joined it without a new version number. A method added later is optional. The page checks that it is there before calling it (`typeof BannerAndroid.watchNext === 'function'`), so an older app keeps working, and so does the phone app's player, which speaks the same protocol (`apps/mobile/src/player/phone-host.ts`) without `watchNext`, `takeLink` and `hash`, and has `helper` and `helperState` only where its stream helper module is built in (ADR 0007). The page ignores an event it does not know. The version number changes only when something already in the protocol changes its meaning.
 
 ## Consequences
 

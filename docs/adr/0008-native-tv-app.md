@@ -55,6 +55,17 @@ Four facts shaped the design:
    controls fade in on a key and out after four seconds, seek ten seconds a press on left and right
    (repeating while held), and keep audio, subtitles and their style, quality and the stream list in
    sheets, with Up Next and "Still watching?" as on the LG.
+   - The video file's own text subtitles are drawn by the app in the viewer's style, as addon
+     files are: the phone's `modules/banner-cues` is linked in too (ADR 0007), so Android hands
+     their lines over through the phone's bridge and hides Media3's own subtitle view for them.
+     Picture subtitles (PGS, DVB) Media3 still draws itself. With the style at the top, every
+     line goes there, as on the phone.
+   - The tracks sheet has a Timing column between Subtitles and Style, as the LG's Timing tab:
+     the offset and which way, steps of 0.1 s, 0.5 s and 5 s each way, Reset, and the drift fix
+     for a file timed for another frame rate, each kept for the file; its heading says the offset
+     and whether the file was lined up or its drift fixed. Only a press changes them. As ADR
+     0005 decision 6 says, Android's own lines can be shown later but not earlier: a line comes
+     as it starts, with no end of its own.
 8. **A test package.** `com.bannertv.app.tvnative`, "BannerTV native test", installs beside the
    Android TV app. CI's `TV APK (React Native)` job type-checks, tests and builds a release APK
    signed with the Expo template's debug key, and uploads it as `bannertv-tv-native-apk`.
