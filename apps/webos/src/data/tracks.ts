@@ -51,6 +51,23 @@ export function wantedSubtitle(
   return foreign ? subtitleLanguage : null;
 }
 
+/**
+ * The languages SubDL is asked for, as a play starts: the title's last
+ * subtitle choice first, then the profile's own. "Only when the audio isn't
+ * in that language" does not narrow it, since the audio is not known yet,
+ * and one search costs the same either way.
+ */
+export function subtitleLanguagesToAsk(metaId: string | undefined): string[] {
+  const choice = metaId === undefined ? undefined : trackMemory.get(metaId);
+  const languages: string[] = [];
+  for (const language of [choice?.subtitle, preferences.get().subtitleLanguage]) {
+    if (typeof language === 'string' && languages.indexOf(language) === -1) {
+      languages.push(language);
+    }
+  }
+  return languages;
+}
+
 export function chooseAudioLanguage(metaId: string | undefined, language: string): void {
   if (preferences.get().learnLanguages) setPreference('audioLanguage', language);
   if (metaId !== undefined) void trackMemory.rememberAudio(metaId, language);

@@ -1,16 +1,19 @@
 import {
   cleanName,
+  cleanSubdlKey,
   KIDS_RATINGS,
   type KidsRating,
   type LiveItem,
   MAIN_PROFILE_ID,
   MAX_PROFILES,
   type PartItem,
+  type Persisted,
   type Profile,
   PROFILE_COLOURS,
   type ProfilesState,
   type Store,
   type StoredPin,
+  type SubdlKeyRecord,
   type SyncPart,
 } from '@bannertv/core';
 import { filterKey, readFilterKey } from '../player/stream-filter';
@@ -386,6 +389,51 @@ export function preferencesPart(profileId: string, store: Store<Preferences>): S
       // Read back as if saved, so a value this build does not know becomes the default.
       const checked = { ...readPreferences(JSON.stringify(next)), probing: current.probing };
       if (!samePreferences(checked, current)) store.set(checked);
+      return Promise.resolve();
+    },
+  };
+}
+
+const SUBDL_KEY = 'subdl/key';
+
+/**
+ * The profile's SubDL key as `subdl/key` in `p/<id>/settings`, encrypted
+ * like the rest of the account (ADR 0006), so a screen with no keyboard (the
+ * native TV app) can use it. Only the key goes: whether SubDL took it is
+ * each screen's to find out again. A kids profile never takes one.
+ */
+export function subdlPart(
+  profileId: string,
+  store: Persisted<SubdlKeyRecord | null>,
+  kids: () => boolean,
+): SyncPart {
+  let seen: SubdlKeyRecord | null | undefined;
+  let items = new Map<string, PartItem>();
+  return {
+    document: `p/${profileId}/settings`,
+    prefixes: ['subdl/'],
+    load: () => store.load(),
+    snapshot() {
+      const record = store.get();
+      if (record !== seen) {
+        seen = record;
+        items = new Map();
+        if (record) items.set(SUBDL_KEY, { v: record.key });
+      }
+      return new Map(items);
+    },
+    subscribe: (listener) => store.subscribe(listener),
+    adopt(change) {
+      if (kids()) return Promise.resolve();
+      const item = change.set.get(SUBDL_KEY);
+      if (item) {
+        const key = typeof item.v === 'string' ? cleanSubdlKey(item.v) : null;
+        if (key === null) return Promise.resolve();
+        return store.updateNow((record) =>
+          record && record.key === key ? record : { key, state: 'unchecked' },
+        );
+      }
+      if (change.remove.indexOf(SUBDL_KEY) !== -1) return store.updateNow(() => null);
       return Promise.resolve();
     },
   };

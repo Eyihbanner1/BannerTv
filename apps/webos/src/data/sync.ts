@@ -1,5 +1,6 @@
 import {
   addonSwitchesPart,
+  createPersisted,
   type AsideCopy,
   checkSyncService,
   collectionPart,
@@ -24,6 +25,8 @@ import {
   profileParts,
   readAccountCode,
   readPullAnswer,
+  readSubdlKey,
+  type SubdlKeyRecord,
   type SyncEngine,
   type SyncPart,
   SyncSetupError,
@@ -44,6 +47,7 @@ import {
   heldDeletions,
   heldKidsChange,
   holdKidsChange,
+  isKidsProfile,
   holdProfileAside,
   holdProfileDeletion,
   kidsHeldAtLaunch,
@@ -59,7 +63,8 @@ import { browserTimers, sportsChoices, sportsFollows } from './sports';
 import { storage } from './storage';
 import { accountClock, setSyncOn, storeNow, syncOn } from './sync-clock';
 import { markJoined, settleJoined } from './sync-joined';
-import { preferencesPart, profilesPart, sportsPart } from './sync-parts';
+import { subdlKey } from './subdl';
+import { preferencesPart, profilesPart, sportsPart, subdlPart } from './sync-parts';
 import { reloadWhenSafe } from './sync-reload';
 import { createSyncTransport, SYNC_SERVICE } from './sync-service';
 
@@ -280,6 +285,7 @@ function activeParts(profileId: string): SyncPart[] {
       subtitleDrifts,
     }),
     preferencesPart(profileId, preferences),
+    subdlPart(profileId, subdlKey, isKidsProfile),
     // A build without Sports leaves the follows in the account as they are.
     ...(SPORTS_IN_BUILD ? [followsPart(profileId, sportsFollows)] : []),
   ];
@@ -291,6 +297,17 @@ function spareParts(profileId: string): SyncPart[] {
   return [
     ...profileParts(profileId, createProfileStores(kv, storeNow)),
     preferencesPart(profileId, profilePreferences(profileId)),
+    // So deleting a profile takes its key out of the account too.
+    subdlPart(
+      profileId,
+      createPersisted<SubdlKeyRecord | null>({
+        storage: kv,
+        key: 'subdl/key',
+        initial: null,
+        read: readSubdlKey,
+      }),
+      () => !!profiles.get().profiles.find((profile) => profile.id === profileId)?.kids,
+    ),
     ...(SPORTS_IN_BUILD
       ? [followsPart(profileId, createFollows({ storage: kv, now: storeNow }))]
       : []),
