@@ -98,6 +98,42 @@ describe('the subtitles of the last few plays', () => {
     expect(rowFor({ state: 'read', ms: 1400 }, 2)).toBe('hash read in 1.4 s');
   });
 
+  it('says a hash read by the app, and never a link', () => {
+    const rowFor = (outcome: Parameters<typeof traceHash>[1]) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt6151526:1:6', 0);
+      traceHash('tt6151526:1:6', outcome);
+      return subtitleTraceRows()[0]![1].split(' · ')[0];
+    };
+    expect(rowFor({ state: 'read', ms: 800, by: 'app' })).toBe('hash read by the app in 0.8 s');
+    expect(rowFor({ state: 'read', ms: 3100, fellBack: 'end', by: 'app' })).toBe(
+      'hash read by the app in 3.1 s, the end through the stream’s link again',
+    );
+    expect(
+      rowFor({
+        state: 'read',
+        ms: 2600,
+        by: 'app',
+        late: { askedAtMs: 2000, askedAgain: 1 },
+      }),
+    ).toBe('hash read by the app in 2.6 s, asked again');
+    expect(rowFor({ state: 'failed', why: 'refused', step: 'start', ms: 4000, by: 'app' })).toBe(
+      'hash failed after 4.0 s (refused, start read, read by the app)',
+    );
+    const late = rowFor({
+      state: 'failed',
+      why: 'busy',
+      step: 'end',
+      ms: 3000,
+      askedAtMs: 2000,
+      by: 'app',
+    });
+    expect(late).toBe(
+      'hash failed after 3.0 s (busy, end read, read by the app), asked without it at 2.0 s',
+    );
+    expect(late).not.toMatch(/:\/\//);
+  });
+
   it('keeps the play under study on the console line after a detour, as five are kept', () => {
     // As on the TV round: the play, a sports stream, the play again, then two more.
     for (const id of ['tt1:1:5', 'sports', 'tt1:1:5', 'tt1:1:6', 'tt2']) {

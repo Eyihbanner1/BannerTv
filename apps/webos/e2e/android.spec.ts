@@ -4,6 +4,7 @@ import {
   ANDROID_URL,
   androidCalls,
   androidCues,
+  androidHashAnswers,
   androidOpens,
   androidSays,
   androidTextTracks,
@@ -16,7 +17,15 @@ import {
   playerState,
   watchNextRow,
 } from './android';
-import { mockPlayback, readKv, type SeedPlayed, type SeedProgress, seedStreamAddon } from './play';
+import {
+  DEFAULT_STREAMS,
+  mockPlayback,
+  readKv,
+  type SeedPlayed,
+  type SeedProgress,
+  seedStreamAddon,
+} from './play';
+import { subtitlesDiagnostics } from './player';
 import { GUEST_ID, lockedWith, main, seedProfiles } from './profiles';
 import { expectFocus, expectFocusLabel, press, watchErrors } from './tv';
 
@@ -335,6 +344,74 @@ test("subtitles inside the file are drawn in the profile's style on Android, and
   await androidSays(page, { type: 'player', event: 'time', position: 21.6, duration: 900 });
   await expect(later).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+/** The hash the Android app reads in these journeys: a made-up one, and the file's size. */
+const APP_HASH = { hash: '8e245d9679d31e12', size: 12909756, walks: 1 };
+
+/** Plays Elephants Dream on Android, whose addon asks for a Referer, with English subtitles. */
+async function playWithSubtitles(page: Page) {
+  // Whether each request the page made carried a Range header: the page reads no bytes itself.
+  const ranged: boolean[] = [];
+  page.on('request', (request) => ranged.push(request.headers()['range'] !== undefined));
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  const mock = await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, requestHeaders: { Referer: 'https://addon.example/' } }],
+    },
+  });
+  await openAsAndroid(page);
+  await page.goto(ANDROID_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openFocusedTitle(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(async () => (await playerOps(page)).filter((op) => op === 'load'))
+    .toHaveLength(1);
+  await androidOpens(page);
+  return { mock, ranged };
+}
+
+test("on Android the app reads the video's hash, and the subtitles are asked for with it", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { mock, ranged } = await playWithSubtitles(page);
+  await androidHashAnswers(page, APP_HASH, 300);
+  await expect.poll(() => mock.subtitles.join()).toContain(`videoHash=${APP_HASH.hash}`);
+  // Read within the 2 s the subtitles wait for it: one ask, with the hash.
+  expect(mock.subtitles).toHaveLength(1);
+
+  // The app was asked once, with the stream's link and the addon's Referer.
+  const asked = (await androidCalls(page)).hash;
+  expect(asked).toHaveLength(1);
+  expect(asked[0]!.url.endsWith(DEFAULT_STREAMS[0]!.path!)).toBe(true);
+  expect(asked[0]!.headers?.Referer === 'https://addon.example/').toBe(true);
+  // The page read no bytes of the file itself.
+  expect(ranged.includes(true)).toBe(false);
+  expect(errors).toEqual([]);
+
+  // Home, on the way to Diagnostics, asks IntroDB of another title, which the stand-in's origin
+  // can't read: errors are checked while playing only.
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read by the app in \d+\.\d s/);
+});
+
+test('a hash the app reads late asks the hash-matching addons again', async ({ page }) => {
+  const errors = watchErrors(page);
+  const { mock } = await playWithSubtitles(page);
+  await androidHashAnswers(page, APP_HASH, 2600);
+  // Asked without it after 2 s, then OpenSubtitles again with it.
+  await expect
+    .poll(() => mock.subtitles.filter((path) => path.includes(`videoHash=${APP_HASH.hash}`)))
+    .toHaveLength(1);
+  expect(mock.subtitles).toHaveLength(2);
+  expect(mock.subtitles[0]).not.toContain('videoHash=');
+  expect(errors).toEqual([]);
+
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read by the app in \d+\.\d s, asked again/);
 });
 
 test('Trailer opens the YouTube app on Android', async ({ page }) => {

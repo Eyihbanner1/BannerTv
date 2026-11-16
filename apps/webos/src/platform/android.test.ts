@@ -290,6 +290,45 @@ describe('initAndroid', () => {
     expect(heard.mock.calls).toEqual([[news]]);
   });
 
+  it('routes a hash answer to its request by id, and drops one for an id no longer waited for', async () => {
+    const asked: { id: number; url: string; size?: number }[] = [];
+    onAndroid({ hash: (request: string) => asked.push(JSON.parse(request) as (typeof asked)[0]) });
+    const android = await load();
+    android.initAndroid();
+    const read = android.androidHashReader()!;
+    const first = read({ url: 'https://cdn.example/a.mkv', size: 1000000 });
+    const second = read({ url: 'https://cdn.example/b.mkv' });
+    const dropped = read({ url: 'https://cdn.example/c.mkv' });
+    expect(asked.map(({ url, size }) => ({ url, size }))).toEqual([
+      { url: 'https://cdn.example/a.mkv', size: 1000000 },
+      { url: 'https://cdn.example/b.mkv', size: undefined },
+      { url: 'https://cdn.example/c.mkv', size: undefined },
+    ]);
+    const ids = asked.map((request) => request.id);
+    expect(new Set(ids).size).toBe(3);
+    dropped.drop();
+    const late = vi.fn();
+    void dropped.answer.then(late);
+    send({ type: 'hash', id: ids[1], failed: 'busy', step: 'end', walks: 2 });
+    send({ type: 'hash', id: ids[0], hash: '0123456789abcdef', size: 1000000, walks: 1 });
+    send({ type: 'hash', id: ids[2], hash: '0123456789abcdef', size: 1000000, walks: 1 });
+    // An unknown id, and the same answer twice, are dropped too.
+    send({ type: 'hash', id: 999, failed: 'refused', step: 'start', walks: 1 });
+    send({ type: 'hash', id: ids[0], failed: 'refused', step: 'start', walks: 1 });
+    await expect(first.answer).resolves.toMatchObject({ hash: '0123456789abcdef', walks: 1 });
+    await expect(second.answer).resolves.toMatchObject({ failed: 'busy', step: 'end' });
+    await Promise.resolve();
+    expect(late).not.toHaveBeenCalled();
+  });
+
+  it('androidHashReader is null without hash()', async () => {
+    onAndroid();
+    const android = await load();
+    expect(android.androidHashReader()).toBeNull();
+    vi.stubGlobal('window', new EventTarget());
+    expect((await load()).androidHashReader()).toBeNull();
+  });
+
   it('leaves the app when Back on the root screen asks to', async () => {
     onAndroid();
     const android = await load();

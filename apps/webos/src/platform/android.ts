@@ -25,6 +25,8 @@ interface AndroidHost {
   watchNext?(cards: string): void;
   /** Added later too: the link the app was opened with, as JSON, once; "" when none. */
   takeLink?(): string;
+  /** Added to version 1 later: reads the video's hash natively; answers with a hash event. */
+  hash?(request: string): void;
 }
 
 /** The Android app, as it describes itself. */
@@ -106,7 +108,24 @@ export type AndroidEvent =
   | { type: 'relaunch' }
   /** Opened from a link while running, such as a Watch Next card: takeLink() hands it over. */
   | { type: 'open' }
+  /**
+   * The answer to hash(), by the request's id: the hash, size, walks and fellBack, or failed,
+   * step and walks. Raw here: stream-hash.ts checks it.
+   */
+  | {
+      type: 'hash';
+      id: number;
+      hash?: unknown;
+      size?: unknown;
+      walks?: unknown;
+      fellBack?: unknown;
+      failed?: unknown;
+      step?: unknown;
+    }
   | AndroidPlayerEvent;
+
+/** A hash event without its type and id, for the request that waits for it. */
+export type AndroidHashAnswer = Omit<Extract<AndroidEvent, { type: 'hash' }>, 'type' | 'id'>;
 
 export type AndroidPlayerCommand =
   | {
@@ -253,6 +272,35 @@ export function takeAndroidLink(): unknown {
   return readJson<unknown>(() => takeLink.call(bridge));
 }
 
+const hashWaiters = new Map<number, (answer: AndroidHashAnswer) => void>();
+let nextHashId = 1;
+
+/** What the page asks the app to read: the stream's link, its size when known, its headers. */
+export interface AndroidHashRequest {
+  url: string;
+  size?: number;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Has the Android TV app read a video's hash, on a thread of its own: each
+ * request's answer comes back as a hash event with its id, and drop() stops
+ * waiting for it. Null where the app cannot: off Android, an older app, and
+ * the phone's and the native TV app's stand-ins, whose fetch reads it.
+ */
+export function androidHashReader():
+  ((request: AndroidHashRequest) => { answer: Promise<AndroidHashAnswer>; drop(): void }) | null {
+  const bridge = host();
+  const hash = bridge?.hash;
+  if (!bridge || typeof hash !== 'function') return null;
+  return (request) => {
+    const id = nextHashId++;
+    const answer = new Promise<AndroidHashAnswer>((resolve) => hashWaiters.set(id, resolve));
+    hash.call(bridge, JSON.stringify({ id, ...request }));
+    return { answer, drop: () => hashWaiters.delete(id) };
+  };
+}
+
 const playerListeners = new Set<(event: AndroidPlayerEvent) => void>();
 
 /** Android's player events, until the returned function is called. */
@@ -343,6 +391,11 @@ export function initAndroid(hooks: AndroidHooks = {}): void {
           return;
         case 'player':
           playerListeners.forEach((listener) => listener(event));
+          return;
+        case 'hash':
+          // One for an id no longer waited for (given up on) is dropped.
+          hashWaiters.get(event.id)?.(event);
+          hashWaiters.delete(event.id);
           return;
       }
     },

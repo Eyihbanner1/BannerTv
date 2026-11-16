@@ -25,15 +25,23 @@ export type HashOutcome =
   /**
    * Read from the file, in so many milliseconds; `fellBack`, the first later read the link it
    * led to refused, which went through the stream's link again, as every read after it did;
-   * `late` when it came after the files were asked for without it.
+   * `late` when it came after the files were asked for without it; `by` 'app' when the Android
+   * TV app read it.
    */
-  | { state: 'read'; ms: number; fellBack?: 'size' | 'end'; late?: HashLate }
+  | { state: 'read'; ms: number; fellBack?: 'size' | 'end'; late?: HashLate; by?: 'app' }
   /** The stream's addon sent it with the stream. */
   | { state: 'sent' }
   /** Still being read when the addons were asked without it. */
   | { state: 'reading'; askedAtMs: number }
-  /** Why it failed, and at which read: the start, the size or the end. */
-  | { state: 'failed'; why: HashFailure; step: HashStep; ms: number; askedAtMs?: number }
+  /** Why it failed, and at which read: the start, the size or the end; `by` as for 'read'. */
+  | {
+      state: 'failed';
+      why: HashFailure;
+      step: HashStep;
+      ms: number;
+      askedAtMs?: number;
+      by?: 'app';
+    }
   /** Not tried: a playlist, a link needing request headers, or no file link at all (a torrent). */
   | { state: 'skipped'; why: HashSkip };
 
@@ -353,7 +361,8 @@ function hashText(hash: HashOutcome | undefined): string {
       const back = hash.fellBack
         ? `, ${hash.fellBack === 'size' ? 'the size and end' : 'the end'} through the stream’s link again`
         : '';
-      return `hash read in ${seconds(hash.ms)}${back}${hash.late ? lateText(hash.late) : ''}`;
+      const read = hash.by === 'app' ? 'hash read by the app in' : 'hash read in';
+      return `${read} ${seconds(hash.ms)}${back}${hash.late ? lateText(hash.late) : ''}`;
     }
     case 'sent':
       return 'hash sent by the addon';
@@ -361,7 +370,8 @@ function hashText(hash: HashOutcome | undefined): string {
       return `hash still being read, ${askedWithout(hash.askedAtMs)}`;
     case 'failed': {
       const late = hash.askedAtMs === undefined ? '' : `, ${askedWithout(hash.askedAtMs)}`;
-      return `hash failed after ${seconds(hash.ms)} (${hash.why}, ${STEP_WORDS[hash.step]})${late}`;
+      const by = hash.by === 'app' ? ', read by the app' : '';
+      return `hash failed after ${seconds(hash.ms)} (${hash.why}, ${STEP_WORDS[hash.step]}${by})${late}`;
     }
     case 'skipped':
       return `hash not tried (${hash.why})`;
