@@ -5,6 +5,7 @@ import {
   subdl,
   SUBDL_KEY_PAGE,
   subdlKey,
+  subdlResting,
   subdlUsage,
 } from '@tv/data/subdl';
 import { type SubdlNotice, subdlStatus } from '@tv/screens/settings/subdl-status';
@@ -19,7 +20,7 @@ import { colors, radius, space, type } from '../ui/theme';
 /** "Check again" is offered at most this often, as on the TV. */
 const CHECK_AGAIN_MS = 10_000;
 
-const restWhy = () => subdlUsage.resting()?.why ?? null;
+const restWhy = () => subdlResting()?.why ?? null;
 
 /**
  * Settings > SubDL subtitles, as the TV's screen (apps/webos SubdlScreen) without the code to

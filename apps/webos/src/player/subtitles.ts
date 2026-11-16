@@ -23,7 +23,7 @@ import {
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
-import { isSubdlDownload, subdl, subdlUsage } from '../data/subdl';
+import { isSubdlDownload, subdl, subdlResting, subdlUsage } from '../data/subdl';
 import { mark } from '../platform/marks';
 import { readStreamHash } from './stream-hash';
 import {
@@ -679,7 +679,7 @@ export function subtitleList(
       if (now.status === 'off' && now.why !== 'subtitles off') return;
       const code = subdlCodeFor(language);
       if (code === undefined || first.languages.indexOf(code) !== -1) return;
-      if (subdlUsage.resting()) return;
+      if (subdlResting()) return;
       subdlMoreLanguage = languageKey(language);
       askSubdlFor([language]);
       refresh();

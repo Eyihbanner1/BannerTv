@@ -91,6 +91,26 @@ describe('createSubdlUsage', () => {
     expect(usage.resting()).toEqual({ why: 'limit', until: Date.UTC(2026, 10, 17, 0, 5) });
   });
 
+  it('keeps a daily limit to the key that reached it, beside the screen’s own rests', async () => {
+    const { usage, storage, now } = await setup(Date.UTC(2026, 10, 16, 20, 30));
+    const until = Date.UTC(2026, 10, 17, 0, 5);
+    usage.rest('limit', 'FAKE-SUBDL-KEY-0001');
+    expect(usage.resting('FAKE-SUBDL-KEY-0001')).toEqual({ why: 'limit', until });
+    expect(usage.resting('FAKE-SUBDL-KEY-0002')).toBeNull();
+    expect(usage.resting()).toBeNull();
+    usage.rest('limit', 'FAKE-SUBDL-KEY-0002');
+    // A slow-down is the screen's, for every key, and leaves the limits as they are.
+    usage.rest('busy');
+    expect(usage.resting('FAKE-SUBDL-KEY-0003')).toEqual({ why: 'busy', until: now() + HOUR });
+    expect(usage.resting('FAKE-SUBDL-KEY-0001')).toEqual({ why: 'limit', until });
+    expect(usage.resting('FAKE-SUBDL-KEY-0002')).toEqual({ why: 'limit', until });
+    await Promise.resolve();
+    const again = createSubdlUsage({ storage, now });
+    await again.load();
+    expect(again.resting('FAKE-SUBDL-KEY-0001')).toEqual({ why: 'limit', until });
+    expect(JSON.stringify(await storage.get('subdl/limit'))).not.toContain('FAKE-SUBDL-KEY');
+  });
+
   it('rests 15 minutes after three failures in a row, and an answer between resets them', async () => {
     const { usage, now } = await setup();
     usage.failed();

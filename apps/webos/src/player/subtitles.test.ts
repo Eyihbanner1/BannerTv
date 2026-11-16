@@ -108,10 +108,8 @@ vi.mock('../data/subdl', async () => {
         };
       },
     },
-    subdlUsage: {
-      takeDownload: () => subdlNet.downloadsLeft,
-      resting: () => (subdlNet.resting ? { why: 'busy', until: Infinity } : null),
-    },
+    subdlUsage: { takeDownload: () => subdlNet.downloadsLeft },
+    subdlResting: () => (subdlNet.resting ? { why: 'busy', until: Infinity } : null),
     isSubdlDownload: (url: string) => url.startsWith('https://dl.subdl.com/'),
   };
 });

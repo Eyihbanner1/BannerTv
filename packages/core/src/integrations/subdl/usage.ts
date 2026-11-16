@@ -5,7 +5,9 @@ import type { KeyValueStore } from '../../storage';
  * How much this screen asked of SubDL today, and whether it is resting
  * because SubDL asked it to slow down or keeps failing. Kept for the whole
  * screen, not per profile: SubDL's limit on downloads without a key is per
- * address, and a rest is about the screen's connection.
+ * address, and a slow-down or failures are about the screen's connection.
+ * A daily limit SubDL answers a search with is the key's own, so it rests
+ * that key only: kept by a short fingerprint of the key, never the key.
  */
 
 /** A safety stop well under the free key's 2,000: one search per play never reaches it. */
@@ -22,9 +24,10 @@ export interface SubdlRest {
 
 export interface SubdlUsage {
   load(): Promise<void>;
-  /** The rest under way, or null. */
-  resting(): SubdlRest | null;
-  rest(why: SubdlRestWhy): void;
+  /** The rest under way for the screen, or for `key` once it reached its daily limit; or null. */
+  resting(key?: string | null): SubdlRest | null;
+  /** A daily limit with `key` rests that key only; without one, the whole screen. */
+  rest(why: SubdlRestWhy, key?: string): void;
   /** An answer came: the failures in a row and the slow-down doubling start again. */
   succeeded(): void;
   /** A challenge, server, network, timeout or unreadable answer. */
@@ -44,6 +47,8 @@ const LIMIT_AFTER_MIDNIGHT_MS = 5 * MINUTE;
 const FAILURES_TO_REST = 3;
 /** A rest longer than this means the clock went back: it ends. */
 const LONGEST_REST_MS = 25 * HOUR;
+/** The keys at their daily limit kept at once: a screen has a few profiles. */
+const LIMITED_KEYS = 8;
 
 interface Counts {
   day: string;
@@ -74,6 +79,34 @@ function readRest(saved: unknown): StoredRest | null {
   return { why, until, stepMs: count(stepMs) };
 }
 
+/** A key at its daily limit, by its fingerprint. */
+interface KeyLimit {
+  tag: string;
+  until: number;
+}
+
+function readLimits(saved: unknown): KeyLimit[] {
+  if (!Array.isArray(saved)) return [];
+  const out: KeyLimit[] = [];
+  for (const item of saved as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { tag, until } = item as Partial<Record<keyof KeyLimit, unknown>>;
+    if (typeof tag !== 'string' || typeof until !== 'number' || !Number.isFinite(until)) continue;
+    out.push({ tag, until });
+  }
+  return out.slice(-LIMITED_KEYS);
+}
+
+/** 32 bits of FNV-1a: tells keys apart, and cannot give a key back. */
+function keyTag(key: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 /** "YYYY-MM-DD" in UTC, as SubDL's day turns. */
 function utcDay(time: number): string {
   return new Date(time).toISOString().slice(0, 10);
@@ -101,7 +134,19 @@ export function createSubdlUsage(options: {
     initial: null,
     read: readRest,
   });
+  const limits = createPersisted<KeyLimit[]>({
+    storage,
+    key: 'subdl/limit',
+    initial: [],
+    read: readLimits,
+  });
   let failuresInRow = 0;
+
+  /** A rest that has not ended, and is not so long the clock must have gone back. */
+  const current = (until: number) => {
+    const left = until - now();
+    return left > 0 && left <= LONGEST_REST_MS;
+  };
 
   function today(): Counts {
     const day = utcDay(now());
@@ -117,8 +162,19 @@ export function createSubdlUsage(options: {
     return true;
   }
 
-  function rest(why: SubdlRestWhy) {
+  function rest(why: SubdlRestWhy, key?: string) {
     const at = now();
+    if (why === 'limit' && key !== undefined) {
+      const tag = keyTag(key);
+      const until = nextUtcMidnight(at) + LIMIT_AFTER_MIDNIGHT_MS;
+      void limits.updateNow((before) =>
+        before
+          .filter((limit) => limit.tag !== tag && current(limit.until))
+          .concat({ tag, until })
+          .slice(-LIMITED_KEYS),
+      );
+      return;
+    }
     const before = rests.get();
     let stepMs = before?.stepMs ?? 0;
     let until: number;
@@ -139,13 +195,14 @@ export function createSubdlUsage(options: {
   }
 
   return {
-    load: () => Promise.all([counts.load(), rests.load()]).then(() => undefined),
-    resting() {
-      const current = rests.get();
-      if (!current) return null;
-      const left = current.until - now();
-      if (left <= 0 || left > LONGEST_REST_MS) return null;
-      return { why: current.why, until: current.until };
+    load: () => Promise.all([counts.load(), rests.load(), limits.load()]).then(() => undefined),
+    resting(key) {
+      // The key's own limit first: it says the searches are used up, and lasts longer.
+      const tag = key ? keyTag(key) : undefined;
+      const limit = limits.get().find((one) => one.tag === tag && current(one.until));
+      if (limit) return { why: 'limit', until: limit.until };
+      const screen = rests.get();
+      return screen && current(screen.until) ? { why: screen.why, until: screen.until } : null;
     },
     rest,
     succeeded() {
@@ -163,7 +220,11 @@ export function createSubdlUsage(options: {
     takeSearch: () => take('searches', SUBDL_SEARCHES_PER_DAY),
     takeDownload: () => take('downloads', SUBDL_DOWNLOADS_PER_DAY),
     subscribe(listener) {
-      const undo = [counts.subscribe(listener), rests.subscribe(listener)];
+      const undo = [
+        counts.subscribe(listener),
+        rests.subscribe(listener),
+        limits.subscribe(listener),
+      ];
       return () => undo.forEach((stop) => stop());
     },
   };

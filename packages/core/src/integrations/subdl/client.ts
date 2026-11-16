@@ -153,8 +153,8 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
       if (!record) throw new SubdlSkipError('no key');
       if (record.state === 'refused') throw new SubdlSkipError('key refused');
       await usage.load();
-      // A rest until SubDL's day turns says so: the searches are used up.
-      const rest = usage.resting();
+      // A rest until SubDL's day turns says so: the key's searches are used up.
+      const rest = usage.resting(record.key);
       if (rest) throw new SubdlSkipError(rest.why === 'limit' ? 'daily limit' : 'resting');
       const failed = failures.get(cacheKey);
       if (failed && elapsed() - failed.at < SUBDL_FAILURE_MEMORY_MS) {
@@ -186,7 +186,8 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
         setKeyState(record.key, 'refused');
         throw new SubdlFailureError(failure);
       }
-      if (failure === 'limit') usage.rest('limit');
+      // The day's searches are the key's: another profile's key, or a new one, is still asked.
+      if (failure === 'limit') usage.rest('limit', record.key);
       else if (failure === 'busy') usage.rest('busy');
       else usage.failed();
       throw remember(cacheKey, failure);

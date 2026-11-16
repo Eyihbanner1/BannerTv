@@ -349,11 +349,39 @@ describe('createSubdlClient', () => {
     expect(busy.requests).toHaveLength(1);
     const limit = setup({ answer: () => ({ status: 429, body: { error: 'daily_limit' } }) });
     await settle(limit.client.search('movie', 'tt9900001', ['en']));
-    expect(limit.usage.resting()?.why).toBe('limit');
+    expect(limit.usage.resting(FAKE_SUBDL_KEY)?.why).toBe('limit');
     expect(await settle(limit.client.search('movie', 'tt9900003', ['en']))).toEqual({
       status: 'off',
       why: 'daily limit',
     });
+  });
+
+  it('rests only the key that reached its daily limit, not another saved since', async () => {
+    const { client, requests, setRecord, usage, kv } = setup({
+      answer: () =>
+        requests[requests.length - 1]!.headers['X-API-Key'] === FAKE_SUBDL_KEY
+          ? { status: 402, body: { error: 'daily_limit' } }
+          : { status: 200, body: filmAnswer() },
+    });
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toMatchObject({
+      status: 'failed',
+      why: 'limit',
+    });
+    expect(await settle(client.search('movie', 'tt9900003', ['en']))).toEqual({
+      status: 'off',
+      why: 'daily limit',
+    });
+    expect(requests).toHaveLength(1);
+    // Another profile's key, or a new key saved: its own searches are left.
+    setRecord({ key: 'FAKE-SUBDL-KEY-0002', state: 'works' });
+    expect(await settle(client.search('movie', 'tt9900003', ['en']))).toMatchObject({
+      status: 'answered',
+      saved: false,
+    });
+    expect(requests).toHaveLength(2);
+    expect(usage.resting()).toBeNull();
+    expect(usage.resting(FAKE_SUBDL_KEY)?.why).toBe('limit');
+    expect(JSON.stringify(await kv.get('subdl/limit'))).not.toContain(FAKE_SUBDL_KEY);
   });
 
   it('serves an older copy while resting, with no request', async () => {

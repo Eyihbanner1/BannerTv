@@ -12,6 +12,7 @@ import {
   subdl,
   SUBDL_KEY_PAGE,
   subdlKey,
+  subdlResting,
   subdlUsage,
 } from '../../data/subdl';
 import screen from '../Screen.module.css';
@@ -21,7 +22,7 @@ import styles from './SubdlScreen.module.css';
 /** "Check again" is offered at most this often. */
 const CHECK_AGAIN_MS = 10_000;
 
-const restWhy = () => subdlUsage.resting()?.why ?? null;
+const restWhy = () => subdlResting()?.why ?? null;
 
 /**
  * Settings > SubDL subtitles: the profile's own free SubDL key. The field

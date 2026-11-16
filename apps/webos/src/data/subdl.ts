@@ -8,6 +8,7 @@ import {
   SUBDL_DOWNLOADS,
   type SubdlClient,
   type SubdlKeyRecord,
+  type SubdlRest,
   type SubdlUsage,
 } from '@bannertv/core';
 import { requestJson } from '../platform/http';
@@ -32,8 +33,13 @@ export const subdlKey: Persisted<SubdlKeyRecord | null> = createPersisted({
   read: readSubdlKey,
 });
 
-/** Today's searches and downloads on this screen, and the rest SubDL asked for. */
+/** Today's searches and downloads on this screen, and the rests SubDL asked for. */
 export const subdlUsage: SubdlUsage = createSubdlUsage({ storage: storage.kv });
+
+/** The rest under way for the profile's key: the screen's, or the key's daily limit. */
+export function subdlResting(): SubdlRest | null {
+  return subdlUsage.resting(subdlKey.get()?.key);
+}
 
 void subdlKey.load();
 void subdlUsage.load();
