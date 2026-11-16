@@ -107,9 +107,10 @@ function nameOfLink(url: string): string {
  * it is not a Matroska file; its subtitles have no index; it is a recording
  * with no index; it has no subtitles; it could not be read, or its index is
  * too large; the server refused byte ranges, could not be read here (blocked),
- * refused the reads, gave a link good for one read, or did not answer them
- * (busy, or no network) even when asked again; or the head and the index took
- * longer than OPEN_MS.
+ * refused the reads, gave a link good for one read, stayed too busy for every
+ * read for two minutes (`BUSY_MS`), or did not answer them (busy, or no
+ * network) even when asked again; or the head and the index took longer than
+ * OPEN_MS.
  */
 export type FileTextSkip =
   | 'named'
@@ -123,6 +124,7 @@ export type FileTextSkip =
   | 'blocked'
   | 'refused'
   | 'one-use'
+  | 'busy'
   | 'unanswered'
   | 'timed-out';
 

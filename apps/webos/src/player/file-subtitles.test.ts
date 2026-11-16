@@ -709,6 +709,32 @@ describe('reads that fail for a moment', () => {
     expect(engine.timedTracks?.().map(({ id, timed }) => [id, timed])).toEqual([['mkv:2', true]]);
   });
 
+  it('drop the tracks once the server stays busy for every line, and ask it no more', async () => {
+    let busy = false;
+    const world = await played({
+      file: tenMinutes(),
+      server: { instead: (_n, url) => (busy && url !== LINK ? 503 : undefined) },
+    });
+    const { engine, video, asked } = world;
+    expect(engine.textTracks()).toHaveLength(1);
+    busy = true;
+    const before = asked.length;
+    engine.selectText('mkv:2');
+    for (let time = 0; time < 300; time += 1) {
+      video.currentTime = time;
+      video.fire('timeupdate');
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(engine.textTracks()).toEqual([]);
+    expect(reportOf(engine)).toMatchObject({ state: 'read', dropped: 'busy' });
+    // Two minutes of busy answers for a line a second, each line asked again, and then none.
+    const made = asked.length - before;
+    expect(made).toBeLessThan(600);
+    expect(asked.filter(({ url }) => url === LINK)).toHaveLength(1);
+    await pass(60000);
+    expect(asked.length - before).toBe(made);
+  });
+
   it('read the Cues again after a busy answer, and list the tracks', async () => {
     let busyOnce = true;
     const { engine, asked } = await played({

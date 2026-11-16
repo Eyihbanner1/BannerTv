@@ -402,6 +402,45 @@ describe('reads that fail for a moment', () => {
     expect(direct.failure()).toBeUndefined();
   });
 
+  it('gives up on a server that stays busy for two minutes, but not on a burst of busy answers', async () => {
+    let now = 0;
+    const clock = {
+      now: () => now,
+      setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms),
+      clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    let busy = false;
+    const { asked, fetcher } = serve({
+      instead: (_n, url) => (busy && url !== LINK ? 429 : undefined),
+    });
+    const source = createFetchSource({ link: LINK, clock }, fetcher);
+    await source.read(0, 100);
+    // A burst of busy answers, then one answered: counted again from nothing.
+    busy = true;
+    for (let i = 0; i < 20; i++) {
+      now += 5000;
+      expect(await failure(source.read(1000, 100))).toBe('transient');
+    }
+    busy = false;
+    expect(Array.from(await source.read(1000, 100))).toEqual(slice(1000, 100));
+    busy = true;
+    // Busy again: many answers in a second are not two minutes.
+    for (let i = 0; i < 20; i++) {
+      expect(await failure(source.read(2000, 100))).toBe('transient');
+    }
+    expect(source.failure()).toBeUndefined();
+    now += 60000;
+    expect(await failure(source.read(2000, 100))).toBe('transient');
+    now += 60000;
+    // Busy at every read for two minutes: no line can be read now, so none is asked for.
+    expect(await failure(source.read(2000, 100))).toBe('busy');
+    expect(source.failure()).toBe('busy');
+    const made = asked.length;
+    expect(await failure(source.read(3000, 100))).toBe('busy');
+    expect(asked).toHaveLength(made);
+    expect(urls(asked).filter((url) => url === 'link')).toHaveLength(1);
+  });
+
   it('a walk that fails for a moment is not counted, and does not end the source', async () => {
     const { asked, fetcher } = serve({ instead: (n) => (n === 1 ? 503 : undefined) });
     const source = createFetchSource({ link: LINK }, fetcher);

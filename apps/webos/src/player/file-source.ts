@@ -18,13 +18,21 @@ import { landedAt } from './stream-hash';
  * request was blocked (cross-origin checks, or no network: the page cannot
  * tell which); the server refused the reads, or the walks allowed are used
  * up; the link the walk led to refused its first read straight to it, as a
- * link good for one use does; or the first answer says it is another kind of
- * file. Never kept: the caller aborted the read, or it got no answer for now
+ * link good for one use does; the first answer says it is another kind of
+ * file; or the server was too busy for every read for BUSY_MS ('busy'). Never
+ * kept: the caller aborted the read, or it got no answer for now
  * ('transient': a busy server, or a moment with no network), which may be
  * tried again later.
  */
 export type FileReadFailure =
-  'no-range' | 'blocked' | 'refused' | 'one-use' | 'not-matroska' | 'aborted' | 'transient';
+  | 'no-range'
+  | 'blocked'
+  | 'refused'
+  | 'one-use'
+  | 'not-matroska'
+  | 'busy'
+  | 'aborted'
+  | 'transient';
 
 /** A failure that is kept: every read after rejects with it. */
 export type FileReadEnd = Exclude<FileReadFailure, 'aborted' | 'transient'>;
@@ -51,6 +59,13 @@ export const WALK_MS = 15000;
  */
 export const UNANSWERED_IN_A_ROW = 3;
 export const UNANSWERED_MS = 10000;
+/**
+ * Busy answers in a row (429, 503 and the like, none answered between), over at least BUSY_MS,
+ * past which the source gives up ('busy'): a server that stays too busy for every read of the
+ * play is asked no more. Fewer, or for less time, are a burst: those reads are tried again later.
+ */
+export const BUSY_IN_A_ROW = 10;
+export const BUSY_MS = 120000;
 /** Walks tried in a play at most, those that got no answer or a busy one among them. */
 const MAX_WALK_TRIES = 3 * MAX_WALKS;
 
@@ -178,7 +193,8 @@ function until<T>(promise: Promise<T>, signal: ReadSignal | undefined): Promise<
  * read walks once more, and the source then gives up ('one-use'), as walking
  * for every line would ration the service. A busy server (429, 503) or a
  * moment with no network fails only the read in hand ('transient'), never
- * walks, and is never kept: the caller tries it again later. Only
+ * walks, and is not kept: the caller tries it again later, until the server
+ * has been busy for every read for BUSY_MS ('busy'). Only
  * UNANSWERED_IN_A_ROW reads with no answer at all take the link as expired. A
  * walk runs on its own, WALK_MS at most, so a read dropped meanwhile (a seek)
  * does not waste it: the reads after go where it led. No other time limit of
@@ -207,6 +223,9 @@ export function createFetchSource(
   // Reads in a row straight to `landed` that got no answer at all, since when.
   let unanswered = 0;
   let unansweredSince = 0;
+  // Busy answers in a row, from any link, since when.
+  let busyInARow = 0;
+  let busySince = 0;
   // A walk in flight, which reads refused meanwhile wait for rather than walk again.
   let walking: Promise<Answer> | null = null;
   let stopWalk: (() => void) | null = null;
@@ -284,6 +303,21 @@ export function createFetchSource(
     }
   }
 
+  /** Counts a busy answer, and gives up once the server has been busy long enough. */
+  function tally(answer: Answer) {
+    if (answer.kind === 'bytes' || answer.kind === 'past-end') busyInARow = 0;
+    if (answer.kind !== 'busy') return;
+    if (busyInARow++ === 0) busySince = clock.now();
+    if (
+      failed === undefined &&
+      !closed &&
+      busyInARow >= BUSY_IN_A_ROW &&
+      clock.now() - busySince >= BUSY_MS
+    ) {
+      failed = 'busy';
+    }
+  }
+
   /** What a read's answer gives, or why it failed: a refusal for good, or for now. */
   function settle(answer: Answer): Uint8Array {
     switch (answer.kind) {
@@ -300,7 +334,7 @@ export function createFetchSource(
       case 'refused':
         return fail('refused');
       default:
-        return fail('transient');
+        return fail(failed ?? 'transient');
     }
   }
 
@@ -321,6 +355,7 @@ export function createFetchSource(
     stopWalk = () => controller?.abort();
     const going = fetchRange(link, start, length, controller?.signal).then((found): Answer => {
       clock.clearTimeout(timer);
+      tally(found);
       walking = null;
       stopWalk = null;
       // Out of time, it is a walk with no answer; stopped by close(), aborted.
@@ -374,6 +409,7 @@ export function createFetchSource(
       }
       const at = landed;
       const answer = await fetchRange(at, start, length, signal);
+      tally(answer);
       if (answer.kind === 'bytes' && landed === at) {
         served = true;
         unanswered = 0;

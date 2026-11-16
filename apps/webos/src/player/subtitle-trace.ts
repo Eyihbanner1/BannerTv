@@ -380,6 +380,7 @@ const FILE_WORDS: Readonly<Record<FileTextSkip, string>> = {
   blocked: 'couldn’t read the file here',
   refused: 'the server refused the reads',
   'one-use': 'the link allows one read',
+  busy: 'the server stayed too busy',
   unanswered: 'the server didn’t answer',
   'timed-out': 'gave up after 20 s',
 };
