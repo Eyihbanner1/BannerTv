@@ -78,7 +78,7 @@ Four facts shaped the design:
 8. **A test package.** `com.bannertv.app.tvnative`, "BannerTV native test", installs beside the
    Android TV app. CI's `TV APK (React Native)` job type-checks, tests and builds a release APK
    signed with the Expo template's debug key, and uploads it as `bannertv-tv-native-apk`.
-9. **SubDL, read only.** The Subtitles section says on grown-ups' profiles whether SubDL subtitles are on, off or the key was not accepted (`src/screens/settings/subdl-row.ts`), and that the key is added or changed on the phone or the LG, signed in to the same account (ADR 0003, Step D). There is no text entry: typing a long key with the remote is what the phone is for.
+9. **SubDL, read only.** The Subtitles section says on grown-ups' profiles whether SubDL subtitles are on, off or the key was not accepted (`src/screens/settings/subdl-row.ts`), and that the key is added or changed on the phone or the LG, signed in to the same account (ADR 0003, Step D). There is no text entry: typing a long key with the remote is what the phone is for. With no Save there, a key once refused is checked again by the shared SubDL code, once a launch and then at most once a day, so a refusal that passes does not leave SubDL off for good.
 
 ## Consequences
 
