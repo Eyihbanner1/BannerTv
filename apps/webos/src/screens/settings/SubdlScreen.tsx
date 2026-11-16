@@ -53,7 +53,8 @@ export function SubdlScreen() {
     const answer = await subdl.checkKey(key);
     checking.current = false;
     if (answer !== 'unreachable') setSubdlKeyState(key, answer);
-    if (mounted.current) setNotice(answer);
+    // A key removed while it was checked stays removed, and says so.
+    if (mounted.current && subdlKey.get()?.key === key) setNotice(answer);
   };
 
   const save = () => {

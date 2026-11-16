@@ -355,6 +355,41 @@ test('a removed key is forgotten, and SubDL is not asked', async ({ page }) => {
   await expect(section).toContainText('SubDL: no key');
 });
 
+test("a key removed while it is being checked stays removed, and the check's answer is not shown", async ({
+  page,
+}) => {
+  await setUp(page, 'films', { key: false });
+  // SubDL's key check waits until the key has been removed.
+  let answerCheck = () => undefined as void;
+  const checked = new Promise<void>((resolve) => {
+    answerCheck = resolve;
+  });
+  await page.route(/^https:\/\/api\.subdl\.com\/api\/v2\/me/, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fallback();
+    await checked;
+    return route.fallback();
+  });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openSubdlScreen(page);
+  const input = page.locator('[data-focus-key="subdl-key"] input');
+  await page.keyboard.press('Enter');
+  await expect(input).toBeFocused();
+  await input.fill(FAKE_SUBDL_KEY);
+  await page.keyboard.press('Enter');
+  await expect(status(page)).toHaveText('Checking your key…');
+  await press(page, 'ArrowDown', 'subdl-save');
+  await press(page, 'ArrowDown', 'subdl-remove');
+  await page.keyboard.press('Enter');
+  await expect(status(page)).toHaveText("Key removed. BannerTV won't look on SubDL.");
+  answerCheck();
+  await page.waitForTimeout(500);
+  await expect(status(page)).toHaveText("Key removed. BannerTV won't look on SubDL.");
+  expect(await readKv(page, 'subdl/key')).toBeNull();
+  await pressBack(page);
+  await expectFocusLabel(page, 'SubDL subtitles: Off');
+});
+
 /** Every value the page keeps: its key-value store, its cache, and the browser's storage. */
 function everythingKept(page: Page) {
   return page.evaluate(

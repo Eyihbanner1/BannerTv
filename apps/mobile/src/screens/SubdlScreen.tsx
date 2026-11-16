@@ -54,7 +54,8 @@ export function SubdlScreen() {
     if (answer !== 'unreachable') setSubdlKeyState(key, answer);
     if (!mounted.current) return;
     setBusy(false);
-    setNotice(answer);
+    // A key removed while it was checked stays removed, and says so.
+    if (subdlKey.get()?.key === key) setNotice(answer);
   };
 
   const save = () => {
