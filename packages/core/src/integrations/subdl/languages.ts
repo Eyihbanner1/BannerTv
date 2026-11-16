@@ -31,14 +31,18 @@ export function languageOfSubdl(code: string): string | undefined {
 const ASKED_AS: Readonly<Record<string, string>> = { es: 'es-419', zh: 'zh-hans' };
 
 /**
- * The language a SubDL file is listed in for a viewer who wanted `wanted`:
- * SubDL's one Spanish, asked for Latin American Spanish, is listed as that,
- * and its Chinese, asked for simplified Chinese, likewise, unless the plain
- * language was wanted too. Otherwise the file's own.
+ * The language a SubDL file is listed in for a viewer who wanted `wanted`,
+ * in the order asked: SubDL's one Spanish is listed as the first of Latin
+ * American Spanish and plain Spanish wanted, and its Chinese as the first of
+ * simplified and plain Chinese, so the title's own choice, asked first, is
+ * the one its files show in. Otherwise the file's own.
  */
 export function subdlFileLanguage(lang: string, wanted: readonly string[]): string {
   const asked = ASKED_AS[lang];
   if (asked === undefined) return lang;
-  const keys = wanted.map(languageKey);
-  return keys.indexOf(asked) !== -1 && keys.indexOf(lang) === -1 ? asked : lang;
+  for (const one of wanted) {
+    const key = languageKey(one);
+    if (key === asked || key === lang) return key;
+  }
+  return lang;
 }

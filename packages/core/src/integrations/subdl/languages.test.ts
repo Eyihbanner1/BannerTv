@@ -38,9 +38,14 @@ describe('subdlCodeFor', () => {
 });
 
 describe('subdlFileLanguage', () => {
-  it('lists Spanish and Chinese files as the variety asked, unless the plain one was asked too', () => {
+  it('lists Spanish and Chinese files as the variety asked first', () => {
     expect(subdlFileLanguage('es', ['es-419'])).toBe('es-419');
     expect(subdlFileLanguage('es', ['spa', 'es-419'])).toBe('es');
+    // The title's choice comes first, and is the language showing.
+    expect(subdlFileLanguage('es', ['es-419', 'es'])).toBe('es-419');
+    expect(subdlFileLanguage('es', ['en', 'es-419', 'spa'])).toBe('es-419');
+    expect(subdlFileLanguage('zh', ['zh-hans', 'zh'])).toBe('zh-hans');
+    expect(subdlFileLanguage('zh', ['zh', 'zh-hans'])).toBe('zh');
     expect(subdlFileLanguage('zh', ['zh-hans'])).toBe('zh-hans');
     expect(subdlFileLanguage('zh', ['zh'])).toBe('zh');
     expect(subdlFileLanguage('zh-hant', ['zh-hans'])).toBe('zh-hant');

@@ -696,11 +696,12 @@ describe('SubDL in the files on offer', () => {
     expect(options.filter((option) => option.lang === 'fr')).toHaveLength(1);
   });
 
-  it('files its one Spanish and its Chinese under Latin American Spanish and simplified Chinese when those were asked', () => {
+  it('files its one Spanish and its Chinese under Latin American Spanish and simplified Chinese when those were asked first', () => {
     for (const [wanted, sent, listed] of [
       [['es-419'], 'es', 'es-419'],
       [['zh-hans'], 'zh', 'zh-hans'],
-      [['es-419', 'es'], 'es', 'es'],
+      [['es-419', 'es'], 'es', 'es-419'],
+      [['es', 'es-419'], 'es', 'es'],
       [['en'], 'es', 'es'],
     ] as const) {
       subdlNet.searches = [];
@@ -714,6 +715,29 @@ describe('SubDL in the files on offer', () => {
       });
       const [file] = list.get().options.filter((option) => option.source === 'SubDL');
       expect(file?.lang).toBe(listed);
+      list.stop();
+    }
+  });
+
+  it('files its one Spanish under the variety turned on, with no search more', () => {
+    for (const [wanted, turnedOn] of [
+      [['es-419'], 'es'],
+      [['es'], 'es-419'],
+      [['es-419', 'es'], 'spa'],
+    ] as const) {
+      subdlNet.searches = [];
+      const list = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, languages: wanted });
+      list.start();
+      subdlNet.searches[0]!.set({
+        status: 'answered',
+        ms: 1,
+        saved: false,
+        files: [subdlFile('s1', 'Test.Film.2026', { lang: 'es' })],
+      });
+      list.askSubdl(turnedOn);
+      expect(subdlNet.searches).toHaveLength(1);
+      const [file] = list.get().options.filter((option) => option.source === 'SubDL');
+      expect(file?.lang).toBe(turnedOn === 'spa' ? 'es' : turnedOn);
       list.stop();
     }
   });

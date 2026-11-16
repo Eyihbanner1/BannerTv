@@ -424,6 +424,9 @@ export function subtitleList(
   let subdlSearches: SubdlSearch[] = [];
   let subdlUnsubscribe: Array<() => void> = [];
   let subdlMoreLanguage: string | undefined;
+  // The languages the first search's files are listed in, first first: a variety turned on
+  // whose SubDL code was asked already (its one Spanish or Chinese) comes first.
+  let subdlFirstWanted: readonly string[] = subdlAsk?.languages ?? [];
 
   function askSubdlFor(languages: readonly string[]) {
     const search = subdl.search(type, videoId, languages);
@@ -442,8 +445,7 @@ export function subtitleList(
       if (now.status === 'asking') asking++;
       const files = 'files' in now && now.files ? now.files : [];
       // The languages this search was asked for, to list its files in the one wanted.
-      const wanted =
-        nth === 0 ? (subdlAsk?.languages ?? []) : subdlMoreLanguage ? [subdlMoreLanguage] : [];
+      const wanted = nth === 0 ? subdlFirstWanted : subdlMoreLanguage ? [subdlMoreLanguage] : [];
       const ranked = files
         .map((file, index) => {
           const releaseName = bestSubdlRelease(file, release);
@@ -670,15 +672,25 @@ export function subtitleList(
       subdlSearches.forEach((search) => search.stop());
       subdlSearches = [];
       subdlMoreLanguage = undefined;
+      subdlFirstWanted = subdlAsk?.languages ?? [];
     },
     askSubdl(language) {
       const [first] = subdlSearches;
-      if (!subdlAsk || !first || subdlSearches.length > 1) return;
+      if (!subdlAsk || !first) return;
+      const code = subdlCodeFor(language);
+      if (code === undefined) return;
+      if (first.languages.indexOf(code) !== -1) {
+        // Asked already: its files are listed in the variety turned on (es-419 or es, say).
+        const key = languageKey(language);
+        if (subdlFirstWanted.length > 0 && languageKey(subdlFirstWanted[0]!) === key) return;
+        subdlFirstWanted = [language, ...subdlFirstWanted.filter((w) => languageKey(w) !== key)];
+        refresh();
+        return;
+      }
+      if (subdlSearches.length > 1) return;
       const now = first.get();
       // Not asked for a reason another language would not change (no key, a kids profile).
       if (now.status === 'off' && now.why !== 'subtitles off') return;
-      const code = subdlCodeFor(language);
-      if (code === undefined || first.languages.indexOf(code) !== -1) return;
       if (subdlResting()) return;
       subdlMoreLanguage = languageKey(language);
       askSubdlFor([language]);
