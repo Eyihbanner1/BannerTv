@@ -108,6 +108,7 @@ import {
   SLEEP_OFF,
   sleepTimerFor,
 } from '../../player/sleep';
+import { formatOffset } from '../../player/timing';
 import { EpisodesSheet } from './EpisodesSheet';
 import { InfoSheet } from './InfoSheet';
 import { type PlayerAction, PlayerControls } from './PlayerControls';
@@ -120,6 +121,7 @@ import { SubtitleLayer } from './SubtitleLayer';
 import { type SheetTab, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
 import { useScrobble } from './use-scrobble';
+import { useOfferNotice } from './use-offer-notice';
 import { useSubtitles } from './use-subtitles';
 import styles from './PlayerScreen.module.css';
 
@@ -526,6 +528,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
     // The title's own running time judges a file's length until the video's is known.
     parseRuntime(item?.runtime),
   );
+
+  const offerNotice = useOfferNotice(subtitles.offer, videoId);
 
   useScrobble(
     session,
@@ -1479,6 +1483,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     else if (!props.lab) toast = t('player.keepsBufferingStreams');
     else toast = t('player.keepsBufferingPlain');
   } else if (subtitles.failed && !waiting) toast = t('player.subtitlesFailed');
+  else if (offerNotice && subtitles.offer) {
+    // Last of all: last episode's timing, offered in Timing.
+    const amount = formatOffset(subtitles.offer.offset);
+    toast = t('player.offerToast', {
+      amount: subtitles.offer.drift ? t('player.offerAmountDrift', { amount }) : amount,
+    });
+  }
 
   // Two tiers with fixed places: nothing comes or goes while the video plays.
   // What can't be used now stays, dimmed, and says why when focused.
@@ -1881,6 +1892,12 @@ export function PlayerScreen(props: PlayerScreenProps) {
           }
           onBack={backFromSheet}
           onClose={() => setPanel(null)}
+          // The clock the subtitle layer draws by, read as a line is matched.
+          clock={() =>
+            video
+              ? { time: video.currentTime, speed: video.playbackRate || 1, paused: video.paused }
+              : null
+          }
         />
       )}
       {panel === 'sources' && (

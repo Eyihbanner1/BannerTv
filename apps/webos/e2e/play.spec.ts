@@ -3623,7 +3623,10 @@ test('each version says where it is from and how it is doing, and its timing is 
   await press(page, 'ArrowRight', 'player-tracks-tab-audio');
   await press(page, 'ArrowRight', 'player-tracks-tab-timing');
   await expect(page.getByText('Subtitles as the file has them')).toBeVisible();
-  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m05');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m01');
+  await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p05');
   await page.keyboard.press('Enter');
   await expect(page.getByText('Subtitles 0.5 s later')).toBeVisible();
@@ -3654,7 +3657,10 @@ test('each version says where it is from and how it is doing, and its timing is 
   await pressBack(page);
   await press(page, 'ArrowRight', 'player-tracks-tab-audio');
   await press(page, 'ArrowRight', 'player-tracks-tab-timing');
-  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m05');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m01');
+  await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowRight');
   await expectFocus(page, 'player-tracks-timing-reset');
   await page.keyboard.press('Enter');
@@ -4406,7 +4412,10 @@ test('the first subtitles to show are the full file: signs only, lines for the h
     'aria-label',
     'Falling behind, in use',
   );
-  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m05');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m01');
+  await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   await page.keyboard.press('Enter');
   const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
   await expect(timing).toContainText('+0.1 s');
@@ -4914,4 +4923,254 @@ test('with timing marks on, the stages of a Play read in order, and no mark name
   );
   expect(names).toContain('play:press');
   expect(names.filter((name) => /https?:|\/\//.test(name))).toEqual([]);
+});
+
+/** Elephants Dream as the 10-minute video, with only this subtitle file: nothing lines it up. */
+async function playForMatching(page: Page, file: string) {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-match.webm' }] },
+    subtitleList: [{ id: file, lang: 'eng' }],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+}
+
+/** Moves the video to `at` seconds, as a seek would. */
+async function seekVideo(page: Page, at: number) {
+  await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((element: HTMLVideoElement, time) => (element.currentTime = time), at);
+}
+
+/** A row of Match a line, by its focus key: the line's start in ms, and its place. */
+const MATCH_ROW = /^player-tracks-match-(-?\d+)-\d+$/;
+
+/**
+ * From the Match button: opens the list of lines, focuses one whose words are still to be
+ * heard (at `heard(n)` seconds of the video for "Test line n"), and presses OK the moment they
+ * are, plus the 0.3 s a viewer takes. Booleans and numbers only, never a link.
+ */
+async function matchHeardLine(page: Page, heard: (n: number) => number): Promise<void> {
+  await expectFocus(page, 'player-tracks-timing-match');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => focusedKey(page), { timeout: 10000 }).toMatch(MATCH_ROW);
+  let target: { n: number; key: string } | undefined;
+  await expect
+    .poll(
+      async () => {
+        const now = (await video(page)).time;
+        const rows = await page
+          .locator('[data-focus-key^="player-tracks-match-"]')
+          .evaluateAll((elements) =>
+            elements.map((element) => ({
+              key: element.getAttribute('data-focus-key') ?? '',
+              text: element.textContent ?? '',
+            })),
+          );
+        target = undefined;
+        for (const row of rows) {
+          const n = Number(/Test line (\d+)/.exec(row.text)?.[1]);
+          if (MATCH_ROW.test(row.key) && n > 0 && heard(n) > now + 1.5) {
+            target = { n, key: row.key };
+            break;
+          }
+        }
+        return target !== undefined;
+      },
+      { timeout: 30000 },
+    )
+    .toBe(true);
+  const { n, key } = target!;
+  const startOf = (focus: string) => Number(MATCH_ROW.exec(focus)?.[1]);
+  for (let step = 0; step < 4 && (await focusedKey(page)) !== key; step++) {
+    await page.keyboard.press(
+      startOf(key) > startOf(await focusedKey(page)) ? 'ArrowDown' : 'ArrowUp',
+    );
+  }
+  await expectFocus(page, key);
+  await page.waitForFunction(
+    (at) => document.querySelector<HTMLVideoElement>('video:not([aria-hidden])')!.currentTime >= at,
+    heard(n) + 0.3,
+    { polling: 'raf', timeout: 30000 },
+  );
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'player-tracks-timing-match');
+}
+
+/** When "Test line n" of APART_SPEECH is heard: its true time in the video. */
+const heardApart = (n: number) => APART_SPEECH[n - 1]![0];
+
+/** "+1.2 s", "−2.0 s", as the Timing tab writes an offset. */
+const amountOf = (offset: number) => `${offset < 0 ? '−' : '+'}${Math.abs(offset).toFixed(1)} s`;
+
+/** The one timing kept for a subtitle file. */
+async function keptOffset(page: Page): Promise<number> {
+  await expect
+    .poll(async () => ((await readKv(page, 'subtitleOffsets')) ?? []) as unknown[])
+    .toHaveLength(1);
+  const [kept] = (await readKv(page, 'subtitleOffsets')) as Array<{ offset: number }>;
+  return kept!.offset;
+}
+
+test('Match a line: one press puts the line heard on time, kept for the file, and Undo puts it back', async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await playForMatching(page, 'matchLate');
+  await seekVideo(page, 30);
+  await openTiming(page);
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await matchHeardLine(page, heardApart);
+
+  // The file is 2 s late: the line pressed now shows when it was heard.
+  const offset = await keptOffset(page);
+  expect(Math.abs(offset + 2)).toBeLessThanOrEqual(0.5);
+  await expect(
+    page.getByText(
+      `Lined up to that line: ${amountOf(offset)}. Much later in the film, do this again to fix lines that drift.`,
+    ),
+  ).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
+    amountOf(offset),
+  );
+
+  // Undo, after Reset, puts back the timing there was: none.
+  for (const key of ['m05', 'm01', 'p01', 'p05', 'reset', 'undo']) {
+    await press(page, 'ArrowRight', `player-tracks-timing-${key}`);
+  }
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
+  await expect(page.locator('[data-focus-key="player-tracks-timing-undo"]')).toHaveCount(0);
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText('0.0 s');
+});
+
+test('Match two lines far apart: the drift is fixed too', async ({ page }) => {
+  test.setTimeout(120000);
+  await playForMatching(page, 'matchAhead');
+  await seekVideo(page, 28);
+  await openTiming(page);
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await matchHeardLine(page, heardApart);
+  await expect(page.getByText(/^Lined up to that line: /)).toBeVisible();
+
+  // Much later in the film: a second line.
+  await seekVideo(page, 448);
+  await expect.poll(async () => (await video(page)).time).toBeGreaterThan(448);
+  await matchHeardLine(page, heardApart);
+  await expect
+    .poll(async () => readKv(page, 'subtitleDrift'))
+    .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), drift: 'ahead' }]);
+  const offset = await keptOffset(page);
+  expect(Math.abs(offset - 2)).toBeLessThanOrEqual(0.5);
+  await expect(
+    page.getByText(`Lined up to both lines: ${amountOf(offset)}, and the drift fixed.`),
+  ).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
+    'drift fixed',
+  );
+});
+
+test('Last episode’s timing is offered on the next episode of the same release', async ({
+  page,
+}) => {
+  test.setTimeout(150000);
+  const report: string[] = [];
+  page.on('console', async (message) => {
+    const [label, body] = message.args();
+    if ((await label?.jsonValue()) === '[BannerTV diagnostics]') {
+      report.push(String(await body?.jsonValue()));
+    }
+  });
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  // Every episode's streams share their binge groups; one English file each, from OpenSubtitles.
+  const mock = await mockPlayback(page, { subtitleList: [{ id: 'en1', lang: 'eng' }] });
+  const tabTiming = page.locator('[data-focus-key="player-tracks-tab-timing"]');
+  const kept = async () => ((await readKv(page, 'subtitleOffsets')) ?? []) as unknown[];
+  /** The Timing tab, its first row focused. */
+  const timingRow = async (first: string) => {
+    await openTiming(page);
+    await press(page, 'ArrowDown', first);
+  };
+  // The episode playing, by its place in the season: Episodes opens on it.
+  let playing = 0;
+  const playEpisode = async (index: number, videoId: string) => {
+    await openEpisodes(page, `player-episodes-ep-${playing}`);
+    for (let at = playing; at !== index;) {
+      at += index > at ? 1 : -1;
+      await press(page, index > playing ? 'ArrowDown' : 'ArrowUp', `player-episodes-ep-${at}`);
+    }
+    playing = index;
+    await press(page, 'Enter', 'player-surface');
+    await expect.poll(() => mock.streams).toContain(`series/${videoId}`);
+    await expect.poll(async () => (await video(page)).playing).toBe(true);
+  };
+
+  // Episode 1: half a second later, by hand.
+  await playFirstEpisode(page);
+  await timingRow('player-tracks-timing-match');
+  for (const key of ['m05', 'm01', 'p01', 'p05']) {
+    await press(page, 'ArrowRight', `player-tracks-timing-${key}`);
+  }
+  await page.keyboard.press('Enter');
+  await expect(tabTiming).toContainText('+0.5 s');
+  await expect.poll(kept).toHaveLength(1);
+  await pressBack(page);
+  await pressBack(page);
+
+  // Episode 2: offered, never used by itself.
+  await playEpisode(1, 'tt8000001:1:2');
+  await expect(
+    page.getByText("Last episode's subtitles needed +0.5 s. Open Timing to use it."),
+  ).toBeVisible({ timeout: 15000 });
+  await timingRow('player-tracks-offer-use');
+  await expect(
+    page.getByText("Last episode's subtitles needed +0.5 s. Use that here?"),
+  ).toBeVisible();
+  await expect(page.locator('[data-focus-key="player-tracks-offer-no"]')).toHaveText('No thanks');
+  await expect(tabTiming).toContainText('0.0 s');
+  await page.keyboard.press('Enter');
+  await expect(tabTiming).toContainText('+0.5 s');
+  await expect.poll(kept).toEqual([
+    { key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.5 },
+    { key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.5 },
+  ]);
+  await expect(page.locator('[data-focus-key="player-tracks-offer-use"]')).toHaveCount(0);
+  await pressBack(page);
+  await pressBack(page);
+
+  // Episode 3: offered again, from episode 2 now, and declined: nothing is written for it.
+  await playEpisode(2, 'tt8000001:1:3');
+  await timingRow('player-tracks-offer-use');
+  await press(page, 'ArrowRight', 'player-tracks-offer-no');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-offer-no"]')).toHaveCount(0);
+  await expect
+    .poll(async () => ((await readKv(page, 'releaseTimings')) as Array<{ declined?: string }>)[0])
+    .toMatchObject({ declined: 'tt8000001:1:3', videoId: 'tt8000001:1:2', offset: 0.5 });
+  expect(await kept()).toHaveLength(2);
+  await pressBack(page);
+  await pressBack(page);
+
+  // Played again, episode 3 offers nothing.
+  await playEpisode(1, 'tt8000001:1:2');
+  await playEpisode(2, 'tt8000001:1:3');
+  await page.waitForTimeout(3000);
+  await timingRow('player-tracks-timing-match');
+  await expect(page.locator('[data-focus-key="player-tracks-offer-use"]')).toHaveCount(0);
+  await expect(page.getByText(/Last episode's subtitles needed/)).toHaveCount(0);
+
+  // Diagnostics, by way of the series' page and Home.
+  for (let step = 0; step < 4 && !(await focusedKey(page)).startsWith('details-'); step++) {
+    await pressBack(page);
+  }
+  await pressBack(page);
+  await expect.poll(() => focusedKey(page)).not.toMatch(/^details-/);
+  await openDiagnostics(page);
+  await expect.poll(() => report.join('\n')).toContain('last episode’s timing offered: used');
+  expect(report.join('\n')).toContain('last episode’s timing offered: declined');
+  expect(report.join('\n')).not.toMatch(/https?:\/\//);
 });
