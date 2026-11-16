@@ -72,8 +72,9 @@ Four facts shaped the design:
      after Reset while a press is the last change. The option with focus stays in the list as
      the lines move on, and focus starts on the line last shown. Above that, last episode's
      timing for the same release is offered ("Use it", with focus first, and "No thanks"), with
-     a toast for 8 s as the episode starts. A picture track says only that its timing can't be
-     changed.
+     a toast for 8 s as the episode starts. What takes focus is decided once, as the sheet
+     opens: a line starting, or a line or an offer that comes later, never takes it from
+     wherever the viewer is. A picture track says only that its timing can't be changed.
 8. **A test package.** `com.bannertv.app.tvnative`, "BannerTV native test", installs beside the
    Android TV app. CI's `TV APK (React Native)` job type-checks, tests and builds a release APK
    signed with the Expo template's debug key, and uploads it as `bannertv-tv-native-apk`.
