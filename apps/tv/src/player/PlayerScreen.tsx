@@ -36,6 +36,8 @@ import {
   type PlaybackSession,
 } from '@tv/player/session';
 import { autoplaysSinceInput, countAutoplay } from '@tv/player/sleep';
+import { formatOffset } from '@tv/player/timing';
+import { useOfferNotice } from '@tv/screens/player/use-offer-notice';
 import { type SubtitleChoice, useSubtitles } from '@tv/screens/player/use-subtitles';
 import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { VideoView } from 'expo-video';
@@ -439,6 +441,8 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
   };
 
   const clock = useCallback(() => element.currentTime, [element]);
+  // Last episode's timing, offered: said for a moment as the episode starts.
+  const offerNotice = useOfferNotice(subtitles.offer, videoId);
   const now = useNow(15_000);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
@@ -450,6 +454,14 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
     if (state.failedOver && waiting) return t('player.tryingAnother');
     if (state.struggling && buffering) return t('player.keepsBufferingPlain');
     if (subtitles.failed && !waiting) return t('player.subtitlesFailed');
+    if (offerNotice && subtitles.offer && !waiting) {
+      const { offset, drift } = subtitles.offer;
+      return t('player.offerToast', {
+        amount: drift
+          ? t('player.offerAmountDrift', { amount: formatOffset(offset) })
+          : formatOffset(offset),
+      });
+    }
     return undefined;
   })();
   const backdrop = item?.background ?? item?.poster;
@@ -736,7 +748,10 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
               <SheetNote>{t('player.stillAsking', { count: subtitles.pending })}</SheetNote>
             ) : null}
           </SheetColumn>
-          <TimingColumn subtitles={subtitles} />
+          <TimingColumn
+            subtitles={subtitles}
+            clock={() => ({ time: element.currentTime, speed: state.rate || 1, paused: !playing })}
+          />
           <SheetColumn title={t('player.style')}>
             {SUBTITLE_SIZES.map((size) => (
               <SheetOption
