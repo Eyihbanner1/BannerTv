@@ -89,7 +89,10 @@ test("the player's English versions list SubDL's file", async ({ page }) => {
   if (!(await panelButton.isVisible())) await page.mouse.click(120, 160);
   await panelButton.click();
   await page.getByRole('button', { name: /^English, \d versions?$/ }).click();
-  await expect(page.getByRole('button', { name: /^SubDL 1/ })).toBeVisible();
+  // One SubDL file is listed under its source alone, with the release it was made for.
+  await expect(
+    page.getByRole('button', { name: `SubDL, Same release · ${SUBDL_FILM_RELEASE}` }),
+  ).toBeVisible();
   expect(subdl.searches).toHaveLength(1);
   for (const line of leaks.lines) expect(line).not.toContain(FAKE_SUBDL_KEY);
   for (const url of leaks.urls) expect(url).not.toContain(FAKE_SUBDL_KEY);
@@ -105,7 +108,10 @@ test('a kids profile has no SubDL row', async ({ page }) => {
   });
   await openApp(page);
   await page.getByRole('tab', { name: 'Settings' }).click();
-  await expect(page.getByText(/^Size, colour|^Subtitle style/).first()).toBeVisible();
+  // A kids profile's Settings hold only the note, so wait for it before looking for the row.
+  await expect(
+    page.getByText('Grown-ups can change the settings from their own profile.'),
+  ).toBeVisible();
   await expect(page.getByText(/^SubDL subtitles/)).toHaveCount(0);
   expect(subdl.meChecks).toBe(0);
 });
