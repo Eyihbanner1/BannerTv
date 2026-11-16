@@ -223,7 +223,7 @@ describe('parseSubdlFiles', () => {
     ).toEqual([]);
   });
 
-  it('falls back to the ZIP, with the episode in the link for packs only', () => {
+  it("falls back to the ZIP, with the episode in the link unless the row is the episode's alone", () => {
     const files = parseSubdlFiles(
       showAnswer([
         packRow({ unpack_files: [] }),
@@ -244,6 +244,25 @@ describe('parseSubdlFiles', () => {
     ]);
     // A film's ZIP never carries an episode.
     expect(parseSubdlFiles(filmAnswer(), film)[0]!.url).not.toContain('#');
+  });
+
+  it("puts the episode in the ZIP's link when the row does not say which episode it is", () => {
+    const [file] = parseSubdlFiles(
+      showAnswer([
+        packRow({
+          full_season: false,
+          episode_from: null,
+          episode_end: null,
+          unpack_files: undefined,
+        }),
+      ]),
+      episode,
+    );
+    expect(file).toMatchObject({
+      url: 'https://dl.subdl.com/subtitle/9000002-9100002.zip#s2e3',
+      season: 2,
+    });
+    expect(file!.episode).toBeUndefined();
   });
 
   it('keeps no more than SUBDL_MAX_FILES, without the same link twice', () => {

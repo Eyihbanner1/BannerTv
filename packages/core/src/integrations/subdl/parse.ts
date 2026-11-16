@@ -127,7 +127,6 @@ const stripExtension = (name: string) => name.replace(/\.[a-z0-9]{1,4}$/i, '');
 const baseName = (name: string) => name.slice(name.lastIndexOf('/') + 1);
 
 interface RowFacts {
-  pack: boolean;
   /** The row is for one episode, the one asked. */
   single: boolean;
 }
@@ -143,13 +142,13 @@ function episodeFacts(row: Fields, ask: SubdlAsk): RowFacts | null {
     const low = Math.min(from, end);
     const high = Math.max(from, end);
     if (ask.episode! < low || ask.episode! > high) return null;
-    return { pack: true, single: false };
+    return { single: false };
   }
-  if (row.full_season === true) return { pack: true, single: false };
+  if (row.full_season === true) return { single: false };
   // A row for one episode: another episode's is dropped.
   const one = from > 0 ? from : count(row.episode);
   if (one > 0 && one !== ask.episode) return null;
-  return { pack: false, single: one === ask.episode };
+  return { single: one === ask.episode };
 }
 
 interface UnpackEntry {
@@ -218,7 +217,7 @@ export function parseSubdlFiles(body: unknown, ask: SubdlAsk): SubdlFile[] {
       const lang = languageOfSubdl(text(row.language));
       if (lang === undefined) continue;
       if (isJunk(row)) continue;
-      const facts = forEpisode ? episodeFacts(row, ask) : { pack: false, single: false };
+      const facts = forEpisode ? episodeFacts(row, ask) : { single: false };
       if (!facts) continue;
       const releases = cleanReleases(row.releases);
       const label =
@@ -266,13 +265,14 @@ export function parseSubdlFiles(body: unknown, ask: SubdlAsk): SubdlFile[] {
         });
         continue;
       }
+      // A ZIP not said to be the episode's alone is opened for that episode's file only.
       files.push({
         ...base,
         id: stem[1]!,
         url:
           SUBDL_DOWNLOADS +
           path +
-          (forEpisode && facts.pack ? `#s${ask.season}e${ask.episode}` : ''),
+          (forEpisode && !facts.single ? `#s${ask.season}e${ask.episode}` : ''),
         ...(label !== '' && { label }),
         ...(forEpisode && { season: ask.season! }),
         ...(forEpisode && facts.single && { episode: ask.episode! }),

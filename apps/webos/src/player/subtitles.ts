@@ -135,7 +135,7 @@ async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayB
   return readCapped(stream);
 }
 
-/** A season pack's episode, as SubDL's list marks it on the link: "#s2e3". */
+/** The episode wanted from a ZIP that may hold others, as SubDL's list marks it on the link: "#s2e3". */
 const PACK_EPISODE = /#s(\d+)e(\d+)$/;
 
 async function download(url: string, lang: string): Promise<Cue[]> {
