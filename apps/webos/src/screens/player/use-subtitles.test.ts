@@ -2872,10 +2872,14 @@ describe('SubDL beside the addons', () => {
     const player = play(entry, { engine: 'hls.js', text: [forced] });
     await player.wait(300);
     expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+    // Not an addon still asked.
+    expect(player.subtitles.pending).toBe(0);
+    expect(player.subtitles.subdlAsking).toBe(true);
     const late = subdlFile('late', FULL);
     more([late], 0);
     await player.wait(2500);
     expect(player.subtitles.choice).toEqual(fileChoice(late));
+    expect(player.subtitles.subdlAsking).toBe(false);
   });
 
   it('is still waited for before nothing in the language settles on Off', async () => {

@@ -167,6 +167,17 @@ test('a SubDL that never answers holds the first line back no longer than with n
   await page.close();
 });
 
+test('the subtitles sheet says SubDL, not an addon, is still being asked', async ({ page }) => {
+  await setUp(page, 'never');
+  await playFilm(page);
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await openSheet(page, 'player-tracks-lang-en');
+  await expect(page.getByText('Still looking on SubDL…')).toBeVisible();
+  await expect(page.getByText(/Still asking \d+ addon/)).toHaveCount(0);
+  // Once its 8 s are up, nothing is said to be asked.
+  await expect(page.getByText('Still looking on SubDL…')).toHaveCount(0, { timeout: 10_000 });
+});
+
 test('SubDL asking to slow down rests it, and its screen says so', async ({ page }) => {
   const { subdl } = await setUp(page, 'busy');
   await playFilm(page);

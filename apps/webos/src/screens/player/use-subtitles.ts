@@ -196,6 +196,8 @@ export interface Subtitles {
   tracks: EngineTrack[];
   /** Addons still looking for subtitles. */
   pending: number;
+  /** SubDL is still being asked: not an addon, so not among `pending`. */
+  subdlAsking: boolean;
   /**
    * The video's hash is still being read after the addons were asked without
    * it: it may yet bring files made for the video.
@@ -2077,8 +2079,9 @@ export function useSubtitles(
   return {
     options,
     tracks,
-    // The hash still being read is not an addon still asked.
-    pending: pending - (listState.hashReading ? 1 : 0),
+    // The hash still being read is not an addon still asked, nor is SubDL.
+    pending: pending - (listState.hashReading ? 1 : 0) - (listState.subdlAsking ?? 0),
+    subdlAsking: (listState.subdlAsking ?? 0) > 0,
     hashReading: !!listState.hashReading,
     textComing,
     choice,
