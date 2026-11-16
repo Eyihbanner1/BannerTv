@@ -117,8 +117,10 @@ function readEntries(bytes: Uint8Array, limits: ZipLimits): Entry[] {
     }
     if (flags & 1) throw new ZipError('encrypted');
     const nameBytes = bytes.subarray(at + 46, at + 46 + nameLength);
+    const name = flags & 0x800 ? decodeUtf8(nameBytes) : latin1(nameBytes);
     entries.push({
-      name: flags & 0x800 ? decodeUtf8(nameBytes) : latin1(nameBytes),
+      // Some Windows tools write folders with backslashes, which no file name holds.
+      name: name.replace(/\\/g, '/'),
       flags,
       method: u16(at + 10),
       crc: u32(at + 16),

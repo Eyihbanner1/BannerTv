@@ -86,6 +86,18 @@ describe('subtitleFromZip', () => {
     expect(reason(other, { season: 2, episode: 3 })).toBe('no-subtitle');
   });
 
+  it('reads names written with backslashes, as some Windows tools write them, by the file alone', async () => {
+    const zip = await zipOf([
+      { name: 'Show.S01E01-E10.Pack\\Show.S01E02.srt', data: utf8(seededSrt(5, 200)) },
+      { name: 'Show.S01E01-E10.Pack\\Show.S01E05.srt', data: utf8(seededSrt(50, 500)) },
+      { name: '__MACOSX\\Show.S01E01-E10.Pack\\._Show.S01E02.srt', data: utf8(seededSrt(90)) },
+      { name: 'Show.S01E01-E10.Pack\\._Show.S01E02.srt', data: utf8(seededSrt(90)) },
+    ]);
+    expect(text(subtitleFromZip(zip, { season: 1, episode: 2 }))).toBe(seededSrt(5, 200));
+    expect(reason(zip, { season: 1, episode: 3 })).toBe('no-subtitle');
+    expect(text(subtitleFromZip(zip, {}))).toBe(seededSrt(50, 500));
+  });
+
   it('never gives another episode when the one wanted is missing', async () => {
     const zip = await zipOf([
       { name: 'Test.Show.S02E01.srt', data: utf8(seededSrt(5)) },
