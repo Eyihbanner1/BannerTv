@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
 import { API_SERVICE } from '../src/data/api-service';
+import { addStorageInitScript } from './tv';
 
 /**
  * A fake stream addon, subtitle files and media for the playback journeys.
@@ -550,7 +551,8 @@ export async function seedStreamAddon(
     updatedAt: 1000 + i,
   }));
   const cards = (options.played ?? []).map((card, i) => ({ ...card, updatedAt: 1000 + i }));
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     ({ stored, saved, played, chosen, extra }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');

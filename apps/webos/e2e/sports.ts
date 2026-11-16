@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
 import { MEDIA_HOST } from './play';
+import { addStorageInitScript } from './tv';
 
 /**
  * Two made-up sports addons for the Sports journeys. Nothing here comes from
@@ -268,7 +269,8 @@ export async function seedSports(page: Page, options: SportsOptions = {}): Promi
         ]
       : []),
   ];
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     ({ stored, settings }) => {
       if (sessionStorage.getItem('bannertv.test.seeded')) return;
       sessionStorage.setItem('bannertv.test.seeded', '1');

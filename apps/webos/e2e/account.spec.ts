@@ -12,6 +12,7 @@ import {
   typeInto,
 } from './sync';
 import {
+  addStorageInitScript,
   APP_URL,
   expectFocus,
   expectFocusLabel,
@@ -1407,7 +1408,8 @@ test('a screen in an account whose localStorage lost the welcome and its flag of
   await mockAddons(page);
   await mockSync(page, sync);
   // At the next launch only: the welcome and the account's flag are gone, as a lost write leaves them.
-  await page.addInitScript(() => {
+  // After mockAddons' own welcome flag, as both wait for the page to be parsed.
+  await addStorageInitScript(page, () => {
     if (sessionStorage.getItem('bannertv.test.lose') !== '1') return;
     sessionStorage.setItem('bannertv.test.lose', 'done');
     localStorage.removeItem('bannertv.welcomed');
