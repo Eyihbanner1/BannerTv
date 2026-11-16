@@ -6,6 +6,7 @@ import {
   estimateBitrate,
   isMuchShorter,
   judgeLive,
+  type LineTiming,
   type LiveWindow,
   type PlayAttempt,
   type ProgressTracker,
@@ -103,6 +104,13 @@ export interface SessionState {
   text: EngineTrack[];
   /** Cues from the stream's own subtitle tracks, by track id. */
   streamCues: Readonly<Record<string, Cue[]>>;
+  /**
+   * Every line each of the stream's subtitle tracks has handed over, by track
+   * id: its timing only, lines with an end, in the order handed over. Unlike `streamCues`
+   * it keeps Android's lines after it lets them go (a seek, its last few
+   * kept), so files can be lined up against the track (`findReference`).
+   */
+  streamTimings: Readonly<Record<string, readonly LineTiming[]>>;
   /** The playback speed; every stream starts at 1. */
   rate: number;
   /**
@@ -246,6 +254,7 @@ export const INITIAL_SESSION_STATE: SessionState = {
   audio: [],
   text: [],
   streamCues: {},
+  streamTimings: {},
   rate: 1,
   clip: false,
   attempts: [],
@@ -964,6 +973,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         audio: [],
         text: [],
         streamCues: {},
+        streamTimings: {},
         rate: 1,
         clip: false,
       });
@@ -974,6 +984,25 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
 
       const engines = new Set<EngineName>();
       const seenCues: Record<string, Record<string, true>> = {};
+      // Each track's lines handed over so far, by when they start and end, for streamTimings.
+      const timedCues: Record<string, Record<string, true>> = {};
+      /** Adds the lines with an end that the track has not handed over before. */
+      const keepTimings = (trackId: string, cues: readonly Cue[]) => {
+        const seen = (timedCues[trackId] = timedCues[trackId] ?? {});
+        const fresh: LineTiming[] = [];
+        for (const cue of cues) {
+          if (!isFinite(cue.start) || !isFinite(cue.end) || !(cue.end > cue.start)) continue;
+          const key = `${Math.round(cue.start * 100)}|${Math.round(cue.end * 100)}`;
+          if (seen[key]) continue;
+          seen[key] = true;
+          fresh.push({ start: cue.start, end: cue.end });
+        }
+        if (fresh.length === 0) return;
+        const timings = state.get().streamTimings;
+        patch({
+          streamTimings: { ...timings, [trackId]: (timings[trackId] ?? []).concat(fresh) },
+        });
+      };
       const open = async (name: EngineName) => {
         if (current !== attempt || destroyed) return;
         engines.add(name);
@@ -989,6 +1018,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
           },
           cues: (trackId: string, cues: Cue[], replace?: boolean) => {
             if (current !== attempt) return;
+            keepTimings(trackId, cues);
             if (replace) {
               patch({ streamCues: { ...state.get().streamCues, [trackId]: cues } });
               return;

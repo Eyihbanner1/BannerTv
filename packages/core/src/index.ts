@@ -86,6 +86,7 @@ export {
   BANNERTV_DEMO_URL,
   CINEMETA_URL,
   DEFAULT_ADDONS,
+  HASH_MATCHING_ADDON_IDS,
   OPENSUBTITLES_V3_ID,
   OPENSUBTITLES_V3_URL,
 } from './addons/defaults';
@@ -438,6 +439,40 @@ export type {
   VideoCodec,
 } from './streams/types';
 export { isAdCue, stripAdCues } from './subtitles/ads';
+export {
+  type Agreement,
+  type AgreementCounts,
+  type AgreementDecision,
+  type AgreementFile,
+  type AgreementInput,
+  AGREEMENT_LIMITS,
+  AGREEMENT_MIN_LINES,
+  type AgreementLimits,
+  type AgreementStep,
+  type AgreementWhy,
+  createAgreement,
+  fileFacts,
+  FIRST_READ_FILES,
+  FIRST_READ_TRIES,
+  groupKeyOf,
+  type NameFacts,
+  type PairAnswer,
+  videoFacts,
+  weightOf,
+} from './subtitles/agreement';
+export {
+  type AlignConfidence,
+  alignedTime,
+  type AlignOptions,
+  ALIGN_RATES,
+  alignSteps,
+  alignSubtitles,
+  alignSubtitlesInSlices,
+  type LineTiming,
+  MAX_OFFSET,
+  type Slicing,
+  type SubtitleAlignment,
+} from './subtitles/align';
 export { createCueIndex, type CueIndex } from './subtitles/cues';
 export { detectEncoding } from './subtitles/encoding';
 export {
@@ -480,9 +515,18 @@ export {
   numberBySource,
   otherEpisode,
   releaseMatch,
+  releaseFeatures,
   type ReleaseMatch,
+  type SourceFamily,
   type VideoRelease,
 } from './subtitles/versions';
+export {
+  readNameTags,
+  releaseEdition,
+  releaseGroup,
+  releaseService,
+  type StreamingService,
+} from './streams/release';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export type { Listener, Store, Updater } from './store';
 export {

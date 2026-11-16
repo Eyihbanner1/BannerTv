@@ -1,4 +1,5 @@
-import { type Cue, profileSubtitles, type SubtitleProfile } from '@bannertv/core';
+import { type Cue, type LineTiming, profileSubtitles, type SubtitleProfile } from '@bannertv/core';
+import { timingOf } from './subtitle-align';
 import { loadSubtitles, type SubtitleOption } from './subtitles';
 
 /** What reading a file for its checks needs of it. */
@@ -14,6 +15,8 @@ export interface SubtitleChecks {
   profile(url: string): SubtitleProfile | undefined;
   /** Every file read so far, by link: a new map after each, for useSyncExternalStore. */
   profiles(): ReadonlyMap<string, SubtitleProfile>;
+  /** The timing of the file's lines, its adverts taken out, once it has been read: for lining it up. */
+  lines(url: string): readonly LineTiming[] | undefined;
   /** Whether the file is being read now. */
   reading(url: string): boolean;
   /** Whether the file could not be read the last time it was tried. */
@@ -32,6 +35,7 @@ export function createSubtitleChecks(
   load: (file: CheckedFile) => Promise<Cue[]> = loadSubtitles,
 ): SubtitleChecks {
   let profiles: ReadonlyMap<string, SubtitleProfile> = new Map();
+  const timings = new Map<string, readonly LineTiming[]>();
   const reading = new Map<string, Promise<Cue[]>>();
   const failed = new Set<string>();
   const listeners = new Set<() => void>();
@@ -40,6 +44,7 @@ export function createSubtitleChecks(
   return {
     profile: (url) => profiles.get(url),
     profiles: () => profiles,
+    lines: (url) => timings.get(url),
     reading: (url) => reading.has(url),
     failed: (url) => failed.has(url),
     read(file) {
@@ -50,6 +55,7 @@ export function createSubtitleChecks(
           reading.delete(file.url);
           failed.delete(file.url);
           if (!profiles.has(file.url)) {
+            timings.set(file.url, timingOf(cues));
             profiles = new Map(profiles).set(file.url, profileSubtitles(cues, file.label));
           }
           changed();

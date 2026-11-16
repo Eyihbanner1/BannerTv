@@ -13,12 +13,15 @@ import type { EngineTrack } from '../../player/engines/types';
 import {
   createOrderMemory,
   DRIFT_CHOICES,
+  driftHintKey,
+  driftOn,
   isUnfit,
   languageFirstPick,
   playingRelease,
   sameChoice,
   subtitlesValue,
   subtitleVersions,
+  syncLine,
   type SubtitleVersion,
   VERSION_NOTES,
   versionDetail,
@@ -191,7 +194,9 @@ export function TracksSheet(props: TracksSheetProps) {
             <Note>
               {subtitles.pending > 0
                 ? t('player.stillAsking', { count: subtitles.pending })
-                : t('player.noSubtitles')}
+                : subtitles.hashReading
+                  ? t('player.stillLinking')
+                  : t('player.noSubtitles')}
             </Note>
           </div>
         )}
@@ -238,6 +243,8 @@ export function TracksSheet(props: TracksSheetProps) {
       );
   } else if (tab === 'timing') {
     const { way, amount } = offsetWay(subtitles.offset);
+    // What lining the file up against the video did: moved by BannerTV, or why not.
+    const sync = syncLine(subtitles.sync);
     content =
       choice === null ? (
         <div className={styles.content}>
@@ -291,7 +298,7 @@ export function TracksSheet(props: TracksSheetProps) {
             <div className={styles.steps}>
               <span className={styles.rowLabel}>{t('player.drift')}</span>
               {DRIFT_CHOICES.map(({ name, drift, label }) => {
-                const on = subtitles.drift === drift;
+                const on = driftOn(subtitles, drift);
                 return (
                   <Pressable
                     key={name}
@@ -307,9 +314,14 @@ export function TracksSheet(props: TracksSheetProps) {
               })}
             </div>
           )}
+          {sync && (
+            <p className={styles.kept}>
+              {t(sync.key, sync.amount !== undefined ? { amount: sync.amount } : undefined)}
+            </p>
+          )}
           <p className={styles.kept}>
             {subtitles.canFixDrift
-              ? `${t(subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint')} ${t('player.timingKept')}`
+              ? `${t(driftHintKey(subtitles))} ${t('player.timingKept')}`
               : t('player.timingKept')}
           </p>
         </Pane>
@@ -332,9 +344,13 @@ export function TracksSheet(props: TracksSheetProps) {
   const values: Record<SheetTab, string> = {
     subtitles: subtitlesValue(subtitles) ?? t('player.subtitlesOff'),
     audio: active ? audioSummary(active) : t('player.audioDefault'),
-    timing: subtitles.drift
-      ? `${formatOffset(subtitles.offset)} · ${t('player.driftFixed')}`
-      : formatOffset(subtitles.offset),
+    timing: [
+      formatOffset(subtitles.offset),
+      subtitles.sync?.state === 'moved' ? t('player.linedUp') : null,
+      subtitles.drift ? t('player.driftFixed') : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(' · '),
     style: styleSummary,
   };
 
@@ -367,9 +383,13 @@ export function TracksSheet(props: TracksSheetProps) {
         values={values}
         onTab={onTab}
         aside={
-          tab === 'subtitles' && subtitles.pending > 0 && groups.length > 0
-            ? t('player.stillAsking', { count: subtitles.pending })
-            : undefined
+          tab !== 'subtitles' || groups.length === 0
+            ? undefined
+            : subtitles.pending > 0
+              ? t('player.stillAsking', { count: subtitles.pending })
+              : subtitles.hashReading
+                ? t('player.stillLinking')
+                : undefined
         }
       />
       {/* Each tab's choices register afresh: a focusable keeps the key it was first given. */}

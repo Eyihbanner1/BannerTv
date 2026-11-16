@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import type { Page, Route } from '@playwright/test';
 import { API_SERVICE } from '../src/data/api-service';
@@ -21,6 +23,20 @@ const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-40s.we
 const LONG_FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/blank-10min.webm'));
 
 /**
+ * The size of the 10-minute video at any media path starting /film-: padded to it with an EBML
+ * Void element after its segment, which players skip, so its OpenSubtitles hash can be read from
+ * two 64 KB ends. The fixtures alone are too small for that, so their hash read fails, as it
+ * does for any file under 128 KB.
+ */
+export const FILM_SIZE = 256 * 1024;
+const FILM_FIXTURE = (() => {
+  const head = Buffer.from([0xec, 0x01, 0, 0, 0, 0, 0, 0, 0]);
+  const rest = FILM_SIZE - LONG_FIXTURE.length - head.length;
+  head.writeUIntBE(rest, 3, 6);
+  return Buffer.concat([LONG_FIXTURE, head, Buffer.alloc(rest)]);
+})();
+
+/**
  * 10 s of HLS at MEDIA_HOST/hls/master.m3u8: VP9 and Opus in fMP4, audio in
  * English and French, and English WebVTT subtitles, so BannerTV hands it to
  * hls.js. Made with ffmpeg; see fixtures/hls/README.md.
@@ -33,6 +49,12 @@ export const LIVE_HLS_PATH = '/hls-live/master.m3u8';
  * "English Commentary", listed first, so the Commentary rule shows.
  */
 export const COMMENTARY_HLS_PATH = '/hls-commentary/master.m3u8';
+/**
+ * Ten minutes of HLS at MEDIA_HOST/hls-long/master.m3u8: VP9 with no audio, and a French
+ * WebVTT rendition, HLS_LONG_FRENCH, in one segment, so hls.js reads it whole at the start.
+ * See fixtures/hls-long/README.md.
+ */
+export const HLS_LONG_PATH = '/hls-long/master.m3u8';
 const HLS_TYPES: Record<string, string> = {
   m3u8: 'application/vnd.apple.mpegurl',
   mp4: 'video/mp4',
@@ -79,6 +101,8 @@ export interface TestStream {
   requestHeaders?: Record<string, string>;
   /** Subtitles that come with the stream, as paths on SUBTITLE_HOST, with a release name if given. */
   subtitles?: ReadonlyArray<{ id: string; path: string; lang: string; label?: string }>;
+  /** The file name the addon gives (behaviorHints.filename). Default the path's last part. */
+  filename?: string;
 }
 
 /**
@@ -187,6 +211,118 @@ export const LONG_SUBTITLES = {
   copy: srt(dialogue('Another full file', 3, 588, 2)),
 };
 
+/** Seconds rounded to milliseconds, as subtitle files keep them. */
+const ms = (seconds: number) => Math.round(seconds * 1000) / 1000;
+
+/**
+ * When a made-up film's lines start and end, from `from` seconds until `until`: one every 2 to
+ * 6 s, lasting 1 to 3 s, as unevenly as people talk, and the same on every run. Even lines
+ * would line up as well a line or two either way, as no film's do.
+ */
+function speech(from: number, until: number): Array<[number, number]> {
+  const lines: Array<[number, number]> = [];
+  for (let at = from, n = 1; at < until; n++) {
+    const random = (salt: number) => {
+      const x = Math.sin(n * 12.9898 + salt * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const length = 1 + 2 * random(1);
+    lines.push([ms(at), ms(at + length)]);
+    at += length + 0.3 + 3 * random(2);
+  }
+  return lines;
+}
+
+/** The made-up film's lines for the 10-minute video, from 6 s. */
+const LONG_SPEECH = speech(6, 588);
+
+/**
+ * Files for lining up on the 10-minute video (any /long- path): one for the hard of hearing,
+ * with a sound in brackets every fifth line, as OpenSubtitles finds by the video's hash; and a
+ * plain one with the same speech, 3 s late, as from another release.
+ */
+export const ALIGN_SUBTITLES = {
+  linkedHearing: srt(
+    LONG_SPEECH.map(([start, end], i) => [
+      start,
+      end,
+      (i + 1) % 5 === 0 ? '[door creaks]' : `Linked file, line ${i + 1}`,
+    ]),
+  ),
+  plainLate: srt(
+    LONG_SPEECH.filter((_, i) => (i + 1) % 5 !== 0).map(([start, end], i) => [
+      ms(start + 3),
+      ms(end + 3),
+      `Plain file, line ${i + 1}`,
+    ]),
+  ),
+};
+
+/** The made-up film's lines on the long HLS, from 15 s: its French track has them on time. */
+const HLS_LONG_SPEECH = speech(15, 588);
+
+/** WebVTT time: 00:01:02.500. */
+const vttTime = (seconds: number) => srtTime(seconds).replace(',', '.');
+
+/** The long HLS's French track, served at MEDIA_HOST/hls-long/subs-fr.vtt. */
+export const HLS_LONG_FRENCH = `WEBVTT\n\n${HLS_LONG_SPEECH.map(
+  ([start, end], i) => `${vttTime(start)} --> ${vttTime(end)}\nLigne ${i + 1} en français\n`,
+).join('\n')}`;
+
+/** An English file for the long HLS, 5 s early: its lines come before the French track's. */
+export const HLS_LONG_ENGLISH = srt(
+  HLS_LONG_SPEECH.map(([start, end], i) => [ms(start - 5), ms(end - 5), `English line ${i + 1}`]),
+);
+
+/**
+ * The made-up film's 120 lines for files that agree with each other, on the 10-minute video:
+ * from 30 s, so a move made in the first seconds comes before the first line.
+ */
+export const AGREE_SPEECH = speech(30, 588).slice(0, 120);
+
+/** The same 120 lines from 3 s, for a journey whose first line need not wait. */
+export const APART_SPEECH = speech(3, 588).slice(0, 120);
+
+/** A file of these lines `by` seconds late, each numbered after `name`. */
+const timed = (lines: ReadonlyArray<readonly [number, number]>, by: number, name: string) =>
+  srt(lines.map(([start, end], i) => [ms(start + by), ms(end + by), `${name} ${i + 1}`]));
+
+/**
+ * Files for the 10-minute video that agree with each other, or don't: test lines only. On
+ * AGREE_SPEECH, four on time, one 8 s late and one 3 s late; on APART_SPEECH, three on time and
+ * one 12 s late.
+ */
+export const AGREE_SUBTITLES = {
+  agreeOnTimeA: timed(AGREE_SPEECH, 0, 'On time A, line'),
+  agreeOnTimeB: timed(AGREE_SPEECH, 0, 'On time B, line'),
+  agreeOnTimeC: timed(AGREE_SPEECH, 0, 'On time C, line'),
+  agreeLate8: timed(AGREE_SPEECH, 8, 'Test line'),
+  agreeLate3: timed(AGREE_SPEECH, 3, 'Picked line'),
+  agreeNamed: timed(AGREE_SPEECH, 0, 'Named line'),
+  apartOnTimeA: timed(APART_SPEECH, 0, 'In step A, line'),
+  apartOnTimeB: timed(APART_SPEECH, 0, 'In step B, line'),
+  apartOnTimeC: timed(APART_SPEECH, 0, 'In step C, line'),
+  apartLate12: timed(APART_SPEECH, 12, 'Apart line'),
+};
+
+/** The made-up film's lines on the 10-minute video from 2 s, so the first shows soon after Play. */
+export const EARLY_SPEECH = speech(2, 588);
+
+/** The same film's lines from 20 s, so the first is due well after a hash read late. */
+export const LATE_SPEECH = speech(20, 588);
+
+/**
+ * Files for a hash read after the subtitles were asked for, on the 10-minute video: test lines
+ * only. On EARLY_SPEECH, one OpenSubtitles finds by the video's id and one it finds only by the
+ * hash, both on time; on LATE_SPEECH, the same pair.
+ */
+export const HASH_SUBTITLES = {
+  askedEarly: timed(EARLY_SPEECH, 0, 'Asked first, line'),
+  linkedEarly: timed(EARLY_SPEECH, 0, 'Found by hash, line'),
+  askedLate: timed(LATE_SPEECH, 0, 'Starts late, line'),
+  linkedLate: timed(LATE_SPEECH, 0, 'Linked late, line'),
+};
+
 /** SRT text served at SUBTITLE_HOST/<id>.srt. */
 export const SUBTITLE_FILES: Record<string, string> = {
   en1: '1\n00:00:00,500 --> 00:00:20,000\nHello from the <i>test</i> subtitles\n\n2\n00:00:20,000 --> 00:00:40,000\nStill here\n',
@@ -194,6 +330,10 @@ export const SUBTITLE_FILES: Record<string, string> = {
   fr1: '1\n00:00:00,500 --> 00:00:40,000\nBonjour\n',
   fr2: '1\n00:00:00,500 --> 00:00:40,000\nBonjour encore\n',
   ...LONG_SUBTITLES,
+  ...ALIGN_SUBTITLES,
+  ...AGREE_SUBTITLES,
+  ...HASH_SUBTITLES,
+  hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 
 export interface PlaybackMock {
@@ -203,6 +343,8 @@ export interface PlaybackMock {
   streams: string[];
   /** Every subtitles request, as the path after /subtitles/. */
   subtitles: string[];
+  /** Every subtitle file asked for from SUBTITLE_HOST, by id, in order. */
+  files: string[];
   /** Stream answers the slow addon has sent. */
   slowAnswers: number;
   /** Every episode IntroDB was asked about, as imdbId:season:episode. */
@@ -222,10 +364,17 @@ export interface PlaybackOptions {
   refused?: Readonly<Record<string, readonly string[]>>;
   /** How long media takes to answer. Default at once. */
   mediaDelayMs?: number;
+  /**
+   * How long the first 'fetch' request to MEDIA_HOST takes to answer: the hash read's first
+   * 64 KB, as the video's own requests are 'media'. Default at once.
+   */
+  hashDelayMs?: number;
   /** Whether OpenSubtitles answers with SUBTITLE_FILES. Default true. */
   subtitles?: boolean;
   /** OpenSubtitles' answer. Default DEFAULT_SUBTITLES. */
   subtitleList?: readonly TestSubtitle[];
+  /** OpenSubtitles' answer when asked with the video's hash (`videoHash=`). Default subtitleList. */
+  subtitleListWithHash?: readonly TestSubtitle[];
   /** How long each subtitle file, by id, takes to arrive. Default at once. */
   subtitleDelayMs?: Readonly<Record<string, number>>;
   /** Subtitle files, by id, that arrive only once this settles, so a test decides when. */
@@ -399,8 +548,16 @@ export async function mockPlayback(
   page: Page,
   options: PlaybackOptions = {},
 ): Promise<PlaybackMock> {
-  const mock: PlaybackMock = { media: [], streams: [], subtitles: [], slowAnswers: 0, skips: [] };
+  const mock: PlaybackMock = {
+    media: [],
+    streams: [],
+    subtitles: [],
+    files: [],
+    slowAnswers: 0,
+    skips: [],
+  };
   const broken = new Set(options.broken ?? []);
+  let hashHeld = false;
 
   await page.route(/^https:\/\/streams\.example\.com\/bannertv\//, (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -422,7 +579,7 @@ export async function mockPlayback(
         behaviorHints: {
           ...(stream.bingeGroup && { bingeGroup: stream.bingeGroup }),
           ...(stream.requestHeaders && { proxyHeaders: { request: stream.requestHeaders } }),
-          filename: `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
+          filename: stream.filename ?? `${(stream.path ?? 'torrent').replace(/^.*\//, '')}`,
         },
         ...(stream.subtitles && {
           subtitles: stream.subtitles.map(({ id, path, lang, label }) => ({
@@ -461,12 +618,30 @@ export async function mockPlayback(
   await page.route(/^https:\/\/media\.example\.com\//, async (route) => {
     const path = new URL(route.request().url()).pathname;
     mock.media.push(path);
+    if (options.hashDelayMs && !hashHeld && route.request().resourceType() === 'fetch') {
+      hashHeld = true;
+      await new Promise((resolve) => setTimeout(resolve, options.hashDelayMs));
+    }
     if (options.mediaDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.mediaDelayMs));
     }
     if (broken.has(path)) return route.fulfill({ status: 404, body: '' });
     if (options.refused?.[path]?.includes(route.request().resourceType())) {
       return route.fulfill({ status: 503, body: '' });
+    }
+    const long = /^\/hls-long\/([\w-]+\.(m3u8|mp4|m4s|vtt))$/.exec(path);
+    if (path.indexOf('/hls-long/') === 0) {
+      if (!long) return route.fulfill({ status: 404 });
+      const file = long[1]!;
+      return route.fulfill({
+        status: 200,
+        contentType: HLS_TYPES[long[2]!],
+        headers: { 'access-control-allow-origin': '*' },
+        body:
+          file === 'subs-fr.vtt'
+            ? HLS_LONG_FRENCH
+            : readFileSync(resolve(import.meta.dirname, 'fixtures/hls-long', file)),
+      });
     }
     const hls = /^\/hls(-live|-commentary)?\//.exec(path);
     if (hls) {
@@ -491,6 +666,7 @@ export async function mockPlayback(
         body,
       });
     }
+    if (path.indexOf('/film-') === 0) return serveVideo(route, FILM_FIXTURE);
     return serveVideo(route, path.indexOf('/long-') === 0 ? LONG_FIXTURE : FIXTURE);
   });
 
@@ -499,8 +675,12 @@ export async function mockPlayback(
     mock.subtitles.push(decodeURIComponent(path));
     if (options.subtitlesGate) await options.subtitlesGate;
     if (options.subtitles === false) return json(route, { subtitles: [] });
+    const list =
+      (path.indexOf('videoHash=') !== -1 && options.subtitleListWithHash) ||
+      options.subtitleList ||
+      DEFAULT_SUBTITLES;
     return json(route, {
-      subtitles: (options.subtitleList ?? DEFAULT_SUBTITLES).map(
+      subtitles: list.map(
         ({ id, lang, label, subtitleFileName, movieReleaseName, m, withoutId }) => ({
           ...(!withoutId && { id }),
           url: `${SUBTITLE_HOST}/${id}.srt`,
@@ -532,6 +712,7 @@ export async function mockPlayback(
 
   await page.route(/^https:\/\/subs\.example\.com\//, async (route) => {
     const id = new URL(route.request().url()).pathname.replace(/^\/|\.srt$/g, '');
+    mock.files.push(id);
     const delay = options.subtitleDelayMs?.[id];
     if (delay) await new Promise((done) => setTimeout(done, delay));
     await options.subtitleGates?.[id];
@@ -545,6 +726,93 @@ export async function mockPlayback(
     });
   });
   return mock;
+}
+
+/** Which server of a RedirectChain a request reached. */
+export type ChainServer = 'resolve' | 'debrid' | 'media';
+
+/**
+ * A stream link that leads on to the film, as an addon's link to a debrid service does: the
+ * addon's server answers 302 to the service's, which answers 307 to its media server with a new
+ * token each time. Real servers on this machine, each with cross-origin headers as the browser
+ * checks them at every step: Playwright's routes never see a redirect's next request, which the
+ * browser sends itself.
+ */
+export interface RedirectChain {
+  /** The stream link to a path on the media server, through the other two. */
+  link: (path: string) => string;
+  /**
+   * Every request the page's own code made (not the video's, nor a CORS check), in order: the
+   * server it reached and the bytes asked for, if any. For a file, these are the hash read's.
+   */
+  fetched: Array<{ server: ChainServer; range?: string }>;
+}
+
+/** Starts a RedirectChain serving the 10-minute film at any /film- path, until the page closes. */
+export async function serveRedirects(page: Page): Promise<RedirectChain> {
+  const fetched: RedirectChain['fetched'] = [];
+  let walks = 0;
+  const origins = {} as Record<ChainServer, string>;
+  const answer = (server: ChainServer, request: IncomingMessage, response: ServerResponse) => {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'range',
+      'access-control-allow-methods': 'GET',
+    };
+    if (request.method === 'OPTIONS') return response.writeHead(204, cors).end();
+    const range = request.headers.range;
+    if (request.headers['sec-fetch-dest'] === 'empty') {
+      fetched.push({ server, ...(range && { range }) });
+    }
+    const path = new URL(request.url ?? '/', origins[server]).pathname;
+    if (server === 'resolve') {
+      return response
+        .writeHead(302, { ...cors, location: `${origins.debrid}${path.replace(/^\/resolve/, '')}` })
+        .end();
+    }
+    if (server === 'debrid') {
+      walks++;
+      return response
+        .writeHead(307, { ...cors, location: `${origins.media}${path}?token=t${walks}` })
+        .end();
+    }
+    if (path.indexOf('/film-') !== 0) return response.writeHead(404, cors).end();
+    const bytes = /bytes=(\d+)-(\d*)/.exec(range ?? '');
+    const start = bytes ? Number(bytes[1]) : 0;
+    const end = bytes?.[2] ? Math.min(Number(bytes[2]), FILM_SIZE - 1) : FILM_SIZE - 1;
+    return response
+      .writeHead(bytes ? 206 : 200, {
+        ...cors,
+        'content-type': 'video/webm',
+        'accept-ranges': 'bytes',
+        'content-length': String(end - start + 1),
+        ...(bytes && { 'content-range': `bytes ${start}-${end}/${FILM_SIZE}` }),
+      })
+      .end(FILM_FIXTURE.subarray(start, end + 1));
+  };
+  const servers = await Promise.all(
+    (['resolve', 'debrid', 'media'] as const).map(
+      (server) =>
+        new Promise<ReturnType<typeof createServer>>((started) => {
+          const http = createServer((request, response) => answer(server, request, response));
+          http.listen(0, '127.0.0.1', () => {
+            origins[server] = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+            started(http);
+          });
+        }),
+    ),
+  );
+  page.once('close', () => {
+    for (const http of servers) {
+      http.closeAllConnections();
+      http.close();
+    }
+  });
+  // The journeys refuse every other address (mockAddons): these servers' are let through.
+  for (const origin of Object.values(origins)) {
+    await page.route(`${origin}/**`, (route) => route.continue());
+  }
+  return { link: (path) => `${origins.resolve}/resolve${path}`, fetched };
 }
 
 /** A value the app keeps in its IndexedDB key-value store. */

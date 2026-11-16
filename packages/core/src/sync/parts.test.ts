@@ -429,6 +429,7 @@ describe('subtitleDriftsPart', () => {
     await part.adopt(
       change(
         {
+          'drift/k5': { t: 4, v: 'aligned' },
           'drift/k4': { t: 3, v: 'auto' },
           'drift/k3': { t: 2, v: 'ahead' },
           'drift/k2': { t: 1, v: 'behind' },
@@ -442,6 +443,7 @@ describe('subtitleDriftsPart', () => {
       { key: 'k2', drift: 'behind' },
       { key: 'k3', drift: 'ahead' },
       { key: 'k4', drift: 'auto' },
+      { key: 'k5', drift: 'aligned' },
     ]);
   });
 

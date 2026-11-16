@@ -160,3 +160,85 @@ const YTS = /(?:^|[^a-z0-9])(?:yts(?:[ .](?:mx|am|ag|lt|pm|bz|rs))?|yify)(?![a-z
 export function isYtsRelease(name: string): boolean {
   return YTS.test(name);
 }
+
+/** The streaming service a web release was taken from, as release names tag it. */
+export type StreamingService =
+  | 'amzn'
+  | 'nf'
+  | 'dsnp'
+  | 'hmax'
+  | 'atvp'
+  | 'hulu'
+  | 'pcok'
+  | 'pmtp'
+  | 'stan'
+  | 'crav'
+  | 'sho'
+  | 'roku'
+  | 'vudu'
+  | 'bcore'
+  | 'itunes'
+  | 'ma';
+
+/** A tag as its own word: "AMZN" in "….1080p.AMZN.WEB-DL", not in "Amazonia". */
+const tagged = (pattern: string) => new RegExp(`(?:^|[^a-z0-9])(?:${pattern})(?![a-z0-9])`);
+
+/**
+ * Each service's tags, the first that matches winning. "MAX", "STAN" and
+ * "SHO" are words in titles too ("Mad.Max", "Stan.and.Ollie"), so they count
+ * only before the WEB word their releases carry.
+ */
+const SERVICES: ReadonlyArray<readonly [StreamingService, RegExp]> = [
+  ['amzn', tagged('amzn|amazon')],
+  ['nf', tagged('nf|netflix')],
+  ['dsnp', tagged('dsnp|dsny|disney[+]?|disneyplus')],
+  ['hmax', tagged('hmax|hbo[ ._-]?max|max(?=[ ._-]web)')],
+  ['atvp', tagged('atvp|aptv|appletv[+]?|apple[ ._-]tv[+]?')],
+  ['hulu', tagged('hulu')],
+  ['pcok', tagged('pcok|peacock')],
+  ['pmtp', tagged('pmtp|paramount[+]?')],
+  ['stan', tagged('stan(?=[ ._-]web)')],
+  ['crav', tagged('crav|crave')],
+  ['sho', tagged('sho(?=[ ._-]web)|showtime')],
+  ['roku', tagged('roku')],
+  ['vudu', tagged('vudu')],
+  ['bcore', tagged('bcore')],
+];
+/** iTunes and Movies Anywhere, read in the name's own case: "iT" and "MA" are words otherwise. */
+const ITUNES = /[ ._-]iT[ ._-]WEB/;
+const MOVIES_ANYWHERE = /[ ._-]MA[ ._-]WEB/;
+
+/**
+ * The streaming service a release name says it was taken from
+ * ("….1080p.AMZN.WEB-DL…-FLUX" is `amzn`), or undefined when it names none.
+ * Releases of one service share its timing; another service's may start a
+ * few seconds apart (its logo before the film).
+ */
+export function releaseService(name: string): StreamingService | undefined {
+  const low = name.toLowerCase();
+  for (const [service, pattern] of SERVICES) if (pattern.test(low)) return service;
+  if (ITUNES.test(name)) return 'itunes';
+  if (MOVIES_ANYWHERE.test(name)) return 'ma';
+  return undefined;
+}
+
+/** Editions that change the cut, as names tag them, and the word each is known by. */
+const EDITIONS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['extended', tagged('extended')],
+  ['directors cut', tagged("director'?s[ ._-]?cut|dc")],
+  ['unrated', tagged('unrated')],
+  ['uncut', tagged('uncut')],
+  ['final cut', tagged('final[ ._-]cut')],
+  ['special edition', tagged('special[ ._-]edition')],
+];
+
+/**
+ * The edition a release name says it is, where that changes the cut
+ * ("….Extended.Cut.1080p…" is `extended`): its lines are timed for scenes
+ * other editions lack. Undefined for a name that says none.
+ */
+export function releaseEdition(name: string): string | undefined {
+  const low = name.toLowerCase();
+  for (const [edition, pattern] of EDITIONS) if (pattern.test(low)) return edition;
+  return undefined;
+}

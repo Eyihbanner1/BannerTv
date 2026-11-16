@@ -3,6 +3,7 @@ import { profileSubtitles } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
 import { driftInUse } from './drift';
 import {
+  agreedSwitchAllowed,
   fitsIn,
   lastResort,
   type PickContext,
@@ -22,6 +23,7 @@ interface File {
   label?: string;
   releaseName?: string;
   hashMatch?: boolean;
+  linkedLate?: boolean;
   season?: number;
   episode?: number;
 }
@@ -470,6 +472,276 @@ describe('planSubtitlePick', () => {
       hold: false,
       switched: true,
     });
+  });
+});
+
+describe('files that agree with each other', () => {
+  const offered = [file('today'), file('second'), file('theirs'), file('gone')];
+  const agreed = { agreed: { key: 'theirs' }, current: 'today' };
+
+  it('take over to the file they would show in the hold, and say why', () => {
+    expect(plan(offered, {}, agreed)).toEqual({
+      pick: 'theirs',
+      read: [],
+      hold: false,
+      switched: false,
+      agreed: true,
+    });
+  });
+
+  it('take over once lines show only before they have, while switches are left', () => {
+    const after = { ...agreed, holding: false };
+    expect(plan(offered, {}, { ...after, linesShown: false })).toMatchObject({
+      pick: 'theirs',
+      switched: true,
+      agreed: true,
+    });
+    expect(plan(offered, {}, { ...after, linesShown: true }).pick).toBe('today');
+    expect(plan(offered, {}, { ...after, linesShown: false, switchesLeft: 0 }).pick).toBe('today');
+    expect(
+      agreedSwitchAllowed({ holding: false, switchesLeft: 2, linesShown: true }) ||
+        agreedSwitchAllowed({ holding: false, switchesLeft: 0, linesShown: false }),
+    ).toBe(false);
+  });
+
+  it('never take over to a file that could not be read', () => {
+    expect(
+      plan(
+        offered,
+        {},
+        { ...agreed, agreed: { key: 'gone' }, broken: (url) => url.includes('gone') },
+      ).agreed,
+    ).toBeUndefined();
+  });
+
+  it('keep the file taken over to, though only they read it, while it can be read', () => {
+    // After the hold, its lines showing: the planner read the others, not this one. A file not
+    // read gives way at once to the best read, but not this one: they read it whole.
+    const showing = {
+      agreed: { key: 'theirs' },
+      current: 'theirs',
+      holding: false,
+      linesShown: true,
+      switchesLeft: 1,
+    };
+    const read = { today: FITS, second: FITS };
+    expect(plan(offered, read, showing)).toEqual({
+      pick: 'theirs',
+      read: [],
+      hold: false,
+      switched: false,
+      agreed: true,
+    });
+    // Not once it could not be read: the best read shows.
+    expect(plan(offered, read, { ...showing, broken: (url) => url.includes('theirs') }).pick).toBe(
+      'today',
+    );
+  });
+});
+
+describe('lined up against a reference', () => {
+  const SYNCED: SubtitleFit = { ...FITS, synced: 'sure' };
+  const UNMATCHED: SubtitleFit = { ...FITS, synced: 'none' };
+  // Found by the video's hash, its name saying nothing of the release: linked to the video.
+  const linked = { ...file('sdh'), label: 'some_film.srt', hashMatch: true };
+  const offered = [linked, file('plain'), file('other')];
+  const syncing = { syncing: true };
+
+  it('holds the lines of a file made for the release while it is read, with a reference on its way', () => {
+    expect(plan(offered, {}, syncing)).toEqual({
+      pick: 'sdh',
+      read: [],
+      hold: true,
+      switched: false,
+    });
+    // With none, it shows at once as before.
+    expect(plan(offered, {})).toEqual({ pick: 'sdh', read: [], hold: false, switched: false });
+    // Not past the hold's time, nor for a slow download.
+    expect(plan(offered, {}, { ...syncing, timeUp: true }).hold).toBe(false);
+  });
+
+  it('reads the rest to line them up while the one made for the release is for the hard of hearing', () => {
+    const showing = { ...syncing, current: 'sdh' };
+    expect(plan(offered, { sdh: SDH }, showing)).toEqual({
+      pick: 'sdh',
+      read: ['plain', 'other'],
+      hold: true,
+      switched: false,
+    });
+    // Read, and waiting to be lined up: still held.
+    const read = { sdh: SDH, plain: FITS, other: FITS };
+    expect(
+      plan(offered, read, { ...showing, aligning: (url) => url.endsWith('/plain.srt') }),
+    ).toMatchObject({ pick: 'sdh', read: [], hold: true });
+    // Lined up for sure, the plain file shows before any line has: no switch.
+    expect(plan(offered, { ...read, plain: SYNCED }, showing)).toEqual({
+      pick: 'plain',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Lined up as nothing like the video: the file made for the release stays.
+    expect(plan(offered, { ...read, plain: UNMATCHED, other: UNMATCHED }, showing)).toEqual({
+      pick: 'sdh',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Whole and plain itself, nothing more is read.
+    expect(plan(offered, { sdh: FITS }, showing)).toEqual({
+      pick: 'sdh',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+  });
+
+  it('once lines show, takes a plain file lined up later as a switch, while switches are left', () => {
+    const showing = { ...syncing, current: 'sdh', holding: false };
+    const read = { sdh: SDH, plain: SYNCED, other: FITS };
+    expect(plan(offered, read, showing)).toEqual({
+      pick: 'plain',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    expect(plan(offered, read, { ...showing, switchesLeft: 0 }).pick).toBe('sdh');
+  });
+
+  it('holds the lines of files not made for the release while one read waits to be lined up', () => {
+    const two = [file('first'), file('second')];
+    const read = { first: FITS, second: FITS };
+    expect(
+      plan(two, read, { current: 'first', aligning: (url) => url.endsWith('/first.srt') }),
+    ).toMatchObject({ pick: 'first', hold: true });
+    expect(plan(two, read, { current: 'first' })).toMatchObject({ pick: 'first', hold: false });
+    // Lined up for sure, it counts as made for the release.
+    expect(plan(two, { first: FITS, second: SYNCED }, { current: 'first' })).toMatchObject({
+      pick: 'second',
+      hold: false,
+    });
+    // One whose timing matched nothing goes after one that fits.
+    expect(plan(two, { first: UNMATCHED, second: FITS }, { current: 'first' })).toMatchObject({
+      pick: 'second',
+      hold: false,
+    });
+  });
+
+  it('once lines show, takes a file not made for the release, lined up later, only as any file read later', () => {
+    const two = [file('first'), file('second')];
+    const drifting: SubtitleFit = { ...FITS, drift: 'behind' };
+    const showing = { current: 'first', holding: false };
+    // As good a fit as the one showing: it stays, though the other now ranks first.
+    expect(plan(two, { first: FITS, second: SYNCED }, showing)).toEqual({
+      pick: 'first',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Clearly better (no drift left to fix), and switches left: a switch, counted.
+    expect(plan(two, { first: drifting, second: SYNCED }, showing)).toEqual({
+      pick: 'second',
+      read: [],
+      hold: false,
+      switched: true,
+    });
+    // Long after the first line, no switches are left: it stays.
+    expect(plan(two, { first: drifting, second: SYNCED }, { ...showing, switchesLeft: 0 })).toEqual(
+      { pick: 'first', read: [], hold: false, switched: false },
+    );
+    // A file made for the release, from an addon that answers late, takes over by itself.
+    const late = [file('first'), { ...file('named'), label: 'some_film.srt', hashMatch: true }];
+    expect(plan(late, { first: FITS }, { ...showing, switchesLeft: 0 })).toMatchObject({
+      pick: 'named',
+      switched: false,
+    });
+  });
+
+  it('never takes over from the version picked by hand', () => {
+    expect(
+      plan(offered, { sdh: SDH, plain: SYNCED }, { ...syncing, current: 'sdh', remembered: 'sdh' }),
+    ).toMatchObject({ pick: 'sdh', switched: false });
+  });
+
+  it('takes a file a late hash linked only in the hold or before the first line, and lines the one showing up against it after', () => {
+    // OpenSubtitles asked again once the hash was read: it found this one by the hash.
+    const linkedLate = {
+      ...file('linked'),
+      label: 'some_film.srt',
+      hashMatch: true,
+      linkedLate: true,
+    };
+    const listed = [file('first'), file('second'), linkedLate];
+    const fits = { first: FITS, second: SDH };
+    // In the hold, it is chosen at once, as any file made for the release.
+    expect(plan(listed, fits, { current: 'first' })).toMatchObject({ pick: 'linked' });
+    // After the hold, before the first line is due: it takes over, and that is no switch.
+    const shown = { current: 'first', holding: false, switchesLeft: 0 };
+    expect(plan(listed, fits, { ...shown, linesShown: false })).toEqual({
+      pick: 'linked',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    // Once a line of the one showing is due: it stays, and the late file is read to line it up.
+    expect(plan(listed, fits, { ...shown, linesShown: true })).toEqual({
+      pick: 'first',
+      read: ['linked'],
+      hold: false,
+      switched: false,
+    });
+    expect(plan(listed, fits, { ...shown, switchesLeft: 2, linesShown: true })).toEqual({
+      pick: 'first',
+      read: ['linked'],
+      hold: false,
+      switched: false,
+    });
+    // Read, or being read, it is asked for no more, and is still never chosen.
+    const linkedRead = { ...fits, linked: FITS };
+    expect(plan(listed, linkedRead, { ...shown, switchesLeft: 2, linesShown: true })).toEqual({
+      pick: 'first',
+      read: [],
+      hold: false,
+      switched: false,
+    });
+    const reading = (url: string) => url.endsWith('/linked.srt');
+    expect(plan(listed, fits, { ...shown, linesShown: true, reading }).read).toEqual([]);
+    // A file linked by the hash from the first answer takes over as before.
+    const linkedFirst = [file('first'), { ...linkedLate, linkedLate: undefined }];
+    expect(plan(linkedFirst, fits, { ...shown, linesShown: true }).pick).toBe('linked');
+  });
+
+  it('lets a file a late hash linked take over from one not read yet, or one that failed', () => {
+    const linkedLate = {
+      ...file('linked'),
+      label: 'some_film.srt',
+      hashMatch: true,
+      linkedLate: true,
+    };
+    const listed = [file('first'), linkedLate];
+    const shown = { current: 'first', holding: false, linesShown: true };
+    // A slow download shows no line: nothing to keep.
+    expect(plan(listed, {}, shown).pick).toBe('linked');
+    // The one showing could not be read.
+    const failed = planSubtitlePick<File>({
+      ...context({ first: FITS }, ['first']),
+      offered: listed,
+      language: 'en',
+      reading: () => false,
+      timeUp: false,
+      readsLeft: 4,
+      switchesLeft: 0,
+      ...shown,
+    });
+    expect(failed.pick?.key).toBe('linked');
+    // Showing itself, it stays.
+    expect(plan(listed, { linked: FITS }, { ...shown, current: 'linked' }).pick).toBe('linked');
+  });
+
+  it('says a file was chosen as lined up against the video', () => {
+    const fits = { plain: SYNCED };
+    const plain = offered[1]!;
+    expect(pickReason(plain, offered, 'en', context(fits))).toBe('synced to your video');
   });
 });
 

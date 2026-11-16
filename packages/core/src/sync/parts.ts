@@ -395,14 +395,15 @@ export function subtitleOffsetsPart(profileId: string, offsets: SubtitleOffsets)
 
 const DRIFT = 'drift/';
 /** The drift choices the account carries, as agreed with the sync format (ADR 0006). */
-const DRIFT_WORDS: readonly string[] = ['ahead', 'behind', 'none', 'auto'];
+const DRIFT_WORDS: readonly string[] = ['ahead', 'behind', 'none', 'auto', 'aligned'];
 
 /**
  * Subtitle drift fixes as `drift/<fileKey>`, beside the timings they were
- * tuned with: 'ahead', 'behind', 'none' (the player's own fix taken off) or
+ * tuned with: 'ahead', 'behind', 'none' (the player's own fix taken off),
  * 'auto' (the player's own fix, worked out again for each stream, kept with
- * the viewer's timing). No choice is a removal. The key is the same hash as
- * the timing's, never a link.
+ * the viewer's timing) or 'aligned' (the same, for timing set on lines the
+ * player lined up itself, which adds to its move). No choice is a removal.
+ * The key is the same hash as the timing's, never a link.
  */
 export function subtitleDriftsPart(profileId: string, drifts: SubtitleDrifts): SyncPart {
   return {

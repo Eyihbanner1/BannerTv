@@ -26,6 +26,12 @@ export interface PickableSubtitle extends MatchedFile {
   key: string;
   url: string;
   lang: string;
+  /**
+   * Linked to the video by a hash read after the files were first listed
+   * without it (`subtitles.ts`): once lines show, it is the reference, not a
+   * file to take over.
+   */
+  linkedLate?: boolean;
 }
 
 /**
@@ -173,6 +179,27 @@ export interface PlanInput<T extends PickableSubtitle> extends PickContext {
   readsLeft: number;
   /** How many more times the file showing may give way to one that fits clearly better. */
   switchesLeft: number;
+  /**
+   * A reference to line the files up against is there, or on its way (a
+   * stream track whose lines are coming, a file linked to the video or named
+   * for its release being read): a file not made for the release may be
+   * lined up, and so count as one, so the hold waits for that too.
+   */
+  syncing?: boolean;
+  /** Whether the file has been read and waits to be lined up against the reference. */
+  aligning?: (url: string) => boolean;
+  /**
+   * The file that files agreeing with each other would show instead of the
+   * one showing (`subtitle-agreement`): taken over to once, while that may
+   * be; once it shows, it stays while it can be read, as they read it whole.
+   */
+  agreed?: { key: string };
+  /**
+   * A line of the file chosen now is on screen, or due within moments (time
+   * to read another file before it), or has been since its lines were let
+   * through: a file taking over now would be seen to.
+   */
+  linesShown?: boolean;
 }
 
 export interface SubtitlePlan<T> {
@@ -184,6 +211,19 @@ export interface SubtitlePlan<T> {
   hold: boolean;
   /** The pick takes over from the file showing because it fits clearly better. */
   switched: boolean;
+  /** The pick is the one files that agree would show (`agreed`). */
+  agreed?: boolean;
+}
+
+/**
+ * Whether a file may take over from the one showing for files that agree: in
+ * the hold, or before its lines have shown while switches are left, soon
+ * after the hold. Anything later lines the file showing up instead.
+ */
+export function agreedSwitchAllowed(
+  input: Pick<PlanInput<PickableSubtitle>, 'holding' | 'switchesLeft' | 'linesShown'>,
+): boolean {
+  return input.holding || (input.switchesLeft > 0 && !input.linesShown);
 }
 
 /**
@@ -221,6 +261,11 @@ function keepOrSwitch<T extends PickableSubtitle>(
  * something is learnt: which file to choose, which to read for their checks,
  * and whether to hold the lines back meanwhile.
  *
+ * - A file linked to the video by a hash read late (`linkedLate`) takes over
+ *   only in the hold, or before the first line of the one showing is due
+ *   (`linesShown`). After that it is read to line the one showing up against
+ *   (step B's reference), and never chosen for it, while that one reads.
+ *
  * - A version picked by hand for this release, or one made for the release
  *   (named for it with the group confirming it, or found by the video's hash
  *   with no name saying otherwise: `madeForRelease`), is chosen at once, and
@@ -254,7 +299,47 @@ function keepOrSwitch<T extends PickableSubtitle>(
  *   gives way to the next best.
  */
 export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>): SubtitlePlan<T> {
+  // The file that files agreeing with each other would show: it takes over once, while it may.
+  const agreed = input.agreed;
+  const agreedPick = agreed
+    ? filesIn(input.offered, input.language).find(
+        (option) => option.key === agreed.key && !input.broken(option.url),
+      )
+    : undefined;
+  if (agreedPick && agreedPick.key !== input.current && agreedSwitchAllowed(input)) {
+    return { pick: agreedPick, read: [], hold: false, switched: !input.holding, agreed: true };
+  }
+  // Once taken over to, it stays while it can be read: they read it whole, and in step with
+  // theirs, though the planner may not have read it yet (a file read only by them).
+  if (agreedPick && agreedPick.key === input.current) {
+    return { pick: agreedPick, read: [], hold: false, switched: false, agreed: true };
+  }
   const ranked = rankedFiles(input.offered, input.language, input);
+  // Once the lines of the file showing show, files a late hash linked to the video do not take
+  // over from it: the first of them is read, to line it up against instead.
+  const current = ranked.find((option) => option.key === input.current);
+  if (!input.linesShown || input.holding || !current || input.fit(current.url) === undefined) {
+    return planAmong(ranked, input);
+  }
+  const late = ranked.filter((option) => option.linkedLate && option !== current);
+  if (late.length === 0) return planAmong(ranked, input);
+  const result = planAmong(
+    ranked.filter((option) => late.indexOf(option) === -1),
+    input,
+  );
+  const reference = late[0]!;
+  const toRead =
+    input.fit(reference.url) === undefined &&
+    !input.reading(reference.url) &&
+    result.read.indexOf(reference) === -1;
+  return toRead ? { ...result, read: result.read.concat(reference) } : result;
+}
+
+/** The plan among these files, ranked (`rankedFiles`). */
+function planAmong<T extends PickableSubtitle>(
+  ranked: readonly T[],
+  input: PlanInput<T>,
+): SubtitlePlan<T> {
   if (ranked.length === 0) {
     return {
       pick: lastResort(input.offered, input.language, input),
@@ -300,24 +385,66 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
       : [];
     return { pick: current, read: toRead, hold: false, switched: false };
   }
+  const aligningNow = (option: T) => !!input.aligning?.(option.url);
   if (reason < 2) {
-    // Made for the release, by the video's hash or its name, whatever reading it found.
+    // Made for the release, by the video's hash or its name, or lined up against a reference,
+    // whatever reading it found.
     const peerOf = (option: T) =>
       reasonOf(option) === reason || (reason === 1 && madeForRelease(option, input.video));
+    // With a reference on its way, the lines wait (within the hold) while the one chosen is
+    // read: none of them can show before, and it may yet give way to a file lined up.
+    const waitFor = (option: T) =>
+      !!input.syncing &&
+      input.holding &&
+      !input.timeUp &&
+      !isRead(option) &&
+      !input.slow?.(option.url);
+    // Once lines show, a file that ranks so only by being lined up takes over from the one
+    // showing as any file read later does: soon after the first line, while switches are left,
+    // counted, and only when it fits clearly better. A file made for the release, from an
+    // addon that answers late, takes over by itself.
+    if (current && !peerOf(current) && !input.holding && !madeForRelease(top, input.video)) {
+      return keepOrSwitch(ranked, current, [], input);
+    }
     if (!current || !peerOf(current)) {
-      return { pick: top, read: [], hold: false, switched: false };
+      return { pick: top, read: [], hold: waitFor(top), switched: false };
     }
     // Others of the same standing, best first. Those placed above the one showing may be read;
     // all of them once it has read as less than whole and plain (or as wanted for the hard of
     // hearing), as a copy placed below it, not read yet, may be; and while it is a slow
     // download, as the first of them read shows at once (keepOrSwitch).
     const peers = ranked.filter(peerOf);
-    const others =
-      (isRead(current) && tierOf(current) > 0) || (!isRead(current) && !!input.slow?.(current.url));
+    const lessThanWhole = isRead(current) && tierOf(current) > 0;
+    const others = lessThanWhole || (!isRead(current) && !!input.slow?.(current.url));
     const pool = others
       ? peers.filter((option) => option !== current)
       : peers.slice(0, peers.indexOf(current));
-    const toRead = pool.filter(unread).slice(0, Math.max(0, input.readsLeft));
+    // With a reference, a file not made for the release may be lined up and so count as one:
+    // while the one showing reads as less than whole and plain, the rest are read too, in the
+    // list's order.
+    const toSync =
+      input.syncing && lessThanWhole
+        ? inOrder.filter((option) => option !== current && pool.indexOf(option) === -1)
+        : [];
+    const toRead = pool.concat(toSync).filter(unread).slice(0, Math.max(0, input.readsLeft));
+    if (input.holding && input.syncing) {
+      // No line has shown yet: the best read shows, and that is no switch. The hold waits for
+      // the one chosen to be read, and then, where it reads as less than whole and plain, for
+      // the rest to be read and lined up.
+      const busy =
+        waitFor(current) ||
+        (!!input.syncing &&
+          lessThanWhole &&
+          !input.timeUp &&
+          (toRead.length > 0 ||
+            inOrder.some(
+              (option) =>
+                option !== current &&
+                ((input.reading(option.url) && !input.slow?.(option.url)) || aligningNow(option)),
+            )));
+      const best = peers.find(isRead) ?? current;
+      return { pick: busy ? current : best, read: toRead, hold: busy, switched: false };
+    }
     return keepOrSwitch(peers, current, toRead, input);
   }
   const first = inOrder.slice(0, FIRST_READS);
@@ -333,7 +460,9 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
   const known = ranked.filter(isRead);
 
   if (input.holding) {
-    const busy = toRead.length > 0 || readingNow > 0 || !!input.lengthPending;
+    // A file read and waiting to be lined up may yet count as made for the release.
+    const busy =
+      toRead.length > 0 || readingNow > 0 || !!input.lengthPending || inOrder.some(aligningNow);
     if (busy && !input.timeUp) {
       return { pick: current ?? top, read: toRead, hold: true, switched: false };
     }
@@ -348,7 +477,8 @@ export function planSubtitlePick<T extends PickableSubtitle>(input: PlanInput<T>
  * Why the file chosen automatically is the one showing, for Diagnostics:
  * picked by hand for the release; found by the video's hash with no name
  * saying otherwise, or named for the release with the group confirming it
- * (made for the release, while it does not read as fitting badly); a better fit than another in the list; named
+ * (made for the release, while it does not read as fitting badly), or lined
+ * up against a reference for sure; a better fit than another in the list; named
  * for the release loosely, with no group to confirm it, among files that fit
  * as well; or nothing told it apart, and the list's order chose.
  */
@@ -366,7 +496,8 @@ export function pickReason<T extends PickableSubtitle>(
     hearing: context.hearing,
   });
   if (reason === 1) {
-    return linkedToVideo(pick, context.video) ? 'linked to your video' : 'same release name';
+    if (linkedToVideo(pick, context.video)) return 'linked to your video';
+    return madeForRelease(pick, context.video) ? 'same release name' : 'synced to your video';
   }
   const tierOf = (option: T) =>
     fileTier(option, context.fit(option.url), context.video, context.hearing);

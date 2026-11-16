@@ -18,6 +18,12 @@ export interface EngineTrack {
    * scenes), as the stream marks it or its name says.
    */
   forced?: boolean;
+  /**
+   * Subtitles only: drawn as pictures (PGS, VobSub, DVB), which only the
+   * player can show; false for lines of text. Undefined where the engine
+   * cannot tell.
+   */
+  picture?: boolean;
 }
 
 /**

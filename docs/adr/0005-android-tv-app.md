@@ -98,7 +98,9 @@ A Watch Next card, newest first by `watchedAt`:
 { "type": "player", "event": "seeked", "position" }
 { "type": "player", "event": "tracks", "audio": [ … ], "text": [ … ] }
     each track: id ("<group>:<track>"), lang, label, active, supported, and channels, mime,
-    codecs, commentary, forced where known
+    codecs, commentary, forced where known; a subtitle track's codecs is the type it had
+    before Media3 read it into its own cues, so the page can tell pictures (PGS, VobSub,
+    DVB) from text
 { "type": "player", "event": "cues", "track": "2:0", "at": 61.2,
   "cues": [ { "text": "<i>Hello</i>\nthere", "top": true } ] }
     what shows from at (seconds on the player's clock) until the next cues event; [] for none,

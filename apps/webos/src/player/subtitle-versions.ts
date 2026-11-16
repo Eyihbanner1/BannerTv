@@ -7,6 +7,7 @@ import {
   linkedToVideo,
   rankSubtitles,
   type StreamEntry,
+  type SubtitleDrift,
   type SubtitleFit,
 } from '@bannertv/core';
 import type {
@@ -14,8 +15,10 @@ import type {
   SubtitleChoice,
   Subtitles,
   SubtitleStatus,
+  SubtitleSync,
 } from '../screens/player/use-subtitles';
 import { streamTitle } from './describe';
+import { formatOffset } from './timing';
 import type { PlayingRelease } from './subtitle-pick';
 
 /*
@@ -53,6 +56,31 @@ export const DRIFT_CHOICES = [
   { name: 'ahead', drift: 'ahead', label: 'player.driftAhead' },
   { name: 'behind', drift: 'behind', label: 'player.driftBehind' },
 ] as const;
+
+/**
+ * Whether a drift choice is the one in use, for the drift row: none of them
+ * where the player lined the lines up and stretched them to a rate that is
+ * neither fix.
+ */
+export function driftOn(
+  subtitles: Pick<Subtitles, 'drift' | 'stretched'>,
+  drift: SubtitleDrift | null,
+): boolean {
+  return !subtitles.stretched && subtitles.drift === drift;
+}
+
+/**
+ * The hint under the drift row, as a key in the strings: the lines were
+ * stretched as BannerTV lined them up; the drift was fixed as the file's
+ * length showed it; or how to choose one.
+ */
+export function driftHintKey(
+  subtitles: Pick<Subtitles, 'autoDrift' | 'sync'>,
+): 'player.driftAligned' | 'player.driftAuto' | 'player.driftHint' {
+  const { sync } = subtitles;
+  if (sync?.state === 'moved' && sync.rate !== 1) return 'player.driftAligned';
+  return subtitles.autoDrift ? 'player.driftAuto' : 'player.driftHint';
+}
 
 /** The language of the subtitles showing, for a chip or a tab; none when off. */
 export function subtitlesValue(
@@ -178,10 +206,12 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
  * read (the one chosen) or was passed over for that reason (another); else
  * what reading it found (its text in another script, signs only, part of the
  * video, longer than it) or its names or its addon say (another episode),
- * that its drift was fixed by itself, that its addon found it by the video's
- * hash with no name saying otherwise (linked to it) or its release name is
- * the same as the video's with enough to confirm it (a guess), and that it
- * is for the hard of hearing.
+ * that its drift was fixed by itself, that the player lined it up against
+ * the video itself (synced) or found it in step with other files for the
+ * video that agree with each other (agreed), that its addon
+ * found it by the video's hash with no name saying otherwise (linked to it)
+ * or its release name is the same as the video's with enough to confirm it
+ * (a guess), and that it is for the hard of hearing.
  */
 export type VersionNote =
   | 'loading'
@@ -193,6 +223,8 @@ export type VersionNote =
   | 'short'
   | 'long'
   | 'driftFixed'
+  | 'synced'
+  | 'agreed'
   | 'linked'
   | 'sameRelease'
   | 'hearing';
@@ -208,6 +240,8 @@ export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
   short: 'player.versionShort',
   long: 'player.versionLong',
   driftFixed: 'player.versionDriftFixed',
+  synced: 'player.versionSynced',
+  agreed: 'player.versionAgreed',
   linked: 'player.versionLinked',
   sameRelease: 'player.versionSameRelease',
   hearing: 'player.versionHearing',
@@ -226,11 +260,14 @@ const MAX_NOTES = 2;
 
 /**
  * The notes on a version's row, most telling first, at most two: loading or
- * a failure alone; else what reading it found, then a drift fixed by itself,
- * linked to the video by its hash (`linkedToVideo`) or else the same release
- * by a strong match of the names (the same name, or the group confirming it:
- * a loose match, another group's file as often as not, says nothing), and
- * lines for the hard of hearing.
+ * a failure alone; else what reading it found, then in step with the video
+ * (lined up against it by the player: that says the drift too; never the
+ * file the others are lined up against, which nothing checked), else a drift
+ * fixed by itself, then linked to the
+ * video by its hash (`linkedToVideo`) or else the same release by a strong
+ * match of the names (the same name, or the group confirming it: a loose
+ * match, another group's file as often as not, says nothing), both said by
+ * synced already, and lines for the hard of hearing.
  */
 export function versionNotes(
   version: SubtitleVersion,
@@ -243,14 +280,18 @@ export function versionNotes(
   if (status === 'failed') return [selected ? 'failed' : 'skipped'];
   const notes: VersionNote[] = [];
   if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
-  if (check?.autoDrift) notes.push('driftFixed');
+  if (check?.synced === 'video') notes.push('synced');
+  else if (check?.synced === 'files') notes.push('agreed');
+  else if (check?.autoDrift) notes.push('driftFixed');
   const file = {
     label: version.release,
     releaseName: version.releaseName,
     hashMatch: version.hashMatch,
   };
   const match = fileReleaseMatch(file, video);
-  if (linkedToVideo(file, video)) notes.push('linked');
+  if (check?.synced) {
+    // In step with the video, or with files that agree, says more than linked to it or named for it.
+  } else if (linkedToVideo(file, video)) notes.push('linked');
   else if (match === 'exact' || match === 'group') notes.push('sameRelease');
   if (check?.hearing) notes.push('hearing');
   return notes.slice(0, MAX_NOTES);
@@ -328,4 +369,61 @@ export function languageFirstPick(
     },
   );
   return best?.item ?? working[0] ?? group.items[0]!;
+}
+
+/** Each way lining the file showing up can go, as keys in the strings. */
+const SYNC_WORDS: Readonly<Record<SubtitleSync['state'], string>> = {
+  moved: 'player.syncMoved',
+  inStep: 'player.syncInStep',
+  reference: 'player.syncReference',
+  checking: 'player.syncChecking',
+  unmatched: 'player.syncUnmatched',
+  yours: 'player.syncYours',
+  // Only ever against files that agree, with how far they would move the lines.
+  picked: 'player.syncYours',
+  late: 'player.syncLate',
+  unchecked: 'player.syncUnchecked',
+  disagree: 'player.syncDisagree',
+};
+
+/** The same against files that agree with each other: never stretched, so no rate words. */
+const FILES_WORDS: Readonly<Partial<Record<SubtitleSync['state'], string>>> = {
+  moved: 'player.syncMovedFiles',
+  inStep: 'player.syncInStepFiles',
+  reference: 'player.syncReferenceFiles',
+  checking: 'player.syncCheckingFiles',
+  unmatched: 'player.syncUnmatchedFiles',
+  yours: 'player.syncYoursFiles',
+  picked: 'player.syncPickedFiles',
+  late: 'player.syncLateFiles',
+};
+
+/**
+ * What the Timing tab says of lining the file showing up against the video,
+ * as a key in the strings and its amount ("+2.3 s"); none for a track, or
+ * with subtitles off. A move that also stretched the lines says so. Against
+ * files that agree with each other (`basis: 'files'`) it says so, and lines
+ * left as the viewer set or picked them say how far BannerTV would move them.
+ */
+export function syncLine(sync: SubtitleSync | null): { key: string; amount?: string } | null {
+  if (!sync) return null;
+  if (sync.basis === 'files') {
+    const offset = 'offset' in sync ? sync.offset : undefined;
+    if (offset !== undefined) {
+      return {
+        key: FILES_WORDS[sync.state] ?? SYNC_WORDS[sync.state],
+        amount: formatOffset(offset),
+      };
+    }
+    // Words that say how far need an amount.
+    if (sync.state === 'yours' || sync.state === 'picked') return { key: SYNC_WORDS.yours };
+    return { key: FILES_WORDS[sync.state] ?? SYNC_WORDS[sync.state] };
+  }
+  if (sync.state === 'moved') {
+    return {
+      key: sync.rate === 1 ? SYNC_WORDS.moved : 'player.syncMovedRate',
+      amount: formatOffset(sync.offset),
+    };
+  }
+  return { key: SYNC_WORDS[sync.state] };
 }

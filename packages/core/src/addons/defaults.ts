@@ -10,6 +10,12 @@ export const CINEMETA_URL = 'https://v3-cinemeta.strem.io/manifest.json';
 export const OPENSUBTITLES_V3_URL = 'https://opensubtitles-v3.strem.io/manifest.json';
 /** Its manifest id. */
 export const OPENSUBTITLES_V3_ID = openSubtitles.id;
+/**
+ * Subtitles addons that match files by the video's hash: asked again when the
+ * hash is read after they were asked without it. Other addons were sent the
+ * file name already, and no manifest says an addon uses the hash.
+ */
+export const HASH_MATCHING_ADDON_IDS: ReadonlySet<string> = new Set([OPENSUBTITLES_V3_ID]);
 
 /**
  * Installed on first launch, all removable. Their manifests ship with the app
