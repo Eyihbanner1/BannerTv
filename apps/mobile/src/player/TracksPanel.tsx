@@ -22,13 +22,15 @@ import {
 import {
   COARSE_TIMING_STEPS,
   formatOffset,
+  lineText,
   offsetWay,
   stepAmount,
   stepLabel,
   stepOffset,
   TIMING_STEPS,
 } from '@tv/player/timing';
-import type { SubtitleChoice, Subtitles } from '@tv/screens/player/use-subtitles';
+import { type MatchClock, useMatchRows } from '@tv/screens/player/use-match-rows';
+import type { MatchResult, SubtitleChoice, Subtitles } from '@tv/screens/player/use-subtitles';
 import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -42,10 +44,6 @@ export interface TracksPanelProps {
   subtitles: Subtitles;
   /** The stream playing, whose release name the versions are matched against. */
   entry: StreamEntry | null;
-  /**
-   * The player draws the stream's own subtitle tracks itself (Android), and no lines of them
-   * reach the page, so timing and the drift fix cannot move them.
-   */
   /** Off or a version was picked: the panel closes. */
   onChoose: (choice: SubtitleChoice) => void;
   /**
@@ -55,6 +53,8 @@ export interface TracksPanelProps {
   audioRows: ReactNode;
   /** Opens the subtitle style, from the foot of the Subtitles tab. */
   onStyle?: () => void;
+  /** The player's clock now, read as a line is tapped; null before there is a video. */
+  clock: () => MatchClock | null;
 }
 
 /**
@@ -116,7 +116,7 @@ export function TracksPanel(props: TracksPanelProps) {
         ) : tab === 'audio' ? (
           <AudioChoices rows={props.audioRows} />
         ) : (
-          <TimingChoices subtitles={subtitles} />
+          <TimingChoices subtitles={subtitles} clock={props.clock} />
         )}
       </View>
     </View>
@@ -266,19 +266,50 @@ function Step({
   );
 }
 
-/**
- * The Timing tab: how far the subtitles showing are moved, steps of a tenth and half a second
- * and of 5 s either way, Reset, and the drift fix for a file timed for another frame rate.
- * Both are kept for the file. Not for subtitles off, nor for tracks the player draws itself.
- */
-function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
-  const { t } = useTranslation();
-  if (subtitles.choice === null) return <Text style={styles.note}>{t('player.timingOff')}</Text>;
+/** What matching a line did, in the words the TV uses. */
+function matchNote(result: MatchResult): { key: string; again: boolean } {
+  if (result.presses === 1) return { key: 'player.matchDone', again: result.again };
+  if ('unsteady' in result) return { key: 'player.matchUnsteady', again: false };
+  return { key: result.drift ? 'player.matchDrift' : 'player.matchBoth', again: false };
+}
 
-  const { offset } = subtitles;
+/**
+ * The Timing tab: last episode's timing, offered where it may be; the lines around now, to tap
+ * the one just heard (a second tap, much later in the film, fixes a drift too); how far the
+ * subtitles showing are moved, steps of a tenth and half a second and of 5 s either way,
+ * Reset, Undo after a tap, and the drift fix for a file timed for another frame rate. Both are
+ * kept for the file. Not for subtitles off, nor for picture tracks the player draws itself.
+ */
+function TimingChoices({
+  subtitles,
+  clock,
+}: {
+  subtitles: Subtitles;
+  clock: () => MatchClock | null;
+}) {
+  const { t } = useTranslation();
+  // What the last tap did, said until the next change.
+  const [lastMatch, setLastMatch] = useState<MatchResult | null>(null);
+  const match = useMatchRows(
+    subtitles.canMatch ? subtitles.cues : null,
+    subtitles.offset,
+    clock,
+    undefined,
+  );
+  if (subtitles.choice === null) return <Text style={styles.note}>{t('player.timingOff')}</Text>;
+  if (subtitles.pictureTrack) {
+    return <Text style={styles.note}>{t('player.matchPicture')}</Text>;
+  }
+
+  const { offset, offer, cues } = subtitles;
   const { way, amount } = offsetWay(offset);
   // What lining the file up against the video did: moved by BannerTV, or why not.
   const sync = syncLine(subtitles.sync);
+  // Any other change says nothing more of the last tap.
+  const change = (act: () => void) => () => {
+    setLastMatch(null);
+    act();
+  };
   const step = (by: number) => (
     <Step
       key={by}
@@ -286,11 +317,66 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
       accessibilityLabel={t(by < 0 ? 'player.earlierBy' : 'player.laterBy', {
         amount: stepAmount(by),
       })}
-      onPress={() => subtitles.setOffset(stepOffset(subtitles.offset, by))}
+      onPress={change(() => subtitles.setOffset(stepOffset(subtitles.offset, by)))}
     />
   );
+  const offerAmount = offer
+    ? offer.drift
+      ? t('player.offerAmountDrift', { amount: formatOffset(offer.offset) })
+      : formatOffset(offer.offset)
+    : '';
+  const said = lastMatch ? matchNote(lastMatch) : null;
   return (
     <ScrollView>
+      {offer ? (
+        <>
+          <Text style={styles.offerText}>{t('player.offerTiming', { amount: offerAmount })}</Text>
+          <View style={styles.steps}>
+            <Step
+              label={t('player.offerUse')}
+              accessibilityLabel={t('player.offerUse')}
+              onPress={change(() => subtitles.takeOffer())}
+            />
+            <Step
+              label={t('player.offerNo')}
+              accessibilityLabel={t('player.offerNo')}
+              onPress={change(() => subtitles.declineOffer())}
+            />
+          </View>
+        </>
+      ) : null}
+      {subtitles.canMatch && cues ? (
+        <>
+          <Text style={styles.rowLabel}>{t('player.matchLine')}</Text>
+          <Text style={styles.note}>
+            {t(match.paused ? 'player.matchPausedTap' : 'player.matchHintTap')}
+          </Text>
+          {match.rows.length === 0 ? (
+            <Text style={styles.note}>{t('player.matchWaiting')}</Text>
+          ) : (
+            match.rows.map((row) => {
+              const label = lineText(cues[row.index]!);
+              const detail = row.onScreen ? t('player.matchOnScreen') : undefined;
+              return (
+                <PanelOption
+                  key={`match-${row.key}`}
+                  label={label}
+                  {...(detail ? { detail } : {})}
+                  accessibilityLabel={label}
+                  onPress={() => {
+                    // The clock as the viewer tapped, read now: never a value kept from a draw.
+                    const now = clock();
+                    if (!now || now.paused) return;
+                    setLastMatch(
+                      subtitles.matchLine(row.index, { time: now.time, speed: now.speed }),
+                    );
+                  }}
+                />
+              );
+            })
+          )}
+        </>
+      ) : null}
       <Text style={styles.offset}>{formatOffset(offset)}</Text>
       <Text style={styles.way}>
         {way === 'later'
@@ -305,10 +391,25 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
         <Step
           label={t('player.timingReset')}
           accessibilityLabel={t('player.timingReset')}
-          onPress={() => subtitles.setOffset(0)}
+          onPress={change(() => subtitles.setOffset(0))}
         />
+        {lastMatch ? (
+          <Step
+            label={t('player.matchUndo')}
+            accessibilityLabel={t('player.matchUndo')}
+            onPress={() => {
+              subtitles.undoMatch();
+              setLastMatch(null);
+            }}
+          />
+        ) : null}
       </View>
-      {sync ? (
+      {said && lastMatch ? (
+        <Text style={styles.note}>
+          {t(said.key, { amount: formatOffset(lastMatch.offset) })}
+          {said.again ? ` ${t('player.matchAgain')}` : ''}
+        </Text>
+      ) : sync ? (
         <Text style={styles.note}>
           {t(sync.key, sync.amount !== undefined ? { amount: sync.amount } : undefined)}
         </Text>
@@ -324,15 +425,17 @@ function TimingChoices({ subtitles }: { subtitles: Subtitles }) {
                 key={name}
                 label={t(label)}
                 on={driftOn(subtitles, drift)}
-                onPress={() => subtitles.setDrift(drift)}
+                onPress={change(() => subtitles.setDrift(drift))}
               />
             ))}
           </View>
-          <Text style={styles.note}>
-            {`${t(driftHintKey(subtitles))} ${t('player.timingKept')}`}
-          </Text>
+          {lastMatch ? null : (
+            <Text style={styles.note}>
+              {`${t(driftHintKey(subtitles))} ${t('player.timingKept')}`}
+            </Text>
+          )}
         </>
-      ) : (
+      ) : lastMatch ? null : (
         <Text style={styles.note}>{t('player.timingKept')}</Text>
       )}
     </ScrollView>
@@ -345,6 +448,7 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   versions: { marginLeft: space.l },
   note: { ...type.small, color: colors.textMuted, padding: space.m },
+  offerText: { ...type.body, color: colors.text, paddingHorizontal: space.m },
   offset: { ...type.heading, color: colors.text, paddingHorizontal: space.m },
   way: { ...type.small, color: colors.textMuted, paddingHorizontal: space.m },
   steps: { flexDirection: 'row', gap: space.s, marginTop: space.m },

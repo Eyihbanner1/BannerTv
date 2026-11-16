@@ -24,6 +24,7 @@ import {
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
 import { openAsLgTv } from './homebrew';
 import {
+  heardApart,
   leavePlayer,
   MOVIE,
   openDiagnostics,
@@ -31,7 +32,9 @@ import {
   openSheet,
   openTiming,
   OPENSUBTITLES,
+  playForMatching,
   recordShownAt,
+  seekVideo,
   shownAt,
   subtitlesDiagnostics,
   video,
@@ -4925,26 +4928,6 @@ test('with timing marks on, the stages of a Play read in order, and no mark name
   expect(names.filter((name) => /https?:|\/\//.test(name))).toEqual([]);
 });
 
-/** Elephants Dream as the 10-minute video, with only this subtitle file: nothing lines it up. */
-async function playForMatching(page: Page, file: string) {
-  await mockAddons(page);
-  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
-  await mockPlayback(page, {
-    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-match.webm' }] },
-    subtitleList: [{ id: file, lang: 'eng' }],
-  });
-  await openMovie(page);
-  await press(page, 'Enter', 'player-surface');
-  await expect.poll(async () => (await video(page)).playing).toBe(true);
-}
-
-/** Moves the video to `at` seconds, as a seek would. */
-async function seekVideo(page: Page, at: number) {
-  await page
-    .locator('video:not([aria-hidden])')
-    .evaluate((element: HTMLVideoElement, time) => (element.currentTime = time), at);
-}
-
 /** A row of Match a line, by its focus key: the line's start in ms, and its place. */
 const MATCH_ROW = /^player-tracks-match-(-?\d+)-\d+$/;
 
@@ -4999,9 +4982,6 @@ async function matchHeardLine(page: Page, heard: (n: number) => number): Promise
   await page.keyboard.press('Enter');
   await expectFocus(page, 'player-tracks-timing-match');
 }
-
-/** When "Test line n" of APART_SPEECH is heard: its true time in the video. */
-const heardApart = (n: number) => APART_SPEECH[n - 1]![0];
 
 /** "+1.2 s", "−2.0 s", as the Timing tab writes an offset. */
 const amountOf = (offset: number) => `${offset < 0 ? '−' : '+'}${Math.abs(offset).toFixed(1)} s`;

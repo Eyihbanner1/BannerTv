@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
-import { FIRST_ROW } from './addons';
+import { FIRST_ROW, mockAddons } from './addons';
+import { APART_SPEECH, DEFAULT_STREAMS, mockPlayback, seedStreamAddon } from './play';
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
 
 /*
@@ -112,3 +113,26 @@ export async function subtitlesDiagnostics(page: Page) {
     has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
   });
 }
+
+/** Elephants Dream as the 10-minute video, with only this subtitle file: nothing lines it up. */
+export async function playForMatching(page: Page, file: string) {
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, {
+    streams: { [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, path: '/long-match.webm' }] },
+    subtitleList: [{ id: file, lang: 'eng' }],
+  });
+  await openMovie(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect.poll(async () => (await video(page)).playing).toBe(true);
+}
+
+/** Moves the video to `at` seconds, as a seek would. */
+export async function seekVideo(page: Page, at: number) {
+  await page
+    .locator('video:not([aria-hidden])')
+    .evaluate((element: HTMLVideoElement, time) => (element.currentTime = time), at);
+}
+
+/** When "Test line n" of APART_SPEECH is heard: its true time in the video. */
+export const heardApart = (n: number) => APART_SPEECH[n - 1]![0];
