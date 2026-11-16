@@ -1015,6 +1015,29 @@ describe('the video file’s own tracks, for a viewer who wants lines for the ha
     expect(stores.subtitlePicks.wantsHearing(META, subtitleRelease(entry, VIDEO))).toBe(true);
     expect(stores.subtitlePicks.wantsHearing(META, 'video:another')).toBe(true);
   });
+
+  it.each([
+    { name: 'a commentary', extra: { commentary: true } },
+    { name: 'forced lines only', extra: { forced: true } },
+  ])('keep the title’s wish where the viewer picks $name by hand', async ({ extra }) => {
+    const entry = streamEntry('film-own-oneoff');
+    offer(entry, [file('plain', FULL)]);
+    await stores.subtitlePicks.remember({
+      metaId: META,
+      release: 'video:another',
+      file: 'another-file',
+      hearing: true,
+    });
+    const oneOff = track('mkv:4', 'en', { picture: false, ...extra });
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack, oneOff] });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:4' }, 'version');
+    await player.flush();
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    const release = subtitleRelease(entry, VIDEO);
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, 'video:third')).toBe(true);
+  });
 });
 
 describe('files for another episode', () => {

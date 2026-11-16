@@ -1858,7 +1858,12 @@ export function useSubtitles(
         handPicked.current = { entry, key: next.key, release: pickRelease };
       else if (next?.kind === 'track') {
         const picked = tracks.find((t) => t.id === next.id);
-        void subtitlePicks.remember({ metaId, release: pickRelease, hearing: !!picked?.hearing });
+        // A commentary or forced lines alone, which the automatic choice never shows, are a
+        // one-off: they say nothing of the wish, and the title's last pick still does.
+        if (picked?.commentary || picked?.forced) void subtitlePicks.forget(metaId, pickRelease);
+        else {
+          void subtitlePicks.remember({ metaId, release: pickRelease, hearing: !!picked?.hearing });
+        }
       }
     },
     setOffset(next) {
