@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private var player: PlayerController? = null
     private var events: JsEvents? = null
     private var watchNext: WatchNextPublisher? = null
+    private var hashReads: HashReads? = null
     private var keyboardVisible = false
 
     // The link the app was opened with (a Watch Next card), until the page takes it. The page
@@ -132,11 +133,13 @@ class MainActivity : ComponentActivity() {
         web.setWebChromeClient(AppChromeClient())
 
         val js = JsEvents(web)
+        val userAgent = "BannerTV/${BuildConfig.VERSION_NAME} (Android)"
+        val hashes = HashReads(StreamHashReader(userAgent = userAgent), emit = js::send)
         val controller =
             PlayerController(
                 context = this,
                 view = playerView,
-                userAgent = "BannerTV/${BuildConfig.VERSION_NAME} (Android)",
+                userAgent = userAgent,
                 emit = js::send,
                 onPlayingChanged = ::keepScreenOn,
             )
@@ -152,12 +155,14 @@ class MainActivity : ComponentActivity() {
                 readHelperState = { StreamHelper.state(app).toString() },
                 onWatchNext = publisher::publish,
                 onTakeLink = { pendingLink.getAndSet(null)?.let(::linkJson) ?: "" },
+                onHash = hashes::submit,
             )
         web.addJavascriptInterface(bridge, Protocol.BRIDGE_NAME)
         webView = web
         player = controller
         events = js
         watchNext = publisher
+        hashReads = hashes
 
         // Back never reaches the page, so it is always sent there; the page calls exit() at its root.
         onBackPressedDispatcher.addCallback(
@@ -251,6 +256,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         player?.destroy()
         player = null
+        hashReads?.close()
+        hashReads = null
         releaseWebView()
         watchNext?.close()
         watchNext = null
