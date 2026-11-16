@@ -330,6 +330,12 @@ export {
   type SubtitlePickMemory,
   subtitleRelease,
 } from './playback/subtitle-picks';
+export {
+  createReleaseTimingMemory,
+  MAX_RELEASE_TIMINGS,
+  type ReleaseTiming,
+  type ReleaseTimingMemory,
+} from './playback/release-timings';
 export { createSourceMemory, type SourceMemory } from './playback/sources';
 export { createProgressTracker, type ProgressTracker } from './playback/tracker';
 export {
@@ -527,6 +533,16 @@ export {
   releaseService,
   type StreamingService,
 } from './streams/release';
+export {
+  fitTwoTaps,
+  MAX_TAP_OFFSET_S,
+  MIN_TAP_GAP_S,
+  REACTION_S,
+  type Tap,
+  type TapFit,
+  tapOffset,
+  TAP_FIT_S,
+} from './subtitles/taps';
 export type { Cue, CueLine, CueSpan, SubtitleFormat } from './subtitles/types';
 export {
   type ByteSource,

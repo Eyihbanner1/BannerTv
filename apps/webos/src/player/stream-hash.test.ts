@@ -1,6 +1,8 @@
 import type { Stream } from '@bannertv/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { initAndroid } from '../platform/android';
 import {
+  appHashSkip,
   canHash,
   forgetHashes,
   HASH_CHUNK,
@@ -583,5 +585,211 @@ describe('reading the hash through a link that redirects twice', () => {
       ms: HASH_TIMEOUT_MS,
       walks: 1,
     });
+  });
+});
+
+describe('on Android TV the app reads the hash', () => {
+  const url = 'https://debrid.example.com/d/abc/Film.2023.1080p.WEB-DL.mkv';
+  const found = { hash: '8e245d9679d31e12', size: 12909756, walks: 1 };
+  let asked: { id: number; url: string; size?: number; headers?: Record<string, string> }[];
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  /** The Android TV app's bridge, with hash() or (the phone's stand-in) without it. */
+  function onAndroid(withHash = true) {
+    asked = [];
+    vi.stubGlobal('addEventListener', () => {});
+    vi.stubGlobal('__bannerAndroid', undefined);
+    vi.stubGlobal('BannerAndroid', {
+      protocol: () => '1',
+      hostInfo: () => '{}',
+      capabilities: () => '{}',
+      exit: () => {},
+      openExternal: () => {},
+      player: () => {},
+      ...(withHash && {
+        hash: (request: string) => asked.push(JSON.parse(request) as (typeof asked)[0]),
+      }),
+    });
+    initAndroid();
+    fetchSpy = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    vi.stubGlobal('fetch', fetchSpy);
+  }
+
+  /** The app answers the newest request. */
+  function answer(fields: Record<string, unknown>) {
+    window.__bannerAndroid!.event({ type: 'hash', id: asked[asked.length - 1]!.id, ...fields });
+  }
+
+  beforeEach(() => onAndroid());
+
+  it('hands the read to the app and makes no request of its own', async () => {
+    const reading = readStreamHash(url, 12909756);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ url, size: 12909756 });
+    expect(asked[0]!.headers).toBeUndefined();
+    answer(found);
+    await expect(reading).resolves.toEqual({
+      found: { videoHash: '8e245d9679d31e12', videoSize: 12909756 },
+      ms: expect.any(Number),
+      walks: 1,
+      by: 'app',
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a hash read by the app by the stream’s link, and forgets a failure', async () => {
+    const reading = readStreamHash(url);
+    expect(asked[0]!.size).toBeUndefined();
+    answer({ ...found, fellBack: 'end', walks: 2 });
+    await expect(reading).resolves.toMatchObject({ fellBack: 'end', walks: 2, by: 'app' });
+    await expect(readStreamHash(url)).resolves.toMatchObject({ by: 'app' });
+    expect(asked).toHaveLength(1);
+    expect(hashReadingFor(url)).toBeDefined();
+
+    const other = `${url}?2`;
+    const failing = readStreamHash(other);
+    answer({ failed: 'refused', step: 'start', walks: 1 });
+    await expect(failing).resolves.toMatchObject({ failed: 'refused', by: 'app' });
+    void readStreamHash(other);
+    expect(asked).toHaveLength(3);
+  });
+
+  it('asks the app again for a link whose read a newer one cancelled', async () => {
+    const first = readStreamHash(url);
+    const other = `${url}?2`;
+    // The app drops the first read for this one, and never answers it.
+    const second = readStreamHash(other);
+    expect(asked.map((request) => request.url)).toEqual([url, other]);
+    // Back to the first within 15 s: asked again, not left waiting for an answer that never comes.
+    const again = readStreamHash(url);
+    expect(again).not.toBe(first);
+    expect(asked.map((request) => request.url)).toEqual([url, other, url]);
+    answer(found);
+    await expect(again).resolves.toMatchObject({ found: { videoHash: found.hash }, by: 'app' });
+    expect(hashReadingFor(url)).toBe(again);
+    // The read the app finished stays kept: the link is not asked for again.
+    void readStreamHash(url);
+    expect(asked).toHaveLength(3);
+    void second;
+  });
+
+  it('says the app’s failure and the read it came at', async () => {
+    const reading = readStreamHash(url);
+    answer({ failed: 'busy', step: 'end', walks: 2 });
+    await expect(reading).resolves.toEqual({
+      failed: 'busy',
+      step: 'end',
+      ms: expect.any(Number),
+      walks: 2,
+      by: 'app',
+    });
+  });
+
+  it('gives up at 15 s when the app never answers, and ignores its late answer', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', globalThis);
+    const reading = readStreamHash(url);
+    await vi.advanceTimersByTimeAsync(HASH_TIMEOUT_MS - 1);
+    const early = vi.fn();
+    void reading.then(early);
+    await Promise.resolve();
+    expect(early).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(reading).resolves.toEqual({
+      failed: 'timed out',
+      step: 'start',
+      ms: HASH_TIMEOUT_MS,
+      walks: 0,
+      by: 'app',
+    });
+    // The answer after that changes nothing, and the next play asks again.
+    answer(found);
+    await expect(reading).resolves.toMatchObject({ failed: 'timed out' });
+    void readStreamHash(url);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('sends the addon’s request headers to the app, which may read such a link', async () => {
+    const guarded = 'https://cdn.example.com/needs-headers/film.mkv';
+    noteRequestHeaders({
+      source: { kind: 'url', url: guarded },
+      behaviorHints: { proxyHeaders: { request: { Referer: 'https://site.example/' } } },
+    } as unknown as Stream);
+    expect(hashSkip(guarded)).toBe('request headers');
+    expect(appHashSkip(guarded)).toBeUndefined();
+    const reading = readStreamHash(guarded, 3 * HASH_CHUNK);
+    expect(asked[0]).toMatchObject({
+      url: guarded,
+      size: 3 * HASH_CHUNK,
+      headers: { Referer: 'https://site.example/' },
+    });
+    answer(found);
+    await expect(reading).resolves.toMatchObject({ found: { videoHash: found.hash } });
+    noteRequestHeaders({ source: { kind: 'url', url: guarded }, behaviorHints: {} } as Stream);
+  });
+
+  it('leaves playlists alone on Android TV too', async () => {
+    await expect(readStreamHash('https://live.example.com/match/master.m3u8')).resolves.toEqual({
+      skipped: 'playlist',
+      ms: 0,
+    });
+    await expect(readStreamHash('https://cdn.example.com/film/manifest.mpd')).resolves.toEqual({
+      skipped: 'playlist',
+      ms: 0,
+    });
+    await expect(readStreamHash('magnet:?xt=urn:btih:abc')).resolves.toEqual({
+      skipped: 'not a file link',
+      ms: 0,
+    });
+    expect(asked).toEqual([]);
+  });
+
+  it('a stand-in with no hash() reads through fetch as before', async () => {
+    onAndroid(false);
+    const size = 4 * HASH_CHUNK;
+    const bytes = file(size);
+    const ranges = serve(bytes);
+    const reading = await readStreamHash(url);
+    expect(reading.found?.videoHash).toBe(
+      reference(size, bytes.slice(0, HASH_CHUNK), bytes.slice(size - HASH_CHUNK)),
+    );
+    expect(reading).not.toHaveProperty('by');
+    expect(ranges).toHaveLength(2);
+    expect(asked).toEqual([]);
+  });
+
+  it('fills no landing on Android TV', async () => {
+    const reading = readStreamHash(url);
+    answer(found);
+    await reading;
+    expect(takeLanding(url)).toBeUndefined();
+  });
+
+  it('the Android app’s reader agrees', () => {
+    // The same input as StreamHashTest.agreesWithThePage in apps/androidtv.
+    const head = new Uint8Array(HASH_CHUNK).map((_, i) => (i * 31 + 7) & 0xff);
+    const tail = new Uint8Array(HASH_CHUNK).map((_, i) => (i * 17 + 3) & 0xff);
+    expect(openSubtitlesHash(1_000_000_007, head, tail)).toBe('5f6060609bfb0a07');
+  });
+
+  it('an answer that is not a hash is a refusal', async () => {
+    const wrong: Record<string, unknown>[] = [
+      { hash: '8E245D9679D31E12', size: 12909756, walks: 1 },
+      { hash: '8e245d9679d31e1', size: 12909756, walks: 1 },
+      { hash: '8e245d9679d31e12', size: 100, walks: 1 },
+      { hash: '8e245d9679d31e12', size: 12909756.5, walks: 1 },
+      { failed: 'exploded', step: 'middle', walks: 'many' },
+    ];
+    for (const [index, fields] of wrong.entries()) {
+      const reading = readStreamHash(`${url}?${index}`);
+      answer(fields);
+      await expect(reading).resolves.toEqual({
+        failed: 'refused',
+        step: 'start',
+        ms: expect.any(Number),
+        walks: 1,
+        by: 'app',
+      });
+    }
   });
 });

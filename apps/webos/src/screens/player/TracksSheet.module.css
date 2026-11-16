@@ -100,3 +100,11 @@
   font: var(--bt-text-label);
   color: var(--bt-text-subtle);
 }
+
+/* Last episode's timing, offered in place of the offset, its two answers beside it. */
+.offerText {
+  display: inline-block;
+  margin-right: 32px;
+  font: var(--bt-text-body);
+  color: var(--bt-text);
+}

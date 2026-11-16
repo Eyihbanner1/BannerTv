@@ -4,6 +4,7 @@ import {
   createPlayedVideos,
   createProgressStore,
   createReleaseMemory,
+  createReleaseTimingMemory,
   createSourceMemory,
   createSpeedMemory,
   createSubtitlePickMemory,
@@ -46,6 +47,13 @@ export function rememberedRelease(metaId: string): BingeHint | undefined {
  */
 export const subtitlePicks = createSubtitlePickMemory({ storage: profileKv });
 
+/**
+ * The subtitle timing the viewer set for each release of a title (the file's source and
+ * language with it; never a link), offered on the next episode of that release. Per profile,
+ * kept on this screen only.
+ */
+export const releaseTimings = createReleaseTimingMemory({ storage: profileKv });
+
 /** Which playback speeds Settings > Lab measured this TV keeping, for each kind of stream. Shared by profiles. */
 export const speedMemory = createSpeedMemory({ storage: storage.kv });
 
@@ -57,4 +65,5 @@ export function startPlaybackData(): void {
   void playedVideos.load();
   void releaseMemory.load();
   void subtitlePicks.load();
+  void releaseTimings.load();
 }

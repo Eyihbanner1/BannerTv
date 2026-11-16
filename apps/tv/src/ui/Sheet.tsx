@@ -37,18 +37,25 @@ export function SheetOption({
   detail,
   selected,
   onPress,
+  onFocus,
+  onBlur,
   preferred,
 }: {
   label: string;
   detail?: string;
   selected: boolean;
   onPress: () => void;
+  /** The remote came onto it, or left it. */
+  onFocus?: () => void;
+  onBlur?: () => void;
   preferred?: boolean;
 }) {
   return (
     <Focusable
       radius={radii.md}
       onPress={onPress}
+      {...(onFocus ? { onFocus } : {})}
+      {...(onBlur ? { onBlur } : {})}
       {...(preferred ? { preferred } : {})}
       accessibilityLabel={[label, detail].filter(Boolean).join(', ')}
     >

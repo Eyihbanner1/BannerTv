@@ -14,6 +14,7 @@
   "dependencies": {
     "@noble/ciphers": "2.4.0",
     "@noble/hashes": "2.4.0",
+    "banner-cues": "file:../mobile/modules/banner-cues",
     "expo": "58.0.22",
     "expo-build-properties": "58.0.12",
     "expo-constants": "58.0.14",

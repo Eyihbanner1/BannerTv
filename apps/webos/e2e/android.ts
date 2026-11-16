@@ -52,6 +52,18 @@ export interface AndroidCalls {
   exits: number;
   /** Each list of cards sent for the Watch Next row, oldest first. */
   watchNext: WatchNextCard[][];
+  /** Each hash() request, oldest first, with when the page sent it (performance.now()). */
+  hash: AndroidHashRequest[];
+}
+
+/** What the page asks the Android app to read the video's hash of. */
+export interface AndroidHashRequest {
+  id: number;
+  url: string;
+  size?: number;
+  headers?: Record<string, string>;
+  /** When the page sent it, by the page's clock. The stand-in's, not the page's. */
+  at: number;
 }
 
 /**
@@ -97,6 +109,7 @@ export async function openAsAndroid(
       opened: [] as string[],
       exits: 0,
       watchNext: [] as unknown[],
+      hash: [] as unknown[],
     };
     Object.assign(window, {
       androidCalls: calls,
@@ -135,6 +148,8 @@ export async function openAsAndroid(
           sessionStorage.removeItem(linkKey);
           return link;
         },
+        hash: (request: string) =>
+          calls.hash.push({ ...(JSON.parse(request) as object), at: performance.now() }),
       },
     });
   }, LINK_KEY);
@@ -175,6 +190,35 @@ export async function leaveApp(page: Page): Promise<void> {
 
 export function androidCalls(page: Page): Promise<AndroidCalls> {
   return page.evaluate(() => (window as unknown as { androidCalls: AndroidCalls }).androidCalls);
+}
+
+/**
+ * The Android app answers the page's newest hash() request with a hash event, `afterMs` after the
+ * page sent it (at once when that has passed already).
+ */
+export async function androidHashAnswers(
+  page: Page,
+  answer: { hash?: string; size?: number; failed?: string; step?: string; walks?: number },
+  afterMs = 0,
+): Promise<void> {
+  await expect.poll(async () => (await androidCalls(page)).hash.length).toBeGreaterThan(0);
+  await page.evaluate(
+    ({ fields, after }) => {
+      const w = window as unknown as {
+        androidCalls: AndroidCalls;
+        __bannerAndroid: { event(event: unknown): void };
+      };
+      const asked = w.androidCalls.hash[w.androidCalls.hash.length - 1]!;
+      const wait = Math.max(0, asked.at + after - performance.now());
+      return new Promise<void>((done) =>
+        setTimeout(() => {
+          w.__bannerAndroid.event({ type: 'hash', id: asked.id, ...fields });
+          done();
+        }, wait),
+      );
+    },
+    { fields: answer, after: afterMs },
+  );
 }
 
 /** The player commands the page has sent so far, by op. */

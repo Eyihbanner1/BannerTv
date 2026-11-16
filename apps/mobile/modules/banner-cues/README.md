@@ -4,6 +4,8 @@ A local Expo module (autolinked from `modules/`) that hands the shared code the 
 
 expo-video plays through Media3's ExoPlayer but tells JS nothing about cues. This module listens on the ExoPlayer inside expo-video's `VideoPlayer` (`Player.Listener.onCues`) and sends `cues` with `at` (seconds on the player's clock) and the lines (`text` with `<b>`, `<i>` and `<u>`, and `&`, `<` and `>` escaped; `top` for a line placed at the top). `src/player/phone-host.ts` passes it on to the shared code as the Android bridge's `{ "type": "player", "event": "cues" }`, exactly as the Android TV app sends it (ADR 0005, decision 6).
 
+Linked into apps/tv too, through its package.json (file: dependency): the native TV app plays through the same phone-host.ts, so it draws these lines in the viewer's style as well.
+
 - `watch(player)`: the player phone-host.ts makes once and keeps.
 - `draw(on)`: sent with each subtitle choice. While on, Media3's own subtitle view is hidden for text lines. Picture subtitles (PGS, DVB) still show there, and the shared code gets an empty group for them.
 

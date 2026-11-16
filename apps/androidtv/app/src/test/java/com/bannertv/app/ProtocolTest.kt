@@ -101,6 +101,54 @@ class ProtocolTest {
     }
 
     @Test
+    fun aHashIsReadOnlyFromAnHttpLink() {
+        assertTrue(Protocol.isHashUrl("http://cdn.example/file.mkv"))
+        assertTrue(Protocol.isHashUrl("HTTPS://cdn.example/file.mkv?token=a"))
+        assertTrue(Protocol.isHashUrl("  https://cdn.example/file.mkv  "))
+        assertFalse(Protocol.isHashUrl("ftp://cdn.example/file.mkv"))
+        assertFalse(Protocol.isHashUrl("magnet:?xt=urn:btih:abc"))
+        assertFalse(Protocol.isHashUrl("https://"))
+        assertFalse(Protocol.isHashUrl("   "))
+        assertFalse(Protocol.isHashUrl(""))
+        assertFalse(Protocol.isHashUrl(null))
+        assertFalse(Protocol.isHashUrl("https://cdn.example/a file.mkv"))
+    }
+
+    @Test
+    fun aHashRequestNeedsAnIdAndALink() {
+        assertNull(Protocol.hashRequest(0, "https://cdn.example/file.mkv", 1000, emptyMap()))
+        assertNull(Protocol.hashRequest(-3, "https://cdn.example/file.mkv", 1000, emptyMap()))
+        assertNull(Protocol.hashRequest(1, "ftp://cdn.example/file.mkv", 1000, emptyMap()))
+        assertNull(Protocol.hashRequest(1, null, 1000, emptyMap()))
+
+        val known = Protocol.hashRequest(4, "https://cdn.example/file.mkv", 1_000_000, emptyMap())!!
+        assertEquals(4, known.id)
+        assertEquals("https://cdn.example/file.mkv", known.url)
+        assertEquals(1_000_000L, known.size)
+        assertNull(Protocol.hashRequest(4, "https://cdn.example/file.mkv", 0, emptyMap())!!.size)
+        assertNull(Protocol.hashRequest(4, "https://cdn.example/file.mkv", -1, emptyMap())!!.size)
+    }
+
+    @Test
+    fun aHashRequestSendsOnlyHeadersThatCanBeSent() {
+        val request =
+            Protocol.hashRequest(
+                2,
+                "https://cdn.example/file.mkv",
+                0,
+                mapOf(
+                    "Referer" to "https://site.example/",
+                    "Range" to "bytes=0-",
+                    "Bad Name" to "x",
+                    "X-Empty" to null,
+                ),
+            )!!
+        assertEquals(mapOf("Referer" to "https://site.example/"), request.headers)
+        // The link never shows when the request is printed.
+        assertEquals("HashRequest(id=2)", request.toString())
+    }
+
+    @Test
     fun undeterminedLanguageIsEmpty() {
         assertEquals("", Protocol.language(null))
         assertEquals("", Protocol.language("und"))

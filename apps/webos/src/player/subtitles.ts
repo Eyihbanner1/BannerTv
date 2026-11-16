@@ -409,10 +409,17 @@ export function subtitleList(
                   state: 'read',
                   ms: reading.ms,
                   ...(reading.fellBack && { fellBack: reading.fellBack }),
+                  ...(reading.by && { by: reading.by }),
                 }
               : 'skipped' in reading
                 ? { state: 'skipped', why: reading.skipped }
-                : { state: 'failed', why: reading.failed, step: reading.step, ms: reading.ms },
+                : {
+                    state: 'failed',
+                    why: reading.failed,
+                    step: reading.step,
+                    ms: reading.ms,
+                    ...(reading.by && { by: reading.by }),
+                  },
           );
           ask(found?.videoHash, found?.videoSize ?? videoSize);
           return;
@@ -424,6 +431,7 @@ export function subtitleList(
             state: 'read',
             ms: reading.ms,
             ...(reading.fellBack && { fellBack: reading.fellBack }),
+            ...(reading.by && { by: reading.by }),
             late: { askedAtMs: askedAt, askedAgain },
           });
           mark('sub:hash:late');
@@ -433,6 +441,7 @@ export function subtitleList(
             why: reading.failed,
             step: reading.step,
             ms: reading.ms,
+            ...(reading.by && { by: reading.by }),
             askedAtMs: askedAt,
           });
         }

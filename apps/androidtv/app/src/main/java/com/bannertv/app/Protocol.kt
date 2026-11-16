@@ -30,6 +30,8 @@ object Protocol {
 
     private val HTTPS_URL = Regex("""https://[^/?#\s]+([/?#]\S*)?""", RegexOption.IGNORE_CASE)
 
+    private val HASH_URL = Regex("""^https?://\S+$""", RegexOption.IGNORE_CASE)
+
     /** The script that hands one event object to the page, if the page is listening yet. */
     fun eventScript(json: String): String {
         // U+2028 and U+2029 are legal inside JSON strings but end the line in older JavaScript.
@@ -69,6 +71,20 @@ object Protocol {
 
     /** The User-Agent among request headers, whatever its case, or null. */
     fun userAgent(headers: Map<String, String>): String? = HeaderRules.userAgent(headers)
+
+    /** hash() reads only an http or https link, with no spaces. */
+    fun isHashUrl(url: String?): Boolean = url != null && HASH_URL.matches(url.trim())
+
+    /**
+     * What hash() asks for, or null when it can't be read: an id the answer goes back with, a
+     * link, the size when the page knows it (null for 0 or less), and the addon's request headers
+     * as they can be sent, as the player sends them.
+     */
+    fun hashRequest(id: Int, url: String?, size: Long, asked: Map<String, String?>): HashRequest? {
+        if (id <= 0 || url == null || !isHashUrl(url)) return null
+        val known = if (size > 0) size else null
+        return HashRequest(id = id, url = url.trim(), size = known, headers = requestHeaders(asked))
+    }
 
     /** Format.language as the web app expects it: "" when missing or undetermined. */
     fun language(language: String?): String =

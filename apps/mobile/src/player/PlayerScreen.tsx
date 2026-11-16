@@ -52,6 +52,8 @@ import {
   type PlaybackSession,
 } from '@tv/player/session';
 import { autoplaysSinceInput, countAutoplay } from '@tv/player/sleep';
+import { formatOffset } from '@tv/player/timing';
+import { useOfferNotice } from '@tv/screens/player/use-offer-notice';
 import { type SubtitleChoice, useSubtitles } from '@tv/screens/player/use-subtitles';
 import { useScrobble } from '@tv/screens/player/use-scrobble';
 import { motion } from '@brand/tokens/design';
@@ -977,6 +979,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
 
   // The player's own time, at the speed playing, so drawn subtitles keep pace at any speed.
   const clock = useCallback(() => playerClock() ?? element.currentTime, [element]);
+  const offerNotice = useOfferNotice(subtitles.offer, videoId);
   const title = item?.name ?? '';
   const subtitle = episodeLabel(current);
   // The picture's note, just changed, goes first; never over what the screen says while a
@@ -995,6 +998,13 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       return t(lowerChoice ? 'player.keepsBuffering' : 'player.keepsBufferingStreams');
     }
     if (subtitles.failed && !waiting) return t('player.subtitlesFailed');
+    // Last of all: last episode's timing, offered in Timing.
+    if (offerNotice && subtitles.offer) {
+      const amount = formatOffset(subtitles.offer.offset);
+      return t('player.offerToast', {
+        amount: subtitles.offer.drift ? t('player.offerAmountDrift', { amount }) : amount,
+      });
+    }
     return undefined;
   })();
 
@@ -1434,6 +1444,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             entry={state.entry}
             onChoose={chooseSubtitle}
             onStyle={() => setPanel('style')}
+            // The clock the subtitles are drawn by, read as a line is tapped.
+            clock={() => ({ time: clock(), speed: state.rate || 1, paused: !playing })}
             audioRows={
               // The Audio tab: the stream's audio tracks, then another stream in the language
               // wanted when this one has none in it.

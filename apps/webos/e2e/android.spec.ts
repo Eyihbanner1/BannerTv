@@ -4,6 +4,7 @@ import {
   ANDROID_URL,
   androidCalls,
   androidCues,
+  androidHashAnswers,
   androidOpens,
   androidSays,
   androidTextTracks,
@@ -16,7 +17,15 @@ import {
   playerState,
   watchNextRow,
 } from './android';
-import { mockPlayback, readKv, type SeedPlayed, type SeedProgress, seedStreamAddon } from './play';
+import {
+  DEFAULT_STREAMS,
+  mockPlayback,
+  readKv,
+  type SeedPlayed,
+  type SeedProgress,
+  seedStreamAddon,
+} from './play';
+import { subtitlesDiagnostics } from './player';
 import { GUEST_ID, lockedWith, main, seedProfiles } from './profiles';
 import { expectFocus, expectFocusLabel, press, watchErrors } from './tv';
 
@@ -314,7 +323,10 @@ test("subtitles inside the file are drawn in the profile's style on Android, and
   await press(page, 'ArrowRight', 'player-tracks-tab-timing');
   await expect(page.getByText('Kept for this file.')).toBeVisible();
   await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
-  await press(page, 'ArrowDown', 'player-tracks-timing-p01');
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m05');
+  await press(page, 'ArrowRight', 'player-tracks-timing-m01');
+  await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p05');
   await page.keyboard.press('Enter');
   await expect(page.getByText('Subtitles 0.5 s later')).toBeVisible();
@@ -335,6 +347,159 @@ test("subtitles inside the file are drawn in the profile's style on Android, and
   await androidSays(page, { type: 'player', event: 'time', position: 21.6, duration: 900 });
   await expect(later).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test("a track Android hands over is matched with one press; a picture track's timing can't be changed", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  await mockPlayback(page, { subtitles: false });
+  await openAsAndroid(page);
+  await page.goto(ANDROID_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openFocusedTitle(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(async () => (await playerOps(page)).filter((op) => op === 'load'))
+    .toHaveLength(1);
+  await androidOpens(page);
+  await androidTextTracks(page, [{ id: '2:0', lang: 'en' }]);
+  await expect
+    .poll(async () => (await androidCalls(page)).player.filter((command) => command.op === 'text'))
+    .toContainEqual({ op: 'text', id: '2:0', cues: true });
+
+  // Lines as Android hands them over while the video plays: past lines only.
+  await playerState(page, { playing: true, position: 5 });
+  for (const [at, n] of [
+    [5, 1],
+    [8, 2],
+    [11, 3],
+  ] as const) {
+    await androidSays(page, { type: 'player', event: 'time', position: at, duration: 900 });
+    await androidCues(page, at, [{ text: `Test line ${n}` }]);
+    await androidCues(page, at + 2, []);
+  }
+  await expect(page.getByText('Test line 3')).toBeVisible();
+
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await androidSays(page, { type: 'key', key: 'Back' });
+  await expectFocus(page, 'player-tracks-tab-subtitles');
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  // No drift fix for these, which keep in step with the video.
+  await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
+  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await page.keyboard.press('Enter');
+  // The newest line heard is focused first.
+  const newest = page.locator('[data-focused="true"]');
+  await expect(newest).toHaveAttribute('data-focus-key', 'player-tracks-match-11000-0');
+  await expect(newest).toContainText('Test line 3');
+  await expect(page.locator('[data-focus-key="player-tracks-match-5000-0"]')).toContainText(
+    'Test line 1',
+  );
+  // Heard a second after Android showed it.
+  await androidSays(page, { type: 'player', event: 'time', position: 12.3, duration: 900 });
+  await page.keyboard.press('Enter');
+  await expectFocus(page, 'player-tracks-timing-match');
+  await expect
+    .poll(async () => ((await readKv(page, 'subtitleOffsets')) ?? []) as Array<{ offset: number }>)
+    .toHaveLength(1);
+  const [{ offset }] = (await readKv(page, 'subtitleOffsets')) as [{ offset: number }];
+  expect(offset).toBeGreaterThanOrEqual(0.8);
+  expect(offset).toBeLessThanOrEqual(1.6);
+  // One press only: no word of a second to fix a drift.
+  const note = page.getByText(/^Lined up to that line: \+\d\.\d s\.$/);
+  await expect(note).toBeVisible();
+  await expect(page.getByText(/do this again/)).toHaveCount(0);
+  await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
+  await androidSays(page, { type: 'key', key: 'Back' });
+  await androidSays(page, { type: 'key', key: 'Back' });
+
+  // A picture track, which Android draws itself: its timing can't be changed.
+  await androidTextTracks(page, [{ id: '3:0', lang: 'en', mime: 'application/pgs' }]);
+  await press(page, 'ArrowUp', 'player-play');
+  await press(page, 'ArrowDown', 'player-tracks-button');
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await androidSays(page, { type: 'key', key: 'Back' });
+  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expect(
+    page.getByText("The player draws these subtitles, so their timing can't be changed."),
+  ).toBeVisible();
+  await expect(page.locator('[data-focus-key^="player-tracks-timing-"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+/** The hash the Android app reads in these journeys: a made-up one, and the file's size. */
+const APP_HASH = { hash: '8e245d9679d31e12', size: 12909756, walks: 1 };
+
+/** Plays Elephants Dream on Android, whose addon asks for a Referer, with English subtitles. */
+async function playWithSubtitles(page: Page) {
+  // Whether each request the page made carried a Range header: the page reads no bytes itself.
+  const ranged: boolean[] = [];
+  page.on('request', (request) => ranged.push(request.headers()['range'] !== undefined));
+  await mockAddons(page);
+  await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
+  const mock = await mockPlayback(page, {
+    streams: {
+      [MOVIE]: [{ ...DEFAULT_STREAMS[0]!, requestHeaders: { Referer: 'https://addon.example/' } }],
+    },
+  });
+  await openAsAndroid(page);
+  await page.goto(ANDROID_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await openFocusedTitle(page);
+  await press(page, 'Enter', 'player-surface');
+  await expect
+    .poll(async () => (await playerOps(page)).filter((op) => op === 'load'))
+    .toHaveLength(1);
+  await androidOpens(page);
+  return { mock, ranged };
+}
+
+test("on Android the app reads the video's hash, and the subtitles are asked for with it", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const { mock, ranged } = await playWithSubtitles(page);
+  await androidHashAnswers(page, APP_HASH, 300);
+  await expect.poll(() => mock.subtitles.join()).toContain(`videoHash=${APP_HASH.hash}`);
+  // Read within the 2 s the subtitles wait for it: one ask, with the hash.
+  expect(mock.subtitles).toHaveLength(1);
+
+  // The app was asked once, with the stream's link and the addon's Referer.
+  const asked = (await androidCalls(page)).hash;
+  expect(asked).toHaveLength(1);
+  expect(asked[0]!.url.endsWith(DEFAULT_STREAMS[0]!.path!)).toBe(true);
+  expect(asked[0]!.headers?.Referer === 'https://addon.example/').toBe(true);
+  // The page read no bytes of the file itself.
+  expect(ranged.includes(true)).toBe(false);
+  expect(errors).toEqual([]);
+
+  // Home, on the way to Diagnostics, asks IntroDB of another title, which the stand-in's origin
+  // can't read: errors are checked while playing only.
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read by the app in \d+\.\d s/);
+});
+
+test('a hash the app reads late asks the hash-matching addons again', async ({ page }) => {
+  const errors = watchErrors(page);
+  const { mock } = await playWithSubtitles(page);
+  await androidHashAnswers(page, APP_HASH, 2600);
+  // Asked without it after 2 s, then OpenSubtitles again with it.
+  await expect
+    .poll(() => mock.subtitles.filter((path) => path.includes(`videoHash=${APP_HASH.hash}`)))
+    .toHaveLength(1);
+  expect(mock.subtitles).toHaveLength(2);
+  expect(mock.subtitles[0]).not.toContain('videoHash=');
+  expect(errors).toEqual([]);
+
+  const section = await subtitlesDiagnostics(page);
+  await expect(section).toContainText(/hash read by the app in \d+\.\d s, asked again/);
 });
 
 test('Trailer opens the YouTube app on Android', async ({ page }) => {

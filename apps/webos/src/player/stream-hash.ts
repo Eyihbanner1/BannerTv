@@ -1,3 +1,5 @@
+import { androidHashReader, type AndroidHashAnswer } from '../platform/android';
+import { mark } from '../platform/marks';
 import { guessMimeType } from './media';
 import { requestHeadersFor } from './request-headers';
 
@@ -15,6 +17,10 @@ import { requestHeadersFor } from './request-headers';
  * any after it go back through the stream's own link, each once. The link it
  * landed on is never kept, nor said: only handed, with the first 64 KB, to the
  * same play's reader of the file's own subtitles (`takeLanding`), once.
+ *
+ * On Android TV the app reads it instead (`androidHashReader`), the same way,
+ * on a thread of its own: the WebView's fetch can't see where a debrid link
+ * leads, nor read a host that sends no cross-origin headers.
  */
 
 /** Bytes read from each end of the file. */
@@ -87,6 +93,19 @@ export type HashSkip = 'playlist' | 'request headers' | 'not a file link';
 export function hashSkip(url: string): HashSkip | undefined {
   if (!/^https?:\/\//i.test(url)) return 'not a file link';
   if (requestHeadersFor(url)) return 'request headers';
+  const mime = guessMimeType(url);
+  return mime === 'application/vnd.apple.mpegurl' || mime === 'application/dash+xml'
+    ? 'playlist'
+    : undefined;
+}
+
+/**
+ * Why the Android TV app does not read a link's hash: no file link, or a
+ * playlist. Request headers are no reason there: the app sends them, as its
+ * player does.
+ */
+export function appHashSkip(url: string): HashSkip | undefined {
+  if (!/^https?:\/\//i.test(url)) return 'not a file link';
   const mime = guessMimeType(url);
   return mime === 'application/vnd.apple.mpegurl' || mime === 'application/dash+xml'
     ? 'playlist'
@@ -375,7 +394,8 @@ async function read(
  * made to the stream's own link, each through its redirects; `fellBack` the
  * first later read the link it led to refused, which went through the
  * stream's link again, as every read after it did; `step` the read a failure
- * came at. Never the link, nor where it led.
+ * came at; `by` 'app' when the Android TV app read it. Never the link, nor
+ * where it led.
  */
 export type HashReading =
   | {
@@ -383,13 +403,96 @@ export type HashReading =
       ms: number;
       walks: number;
       fellBack?: 'size' | 'end';
+      by?: 'app';
     }
   | { found?: undefined; skipped: HashSkip; ms: 0 }
-  | { found?: undefined; failed: HashFailure; step: HashStep; ms: number; walks: number };
+  | {
+      found?: undefined;
+      failed: HashFailure;
+      step: HashStep;
+      ms: number;
+      walks: number;
+      by?: 'app';
+    };
 
 const known = new Map<string, Promise<HashReading>>();
+/** The Android TV app's read in flight, until it answers or gives up. */
+let appInFlight: { url: string; reading: Promise<HashReading> } | null = null;
 /** Hashes kept for going back and forth between streams. */
 const KEPT = 20;
+
+const FAILURES: readonly HashFailure[] = [
+  'no range',
+  'no size',
+  'too small',
+  'refused',
+  'busy',
+  'timed out',
+];
+const STEPS: readonly HashStep[] = ['start', 'size', 'end'];
+
+/** The Android TV app's answer as a reading. Anything that is not a hash is a refusal. */
+function appReading(answer: AndroidHashAnswer, ms: number): HashReading {
+  const walks =
+    typeof answer.walks === 'number' &&
+    Number.isInteger(answer.walks) &&
+    answer.walks >= 0 &&
+    answer.walks <= 10
+      ? answer.walks
+      : 1;
+  const { hash, size } = answer;
+  if (
+    typeof hash === 'string' &&
+    /^[0-9a-f]{16}$/.test(hash) &&
+    typeof size === 'number' &&
+    Number.isInteger(size) &&
+    size >= 2 * HASH_CHUNK
+  ) {
+    const fellBack: 'size' | 'end' | undefined =
+      answer.fellBack === 'size' || answer.fellBack === 'end' ? answer.fellBack : undefined;
+    return {
+      found: { videoHash: hash, videoSize: size },
+      ms,
+      walks,
+      ...(fellBack && { fellBack }),
+      by: 'app',
+    };
+  }
+  const failed = FAILURES.find((word) => word === answer.failed) ?? 'refused';
+  const step = STEPS.find((word) => word === answer.step) ?? 'start';
+  return { failed, step, ms, walks, by: 'app' };
+}
+
+/** Has the Android TV app read the hash, giving up at HASH_TIMEOUT_MS as the page does. */
+function readByApp(
+  app: NonNullable<ReturnType<typeof androidHashReader>>,
+  url: string,
+  size: number | undefined,
+  startedAt: number,
+): Promise<HashReading> {
+  const headers = requestHeadersFor(url);
+  const asked = app({
+    url,
+    ...(size !== undefined && size > 0 && { size }),
+    ...(headers && { headers }),
+  });
+  return new Promise<HashReading>((resolve) => {
+    const timer = window.setTimeout(() => {
+      asked.drop();
+      resolve({
+        failed: 'timed out',
+        step: 'start',
+        ms: Date.now() - startedAt,
+        walks: 0,
+        by: 'app',
+      });
+    }, HASH_TIMEOUT_MS);
+    void asked.answer.then((answer) => {
+      clearTimeout(timer);
+      resolve(appReading(answer, Date.now() - startedAt));
+    });
+  });
+}
 
 /**
  * Reads the OpenSubtitles hash and size of the file at `url`, once per link,
@@ -402,6 +505,8 @@ const KEPT = 20;
 export function readStreamHash(url: string, knownSize?: number): Promise<HashReading> {
   const kept = known.get(url);
   if (kept) return kept;
+  const app = androidHashReader();
+  if (app) return readThroughApp(app, url, knownSize);
   const skipped = hashSkip(url);
   if (skipped) return Promise.resolve({ skipped, ms: 0 });
   const startedAt = Date.now();
@@ -438,6 +543,37 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
       return { failed, step, ms: Date.now() - startedAt, walks: progress.walks };
     },
   );
+  known.set(url, reading);
+  newest = { url, reading };
+  while (known.size > KEPT) known.delete(known.keys().next().value!);
+  return reading;
+}
+
+/**
+ * readStreamHash on Android TV: the app reads it. No landing is kept, as the
+ * android engine never takes one; a hash read is kept by the stream's link,
+ * and a failure forgotten, as on the page's own path.
+ */
+function readThroughApp(
+  app: NonNullable<ReturnType<typeof androidHashReader>>,
+  url: string,
+  knownSize: number | undefined,
+): Promise<HashReading> {
+  const skipped = appHashSkip(url);
+  if (skipped) return Promise.resolve({ skipped, ms: 0 });
+  mark('sub:hash:app');
+  // The app reads one link at a time and drops the read in flight for a newer one, which then
+  // never answers: that link is asked again when it comes back, never left waiting for it.
+  if (appInFlight && known.get(appInFlight.url) === appInFlight.reading) {
+    known.delete(appInFlight.url);
+  }
+  const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
+  const reading: Promise<HashReading> = readByApp(app, url, size, Date.now()).then((done) => {
+    if (!done.found && known.get(url) === reading) known.delete(url);
+    if (appInFlight?.reading === reading) appInFlight = null;
+    return done;
+  });
+  appInFlight = { url, reading };
   known.set(url, reading);
   newest = { url, reading };
   while (known.size > KEPT) known.delete(known.keys().next().value!);
@@ -484,5 +620,6 @@ export function hashStream(
 /** For tests: forgets every hash read. */
 export function forgetHashes(): void {
   known.clear();
+  appInFlight = null;
   forgetLanding();
 }

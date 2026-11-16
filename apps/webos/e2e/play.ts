@@ -323,6 +323,25 @@ export const HASH_SUBTITLES = {
   linkedLate: timed(LATE_SPEECH, 0, 'Linked late, line'),
 };
 
+/** The file's seconds for one of the video's, for a file timed for a PAL release of a film. */
+const AHEAD_RATE = 24000 / 1001 / 25;
+
+/**
+ * Files for Match a line, on the 10-minute video: test lines only, one file at a time so nothing
+ * lines them up. On APART_SPEECH: 2 s late; and timed for a PAL release, each line at
+ * (its time − 2) × 23.976 / 25, so the drift fix for lines getting ahead and +2 s put it right.
+ */
+export const MATCH_SUBTITLES = {
+  matchLate: timed(APART_SPEECH, 2, 'Test line'),
+  matchAhead: srt(
+    APART_SPEECH.map(([start, end], i) => [
+      ms((start - 2) * AHEAD_RATE),
+      ms((end - 2) * AHEAD_RATE),
+      `Test line ${i + 1}`,
+    ]),
+  ),
+};
+
 /**
  * The made-up film's lines muxed into the journeys' MKV files (fixtures/mkv/lines.json), each
  * a start and an end in seconds: 150 over the 10-minute video, from 3 s.
@@ -353,6 +372,7 @@ export const SUBTITLE_FILES: Record<string, string> = {
   ...AGREE_SUBTITLES,
   ...HASH_SUBTITLES,
   ...MKV_SUBTITLES,
+  ...MATCH_SUBTITLES,
   hlsEnglishEarly: HLS_LONG_ENGLISH,
 };
 

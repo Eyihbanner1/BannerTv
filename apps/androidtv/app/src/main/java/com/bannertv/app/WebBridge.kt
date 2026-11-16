@@ -21,6 +21,7 @@ class WebBridge(
     private val readHelperState: () -> String,
     private val onWatchNext: (String) -> Unit,
     private val onTakeLink: () -> String,
+    private val onHash: (HashRequest) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
 
@@ -77,4 +78,37 @@ class WebBridge(
     /** The link the app was opened with, as JSON, once; "" when none waits. */
     @JavascriptInterface
     fun takeLink(): String = onTakeLink()
+
+    /**
+     * Reads the video's hash for the subtitles on its own thread; answers with a hash event, never
+     * the link. This only hands the request on: nothing is read on the bridge thread.
+     */
+    @JavascriptInterface
+    fun hash(requestJson: String?) {
+        if (requestJson == null) return
+        val request =
+            try {
+                JSONObject(requestJson)
+            } catch (e: JSONException) {
+                return
+            }
+        Protocol.hashRequest(
+            id = request.optInt("id", 0),
+            url = request.optString("url", ""),
+            size = request.optLong("size", 0),
+            asked = readHeaders(request.optJSONObject("headers")),
+        )?.let(onHash)
+    }
+
+    /** The addon's request headers as the page sent them; Protocol keeps those that can be sent. */
+    private fun readHeaders(json: JSONObject?): Map<String, String?> {
+        if (json == null) return emptyMap()
+        val headers = HashMap<String, String?>()
+        val names = json.keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            headers[name] = json.opt(name) as? String
+        }
+        return headers
+    }
 }

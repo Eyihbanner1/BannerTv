@@ -9,6 +9,8 @@ import {
   traceFiles,
   traceFirstLine,
   traceHash,
+  traceMatch,
+  traceOffer,
   traceHashLinked,
   traceAgreement,
   traceAlignment,
@@ -96,6 +98,86 @@ describe('the subtitles of the last few plays', () => {
     ).toBe('hash failed after 15.0 s (timed out, end read), asked without it at 2.0 s');
     // Linked files are counted only for a hash read late.
     expect(rowFor({ state: 'read', ms: 1400 }, 2)).toBe('hash read in 1.4 s');
+  });
+
+  it('says a hash read by the app, and never a link', () => {
+    const rowFor = (outcome: Parameters<typeof traceHash>[1]) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt6151526:1:6', 0);
+      traceHash('tt6151526:1:6', outcome);
+      return subtitleTraceRows()[0]![1].split(' · ')[0];
+    };
+    expect(rowFor({ state: 'read', ms: 800, by: 'app' })).toBe('hash read by the app in 0.8 s');
+    expect(rowFor({ state: 'read', ms: 3100, fellBack: 'end', by: 'app' })).toBe(
+      'hash read by the app in 3.1 s, the end through the stream’s link again',
+    );
+    expect(
+      rowFor({
+        state: 'read',
+        ms: 2600,
+        by: 'app',
+        late: { askedAtMs: 2000, askedAgain: 1 },
+      }),
+    ).toBe('hash read by the app in 2.6 s, asked again');
+    expect(rowFor({ state: 'failed', why: 'refused', step: 'start', ms: 4000, by: 'app' })).toBe(
+      'hash failed after 4.0 s (refused, start read, read by the app)',
+    );
+    const late = rowFor({
+      state: 'failed',
+      why: 'busy',
+      step: 'end',
+      ms: 3000,
+      askedAtMs: 2000,
+      by: 'app',
+    });
+    expect(late).toBe(
+      'hash failed after 3.0 s (busy, end read, read by the app), asked without it at 2.0 s',
+    );
+    expect(late).not.toMatch(/:\/\//);
+  });
+
+  it('says how a line was matched and what the offer did, never the line', () => {
+    const rowOf = (fill: () => void) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt6151526:1:6', 0);
+      traceReason('tt6151526:1:6', 'best fit', 'eng');
+      traceReference('tt6151526:1:6', null);
+      fill();
+      return subtitleTraceRows()[0]![1];
+    };
+    const one = rowOf(() => traceMatch('tt6151526:1:6', { presses: 1, offset: 1.2 }));
+    expect(one).toBe(
+      'hash: not asked yet · no files · en, best fit · lined up against nothing · timing set by matching a line: +1.2 s · no line yet',
+    );
+    expect(
+      rowOf(() => traceMatch('tt6151526:1:6', { presses: 2, offset: 1.2, drift: 'ahead' })),
+    ).toContain('timing set by matching two lines: +1.2 s, drift fixed');
+    expect(
+      rowOf(() => traceMatch('tt6151526:1:6', { presses: 2, offset: -0.4, drift: 'none' })),
+    ).toContain('timing set by matching two lines: −0.4 s, no drift');
+    expect(
+      rowOf(() => traceMatch('tt6151526:1:6', { presses: 2, offset: 1.2, unsteady: true })),
+    ).toContain('two lines matched kept no steady pace: the newer one set +1.2 s');
+    expect(
+      rowOf(() => traceMatch('tt6151526:1:6', { presses: 1, offset: 1.2, undone: true })),
+    ).toContain('timing set by matching a line: +1.2 s (undone) ·');
+    expect(rowOf(() => traceOffer('tt6151526:1:6', 'shown'))).toContain(
+      'lined up against nothing · last episode’s timing offered · no line yet',
+    );
+    expect(rowOf(() => traceOffer('tt6151526:1:6', 'used'))).toContain(
+      'last episode’s timing offered: used',
+    );
+    const both = rowOf(() => {
+      traceOffer('tt6151526:1:6', 'declined');
+      traceMatch('tt6151526:1:6', { presses: 1, offset: 0.5 });
+    });
+    expect(both).toContain(
+      'timing set by matching a line: +0.5 s · last episode’s timing offered: declined',
+    );
+    expect(both).not.toMatch(/:\/\/|Test line/);
+    // Another video's play is not told.
+    traceMatch('tt0000001', { presses: 1, offset: 9 });
+    expect(subtitleTraceRows()[0]![1]).not.toContain('+9.0 s');
   });
 
   it('keeps the play under study on the console line after a detour, as five are kept', () => {
