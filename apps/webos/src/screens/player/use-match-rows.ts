@@ -34,12 +34,14 @@ export function useMatchRows(
   read: () => MatchClock | null,
   pinnedKey: string | undefined,
 ): { rows: MatchRow[]; paused: boolean } {
-  // Kept with the cues they were read for: rows of other cues are never handed out.
+  // Kept with the cues they were read for, and the moment on the lines' clock they were read at
+  // (null with no clock to read).
   const [state, setState] = useState<{
     cues: readonly Cue[] | null;
     rows: MatchRow[];
     paused: boolean;
-  }>({ cues: null, rows: [], paused: false });
+    at: number | null;
+  }>(EMPTY);
   // The screen hands a new reader each draw: the latest is read.
   const reader = useRef(read);
   useEffect(() => {
@@ -48,16 +50,21 @@ export function useMatchRows(
   const index = useMemo(() => (cues ? createCueIndex(cues) : null), [cues]);
 
   useEffect(() => {
-    if (!cues || !index) return;
+    if (!cues || !index) {
+      // Closed: the next opening starts afresh, with nothing kept from before.
+      const timer = setTimeout(() => setState(EMPTY), 0);
+      return () => clearTimeout(timer);
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
       const clock = reader.current();
       const paused = !clock || clock.paused;
-      const rows = clock ? matchRows(cues, clock.time - offset, pinnedKey) : [];
+      const at = clock ? clock.time - offset : null;
+      const rows = at !== null ? matchRows(cues, at, pinnedKey) : [];
       setState((old) =>
         old.cues === cues && old.paused === paused && sameRows(old.rows, rows)
           ? old
-          : { cues, rows, paused },
+          : { cues, rows, paused, at },
       );
       let delay = LATEST_MS;
       if (clock && !clock.paused) {
@@ -75,8 +82,21 @@ export function useMatchRows(
     };
   }, [cues, index, offset, pinnedKey]);
 
-  if (!cues || state.cues !== cues) return NONE;
-  return { rows: state.rows, paused: state.paused };
+  // New cues for the same list (a track handing over its lines again as each starts, a file's
+  // window growing): the rows are read from them at once, at the moment last read, so the list
+  // never empties and the row with focus stays drawn until the next read.
+  const carried = useMemo(
+    () =>
+      cues && state.cues && state.cues !== cues
+        ? state.at !== null
+          ? matchRows(cues, state.at, pinnedKey)
+          : []
+        : null,
+    [cues, state, pinnedKey],
+  );
+  if (!cues || !state.cues) return NONE;
+  return { rows: carried ?? state.rows, paused: state.paused };
 }
 
+const EMPTY = { cues: null, rows: [], paused: false, at: null };
 const NONE: { rows: MatchRow[]; paused: boolean } = { rows: [], paused: false };
