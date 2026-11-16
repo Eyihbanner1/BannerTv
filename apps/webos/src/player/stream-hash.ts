@@ -416,6 +416,8 @@ export type HashReading =
     };
 
 const known = new Map<string, Promise<HashReading>>();
+/** The Android TV app's read in flight, until it answers or gives up. */
+let appInFlight: { url: string; reading: Promise<HashReading> } | null = null;
 /** Hashes kept for going back and forth between streams. */
 const KEPT = 20;
 
@@ -560,11 +562,18 @@ function readThroughApp(
   const skipped = appHashSkip(url);
   if (skipped) return Promise.resolve({ skipped, ms: 0 });
   mark('sub:hash:app');
+  // The app reads one link at a time and drops the read in flight for a newer one, which then
+  // never answers: that link is asked again when it comes back, never left waiting for it.
+  if (appInFlight && known.get(appInFlight.url) === appInFlight.reading) {
+    known.delete(appInFlight.url);
+  }
   const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
-  const reading = readByApp(app, url, size, Date.now()).then((done) => {
-    if (!done.found) known.delete(url);
+  const reading: Promise<HashReading> = readByApp(app, url, size, Date.now()).then((done) => {
+    if (!done.found && known.get(url) === reading) known.delete(url);
+    if (appInFlight?.reading === reading) appInFlight = null;
     return done;
   });
+  appInFlight = { url, reading };
   known.set(url, reading);
   newest = { url, reading };
   while (known.size > KEPT) known.delete(known.keys().next().value!);
@@ -611,5 +620,6 @@ export function hashStream(
 /** For tests: forgets every hash read. */
 export function forgetHashes(): void {
   known.clear();
+  appInFlight = null;
   forgetLanding();
 }

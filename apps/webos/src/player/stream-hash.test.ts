@@ -654,6 +654,25 @@ describe('on Android TV the app reads the hash', () => {
     expect(asked).toHaveLength(3);
   });
 
+  it('asks the app again for a link whose read a newer one cancelled', async () => {
+    const first = readStreamHash(url);
+    const other = `${url}?2`;
+    // The app drops the first read for this one, and never answers it.
+    const second = readStreamHash(other);
+    expect(asked.map((request) => request.url)).toEqual([url, other]);
+    // Back to the first within 15 s: asked again, not left waiting for an answer that never comes.
+    const again = readStreamHash(url);
+    expect(again).not.toBe(first);
+    expect(asked.map((request) => request.url)).toEqual([url, other, url]);
+    answer(found);
+    await expect(again).resolves.toMatchObject({ found: { videoHash: found.hash }, by: 'app' });
+    expect(hashReadingFor(url)).toBe(again);
+    // The read the app finished stays kept: the link is not asked for again.
+    void readStreamHash(url);
+    expect(asked).toHaveLength(3);
+    void second;
+  });
+
   it('says the app’s failure and the read it came at', async () => {
     const reading = readStreamHash(url);
     answer({ failed: 'busy', step: 'end', walks: 2 });
