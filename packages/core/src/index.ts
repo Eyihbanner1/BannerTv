@@ -614,6 +614,57 @@ export {
 } from './integrations/tmdb/client';
 export { TMDB_LOGO } from './integrations/tmdb/logo';
 export {
+  createSubdlClient,
+  SUBDL_FAILURE_MEMORY_MS,
+  SUBDL_POLICY,
+  SUBDL_SEARCH_MS,
+  type SubdlClient,
+  type SubdlClientOptions,
+  SubdlFailureError,
+  type SubdlHttp,
+  type SubdlOff,
+  type SubdlSearch,
+  type SubdlSearchState,
+  SubdlSkipError,
+} from './integrations/subdl/client';
+export {
+  cleanSubdlKey,
+  readSubdlKey,
+  SUBDL_KEY_PATTERN,
+  type SubdlKeyRecord,
+} from './integrations/subdl/key';
+export { languageOfSubdl, subdlCodeFor } from './integrations/subdl/languages';
+export {
+  classifySubdlAnswer,
+  parseSubdlFiles,
+  SUBDL_MAX_FILES,
+  type SubdlFailure,
+  type SubdlFile,
+  type SubdlOutcome,
+} from './integrations/subdl/parse';
+export {
+  SUBDL_API,
+  SUBDL_DOWNLOADS,
+  SUBDL_PREFER_UNPACK,
+  SUBDL_ROUTE,
+  type SubdlAsk,
+  subdlAskFor,
+  subdlCacheKey,
+  subdlKeyCheckRequest,
+  type SubdlRequest,
+  type SubdlRoute,
+  subdlSearchRequest,
+  type SubdlSkip,
+} from './integrations/subdl/request';
+export {
+  createSubdlUsage,
+  SUBDL_DOWNLOADS_PER_DAY,
+  SUBDL_SEARCHES_PER_DAY,
+  type SubdlRest,
+  type SubdlRestWhy,
+  type SubdlUsage,
+} from './integrations/subdl/usage';
+export {
   createIntroDbClient,
   episodeOf,
   INTRODB_POLICY,
