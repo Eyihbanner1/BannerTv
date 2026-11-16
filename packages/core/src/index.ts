@@ -590,6 +590,16 @@ export {
   readMatroskaLines,
 } from './media/matroska-window';
 export type { MatroskaTextFormat } from './media/matroska-text';
+export { crc32, InflateError, type InflateFailure, inflateRaw } from './media/inflate';
+export {
+  isZip,
+  subtitleFromZip,
+  ZIP_LIMITS,
+  ZipError,
+  type ZipFailure,
+  type ZipLimits,
+  type ZipPick,
+} from './subtitles/zip';
 export type { Listener, Store, Updater } from './store';
 export {
   createTmdbClient,
