@@ -377,6 +377,11 @@ function subdlTraceOf(state: SubdlSearchState): SubdlTrace {
 export interface SubdlAskInput {
   languages: readonly string[];
   release: VideoRelease;
+  /**
+   * Languages turned on from the sheet earlier in the play, on another
+   * stream of the video: asked as then (from the cache), never one more.
+   */
+  turnedOn?: readonly string[];
 }
 
 const settled = (state: QueryState<unknown>) =>
@@ -405,8 +410,11 @@ export function subtitleList(
   subscribe(listener: () => void): () => void;
   start(): void;
   stop(): void;
-  /** Asks SubDL once more, for a language the viewer turned on that it was not asked for. */
-  askSubdl(language: string): void;
+  /**
+   * Asks SubDL once more, for a language the viewer turned on that it was
+   * not asked for: true when it asked, or its files moved to that language.
+   */
+  askSubdl(language: string): boolean;
 } {
   const own = stream.subtitles.map((subtitle) => toOption('stream', streamAddon, subtitle));
   const state = createStore<SubtitleListState>({ options: own, pending: 0 });
@@ -572,13 +580,40 @@ export function subtitleList(
     return asked.length;
   }
 
+  function askSubdl(language: string): boolean {
+    const [first] = subdlSearches;
+    if (!subdlAsk || !first) return false;
+    const code = subdlCodeFor(language);
+    if (code === undefined) return false;
+    if (first.languages.indexOf(code) !== -1) {
+      // Asked already: its files are listed in the variety turned on (es-419 or es, say).
+      const key = languageKey(language);
+      if (subdlFirstWanted.length > 0 && languageKey(subdlFirstWanted[0]!) === key) return false;
+      subdlFirstWanted = [language, ...subdlFirstWanted.filter((w) => languageKey(w) !== key)];
+      refresh();
+      return true;
+    }
+    if (subdlSearches.length > 1) return false;
+    const now = first.get();
+    // Not asked for a reason another language would not change (no key, a kids profile).
+    if (now.status === 'off' && now.why !== 'subtitles off') return false;
+    if (subdlResting()) return false;
+    subdlMoreLanguage = languageKey(language);
+    askSubdlFor([language]);
+    refresh();
+    return true;
+  }
+
   return {
     get: state.get,
     subscribe: state.subscribe,
     start() {
       if (answers.length > 0 || hashing) return;
       // SubDL is asked at once, beside the hash and the addons: it never waits for either.
-      if (subdlAsk && subdlSearches.length === 0) askSubdlFor(subdlAsk.languages);
+      if (subdlAsk && subdlSearches.length === 0) {
+        askSubdlFor(subdlAsk.languages);
+        subdlAsk.turnedOn?.forEach((language) => askSubdl(language));
+      }
       const { videoHash, videoSize } = stream.behaviorHints;
       const source = stream.source;
       if (videoHash || source.kind !== 'url') {
@@ -674,27 +709,6 @@ export function subtitleList(
       subdlMoreLanguage = undefined;
       subdlFirstWanted = subdlAsk?.languages ?? [];
     },
-    askSubdl(language) {
-      const [first] = subdlSearches;
-      if (!subdlAsk || !first) return;
-      const code = subdlCodeFor(language);
-      if (code === undefined) return;
-      if (first.languages.indexOf(code) !== -1) {
-        // Asked already: its files are listed in the variety turned on (es-419 or es, say).
-        const key = languageKey(language);
-        if (subdlFirstWanted.length > 0 && languageKey(subdlFirstWanted[0]!) === key) return;
-        subdlFirstWanted = [language, ...subdlFirstWanted.filter((w) => languageKey(w) !== key)];
-        refresh();
-        return;
-      }
-      if (subdlSearches.length > 1) return;
-      const now = first.get();
-      // Not asked for a reason another language would not change (no key, a kids profile).
-      if (now.status === 'off' && now.why !== 'subtitles off') return;
-      if (subdlResting()) return;
-      subdlMoreLanguage = languageKey(language);
-      askSubdlFor([language]);
-      refresh();
-    },
+    askSubdl,
   };
 }

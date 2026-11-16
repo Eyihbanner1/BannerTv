@@ -299,7 +299,10 @@ function offer(
     subscribe: store.subscribe,
     start: () => undefined,
     stop: () => undefined,
-    askSubdl: (language: string) => world.subdlMore.push(language),
+    askSubdl: (language: string) => {
+      world.subdlMore.push(language);
+      return true;
+    },
   });
   return (more: SubtitleOption[], stillPending = 0, stillComing = false) =>
     store.set({
@@ -2844,6 +2847,29 @@ describe('SubDL beside the addons', () => {
     player.subtitles.choose(null);
     await player.flush();
     expect(world.subdlMore).toEqual(['fre']);
+  });
+
+  it('asks for the same languages on another stream of the video, with the one turned on', async () => {
+    const entry = streamEntry(RELEASE);
+    const french = file('fr-1', FULL, { lang: 'fre' });
+    offer(entry, [file('en-1', FULL), french]);
+    const player = play(entry);
+    await player.wait(300);
+    player.subtitles.choose(fileChoice(french), 'version');
+    await player.flush();
+    expect(world.subdlMore).toEqual(['fre']);
+    // The stream fails over, or the viewer picks another: the same play of the same video.
+    const next = streamEntry('Test.Film.2026.720p.WEB-DL-GRPB');
+    offer(next, [file('en-2', FULL), file('fr-2', FULL, { lang: 'fre' })]);
+    await player.stream(next);
+    expect(world.subdlAsks[world.subdlAsks.length - 1]).toEqual({
+      languages: ['eng'],
+      release: {
+        filename: 'Test.Film.2026.720p.WEB-DL-GRPB.mkv',
+        title: 'Test.Film.2026.720p.WEB-DL-GRPB.mkv',
+      },
+      turnedOn: ['fre'],
+    });
   });
 
   it('never holds the first line longer while it is still asking', async () => {

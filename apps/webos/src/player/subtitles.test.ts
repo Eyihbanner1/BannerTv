@@ -831,6 +831,38 @@ describe('SubDL in the files on offer', () => {
     expect(subdlNet.searches.every((search) => search.stopped)).toBe(true);
   });
 
+  it('asks again, for another stream of the video, the language turned on, and no third', () => {
+    const list = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, turnedOn: ['fre'] });
+    list.start();
+    expect(subdlNet.searches.map((search) => search.wanted)).toEqual([['en'], ['fre']]);
+    subdlNet.searches[1]!.set({
+      status: 'answered',
+      files: [subdlFile('f', 'Test.Film.fr', { lang: 'fr' })],
+      ms: 2,
+      saved: true,
+    });
+    expect(recentSubtitleTraces()[0]!.subdlMore).toEqual({ language: 'fr', files: 1 });
+    expect(list.askSubdl('de')).toBe(false);
+    expect(subdlNet.searches).toHaveLength(2);
+    list.stop();
+    subdlNet.searches = [];
+    const spanish = subtitleList('movie', VIDEO, stream, 'Streams', {
+      ...ask,
+      languages: ['es-419'],
+      turnedOn: ['es'],
+    });
+    spanish.start();
+    subdlNet.searches[0]!.set({
+      status: 'answered',
+      ms: 1,
+      saved: true,
+      files: [subdlFile('s1', 'Test.Film.2026', { lang: 'es' })],
+    });
+    expect(subdlNet.searches).toHaveLength(1);
+    expect(spanish.get().options.find((option) => option.source === 'SubDL')?.lang).toBe('es');
+    spanish.stop();
+  });
+
   it('asks once more after a play with subtitles off, but not without a key or while resting', () => {
     const off = subtitleList('movie', VIDEO, stream, 'Streams', { ...ask, languages: [] });
     off.start();
