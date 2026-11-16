@@ -1081,7 +1081,7 @@ export function useSubtitles(
         (isSubtitleCheck(entry) ? null : wantedSubtitle(metaId, heardLanguages(audio, entry)));
       wantedNow = wanted;
       pressedNow = pressed;
-      const { options: offered, pending: waiting, hashComing } = list.get();
+      const { options: offered, pending: waiting, hashComing, subdlAsking = 0 } = list.get();
       const length = videoLength(playing.duration, playing.live, runtimeSeconds);
       const context = wanted === null ? null : contextIn(offered, wanted, entry, length);
       const key = wanted === null ? null : languageKey(wanted);
@@ -1243,15 +1243,18 @@ export function useSubtitles(
       startAuto(true);
       const result = plan(offered, wanted, context, undefined, sync);
       // Nothing in the language can be shown (none at all, or only files that could not be read
-      // or are in another script): a track of forced lines only, where the stream has one.
+      // or are in another script): a track of forced lines only, where the stream has one. It is
+      // not held back for SubDL, whose file takes over if it brings one; Off waits for SubDL too,
+      // as nothing would plan it again.
       if (result.pick && !usable(result.pick) && forcedTrack) {
+        setHolding(false);
+        settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
+      } else if (!result.pick && forcedTrack && waiting - subdlAsking === 0) {
         setHolding(false);
         settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
       } else if (!result.pick && waiting === 0) {
         setHolding(false);
-        if (forcedTrack)
-          settle({ kind: 'track', id: forcedTrack.id }, 'own track', forcedTrack.lang);
-        else settle(null, 'off', null);
+        settle(null, 'off', null);
       }
     };
     wake.current = decide;

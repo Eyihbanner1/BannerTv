@@ -732,8 +732,11 @@ describe('SubDL in the files on offer', () => {
       list.start();
       net.asks[0]!.answers[0]!.query.answer([]);
       expect(list.get().pending).toBe(1);
+      // Of those, SubDL's: not an addon.
+      expect(list.get().subdlAsking).toBe(1);
       subdlNet.searches[0]!.set(end);
       expect(list.get().pending).toBe(0);
+      expect(list.get().subdlAsking).toBeUndefined();
       list.stop();
     }
   });

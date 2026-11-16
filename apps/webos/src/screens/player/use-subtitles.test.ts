@@ -285,12 +285,14 @@ function offer(
   options: SubtitleOption[],
   pending = 0,
   hashComing: boolean | 'reading' = false,
+  subdlAsking = 0,
 ) {
   const store = createStore<SubtitleListState>({
     options,
     pending,
     ...(hashComing && { hashComing: true }),
     ...(hashComing === 'reading' && { hashReading: true }),
+    ...(subdlAsking > 0 && { subdlAsking }),
   });
   world.lists.set(entry.stream, {
     get: store.get,
@@ -2861,6 +2863,30 @@ describe('SubDL beside the addons', () => {
     const asking = await firstLineAt(1);
     expect(without).toBeLessThan(10_000);
     expect(asking).toBe(without);
+  });
+
+  it('never holds a forced track back while only it is still asking, and its file takes over later', async () => {
+    const entry = streamEntry('film-forced');
+    const forced = track('en|Forced', 'en', { label: 'English', forced: true });
+    const more = offer(entry, [file('french', FULL, { lang: 'fre' })], 1, false, 1);
+    const player = play(entry, { engine: 'hls.js', text: [forced] });
+    await player.wait(300);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: forced.id });
+    const late = subdlFile('late', FULL);
+    more([late], 0);
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(late));
+  });
+
+  it('is still waited for before nothing in the language settles on Off', async () => {
+    const entry = streamEntry('film-off');
+    const more = offer(entry, [file('french', FULL, { lang: 'fre' })], 1, false, 1);
+    const player = play(entry, { engine: 'hls.js', text: [] });
+    await player.wait(300);
+    const late = subdlFile('late-off', FULL);
+    more([late], 0);
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(late));
   });
 
   it('keeps a SubDL file picked by hand over one named for the release that comes later', async () => {

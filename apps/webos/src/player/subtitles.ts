@@ -75,6 +75,11 @@ export interface SubtitleListState {
   hashComing?: boolean;
   /** Of those in `pending`, the hash still being read after the addons were asked without it. */
   hashReading?: boolean;
+  /**
+   * Of those in `pending`, SubDL's searches still asking: not addons, and a
+   * track of forced lines only is not held back for them.
+   */
+  subdlAsking?: number;
 }
 
 /**
@@ -503,7 +508,8 @@ export function subtitleList(
         options.push(toOption(answer.addon.manifest.id, answer.addon.manifest.name, subtitle));
       }
     });
-    pending += addSubdlFiles(options, seen);
+    const subdlAsking = addSubdlFiles(options, seen);
+    pending += subdlAsking;
     // Asked without the hash while it is still being read: it may yet link files, but only
     // through an addon that matches by it.
     const hashLate =
@@ -518,6 +524,7 @@ export function subtitleList(
       pending: pending + askingAgain + (hashLate ? 1 : 0) + notAsked,
       ...(hashComing && { hashComing: true }),
       ...(hashLate && { hashReading: true }),
+      ...(subdlAsking > 0 && { subdlAsking }),
     });
     traceFiles(
       videoId,
