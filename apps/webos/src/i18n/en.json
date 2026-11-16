@@ -423,6 +423,7 @@
     "stillAsking_one": "Still asking {{count}} addon…",
     "stillAsking_other": "Still asking {{count}} addons…",
     "stillLinking": "Still looking for subtitles linked to your video…",
+    "stillReadingVideo": "Still looking for subtitles inside the video…",
     "noSubtitles": "No subtitles found",
     "pickLanguage": "Pick a language on the left.",
     "noAudioChoice": "This stream has no other audio to choose from.",

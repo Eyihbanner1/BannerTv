@@ -99,6 +99,12 @@ describe('audio rows', () => {
     expect(isCommentary(track('1', 'ger', 'ohne Audiokommentar'))).toBe(false);
     expect(isCommentary(track('1', 'eng', 'No Country for Old Men Commentary'))).toBe(true);
     expect(isCommentary(track('1', 'eng', 'Without Remorse commentary'))).toBe(true);
+    // As French, Spanish and Portuguese write it.
+    expect(isCommentary(track('1', 'fre', 'Commentaire du réalisateur'))).toBe(true);
+    expect(isCommentary(track('1', 'spa', 'Comentario del director'))).toBe(true);
+    expect(isCommentary(track('1', 'por', 'Comentário'))).toBe(true);
+    expect(isCommentary(track('1', 'spa', 'Sin comentarios'))).toBe(false);
+    expect(isCommentary(track('1', 'fre', 'Sans commentaire'))).toBe(false);
     // Where names are not trusted, only the stream's mark counts.
     expect(isCommentary(track('1', 'eng', 'English Commentary'), false)).toBe(false);
     expect(isCommentary(track('1', 'eng', 'Main', { commentary: true }), false)).toBe(true);

@@ -70,6 +70,9 @@ export function formatName(codecs: string | null | undefined, atmos = false): st
   return atmos ? 'Atmos' : undefined;
 }
 
+/** "Commentary", and as French, Spanish, Portuguese and German write it. */
+const COMMENTARY = /commentar|commentair|comentari|comentári|kommentar/i;
+
 /**
  * Whether the track is a commentary, by the stream's own mark or, unless
  * names are not to be trusted, by its name ("No commentary" is not one).
@@ -78,10 +81,10 @@ export function isCommentary(track: EngineTrack, byName = true): boolean {
   if (track.commentary === true) return true;
   if (!byName) return false;
   return (
-    /commentar|kommentar/i.test(track.label) &&
+    COMMENTARY.test(track.label) &&
     // "Without the director's commentary", "Non-commentary", "Kein Kommentar",
     // but not a film's own name: "No Country for Old Men commentary" is one.
-    !/\b(no|non|without|ohne|kein\w*)[\s-]+((the|a|director'?s?|directors'|audio)[\s-]+)*(audio)?(commentar|kommentar)/i.test(
+    !/\b(no|non|without|ohne|kein\w*|sin|sans|senza|sem)[\s-]+((the|a|director'?s?|directors'|audio)[\s-]+)*(audio)?(commentar|commentair|comentari|comentári|kommentar)/i.test(
       track.label,
     )
   );

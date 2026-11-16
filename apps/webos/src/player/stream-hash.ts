@@ -13,7 +13,8 @@ import { requestHeadersFor } from './request-headers';
  * those redirects once, and the size and the end are read straight from where
  * it landed. Once that refuses a read (a link good for one use), that read and
  * any after it go back through the stream's own link, each once. The link it
- * landed on is never kept, nor said.
+ * landed on is never kept, nor said: only handed, with the first 64 KB, to the
+ * same play's reader of the file's own subtitles (`takeLanding`), once.
  */
 
 /** Bytes read from each end of the file. */
@@ -102,9 +103,14 @@ export function canHash(url: string): boolean {
  * file or a short piece; the file's size could not be learnt; the file is
  * too small to hash; the request was refused or never answered (a host
  * that sends no cross-origin headers, or no network: the page cannot tell
- * which); or it took longer than HASH_TIMEOUT_MS.
+ * which); the server was too busy to answer it (`busyStatus`), which says
+ * nothing of the link; or it took longer than HASH_TIMEOUT_MS.
  */
-export type HashFailure = 'no range' | 'no size' | 'too small' | 'refused' | 'timed out';
+export type HashFailure = 'no range' | 'no size' | 'too small' | 'refused' | 'busy' | 'timed out';
+
+/** Statuses of a server too busy to answer now (408, 425, 429, 5xx), which says nothing of the link. */
+export const busyStatus = (status: number) =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
 
 /** Which read a failure came at: the first 64 KB, the file's size, or the last 64 KB. */
 export type HashStep = 'start' | 'size' | 'end';
@@ -130,7 +136,7 @@ function totalFrom(response: Response): number | undefined {
 }
 
 /** The link an answer came from, past every redirect; the link asked when the fetch can't say. */
-function landedAt(response: Response, asked: string): string {
+export function landedAt(response: Response, asked: string): string {
   const url = typeof response.url === 'string' ? response.url : '';
   return /^https?:\/\//i.test(url) ? url : asked;
 }
@@ -145,6 +151,8 @@ interface Answer<T> {
    * is not refused: the same host would send it again.
    */
   refused: boolean;
+  /** Of those, an answer from a server too busy for it now (`busyStatus`). */
+  busy?: boolean;
 }
 
 /** A read stopped by its own NATIVE_READ_MS: the host is sending more than was asked for. */
@@ -172,7 +180,10 @@ async function fetchWith<T>(
         }, NATIVE_READ_MS)
       : undefined;
   try {
-    const response = await fetch(url, { ...init, signal: controller?.signal });
+    // Kept out of the browser's cache, which would write the link it landed on to the TV's disk.
+    // Not through React Native's fetch, whose polyfill adds a "_=" to the link for that.
+    const cache: RequestInit = nativeFetch() ? {} : { cache: 'no-store' };
+    const response = await fetch(url, { ...init, ...cache, signal: controller?.signal });
     return await take(response, stop);
   } catch (error) {
     throw tooLong && !signal?.aborted ? new TooLong() : error;
@@ -218,7 +229,11 @@ async function readRange(
         // A server that ignores the range sends the whole file: stop at the headers.
         if (response.status !== 206) {
           stop();
-          return { value: { total, landed, sizeReadable }, refused: !response.ok };
+          return {
+            value: { total, landed, sizeReadable },
+            refused: !response.ok,
+            ...(busyStatus(response.status) && { busy: true }),
+          };
         }
         const bytes = new Uint8Array(await response.arrayBuffer());
         return {
@@ -247,7 +262,11 @@ async function readSize(url: string, signal: AbortSignal | undefined): Promise<A
     return await fetchWith(url, {}, signal, async (response, stop): Promise<Answer<number>> => {
       const length = Number(response.headers.get('content-length'));
       stop();
-      return { value: response.ok && length > 0 ? length : undefined, refused: !response.ok };
+      return {
+        value: response.ok && length > 0 ? length : undefined,
+        refused: !response.ok,
+        ...(busyStatus(response.status) && { busy: true }),
+      };
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -264,17 +283,46 @@ interface Progress {
   walks: number;
 }
 
+/**
+ * What the newest hash read found at its first read, for the same play's reader of the file's
+ * own subtitles (file-subtitles.ts): the first 64 KB, the link the redirects led to (dropped
+ * once that refused a read), and the file's size where a Content-Range gave it. One slot, in
+ * memory only: replaced by the next read, taken once, and never stored, traced or logged.
+ */
+export interface Landing {
+  /** Where the first read landed, past every redirect. Never kept past the play, nor said. */
+  landed?: string;
+  head: Uint8Array;
+  /** The file's size, from the first read's Content-Range when the page could read it. */
+  total?: number;
+}
+
+/** The reading whose landing the slot may hold: each read started makes a new one. */
+interface Slot {
+  url: string;
+  landing?: Landing;
+}
+
+let slot: Slot | null = null;
+/** The newest reading started, kept after it failed (`known` forgets a failure) for its outcome. */
+let newest: { url: string; reading: Promise<HashReading> } | null = null;
+
 async function read(
   url: string,
   knownSize: number | undefined,
   signal: AbortSignal | undefined,
   progress: Progress,
+  mine: Slot,
 ): Promise<{ videoHash: string; videoSize: number }> {
   progress.walks++;
   const first = await readRange(url, 0, signal);
-  if (first.refused) throw new HashError('refused', 'start');
+  if (first.refused) throw new HashError(first.busy ? 'busy' : 'refused', 'start');
   if (!first.value?.bytes) throw new HashError('no range', 'start');
   const { landed, bytes: head } = first.value;
+  if (slot === mine) {
+    mine.landing = { landed, head };
+    if (first.value.total !== undefined) mine.landing.total = first.value.total;
+  }
   // Every later read goes straight to where the first landed, past the redirects (each walk
   // through them asks the debrid service for its link again, and its answers are rationed). A
   // read there that is refused goes once through the stream's own link, and so does every read
@@ -284,6 +332,8 @@ async function read(
       const direct = await attempt(landed);
       if (!direct.refused) return direct;
       progress.fellBack = progress.step === 'size' ? 'size' : 'end';
+      // Refused once, it is no link to read the file by: only the bytes are handed on.
+      delete mine.landing?.landed;
     }
     progress.walks++;
     return attempt(url);
@@ -296,7 +346,7 @@ async function read(
     if (!first.value.sizeReadable) throw new HashError('no size', 'size');
     const sized = await once((target) => readSize(target, signal));
     if (sized.value === undefined) {
-      throw new HashError(sized.refused ? 'refused' : 'no size', 'size');
+      throw new HashError(sized.busy ? 'busy' : sized.refused ? 'refused' : 'no size', 'size');
     }
     size = sized.value;
   }
@@ -309,9 +359,12 @@ async function read(
     // An answer that names another size is not this file's end.
     const total = answer.value?.total;
     if (bytes && total !== undefined && total !== size) return { refused: true };
-    return bytes ? { value: bytes, refused: false } : { refused: answer.refused };
+    if (bytes) return { value: bytes, refused: false };
+    return { refused: answer.refused, ...(answer.busy && { busy: true }) };
   });
-  if (!last.value) throw new HashError(last.refused ? 'refused' : 'no range', 'end');
+  if (!last.value) {
+    throw new HashError(last.busy ? 'busy' : last.refused ? 'refused' : 'no range', 'end');
+  }
   const videoHash = openSubtitlesHash(size, head, last.value);
   if (!videoHash) throw new HashError('too small', 'end');
   return { videoHash, videoSize: size };
@@ -360,7 +413,9 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
   }, HASH_TIMEOUT_MS);
   const size = knownSize !== undefined && knownSize > 0 ? knownSize : undefined;
   const progress: Progress = { step: 'start', walks: 0 };
-  const reading = read(url, size, controller?.signal, progress).then(
+  const mine: Slot = { url };
+  slot = mine;
+  const reading = read(url, size, controller?.signal, progress, mine).then(
     (found): HashReading => {
       clearTimeout(timer);
       return {
@@ -384,8 +439,35 @@ export function readStreamHash(url: string, knownSize?: number): Promise<HashRea
     },
   );
   known.set(url, reading);
+  newest = { url, reading };
   while (known.size > KEPT) known.delete(known.keys().next().value!);
   return reading;
+}
+
+/**
+ * The reading of `url`'s hash, in flight or done: the one kept, or the newest started when it
+ * was of this link (one that failed is not kept). Never starts one: a stream whose addon sent
+ * its hash has none.
+ */
+export function hashReadingFor(url: string): Promise<HashReading> | undefined {
+  return known.get(url) ?? (newest?.url === url ? newest.reading : undefined);
+}
+
+/**
+ * What the newest hash read found at its first read of `url` (`Landing`), once: the slot is
+ * emptied, and holds nothing for another link, nor for a hash kept from before.
+ */
+export function takeLanding(url: string): Landing | undefined {
+  if (!slot || slot.url !== url || !slot.landing) return undefined;
+  const { landing } = slot;
+  slot = null;
+  return landing;
+}
+
+/** Lets go of the newest reading's landing and outcome: the player closed. */
+export function forgetLanding(): void {
+  slot = null;
+  newest = null;
 }
 
 /**
@@ -402,4 +484,5 @@ export function hashStream(
 /** For tests: forgets every hash read. */
 export function forgetHashes(): void {
   known.clear();
+  forgetLanding();
 }

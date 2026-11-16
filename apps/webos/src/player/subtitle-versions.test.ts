@@ -392,6 +392,14 @@ describe('subtitle versions', () => {
     expect(firstOf([track('t1', 'eng')], options)).toBe('track:t1');
   });
 
+  it('starts a language on the stream’s track for the hard of hearing where those are wanted', () => {
+    const options = [option('os#1', 'eng')];
+    const tracks = [track('t1', 'eng'), { ...track('t2', 'eng'), hearing: true }];
+    const checks = { 'track:t2': { hearing: true } };
+    expect(firstOf(tracks, options, { checks })).toBe('track:t1');
+    expect(firstOf(tracks, options, { checks, hearing: true })).toBe('track:t2');
+  });
+
   it('passes over the stream’s own track of forced lines only, as over an unfit file', () => {
     const options = [option('os#1', 'eng')];
     const forced = { ...track('t1', 'eng', 'English (Forced)'), forced: true };
@@ -399,6 +407,33 @@ describe('subtitle versions', () => {
     expect(firstOf([forced, track('t2', 'eng')], options)).toBe('track:t2');
     // Nothing else left: the forced track.
     expect(firstOf([forced], options, { failed: ['file:os#1'] })).toBe('track:t1');
+  });
+
+  it('says a stream track holds only a few lines, or is a commentary, where its name does not', () => {
+    const [signs, commentary, named, plain] = subtitleVersions(
+      {
+        tracks: [
+          { ...track('t1', 'eng'), forced: true },
+          { ...track('t2', 'eng'), commentary: true },
+          { ...track('t3', 'eng', 'Commentary by the director'), commentary: true },
+          track('t4', 'eng'),
+        ],
+        options: [],
+      },
+      IN_THE_STREAM,
+    );
+    expect(versionNotes(signs!, false, undefined, {})).toEqual(['signs']);
+    expect(versionNotes(commentary!, false, undefined, {})).toEqual(['commentary']);
+    // Its name says so already.
+    expect(versionNotes(named!, false, undefined, {})).toEqual([]);
+    expect(versionNotes(plain!, false, undefined, {})).toEqual([]);
+  });
+
+  it('passes over a commentary when a language is turned on', () => {
+    const options = [option('os#1', 'eng')];
+    const commentary = { ...track('t1', 'eng'), commentary: true };
+    expect(firstOf([commentary], options)).toBe('file:os#1');
+    expect(firstOf([commentary, track('t2', 'eng')], options)).toBe('track:t2');
   });
 
   it('puts the notes before the release name, which a row may cut short', () => {

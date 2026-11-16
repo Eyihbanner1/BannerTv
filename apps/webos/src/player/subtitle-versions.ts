@@ -40,6 +40,8 @@ export interface SubtitleVersion {
   hashMatch?: boolean;
   /** A stream track of forced lines only (signs, the foreign-language scenes). */
   forced?: boolean;
+  /** A stream track that is a commentary (a director's, the cast's). */
+  commentary?: boolean;
 }
 
 /** Who a version is among the others: `file:<key>` or `track:<id>`. */
@@ -134,6 +136,7 @@ export function subtitleVersions(
           ? track.label
           : undefined,
       ...(track.forced ? { forced: true } : {}),
+      ...(track.commentary ? { commentary: true } : {}),
     })),
     ...subtitles.options.map((option) => ({
       choice: { kind: 'file', key: option.key } as const,
@@ -211,7 +214,9 @@ export function playingRelease(entry: StreamEntry | null, videoId?: string): Pla
  * video that agree with each other (agreed), that its addon
  * found it by the video's hash with no name saying otherwise (linked to it)
  * or its release name is the same as the video's with enough to confirm it
- * (a guess), and that it is for the hard of hearing.
+ * (a guess), and that it is for the hard of hearing. A stream track of
+ * forced lines only says it has only a few lines, and a commentary says so
+ * where its name does not.
  */
 export type VersionNote =
   | 'loading'
@@ -227,7 +232,8 @@ export type VersionNote =
   | 'agreed'
   | 'linked'
   | 'sameRelease'
-  | 'hearing';
+  | 'hearing'
+  | 'commentary';
 
 /** Each note's words, as keys in the strings. */
 export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
@@ -245,6 +251,7 @@ export const VERSION_NOTES: Readonly<Record<VersionNote, string>> = {
   linked: 'player.versionLinked',
   sameRelease: 'player.versionSameRelease',
   hearing: 'player.versionHearing',
+  commentary: 'player.commentary',
 };
 
 const PROBLEM_NOTES: Readonly<Record<NonNullable<SubtitleCheck['problem']>, VersionNote>> = {
@@ -254,6 +261,9 @@ const PROBLEM_NOTES: Readonly<Record<NonNullable<SubtitleCheck['problem']>, Vers
   short: 'short',
   long: 'long',
 };
+
+/** A name that says it is a commentary already. */
+const COMMENTARY_NAME = /comment|kommentar|comentári/i;
 
 /** A row has room for this many notes beside its release name. */
 const MAX_NOTES = 2;
@@ -280,6 +290,11 @@ export function versionNotes(
   if (status === 'failed') return [selected ? 'failed' : 'skipped'];
   const notes: VersionNote[] = [];
   if (check?.problem) notes.push(PROBLEM_NOTES[check.problem]);
+  // A stream track of forced lines only reads like the full one but for this, named or not.
+  else if (version.forced) notes.push('signs');
+  if (version.commentary && !COMMENTARY_NAME.test(version.release ?? '')) {
+    notes.push('commentary');
+  }
   if (check?.synced === 'video') notes.push('synced');
   else if (check?.synced === 'files') notes.push('agreed');
   else if (check?.autoDrift) notes.push('driftFixed');
@@ -335,7 +350,8 @@ function fitOfCheck(check: SubtitleCheck | undefined): SubtitleFit | undefined {
  * The version a language starts with when it is picked, as the automatic
  * choice would rank them, of those that have not failed: the version picked
  * by hand for the release; the stream's own track (always in step), unless it
- * holds forced lines only; then the files, one made for the release first,
+ * holds forced lines only or is a commentary, one for the hard of hearing
+ * first where such lines are wanted; then the files, one made for the release first,
  * then the best fit, in the list's order where nothing tells them apart (so
  * a file known to cover only part falls below one not read yet). One passed
  * over for its checks, or a forced track, only when nothing else is left;
@@ -350,7 +366,14 @@ export function languageFirstPick(
   const working = group.items.filter((item) => subtitles.statusOf(item.choice) !== 'failed');
   const remembered = working.find((item) => subtitles.isRemembered(item.choice));
   if (remembered) return remembered;
-  const track = working.find((item) => item.choice.kind === 'track' && !item.forced);
+  const tracks = working.filter(
+    (item) => item.choice.kind === 'track' && !item.forced && !item.commentary,
+  );
+  // One for the hard of hearing first where such lines are wanted.
+  const track =
+    (subtitles.wantsHearing()
+      ? tracks.find((item) => !!subtitles.checkOf(item.choice)?.hearing)
+      : undefined) ?? tracks[0];
   if (track) return track;
   const files = working.filter(
     (item) => item.choice.kind === 'file' && !isUnfit(subtitles.checkOf(item.choice)),

@@ -196,7 +196,9 @@ export function TracksSheet(props: TracksSheetProps) {
                 ? t('player.stillAsking', { count: subtitles.pending })
                 : subtitles.hashReading
                   ? t('player.stillLinking')
-                  : t('player.noSubtitles')}
+                  : subtitles.textComing
+                    ? t('player.stillReadingVideo')
+                    : t('player.noSubtitles')}
             </Note>
           </div>
         )}
@@ -389,7 +391,9 @@ export function TracksSheet(props: TracksSheetProps) {
               ? t('player.stillAsking', { count: subtitles.pending })
               : subtitles.hashReading
                 ? t('player.stillLinking')
-                : undefined
+                : subtitles.textComing
+                  ? t('player.stillReadingVideo')
+                  : undefined
         }
       />
       {/* Each tab's choices register afresh: a focusable keeps the key it was first given. */}

@@ -35,6 +35,7 @@ import {
 } from '../../player/drift';
 import type { EngineTrack } from '../../player/engines/types';
 import type { PlaybackSession, SessionState } from '../../player/session';
+import { forgetLanding } from '../../player/stream-hash';
 import {
   type AgreementRunner,
   type AgreementStart,
@@ -79,6 +80,8 @@ import {
   startSubtitleTrace,
   traceAgreement,
   traceAlignment,
+  traceFileReference,
+  traceFileText,
   traceReason,
   traceReference,
 } from '../../player/subtitle-trace';
@@ -165,6 +168,8 @@ export interface Subtitles {
    * it: it may yet bring files made for the video.
    */
   hashReading: boolean;
+  /** The video file's own subtitle tracks are still being looked for, and may be listed soon. */
+  textComing: boolean;
   choice: SubtitleChoice;
   /** What to draw, or null when off or still loading: on the video's clock, drift fix applied. */
   cues: Cue[] | null;
@@ -319,11 +324,31 @@ function fitsByUrl(
   return byUrl;
 }
 
-type StreamTracks = Pick<SessionState, 'text' | 'engine' | 'streamTimings'>;
+type StreamTracks = Pick<
+  SessionState,
+  'text' | 'timedText' | 'engine' | 'streamTimings' | 'textComing' | 'fileText'
+>;
 
-/** The stream's track to line files up against (`referenceTrack`). */
-const referenceTrackOf = (playing: StreamTracks): EngineTrack | null =>
-  referenceTrack(playing.text, playing.engine, playing.streamTimings);
+/**
+ * Whether the video file's own tracks may still be listed: the choice waits for them
+ * (`textComing`), or the reader is still at them where it does not.
+ */
+const fileTracksComing = (playing: StreamTracks): boolean =>
+  playing.textComing ||
+  playing.fileText?.state === 'waiting' ||
+  playing.fileText?.state === 'reading';
+
+/**
+ * The stream's track to line files up against (`referenceTrack`): in `language` first. The
+ * video file's own tracks the TV can only time count too.
+ */
+const referenceTrackOf = (playing: StreamTracks, language?: string | null): EngineTrack | null =>
+  referenceTrack(
+    playing.text.concat(playing.timedText),
+    playing.engine,
+    playing.streamTimings,
+    language,
+  );
 
 /** What finding the reference needs to know of the files, besides the stream. */
 interface FilesKnown {
@@ -334,18 +359,23 @@ interface FilesKnown {
   video: PlayingRelease;
 }
 
-/** The reference to line files up against, now (`findReference`): last, the files that agree. */
+/**
+ * The reference to line files up against, now (`findReference`): last, the
+ * files that agree. A track the video file's index timed is whole, and one
+ * in `language`, the language wanted or showing, comes first.
+ */
 function referenceIn(
   playing: StreamTracks & Pick<SessionState, 'duration'>,
   files: FilesKnown,
   previous: Reference | null,
   agreed: RunnerDecision | null,
+  language: string | null,
 ): Reference | null {
-  const track = referenceTrackOf(playing);
+  const track = referenceTrackOf(playing, language);
   const lines = track ? playing.streamTimings[track.id] : undefined;
   return findReference(
     {
-      track: track && lines ? { id: track.id, lines } : null,
+      track: track && lines ? { id: track.id, lines, whole: !!track.timed } : null,
       duration: playing.duration > 0 && isFinite(playing.duration) ? playing.duration : 0,
       offered: files.offered,
       fit: (option) => files.fits.get(option.url),
@@ -373,15 +403,17 @@ function strongFile(offered: readonly SubtitleOption[], video: PlayingRelease): 
 
 /**
  * Whether a reference may yet come: the stream has a track the engine can
- * read, or a file in the language linked to the video or named for its
- * release is still to be read.
+ * read, or the video file's own tracks may still be listed, or a file in the
+ * language linked to the video or named for its release is still to be read.
  */
 function referenceComing(
   playing: StreamTracks,
   language: string | null,
   files: FilesKnown,
 ): boolean {
+  if (fileTracksComing(playing)) return true;
   if (playing.text.some((track) => readableTrack(track, playing.engine))) return true;
+  if (playing.timedText.some((track) => readableTrack(track, playing.engine))) return true;
   if (language === null) return false;
   return filesIn(files.offered, language).some((option) => {
     if (files.broken(option.url) || files.fits.has(option.url)) return false;
@@ -394,9 +426,12 @@ function referenceComing(
 /**
  * Whether the stream's track, through hls.js or Shaka, is still to hand over
  * enough lines to line files up against: its lines come within moments, so
- * the hold waits for them. Android hands them over only as the video plays.
+ * the hold waits for them. On the TV's own player, while the video file's own
+ * tracks may still be listed with their timing. Android hands them over only
+ * as the video plays.
  */
 function trackComing(playing: StreamTracks): boolean {
+  if (playing.engine === 'native') return playing.textComing;
   if (playing.engine !== 'hls.js' && playing.engine !== 'shaka') return false;
   const track = referenceTrackOf(playing);
   return !!track && (playing.streamTimings[track.id]?.length ?? 0) < MIN_REFERENCE_LINES;
@@ -496,6 +531,11 @@ export function useSubtitles(
   useEffect(() => {
     startSubtitleTrace(videoId);
   }, [videoId]);
+  // What the video file's own subtitles held, and what reading them cost so far.
+  const fileText = state.fileText;
+  useEffect(() => {
+    traceFileText(videoId, fileText);
+  }, [videoId, fileText]);
   useEffect(() => {
     if (!list) return;
     list.start();
@@ -588,6 +628,15 @@ export function useSubtitles(
     referenceUsed.current = reference;
     if (before?.id !== reference?.id || before?.kind !== reference?.kind) {
       setUsedReference({ entry, reference });
+      // A track of the video file's own, its every line's timing from the file's index.
+      const own =
+        reference?.kind === 'track'
+          ? session
+              ?.get()
+              .text.concat(session.get().timedText)
+              .find((track) => track.id === reference.id && track.timed)
+          : undefined;
+      traceFileReference(videoId, own ? own.lang : null);
     }
     const kind = reference ? reference.kind : null;
     if (kind === tracedReference.current) return;
@@ -945,8 +994,11 @@ export function useSubtitles(
       const playing = session.get();
       const { text, status, engine, audio } = playing;
       // hls.js and Shaka list the stream's tracks before its first picture; the
-      // TV's player never lists any.
-      const tracksKnown = status === 'playing' || status === 'paused' || engine === 'native';
+      // TV's player lists none, but for a video file whose own tracks are being
+      // read, which may be listed soon after the first picture (at most
+      // FILE_WAIT_MS after reading starts): the choice waits for them.
+      const tracksKnown =
+        (status === 'playing' || status === 'paused' || engine === 'native') && !playing.textComing;
       const made = decided.current;
       const ours = made?.entry === entry ? made : null;
       // A language the viewer turned on from the sheet: its version is chosen in it.
@@ -974,6 +1026,7 @@ export function useSubtitles(
         known,
         referenceUsed.current,
         agreedRef.current?.entry === entry ? agreedRef.current.decision : null,
+        wanted,
       );
       // What files that agree decided, handed over once no addon is still to answer and no hash
       // may still link a file, and only where it was decided for the files offered now and they
@@ -999,7 +1052,7 @@ export function useSubtitles(
           if ('record' in agreedDecision && agreedDecision.record) {
             aligner.seed(agreedDecision.showUrl, agreedDecision.record);
           }
-          reference = referenceIn(playing, known, referenceUsed.current, agreedDecision);
+          reference = referenceIn(playing, known, referenceUsed.current, agreedDecision, wanted);
         }
       }
       noteReference(reference);
@@ -1025,8 +1078,12 @@ export function useSubtitles(
       // The stream's own track in the language; one of forced lines only (signs, the
       // foreign-language scenes) only when the language has nothing else.
       const inLanguage = (t: EngineTrack) => key !== null && languageKey(t.lang) === key;
-      const track = text.find((t) => inLanguage(t) && !t.forced);
-      const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced);
+      // Never a commentary: the viewer picks one by hand. One for the hard of hearing first where
+      // the viewer asked for such lines.
+      const fullTracks = text.filter((t) => inLanguage(t) && !t.forced && !t.commentary);
+      const track =
+        (context?.hearing ? fullTracks.find((t) => !!t.hearing) : undefined) ?? fullTracks[0];
+      const forcedTrack = text.find((t) => inLanguage(t) && !!t.forced && !t.commentary);
       // A file that can be shown: one that could be read, in the language's script. A track of
       // forced lines only comes before one that cannot.
       const usable = (option: SubtitleOption | undefined) =>
@@ -1036,11 +1093,13 @@ export function useSubtitles(
         context.fit(option.url)?.script !== 'wrong';
       if (ours) {
         // A track that left with its engine (hls.js handing the stream to the
-        // TV's player) gives way to a file.
+        // TV's player) gives way to a file; one of the video file's own, read
+        // again as the stream starts over (Try again), only once they cannot be.
         const chosenTrack = ours.choice;
         const lost =
           chosenTrack?.kind === 'track' &&
           tracksKnown &&
+          !fileTracksComing(playing) &&
           !text.some((t) => t.id === chosenTrack.id);
         // A file or Off picked while the TV's player listed no tracks gives way
         // to the stream's own track once another engine (hls.js) lists one,
@@ -1126,8 +1185,24 @@ export function useSubtitles(
     // The session tells of every step of the clock; only what the choice weighs counts.
     const nothingNew = sameAsLast();
     const onSession = () => {
-      const { text, audio, status, engine, duration, live, streamTimings } = session.get();
-      if (nothingNew([text, audio, status, engine, duration, live, streamTimings])) return;
+      const { text, timedText, audio, status, engine, duration, live, streamTimings, textComing } =
+        session.get();
+      if (
+        nothingNew([
+          text,
+          timedText,
+          audio,
+          status,
+          engine,
+          duration,
+          live,
+          streamTimings,
+          textComing,
+          session.get().fileText?.state,
+        ])
+      ) {
+        return;
+      }
       decide();
     };
     const stopList = list.subscribe(decide);
@@ -1151,8 +1226,15 @@ export function useSubtitles(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, session, list, metaId, runtimeSeconds, videoId, checks, aligner, runner]);
 
-  // The files read stay in memory only while the player is open.
-  useEffect(() => () => clearSubtitleCache(), []);
+  // The files read stay in memory only while the player is open, and so does what the hash read
+  // found at the file's start.
+  useEffect(
+    () => () => {
+      clearSubtitleCache();
+      forgetLanding();
+    },
+    [],
+  );
 
   // Load the chosen file, moving to the next in its language if it fails.
   useEffect(() => {
@@ -1254,12 +1336,19 @@ export function useSubtitles(
   const holding = fileKey !== null && holdingFor !== null && holdingFor === entry;
 
   // The stream's own tracks: tell the engine, and read the cues it hands over. While a file
-  // shows, the track to line files up against is read for its lines, and not shown.
+  // shows, the track to line files up against is read for its lines, and not shown; one the
+  // video file's index timed is whole already, and needs no reading.
   const trackId = choice?.kind === 'track' ? choice.id : null;
-  const readTrackId =
+  const readTrack =
     choice?.kind === 'file'
-      ? (referenceTrack(tracks, state.engine, state.streamTimings)?.id ?? null)
+      ? referenceTrack(
+          tracks.concat(state.timedText),
+          state.engine,
+          state.streamTimings,
+          fileOption?.lang,
+        )
       : null;
+  const readTrackId = readTrack && !readTrack.timed ? readTrack.id : null;
   useEffect(() => {
     session?.selectText(trackId ?? readTrackId);
   }, [session, trackId, readTrackId]);
@@ -1282,11 +1371,20 @@ export function useSubtitles(
   const fitOf = (option: SubtitleOption) => fits.get(languageKey(option.lang))?.get(option.url);
 
   // What the files are lined up against, and each file read lined up as the reference grows.
-  const { text: streamText, engine, streamTimings } = state;
+  const { text: streamText, timedText, engine, streamTimings, textComing } = state;
+  const fileTextState = state.fileText;
   const reference = useMemo(
     () =>
       referenceIn(
-        { text: streamText, engine, streamTimings, duration },
+        {
+          text: streamText,
+          timedText,
+          engine,
+          streamTimings,
+          textComing,
+          fileText: fileTextState,
+          duration,
+        },
         {
           offered: options,
           fits: fitsByLink,
@@ -1297,12 +1395,18 @@ export function useSubtitles(
         // The one the automatic choice settled on: it is kept while it still is one.
         usedReference.entry === entry ? usedReference.reference : null,
         agreedNow,
+        // The language showing: a track the file's index timed in it comes first.
+        options.find((option) => option.key === fileKey)?.lang ?? null,
       ),
     [
+      fileKey,
       agreedNow,
       streamText,
+      timedText,
       engine,
       streamTimings,
+      textComing,
+      fileTextState,
       duration,
       options,
       fitsByLink,
@@ -1326,7 +1430,7 @@ export function useSubtitles(
   // to the video or named for its release still to be read.
   const video = useMemo(() => playingRelease(entry, videoId), [entry, videoId]);
   const coming = referenceComing(
-    { text: streamText, engine, streamTimings },
+    { text: streamText, timedText, engine, streamTimings, textComing, fileText: fileTextState },
     fileOption?.lang ?? null,
     {
       offered: options,
@@ -1379,7 +1483,12 @@ export function useSubtitles(
   const keptDrift = useSyncExternalStore(subtitleDrifts.subscribe, (): DriftChoice | null =>
     offsetKey === null ? null : (subtitleDrifts.get(offsetKey) ?? null),
   );
-  const canFixDrift = !(trackId !== null && state.engine === 'android');
+  // Not for the stream's own track where it comes in step with the video: Android's, and on the
+  // TV's player the video file's own (ADR 0005, decision 6).
+  const canFixDrift = !(
+    trackId !== null &&
+    (state.engine === 'android' || state.engine === 'native')
+  );
   // A drift the file's length gives away is fixed by itself, unless the viewer set a drift
   // or a timing on this file: theirs stands.
   const evidence = fileOption ? (fitOf(fileOption)?.drift ?? null) : null;
@@ -1636,6 +1745,7 @@ export function useSubtitles(
     // The hash still being read is not an addon still asked.
     pending: pending - (listState.hashReading ? 1 : 0),
     hashReading: !!listState.hashReading,
+    textComing,
     choice,
     cues,
     loading: fileKey !== null && (fileCues === null || holding) && !fileFailed,
@@ -1665,7 +1775,11 @@ export function useSubtitles(
       return showing && (fileCues === null || holding) ? 'loading' : undefined;
     },
     checkOf(version) {
-      if (version.kind !== 'file') return undefined;
+      if (version.kind !== 'file') {
+        // A track marked, or named, for the hard of hearing says so: nothing else is checked.
+        const track = tracks.find((candidate) => candidate.id === version.id);
+        return track?.hearing ? { hearing: true } : undefined;
+      }
       const option = options.find((o) => o.key === version.key);
       if (!option) return undefined;
       const fit = fitOf(option);
@@ -1735,13 +1849,22 @@ export function useSubtitles(
       chooseSubtitleLanguage(metaId, language);
       if (pressed) wake.current?.();
       // A version picked from the list is the one for this release; the stream's own track
-      // picked over it takes its place. Not for Lab streams, which remember nothing. Picking a
+      // picked over it takes its place, no file tried first, and whether it is for the hard of
+      // hearing says what is wanted. Not for Lab streams, which remember nothing. Picking a
       // language keeps no version.
       if (way !== 'version' || metaId === undefined || !entry) return;
       const pickRelease = subtitleRelease(entry, videoId);
       if (next?.kind === 'file')
         handPicked.current = { entry, key: next.key, release: pickRelease };
-      else if (next?.kind === 'track') void subtitlePicks.forget(metaId, pickRelease);
+      else if (next?.kind === 'track') {
+        const picked = tracks.find((t) => t.id === next.id);
+        // A commentary or forced lines alone, which the automatic choice never shows, are a
+        // one-off: they say nothing of the wish, and the title's last pick still does.
+        if (picked?.commentary || picked?.forced) void subtitlePicks.forget(metaId, pickRelease);
+        else {
+          void subtitlePicks.remember({ metaId, release: pickRelease, hearing: !!picked?.hearing });
+        }
+      }
     },
     setOffset(next) {
       // The timing already in use, set again (Reset at +0.0 s), changes nothing.

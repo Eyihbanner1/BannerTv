@@ -1,12 +1,14 @@
 import { type AlignConfidence, languageKey } from '@bannertv/core';
 import { mark } from '../platform/marks';
+import type { FileTextCost, FileTextReport, FileTextSkip } from './file-subtitles';
 import type { HashFailure, HashSkip, HashStep } from './stream-hash';
 import type { ReferenceKind } from './subtitle-align';
 
 /*
  * What happened to the subtitles of the last few plays, so a round on the
  * TV can say why each title got the file it did: whether the exact file's
- * hash was read, how many files came in each language, why the version
+ * hash was read, what the video file's own subtitles held and what reading
+ * them cost, how many files came in each language, why the version
  * showing was chosen, what the files were lined up against and what that
  * found (files that agree with each other among them), and how long the
  * first line took. Settings >
@@ -129,11 +131,23 @@ export type AgreementTrace =
   | ({ state: 'none'; why: AgreementAbstain; ms: number } & AgreementCounts)
   | { state: 'not tried'; why: 'recording' | 'no source' };
 
+/**
+ * How reading the video file's own subtitles went (`withFileSubtitles`): the
+ * engine's report, whose cost is its tally kept up to date as lines are read;
+ * and the language of its track the files were lined up against, if one was.
+ */
+export interface FileTrace {
+  report: FileTextReport;
+  reference?: string;
+}
+
 /** One play's subtitles, as Diagnostics shows them. */
 export interface SubtitleTrace {
   /** The video's id ("tt3581920:1:1"): never a link. */
   videoId: string;
   hash?: HashOutcome;
+  /** The video file's own subtitles, where they were looked for. */
+  file?: FileTrace;
   /** Files offered in each language, by language code, as the addons answered. */
   files: Record<string, number>;
   /** Why the version showing was chosen, and whether the viewer turned its language on. */
@@ -153,6 +167,8 @@ export interface SubtitleTrace {
 
 interface Running extends SubtitleTrace {
   startedAt: number;
+  /** The file's own track the files are lined up against, kept apart as it can come first. */
+  fileReference?: string;
 }
 
 /**
@@ -207,6 +223,25 @@ export function traceHashLinked(videoId: string, linked: number | null): void {
     ...trace.hash,
     late: { askedAtMs, askedAgain, ...(linked === null ? { failed: true } : { linked }) },
   };
+}
+
+/** How reading the video file's own subtitles goes now; null where they are not looked for. */
+export function traceFileText(videoId: string, report: FileTextReport | null): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  if (report) trace.file = { report };
+  else delete trace.file;
+}
+
+/**
+ * The language of the video file's own track the files are lined up against
+ * now (a track its index timed), or null for none.
+ */
+export function traceFileReference(videoId: string, language: string | null): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  if (language) trace.fileReference = languageKey(language) || language;
+  else delete trace.fileReference;
 }
 
 /** The files on offer now, counted by language. */
@@ -272,6 +307,12 @@ export function recentSubtitleTraces(): SubtitleTrace[] {
   return traces.map((trace) => {
     const copy: SubtitleTrace = { ...trace, files: { ...trace.files } };
     if (trace.hash) copy.hash = { ...trace.hash };
+    // The report's cost stays the engine's own tally, so it shows reads up to now.
+    if (trace.file) {
+      copy.file = { report: trace.file.report };
+      if (trace.fileReference) copy.file.reference = trace.fileReference;
+    }
+    delete (copy as Partial<Running>).fileReference;
     if (trace.aligned) copy.aligned = { ...trace.aligned };
     if (trace.agreement) copy.agreement = { ...trace.agreement };
     delete (copy as Partial<Running>).startedAt;
@@ -324,6 +365,96 @@ function hashText(hash: HashOutcome | undefined): string {
     }
     case 'skipped':
       return `hash not tried (${hash.why})`;
+  }
+}
+
+const FILE_WORDS: Readonly<Record<FileTextSkip, string>> = {
+  named: 'its name says it’s another kind of video file',
+  'not-matroska': 'not a kind of video file BannerTV reads them from',
+  'no-index': 'the file’s subtitles have no index',
+  live: 'a recording with no index',
+  'no-subtitles': 'no subtitles in the file',
+  corrupt: 'the file couldn’t be read',
+  'too-large': 'its index is too large',
+  'no-range': 'the server sends only the whole file',
+  blocked: 'couldn’t read the file here',
+  refused: 'the server refused the reads',
+  'one-use': 'the link allows one read',
+  busy: 'the server stayed too busy',
+  unanswered: 'the server didn’t answer',
+  'timed-out': 'gave up after 20 s',
+};
+
+/** "1 request", "4 requests". */
+const counted = (count: number, one: string) => `${count} ${count === 1 ? one : `${one}s`}`;
+
+const kilobytes = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
+
+/** Language codes, each once: four at most, then how many more. */
+function languagesText(languages: readonly string[]): string {
+  const keys: string[] = [];
+  for (const lang of languages) {
+    const key = languageKey(lang) || lang;
+    if (keys.indexOf(key) < 0) keys.push(key);
+  }
+  if (keys.length === 0) return '';
+  const more = keys.length > 4 ? `, +${keys.length - 4}` : '';
+  return ` (${keys.slice(0, 4).join(', ')}${more})`;
+}
+
+/** Walks through the stream's link past the first: ", through the stream’s link 2 times". */
+const walksText = (cost: FileTextCost) =>
+  cost.walks > 1 ? `, through the stream’s link ${cost.walks} times` : '';
+
+/**
+ * What the video file's own subtitles held and what reading them cost: its text tracks and
+ * their languages, those this TV can't read, its picture tracks; the head and the index's
+ * reads; the lines read for a track shown; what the files were lined up against, or why the
+ * tracks were dropped while the video played.
+ */
+function fileText(file: FileTrace | undefined): string | undefined {
+  if (!file) return undefined;
+  const said = 'the video file’s own subtitles';
+  const { report } = file;
+  switch (report.state) {
+    case 'waiting':
+      return `${said}: not read yet`;
+    case 'reading':
+      return `${said}: still being read`;
+    case 'none': {
+      const { cost } = report;
+      const reads = cost.requests > 0 ? `, ${counted(cost.requests, 'request')}` : '';
+      return `${said}: none (${FILE_WORDS[report.why]}${reads}${walksText(cost)})`;
+    }
+    case 'read': {
+      const { cost } = report;
+      const held = [`${counted(report.text.length, 'text track')}${languagesText(report.text)}`];
+      if (report.unreadable > 0) {
+        held.push(`${counted(report.unreadable, 'text track')} this TV can’t read`);
+      }
+      if (report.picture > 0) held.push(counted(report.picture, 'picture track'));
+      const parts = [
+        held.join(', '),
+        `read in ${seconds(report.ms)}, ${counted(cost.requests, 'request')}, ${kilobytes(
+          cost.bytes,
+        )}${walksText(cost)}`,
+      ];
+      if (cost.lines > 0 || cost.lineRequests > 0 || cost.failedReads > 0) {
+        const failed =
+          cost.failedReads > 0
+            ? `, ${cost.failedReads} ${cost.failedReads === 1 ? 'read' : 'reads'} failed`
+            : '';
+        parts.push(
+          `${counted(cost.lines, 'line')} in ${counted(cost.lineRequests, 'request')}, ${kilobytes(
+            cost.lineBytes,
+          )}${failed}`,
+        );
+      }
+      if (report.dropped) parts.push(`dropped while playing (${FILE_WORDS[report.dropped]})`);
+      // Its timing, from the index, still lines files up once the tracks are dropped.
+      if (file.reference) parts.push(`files lined up against ${file.reference}`);
+      return `${said}: ${parts.join('; ')}`;
+    }
   }
 }
 
@@ -467,6 +598,7 @@ export function subtitleTraceRows(
     trace.videoId,
     [
       hashText(trace.hash),
+      fileText(trace.file),
       filesText(trace),
       reasonText(trace),
       agreementText(trace.agreement),

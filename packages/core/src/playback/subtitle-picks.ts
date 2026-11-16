@@ -17,11 +17,14 @@ export interface SubtitlePick {
   metaId: string;
   /** What names the release, as subtitleRelease makes it. */
   release: string;
-  /** Who the file is, as subtitleFileKey makes it from the video and the file's source and id. */
-  file: string;
   /**
-   * The file was for the hard of hearing: picking one by hand asks for them,
-   * so such files come first for this title from then on.
+   * Who the file is, as subtitleFileKey makes it from the video and the file's source and id.
+   * None where the stream's own track was picked: no file is tried first.
+   */
+  file?: string;
+  /**
+   * The file, or the stream's track, was for the hard of hearing: picking one by hand asks
+   * for them, so such files and tracks come first for this title from then on.
    */
   hearing?: boolean;
 }
@@ -41,8 +44,9 @@ export interface SubtitlePickMemory {
    * picked last for the title was.
    */
   wantsHearing(metaId: string, release: string): boolean;
+  /** Keeps the version picked for a release: a file, or the stream's own track (no file). */
   remember(pick: SubtitlePick): Promise<void>;
-  /** Forgets the version picked for a release: the stream's own subtitles were picked over it. */
+  /** Forgets the version picked for a release. */
   forget(metaId: string, release: string): Promise<void>;
   /** Told of every change, and once when the saved picks have been read. */
   subscribe(listener: Listener): () => void;
@@ -63,12 +67,13 @@ function readPicks(saved: unknown): SubtitlePick[] {
     const raw = saved[i] as Record<string, unknown> | null;
     if (typeof raw !== 'object' || raw === null) continue;
     const { metaId, release, file, hearing } = raw;
-    if (!isText(metaId) || !isText(release) || !isText(file)) continue;
-    if (LINK.test(release) || LINK.test(file)) continue;
+    if (!isText(metaId) || !isText(release) || (file !== undefined && !isText(file))) continue;
+    if (LINK.test(release) || (file !== undefined && LINK.test(file))) continue;
     const id = `${metaId}\n${release}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    const pick: SubtitlePick = { metaId, release, file };
+    const pick: SubtitlePick = { metaId, release };
+    if (file !== undefined) pick.file = file;
     if (hearing === true) pick.hearing = true;
     picks.unshift(pick);
   }
@@ -116,11 +121,15 @@ export function createSubtitlePickMemory(options: { storage: KeyValueStore }): S
       return false;
     },
     remember(pick) {
-      if (!isText(pick.metaId) || !isText(pick.release) || !isText(pick.file)) {
+      const { file } = pick;
+      if (!isText(pick.metaId) || !isText(pick.release) || (file !== undefined && !isText(file))) {
         return Promise.resolve();
       }
-      if (LINK.test(pick.release) || LINK.test(pick.file)) return Promise.resolve();
-      const kept: SubtitlePick = { metaId: pick.metaId, release: pick.release, file: pick.file };
+      if (LINK.test(pick.release) || (file !== undefined && LINK.test(file))) {
+        return Promise.resolve();
+      }
+      const kept: SubtitlePick = { metaId: pick.metaId, release: pick.release };
+      if (file !== undefined) kept.file = file;
       if (pick.hearing) kept.hearing = true;
       return state.update((current) => {
         const last = current[current.length - 1];

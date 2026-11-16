@@ -1,4 +1,4 @@
-import { type Cue, type CueLine, type CueSpan, isForcedName } from '@bannertv/core';
+import { type Cue, type CueLine, type CueSpan, hearingName, isForcedName } from '@bannertv/core';
 import type shakaNs from 'shaka-player/dist/shaka-player.dash';
 import { channelName, codecFamily, formatName } from '../audio';
 import { resetVideo } from './native';
@@ -52,7 +52,10 @@ export function shakaAudioId(track: ShakaAudio): string {
   ].join('|');
 }
 
-/** A subtitle track as the player lists it: forced lines only by Shaka's flag or its name. */
+/**
+ * A subtitle track as the player lists it: forced lines only by Shaka's flag or its name, and for
+ * the hard of hearing by its name ("English SDH").
+ */
 export function shakaTextTrack(track: shakaNs.extern.TextTrack): EngineTrack {
   const label = track.label ?? '';
   const listed: EngineTrack = {
@@ -62,6 +65,7 @@ export function shakaTextTrack(track: shakaNs.extern.TextTrack): EngineTrack {
     active: track.active,
   };
   if (track.forced || isForcedName(label)) listed.forced = true;
+  if (hearingName(label)) listed.hearing = true;
   return listed;
 }
 

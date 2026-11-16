@@ -12,9 +12,12 @@ import {
   traceHashLinked,
   traceAgreement,
   traceAlignment,
+  traceFileReference,
+  traceFileText,
   traceReason,
   traceReference,
 } from './subtitle-trace';
+import type { FileTextCost, FileTextReport, FileTextSkip } from './file-subtitles';
 
 afterEach(() => forgetSubtitleTraces());
 
@@ -288,5 +291,137 @@ describe('the subtitles of the last few plays', () => {
     expect(said({ state: 'reading', read: 7, aligned: 21, failed: 2 })).toBe(
       'files that agree: reading, 7 read, 2 failed, 21 lined up',
     );
+  });
+
+  describe('the video file’s own subtitles', () => {
+    const cost = (extra: Partial<FileTextCost> = {}): FileTextCost => ({
+      requests: 4,
+      bytes: 83000,
+      walks: 1,
+      lines: 0,
+      lineRequests: 0,
+      lineBytes: 0,
+      failedReads: 0,
+      ...extra,
+    });
+    type Read = Extract<FileTextReport, { state: 'read' }>;
+    const read = (extra: Partial<Read> = {}): Read => ({
+      state: 'read',
+      text: ['en', 'es'],
+      unreadable: 0,
+      picture: 1,
+      ms: 1400,
+      afterFirstFrameMs: 2900,
+      cost: cost(),
+      ...extra,
+    });
+    const segment = (report: FileTextReport | null, reference?: string | null) => {
+      forgetSubtitleTraces();
+      startSubtitleTrace('tt0000001', 0);
+      traceHash('tt0000001', { state: 'read', ms: 400 });
+      traceFileText('tt0000001', report);
+      if (reference !== undefined) traceFileReference('tt0000001', reference);
+      return subtitleTraceRows()[0]![1].split(' · ')[1];
+    };
+
+    it('says what it held and what reading it cost, second, after the hash', () => {
+      expect(segment(read())).toBe(
+        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB',
+      );
+      const shown = read({
+        cost: cost({ walks: 2, lines: 37, lineRequests: 9, lineBytes: 14336, failedReads: 2 }),
+      });
+      expect(segment(shown, 'spa')).toBe(
+        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB, through the stream’s link 2 times; 37 lines in 9 requests, 14 KB, 2 reads failed; files lined up against es',
+      );
+      expect(segment(read({ text: [], unreadable: 1, picture: 0 }))).toBe(
+        'the video file’s own subtitles: 0 text tracks, 1 text track this TV can’t read; read in 1.4 s, 4 requests, 81 KB',
+      );
+      expect(segment(read({ text: ['eng'], picture: 0, cost: cost({ requests: 1 }) }))).toBe(
+        'the video file’s own subtitles: 1 text track (en); read in 1.4 s, 1 request, 81 KB',
+      );
+      expect(segment({ state: 'waiting' })).toBe('the video file’s own subtitles: not read yet');
+      expect(segment({ state: 'reading' })).toBe(
+        'the video file’s own subtitles: still being read',
+      );
+      // Not looked for: no segment.
+      expect(segment(null)).toMatch(/^no files/);
+    });
+
+    it('says when the tracks were dropped while the video played, and why', () => {
+      const dropped = read({
+        cost: cost({ lines: 120, lineRequests: 63, lineBytes: 40960, failedReads: 3 }),
+        dropped: 'refused',
+      });
+      expect(segment(dropped, 'en')).toBe(
+        'the video file’s own subtitles: 2 text tracks (en, es), 1 picture track; read in 1.4 s, 4 requests, 81 KB; 120 lines in 63 requests, 40 KB, 3 reads failed; dropped while playing (the server refused the reads); files lined up against en',
+      );
+    });
+
+    it('names four languages at most, each once', () => {
+      const many = read({ text: ['en', 'eng', 'fr-CA', 'de', 'es', 'it', 'ja'], picture: 0 });
+      expect(segment(many)).toBe(
+        'the video file’s own subtitles: 7 text tracks (en, fr, de, es, +2); read in 1.4 s, 4 requests, 81 KB',
+      );
+    });
+
+    it('says why none were read, in the words Diagnostics uses', () => {
+      const words: Record<FileTextSkip, string> = {
+        named: 'its name says it’s another kind of video file',
+        'not-matroska': 'not a kind of video file BannerTV reads them from',
+        'no-index': 'the file’s subtitles have no index',
+        live: 'a recording with no index',
+        'no-subtitles': 'no subtitles in the file',
+        corrupt: 'the file couldn’t be read',
+        'too-large': 'its index is too large',
+        'no-range': 'the server sends only the whole file',
+        blocked: 'couldn’t read the file here',
+        refused: 'the server refused the reads',
+        'one-use': 'the link allows one read',
+        busy: 'the server stayed too busy',
+        unanswered: 'the server didn’t answer',
+        'timed-out': 'gave up after 20 s',
+      };
+      // No word a viewer would have to look up.
+      for (const said of Object.values(words)) {
+        expect(said).not.toMatch(/matroska|byte range|cues|ebml/i);
+      }
+      for (const why of Object.keys(words) as FileTextSkip[]) {
+        expect(segment({ state: 'none', why, ms: 300, cost: cost({ requests: 0 }) })).toBe(
+          `the video file’s own subtitles: none (${words[why]})`,
+        );
+      }
+      expect(
+        segment({ state: 'none', why: 'not-matroska', ms: 300, cost: cost({ requests: 1 }) }),
+      ).toBe(
+        'the video file’s own subtitles: none (not a kind of video file BannerTV reads them from, 1 request)',
+      );
+      expect(
+        segment({ state: 'none', why: 'refused', ms: 300, cost: cost({ requests: 5, walks: 3 }) }),
+      ).toBe(
+        'the video file’s own subtitles: none (the server refused the reads, 5 requests, through the stream’s link 3 times)',
+      );
+    });
+
+    it('shows the reads up to the moment it is looked at, and never a link', () => {
+      const tally = cost();
+      startSubtitleTrace('tt0000002', 0);
+      traceFileText('tt0000002', read({ cost: tally }));
+      traceFileReference('tt0000002', 'eng');
+      tally.lines = 12;
+      tally.lineRequests = 3;
+      tally.lineBytes = 4096;
+      const [row] = subtitleTraceRows();
+      expect(row![1]).toContain('12 lines in 3 requests, 4 KB; files lined up against en');
+      expect(recentSubtitleTraces()[0]!.file).toEqual({
+        report: read({ cost: tally }),
+        reference: 'en',
+      });
+      expect(JSON.stringify(recentSubtitleTraces())).not.toMatch(/https?:|token=|127\.0\.0\.1/);
+      // Another stream of the same video, not looked for: the segment goes, and the reference.
+      traceFileText('tt0000002', null);
+      traceFileReference('tt0000002', null);
+      expect(recentSubtitleTraces()[0]!.file).toBeUndefined();
+    });
   });
 });

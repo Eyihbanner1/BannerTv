@@ -23,24 +23,23 @@ import {
 } from './play';
 import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
 import { openAsLgTv } from './homebrew';
+import {
+  leavePlayer,
+  MOVIE,
+  openDiagnostics,
+  openMovie,
+  openSheet,
+  openTiming,
+  OPENSUBTITLES,
+  recordShownAt,
+  shownAt,
+  subtitlesDiagnostics,
+  video,
+} from './player';
 import { mockServices, traktSignIn } from './services';
 
-/** Elephants Dream, the first title on Home. */
-const MOVIE = 'tt0807840';
-/** The start of the focus key of an OpenSubtitles version row: its addon id, then the file's. */
-const OPENSUBTITLES = 'player-tracks-file-org.stremio.opensubtitlesv3';
 /** A row of the Sources sheet: the test addon's stream at this place in its answer. */
 const source = (rank: number) => `player-sources-row-0:org.bannertv.test-streams#${rank}`;
-
-/** What the player's video element is doing. */
-function video(page: Page) {
-  // Not the link test's hidden player, which stays in the page.
-  return page.locator('video:not([aria-hidden])').evaluate((element: HTMLVideoElement) => ({
-    src: element.currentSrc.replace(/^https:\/\/media\.example\.com/, ''),
-    playing: !element.paused && element.currentTime > 0,
-    time: element.currentTime,
-  }));
-}
 
 /** Tells the page it was hidden or shown, as webOS does when another app comes to the front. */
 async function setHidden(page: Page, hidden: boolean) {
@@ -81,13 +80,6 @@ async function routeDemoFilms(page: Page) {
       body: readFileSync(resolve(import.meta.dirname, 'fixtures/hls', file)),
     });
   });
-}
-
-async function openMovie(page: Page) {
-  await page.goto(APP_URL);
-  await expectFocus(page, `${FIRST_ROW}-tile-0`);
-  await press(page, 'Enter', 'details-watch');
-  await expect(page.locator('section[aria-label="Elephants Dream"]:visible')).toBeVisible();
 }
 
 /** The same with the film left part way: Home opens on Continue watching, above the catalogs. */
@@ -3564,13 +3556,6 @@ test('Back while a stream starts leaves at once, even after the pointer moved', 
   await expectFocus(page, 'details-watch');
 });
 
-/** Opens the audio and subtitle sheet from the controls, on the subtitles showing. */
-async function openSheet(page: Page, focusKey: string) {
-  await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowDown', 'player-tracks-button');
-  await press(page, 'Enter', focusKey);
-}
-
 /** Whether a sheet row sits wholly inside its list's window, not slid out of sight. */
 async function inSight(page: Page, focusKey: string) {
   const row = page.locator(`[data-focus-key="${focusKey}"]`);
@@ -3676,32 +3661,6 @@ test('each version says where it is from and how it is doing, and its timing is 
   await expect(timing).toContainText('0.0 s');
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
 });
-
-/** Leaves the player for the title's page, then Home. */
-async function leavePlayer(page: Page) {
-  for (let step = 0; step < 4 && (await focusedKey(page)) !== 'details-watch'; step++) {
-    await pressBack(page);
-  }
-  await expectFocus(page, 'details-watch');
-  await pressBack(page);
-  await expect.poll(() => focusedKey(page)).not.toBe('details-watch');
-}
-
-/** Settings > Diagnostics, from Home. */
-async function openDiagnostics(page: Page) {
-  await openSection(page, 'settings');
-  await expectFocus(page, 'settings-stream-choice');
-  for (const key of [
-    'settings-probing',
-    'settings-subtitle-style',
-    'settings-still-watching',
-    'settings-next-at-credits',
-    'settings-diagnostics',
-  ]) {
-    await press(page, 'ArrowDown', key);
-  }
-  await press(page, 'Enter', 'diagnostics-refresh');
-}
 
 test('the file OpenSubtitles names for the stream’s release shows first and says Same release, and Diagnostics says why with no link', async ({
   page,
@@ -3829,6 +3788,8 @@ test('on an LG TV, Diagnostics shows the newest play’s subtitles inside the sc
     has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
   });
   await expect(section).toContainText('first line after');
+  // The video file's own subtitles were looked for, and the row says what came of it.
+  await expect(section).toContainText('the video file’s own subtitles: none (');
   // The newest play only, inside the screen's safe area.
   await expect(section.locator('div')).toHaveCount(1);
   const box = await section.boundingBox();
@@ -3869,47 +3830,6 @@ test('the file OpenSubtitles found by the video’s hash shows first and says it
     'OpenSubtitles v3 1Elephants.Dream.2006.720p.BluRay',
   );
 });
-
-/**
- * Records when each piece of text the page draws first showed, by the video's clock, so a
- * journey can say a subtitle line came on time.
- */
-async function recordShownAt(page: Page) {
-  await page.addInitScript(() => {
-    const shown: Array<{ text: string; at: number }> = [];
-    (window as unknown as { shownAt: typeof shown }).shownAt = shown;
-    new MutationObserver((records) => {
-      const playing = document.querySelector<HTMLVideoElement>('video:not([aria-hidden])');
-      const at = playing ? playing.currentTime : -1;
-      for (const record of records) {
-        if (record.type === 'characterData') {
-          shown.push({ text: record.target.textContent ?? '', at });
-        }
-        record.addedNodes.forEach((node) => shown.push({ text: node.textContent ?? '', at }));
-      }
-    }).observe(document, { childList: true, subtree: true, characterData: true });
-  });
-}
-
-/** The video's time when this line first showed ("line 1", not "line 12"), or null before. */
-function shownAt(page: Page, line: string): Promise<number | null> {
-  return page.evaluate((text) => {
-    const shown = (window as unknown as { shownAt: Array<{ text: string; at: number }> }).shownAt;
-    const found = shown.find((entry) => {
-      const index = entry.text.indexOf(text);
-      return index !== -1 && !/\d/.test(entry.text.charAt(index + text.length));
-    });
-    return found ? found.at : null;
-  }, line);
-}
-
-/** Opens the Timing tab from the subtitles sheet's list of languages. */
-async function openTiming(page: Page) {
-  await openSheet(page, 'player-tracks-lang-en');
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
-}
 
 test('a plain file 3 s out shows lined up against one for the hard of hearing linked to the video, on time from its first line', async ({
   page,
@@ -4064,15 +3984,6 @@ function firstShown(page: Page, name: string): Promise<{ n: number; at: number }
     }
     return null;
   }, name);
-}
-
-/** The Subtitles part of Diagnostics, from the player. */
-async function subtitlesDiagnostics(page: Page) {
-  await leavePlayer(page);
-  await openDiagnostics(page);
-  return page.locator('section', {
-    has: page.getByRole('heading', { name: 'Subtitles', exact: true }),
-  });
 }
 
 /** Plays the E6 world, and waits for the late file's first line, moved onto its true time. */

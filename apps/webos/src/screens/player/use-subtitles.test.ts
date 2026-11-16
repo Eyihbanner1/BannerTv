@@ -11,7 +11,10 @@ import {
   subtitleRelease,
 } from '@bannertv/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MediaPlaylist } from 'hls.js';
+import { hlsTextTrack } from '../../player/engines/hls';
 import type { EngineTrack } from '../../player/engines/types';
+import type { FileTextReport } from '../../player/file-subtitles';
 import type { PlaybackSession, SessionState } from '../../player/session';
 import type { SubtitleListState, SubtitleOption } from '../../player/subtitles';
 import { recentSubtitleTraces } from '../../player/subtitle-trace';
@@ -307,6 +310,9 @@ const BASE: SessionState = {
   text: [],
   streamCues: {},
   streamTimings: {},
+  textComing: false,
+  timedText: [],
+  fileText: null,
   rate: 1,
   clip: false,
   attempts: [],
@@ -912,6 +918,128 @@ describe('the stream’s own tracks', () => {
   });
 });
 
+describe('the video file’s own tracks on the TV’s player', () => {
+  const english = track('mkv:2', 'en', { picture: false, timed: true });
+
+  it('are waited for while they may still be listed, then chosen before a file', async () => {
+    const entry = streamEntry('film-own');
+    const full = file('full', FULL);
+    offer(entry, [full]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toBeNull();
+    expect(player.subtitles.textComing).toBe(true);
+    await player.session({ textComing: false, text: [english] });
+    await player.wait(100);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    expect(player.selected[player.selected.length - 1]).toBe('mkv:2');
+    expect(player.subtitles.textComing).toBe(false);
+  });
+
+  it('give way to a file once none was found', async () => {
+    const entry = streamEntry('film-none');
+    const full = file('full', FULL);
+    offer(entry, [full]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(1000);
+    await player.session({ textComing: false });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(full));
+  });
+
+  it('say which is for the hard of hearing', async () => {
+    const entry = streamEntry('film-hearing');
+    offer(entry, []);
+    const hearing = track('mkv:5', 'en', { picture: false, hearing: true });
+    const player = play(entry, { engine: 'native', text: [english, hearing] });
+    await player.wait(100);
+    expect(player.subtitles.checkOf({ kind: 'track', id: 'mkv:5' })).toEqual({ hearing: true });
+    expect(player.subtitles.checkOf({ kind: 'track', id: 'mkv:2' })).toBeUndefined();
+  });
+});
+
+describe('the video file’s own tracks, for a viewer who wants lines for the hard of hearing', () => {
+  const plainTrack = track('mkv:2', 'en', { picture: false, timed: true });
+  const sdhTrack = track('mkv:3', 'en', { picture: false, timed: true, hearing: true });
+
+  it('show the track for the hard of hearing first, where the viewer picked such a version', async () => {
+    const entry = streamEntry('film-own-hearing');
+    const plain = file('plain', FULL);
+    const sdh = file('sdh', SDH);
+    offer(entry, [plain, sdh]);
+    // Picked by hand for this title before: a file for the hard of hearing.
+    await stores.subtitlePicks.remember({
+      metaId: META,
+      release: 'video:another',
+      file: 'another-file',
+      hearing: true,
+    });
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack] });
+    await player.wait(1000);
+    expect(player.subtitles.wantsHearing()).toBe(true);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:3' });
+  });
+
+  it('keep the wish where the viewer picks the track for the hard of hearing by hand', async () => {
+    const entry = streamEntry('film-own-pick');
+    const plain = file('plain', FULL);
+    offer(entry, [plain]);
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack] });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    player.subtitles.choose({ kind: 'track', id: 'mkv:3' }, 'version');
+    await player.flush();
+    const release = subtitleRelease(entry, VIDEO);
+    expect(player.subtitles.wantsHearing()).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(true);
+    // No file is tried first for the release.
+    expect(stores.subtitlePicks.get(META, release)?.file).toBeUndefined();
+    // And the plain track picked later says they are not wanted.
+    player.subtitles.choose({ kind: 'track', id: 'mkv:2' }, 'version');
+    await player.flush();
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(false);
+  });
+
+  it('keep the wish where the viewer picks a stream’s rendition named for it by hand', async () => {
+    const entry = streamEntry('film-hls-sdh');
+    offer(entry, [file('plain', FULL)]);
+    const rendition = (name: string) =>
+      hlsTextTrack({ lang: 'en', name, forced: false } as unknown as MediaPlaylist, false);
+    const player = play(entry, {
+      engine: 'hls.js',
+      text: [rendition('English'), rendition('English SDH')],
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'en|English SDH' }, 'version');
+    await player.flush();
+    expect(stores.subtitlePicks.wantsHearing(META, subtitleRelease(entry, VIDEO))).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, 'video:another')).toBe(true);
+  });
+
+  it.each([
+    { name: 'a commentary', extra: { commentary: true } },
+    { name: 'forced lines only', extra: { forced: true } },
+  ])('keep the title’s wish where the viewer picks $name by hand', async ({ extra }) => {
+    const entry = streamEntry('film-own-oneoff');
+    offer(entry, [file('plain', FULL)]);
+    await stores.subtitlePicks.remember({
+      metaId: META,
+      release: 'video:another',
+      file: 'another-file',
+      hearing: true,
+    });
+    const oneOff = track('mkv:4', 'en', { picture: false, ...extra });
+    const player = play(entry, { engine: 'native', text: [plainTrack, sdhTrack, oneOff] });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:4' }, 'version');
+    await player.flush();
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    const release = subtitleRelease(entry, VIDEO);
+    expect(stores.subtitlePicks.wantsHearing(META, release)).toBe(true);
+    expect(stores.subtitlePicks.wantsHearing(META, 'video:third')).toBe(true);
+  });
+});
+
 describe('files for another episode', () => {
   it('are said to be before they are read, and never chosen', async () => {
     // The stream's name says nothing of the episode: the video's id does.
@@ -1019,6 +1147,250 @@ describe('lining files up against the video', () => {
     expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
     expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
     expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+  });
+
+  it('lines a file up against the video file’s own track in another language, never asked for its lines', async () => {
+    const entry = streamEntry('film-own-french');
+    const english = file('english', shift(FULL, -5));
+    offer(entry, [english]);
+    // On the TV's own player: the file's French track, every line's timing from its index.
+    const french = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(300);
+    expect(player.subtitles.choice).toBeNull();
+    const report: FileTextReport = {
+      state: 'read',
+      text: ['fr'],
+      unreadable: 0,
+      picture: 0,
+      ms: 900,
+      afterFirstFrameMs: 2400,
+      cost: {
+        requests: 2,
+        bytes: 70000,
+        walks: 1,
+        lines: 0,
+        lineRequests: 0,
+        lineBytes: 0,
+        failedReads: 0,
+      },
+    };
+    await player.session({
+      textComing: false,
+      text: [french],
+      streamTimings: { 'mkv:3': timings(FULL) },
+      fileText: report,
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    // Whole already: the engine is never asked for the track.
+    expect(player.selected).not.toContain('mkv:3');
+    // Diagnostics says what the file held, and that the files were lined up against its track.
+    expect(recentSubtitleTraces()[0]).toMatchObject({
+      reference: 'track',
+      file: { report, reference: 'fr' },
+    });
+    expect(player.subtitles.checkOf(fileChoice(english)!)).toMatchObject({ synced: 'video' });
+  });
+
+  it('lines a file up against a track of the video file’s the TV can only time, never listed', async () => {
+    const entry = streamEntry('film-own-timed');
+    const english = file('english', shift(FULL, -5));
+    offer(entry, [english]);
+    // Its text is compressed in a way this TV can't undo: the index's timing only.
+    const french = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [],
+      timedText: [french],
+      streamTimings: { 'mkv:3': timings(FULL) },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.tracks).toEqual([]);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.selected).not.toContain('mkv:3');
+    expect(recentSubtitleTraces()[0]).toMatchObject({ reference: 'track' });
+  });
+
+  it('never shows a commentary track by itself, nor lines files up against it', async () => {
+    const entry = streamEntry('film-own-commentary');
+    const late = file('late', shift(FULL, 3));
+    offer(entry, [late]);
+    // The commentary has more lines, and comes first.
+    const commentary = track('mkv:2', 'en', { picture: false, commentary: true });
+    const main = track('mkv:3', 'fr', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [commentary, main],
+      streamTimings: { 'mkv:2': timings(lines(1600, 7000)), 'mkv:3': timings(FULL) },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(late));
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+  });
+
+  it('lines files up against the video file’s own track in the language showing first', async () => {
+    const entry = streamEntry('film-own-two');
+    const english = file('english', shift(FULL, 3));
+    offer(entry, [english]);
+    // The Spanish track is out with this cut by 4 s; the English one, listed after, is in step.
+    const spanish = track('mkv:2', 'es', { picture: false, timed: true });
+    const own = track('mkv:4', 'en', { picture: false, timed: true, hearing: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [spanish, own],
+      streamTimings: { 'mkv:2': timings(shift(FULL, 4)), 'mkv:4': timings(FULL) },
+    });
+    await player.wait(2500);
+    // The viewer's language is embedded: its track shows, for the hard of hearing or not.
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    player.subtitles.choose(fileChoice(english), 'version');
+    await player.wait(1000);
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(player.selected[player.selected.length - 1]).toBeNull();
+  });
+
+  it('offers no drift fix for the video file’s own track, as for Android’s', async () => {
+    const entry = streamEntry('film-own-drift');
+    offer(entry, [file('english', FULL)]);
+    const own = track('mkv:2', 'en', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [own],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    expect(player.subtitles.canFixDrift).toBe(false);
+    // An addon file still has it.
+    player.subtitles.choose(fileChoice(file('english', FULL)), 'version');
+    await player.wait(1000);
+    expect(player.subtitles.canFixDrift).toBe(true);
+  });
+
+  it('keeps the video file’s own track picked by hand through Try again', async () => {
+    const entry = streamEntry('film-own-again');
+    const english = file('english', FULL);
+    offer(entry, [english]);
+    const plain = track('mkv:2', 'en', { picture: false, timed: true });
+    const sdh = track('mkv:4', 'en', { picture: false, timed: true, hearing: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [plain, sdh],
+      streamTimings: { 'mkv:2': timings(FULL), 'mkv:4': timings(FULL) },
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:4' }, 'version');
+    await player.wait(1000);
+    // Try again on the same stream: the TV's player starts over, the file's tracks read again.
+    await player.session({ text: [], streamTimings: {}, fileText: { state: 'waiting' } });
+    await player.wait(2000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    await player.session({ fileText: { state: 'reading' } });
+    await player.wait(2000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+    await player.session({
+      text: [plain, sdh],
+      streamTimings: { 'mkv:2': timings(FULL), 'mkv:4': timings(FULL) },
+      fileText: null,
+    });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:4' });
+  });
+
+  it('gives a track picked by hand up once the video file’s tracks cannot be read again', async () => {
+    const entry = streamEntry('film-own-again-none');
+    const english = file('english', FULL);
+    offer(entry, [english]);
+    const plain = track('mkv:2', 'en', { picture: false, timed: true });
+    const player = play(entry, {
+      engine: 'native',
+      text: [plain],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(1000);
+    player.subtitles.choose({ kind: 'track', id: 'mkv:2' }, 'version');
+    await player.wait(1000);
+    await player.session({ text: [], streamTimings: {}, fileText: { state: 'reading' } });
+    await player.wait(1000);
+    expect(player.subtitles.choice).toEqual({ kind: 'track', id: 'mkv:2' });
+    await player.session({
+      fileText: {
+        state: 'none',
+        why: 'refused',
+        ms: 900,
+        cost: {
+          requests: 1,
+          bytes: 0,
+          walks: 1,
+          lines: 0,
+          lineRequests: 0,
+          lineBytes: 0,
+          failedReads: 0,
+        },
+      },
+    });
+    await player.wait(2500);
+    expect(player.subtitles.choice).toEqual(fileChoice(english));
+  });
+
+  it('waits for the video file’s own tracks before files that agree may decide', async () => {
+    const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+    const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    offer(entry, [
+      real,
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+      file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt` }),
+    ]);
+    const player = play(entry, { engine: 'native', textComing: true });
+    await player.wait(5000);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+    // The file's own track comes: the late file is lined up against it, not against the files.
+    await player.session({
+      textComing: false,
+      text: [track('mkv:2', 'fr', { picture: false, timed: true })],
+      streamTimings: { 'mkv:2': timings(FULL) },
+    });
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.subtitles.sync?.basis).toBeUndefined();
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+  });
+
+  it('waits for the video file’s own tracks being read, where the choice does not', async () => {
+    // A link not named as a video file, or a reader still going after the choice let go.
+    const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+    const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    offer(entry, [
+      real,
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+      file('kings', FULL, { lang: 'eng', label: `${AMZN}-KiNGS.srt` }),
+    ]);
+    const player = play(entry, { engine: 'native', fileText: { state: 'reading' } });
+    await player.wait(5000);
+    expect(player.subtitles.choice).toEqual(fileChoice(real));
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
+    await player.session({
+      text: [track('mkv:2', 'fr', { picture: false, timed: true })],
+      streamTimings: { 'mkv:2': timings(FULL) },
+      fileText: null,
+    });
+    await player.wait(3000);
+    expect(player.subtitles.sync).toMatchObject({ state: 'moved' });
+    expect(player.subtitles.sync?.basis).toBeUndefined();
+    expect(firstStart(player.subtitles)).toBeCloseTo(FULL[0]!.start, 1);
+    expect(recentSubtitleTraces()[0]?.agreement).toBeUndefined();
   });
 
   it('says so where there is nothing to check a file against, and moves nothing', async () => {

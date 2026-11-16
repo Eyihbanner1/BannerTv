@@ -2,7 +2,7 @@ import { type BaseStyle, fromLegacyAlignment, parseMarkup, PLAIN } from './marku
 import { toSeconds } from './time';
 import type { Cue } from './types';
 
-interface AssStyle extends BaseStyle {
+export interface AssStyle extends BaseStyle {
   /** Numpad position, 7-9 the top row. */
   alignment: number;
 }
@@ -23,7 +23,7 @@ const TIME = /^(\d+):(\d{1,2}):(\d{1,2})(?:[.,](\d+))?$/;
 const DEFAULT_STYLE: AssStyle = { ...PLAIN, alignment: 2 };
 
 /** Splits on the first count - 1 commas only: the last column, Text, keeps its commas. */
-function splitColumns(value: string, count: number): string[] {
+export function splitColumns(value: string, count: number): string[] {
   const columns: string[] = [];
   let from = 0;
   while (columns.length < count - 1) {
@@ -75,19 +75,29 @@ function readStyle(values: string[], format: string[], legacy: boolean): [string
   ];
 }
 
+/** What an ASS or SSA script's header says about its events: styles and line wrapping. */
+export interface AssScript {
+  /** By name, as styleKey reads it. */
+  styles: Map<string, AssStyle>;
+  wrapStyle: number;
+  /** The [Events] section's columns, lower case. */
+  eventFormat: string[];
+}
+
 /**
- * Reads the Dialogue lines of an ASS or SSA script. Columns are found by the
- * [Events] Format line, styles by [V4+ Styles] (or SSA's [V4 Styles]) so a
- * style that is italic or placed at the top carries over. Comment lines and
- * vector drawings are dropped; positions, fonts and effects are ignored.
+ * Reads a script's sections line by line: [Script Info]'s WrapStyle, the
+ * styles and the [Events] Format line. Each Dialogue line is handed to
+ * `onDialogue` with the script as read up to it, so a style defined after a
+ * line does not apply to it. A Matroska track keeps this header in its
+ * CodecPrivate and each event in a block of its own.
  */
-export function parseAss(lines: readonly string[]): Cue[] {
+export function readAssScript(
+  lines: readonly string[],
+  onDialogue?: (columns: string[], script: AssScript) => void,
+): AssScript {
   let section = '';
-  let eventFormat = EVENT_FORMAT;
   let styleFormat = ASS_STYLE_FORMAT;
-  let wrapStyle = 0;
-  const styles = new Map<string, AssStyle>();
-  const cues: Cue[] = [];
+  const script: AssScript = { styles: new Map(), wrapStyle: 0, eventFormat: EVENT_FORMAT };
 
   const inStyles = () => section.indexOf('styles') !== -1;
   const legacyStyles = () => section.indexOf('+') === -1;
@@ -105,12 +115,12 @@ export function parseAss(lines: readonly string[]): Cue[] {
     const value = line.slice(colon + 1);
 
     if (kind === 'wrapstyle') {
-      wrapStyle = parseInt(value, 10) || 0;
+      script.wrapStyle = parseInt(value, 10) || 0;
     } else if (kind === 'format') {
       const format = readFormat(value);
       if (inStyles()) styleFormat = format;
       else if (['start', 'end', 'text'].every((name) => format.indexOf(name) !== -1)) {
-        eventFormat = format;
+        script.eventFormat = format;
       }
     } else if (kind === 'style') {
       const [name, style] = readStyle(
@@ -118,23 +128,53 @@ export function parseAss(lines: readonly string[]): Cue[] {
         styleFormat,
         legacyStyles(),
       );
-      styles.set(name, style);
-    } else if (kind === 'dialogue') {
-      const columns = splitColumns(value, eventFormat.length);
-      const column = (name: string) => columns[eventFormat.indexOf(name)];
-      const start = readTime(column('start'));
-      const end = readTime(column('end'));
-      const text = column('text');
-      if (start === undefined || end === undefined || text === undefined || !(end > start)) {
-        continue;
-      }
-      const style = styles.get(styleKey(column('style'))) ?? styles.get('default') ?? DEFAULT_STYLE;
-      const markup = parseMarkup(text, { html: false, base: style, wrapStyle });
-      if (markup.lines.length === 0) continue;
-      const cue: Cue = { start, end, lines: markup.lines };
-      if ((markup.alignment ?? style.alignment) >= 7) cue.top = true;
-      cues.push(cue);
+      script.styles.set(name, style);
+    } else if (kind === 'dialogue' && onDialogue) {
+      onDialogue(splitColumns(value, script.eventFormat.length), script);
     }
   }
+  return script;
+}
+
+/**
+ * One event's text as a cue, in its style: italic, bold and underline carry
+ * over from the style, override tags change them, and a style or \an in the
+ * top row puts the cue at the top. Undefined when the times are not in order
+ * or nothing is left to draw (a vector drawing, an empty line).
+ */
+export function assEventCue(
+  start: number,
+  end: number,
+  styleName: string | undefined,
+  text: string,
+  script: AssScript,
+): Cue | undefined {
+  if (!(end > start)) return undefined;
+  const style =
+    script.styles.get(styleKey(styleName)) ?? script.styles.get('default') ?? DEFAULT_STYLE;
+  const markup = parseMarkup(text, { html: false, base: style, wrapStyle: script.wrapStyle });
+  if (markup.lines.length === 0) return undefined;
+  const cue: Cue = { start, end, lines: markup.lines };
+  if ((markup.alignment ?? style.alignment) >= 7) cue.top = true;
+  return cue;
+}
+
+/**
+ * Reads the Dialogue lines of an ASS or SSA script. Columns are found by the
+ * [Events] Format line, styles by [V4+ Styles] (or SSA's [V4 Styles]) so a
+ * style that is italic or placed at the top carries over. Comment lines and
+ * vector drawings are dropped; positions, fonts and effects are ignored.
+ */
+export function parseAss(lines: readonly string[]): Cue[] {
+  const cues: Cue[] = [];
+  readAssScript(lines, (columns, script) => {
+    const column = (name: string) => columns[script.eventFormat.indexOf(name)];
+    const start = readTime(column('start'));
+    const end = readTime(column('end'));
+    const text = column('text');
+    if (start === undefined || end === undefined || text === undefined) return;
+    const cue = assEventCue(start, end, column('style'), text, script);
+    if (cue) cues.push(cue);
+  });
   return cues;
 }

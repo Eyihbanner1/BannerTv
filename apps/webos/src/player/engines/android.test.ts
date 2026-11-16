@@ -409,6 +409,14 @@ describe("Android's engine", () => {
     expect(text()).toBeUndefined();
   });
 
+  it('marks a subtitle track for the hard of hearing by its name, never an audio track', () => {
+    const listed = (label: string, audio: boolean) =>
+      toEngineTrack({ id: '2:0', lang: 'en', label, active: false, supported: true }, audio);
+    expect(listed('English SDH', false).hearing).toBe(true);
+    expect(listed('English', false)).not.toHaveProperty('hearing');
+    expect(listed('English SDH', true)).not.toHaveProperty('hearing');
+  });
+
   it("passes Android's failures on as the player's", () => {
     const { fatal } = open();
     send({

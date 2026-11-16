@@ -202,18 +202,53 @@ const NOT_FORCED = /(?:^|[^a-z])no[nt]?[ ._-]*forced(?=[^a-z]|$)/gi;
  */
 const FORCED_TITLE = /^[\s._-]*forced(?=[ ._-]+(?!(?:srt|ass|ssa|vtt|sub|txt)$)[a-z0-9])/i;
 
+/**
+ * Whether a name carries a forced or signs-and-songs tag: "Forced", "Signs & Songs". "Non-Forced",
+ * "no forced" and "not forced" say the opposite.
+ */
+function hasForcedTag(name: string): boolean {
+  return SONGS_LABEL.test(name) || FORCED_WORD.test(name.replace(NOT_FORCED, ' '));
+}
+
+/**
+ * A release or file name, read for its tag alone: the words a track name is read for besides
+ * ("Full", "Dialogue", "Signs" alone) may be the film's title ("The.Full.Monty", "Signs.2002").
+ */
 function isForcedLabel(label: string): boolean {
-  return isForcedName(label.replace(FORCED_TITLE, ''));
+  return hasForcedTag(label.replace(FORCED_TITLE, ''));
+}
+
+/** Words that say a name has the whole dialogue too: "Dialogue + Signs & Songs", "Full Subs". */
+const FULL_WORDS = /(?:^|[^a-z])(?:dialog(?:ue)?s?|full)(?:[^a-z]|$)/i;
+const SIGNS_WORD = /^(?:signs?|songs?)$/;
+const SIGNS_FILLER = /^(?:signs?|songs?|only|and)$/;
+
+/**
+ * Signs or songs and nothing else, but for one more word (a language):
+ * "Signs", "Songs only", "English Signs", "Signs (ENG)".
+ */
+function signsAlone(name: string): boolean {
+  const words = name
+    .toLowerCase()
+    .split(/[^a-z0-9\u00c0-\u024f]+/)
+    .filter((word) => word.length > 0);
+  if (!words.some((word) => SIGNS_WORD.test(word))) return false;
+  return words.filter((word) => !SIGNS_FILLER.test(word)).length <= 1;
 }
 
 /**
  * Whether a stream track's own name says it holds only forced lines, or
- * signs and songs ("English (Forced)", "Signs & Songs"). A track's name is
- * not a release name, so "Forced" counts at its start too. "Non-Forced",
- * "no forced" and "not forced" say the opposite, and do not count.
+ * signs and songs ("English (Forced)", "Signs & Songs", "Signs"). A track's
+ * name is not a release name, so "Forced" counts at its start too.
+ * "Non-Forced", "no forced" and "not forced" say the opposite, and do not
+ * count; nor do signs and songs beside the dialogue ("Dialogue + Signs &
+ * Songs", "Full Subs + Signs & Songs"), which is a full track.
  */
 export function isForcedName(name: string): boolean {
-  return SONGS_LABEL.test(name) || FORCED_WORD.test(name.replace(NOT_FORCED, ' '));
+  return (
+    (!FULL_WORDS.test(name) && (SONGS_LABEL.test(name) || signsAlone(name))) ||
+    FORCED_WORD.test(name.replace(NOT_FORCED, ' '))
+  );
 }
 
 function lineText(line: Cue['lines'][number]): string {

@@ -1,0 +1,30 @@
+[Script Info]
+Title: Synthetic test script
+ScriptType: v4.00+
+WrapStyle: 0
+PlayResX: 384
+PlayResY: 288
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+Style: Italique,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+Style: Haut,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,8,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,Bonjour, tout le monde.
+Dialogue: 0,0:00:04.20,0:00:06.00,Italique,,0,0,0,,En italique par le style.
+Dialogue: 0,0:00:06.50,0:00:08.75,Haut,,0,0,0,,En haut par le style.
+Dialogue: 0,0:00:09.00,0:00:11.00,Default,,0,0,0,,Première ligne\Nseconde ligne
+Dialogue: 0,0:00:12.00,0:00:14.00,Default,,0,0,0,,{\i1}Italique{\i0} puis droit
+Dialogue: 0,0:00:15.00,0:00:17.50,Default,,0,0,0,,{\an8}En haut par balise
+Dialogue: 0,0:00:18.00,0:00:20.00,Default,,0,0,0,,{\b1}Gras{\b0}, puis {\u1}souligné{\u0}
+Dialogue: 0,0:00:21.00,0:00:23.00,Default,,0,0,0,,{\pos(10,10)\fs30}Position ignorée
+Dialogue: 0,0:00:24.00,0:00:26.00,Default,,0,0,0,,{\p1}m 0 0 l 10 0 10 10 0 10{\p0}
+Dialogue: 0,0:00:27.00,0:00:29.00,Default,Narrateur,0,0,0,,Une virgule, deux, trois
+Dialogue: 0,0:00:30.00,0:00:32.00,Default,,0,0,0,,Espace\hdur
+Dialogue: 0,0:00:33.00,0:00:35.00,Italique,,0,0,0,,{\r}Style remis à zéro
+Dialogue: 1,0:00:36.00,0:00:38.00,Default,,0,0,0,,Calque un
+Comment: 0,0:00:39.00,0:00:40.00,Default,,0,0,0,,Un commentaire
+Dialogue: 0,0:00:41.00,0:00:43.50,Default,,0,0,0,,La fin.

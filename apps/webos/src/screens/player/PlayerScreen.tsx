@@ -597,6 +597,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       autoFailover: !props.chosen,
       remember,
       continueRow: !sportsEvent,
+      fileSubtitles: !props.lab,
     });
     setSession(created);
     if (!props.lab) finder.start();

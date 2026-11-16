@@ -4,12 +4,15 @@ import {
   canHash,
   forgetHashes,
   HASH_CHUNK,
+  forgetLanding,
   HASH_TIMEOUT_MS,
+  hashReadingFor,
   hashSkip,
   hashStream,
   NATIVE_READ_MS,
   openSubtitlesHash,
   readStreamHash,
+  takeLanding,
 } from './stream-hash';
 import { noteRequestHeaders } from './request-headers';
 
@@ -375,6 +378,29 @@ describe('reading the hash through a link that redirects twice', () => {
     expect(toCdn(asked)).toEqual([head, 'whole', 'whole', tail]);
   });
 
+  it('keeps every read out of the browser’s cache, but for React Native’s fetch, which would change the link', async () => {
+    const caches: Array<RequestCache | undefined> = [];
+    const watch = () => {
+      const chain = globalThis.fetch;
+      vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+        caches.push(init?.cache);
+        return chain(url, init);
+      });
+    };
+    serveChain({ type: 'cors', showLength: true });
+    watch();
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(caches.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(caches)).toEqual(new Set(['no-store']));
+    forgetHashes();
+    caches.length = 0;
+    vi.stubGlobal('navigator', { product: 'ReactNative' });
+    serveChain({ type: 'default' });
+    watch();
+    expect((await readStreamHash(LINK)).found?.videoHash).toBe(expected);
+    expect(new Set(caches)).toEqual(new Set([undefined]));
+  });
+
   it('gives each read 4 s at most through React Native’s fetch, which can’t stop at the headers', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('navigator', { product: 'ReactNative' });
@@ -405,6 +431,63 @@ describe('reading the hash through a link that redirects twice', () => {
     expect(walks(asked)).toBe(1);
   });
 
+  it('hands the first bytes, where they came from and the size, once, to the same link’s reader', async () => {
+    serveChain({ type: 'basic' });
+    // Nothing before a read has started, and asking never starts one.
+    expect(hashReadingFor(LINK)).toBeUndefined();
+    expect(takeLanding(LINK)).toBeUndefined();
+    const reading = readStreamHash(LINK);
+    expect(hashReadingFor(LINK)).toBe(reading);
+    await reading;
+    // Another link's reader gets nothing, and leaves it for this one's.
+    expect(takeLanding(`${LINK}?other`)).toBeUndefined();
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBe(`${CDN}?token=t1`);
+    expect(landing?.total).toBe(size);
+    expect(Array.from(landing!.head)).toEqual(Array.from(bytes.slice(0, HASH_CHUNK)));
+    // Once only, and none from a hash kept from before.
+    expect(takeLanding(LINK)).toBeUndefined();
+    expect(await readStreamHash(LINK)).toBe(await reading);
+    expect(takeLanding(LINK)).toBeUndefined();
+  });
+
+  it('hands no size it did not see in a Content-Range', async () => {
+    serveChain({ type: 'cors', showLength: true });
+    await readStreamHash(LINK);
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBe(`${CDN}?token=t1`);
+    expect(landing?.total).toBeUndefined();
+  });
+
+  it('hands the bytes but not the link once that refused a read', async () => {
+    serveChain({ type: 'basic', oneUse: true });
+    expect(await readStreamHash(LINK)).toMatchObject({ fellBack: 'end' });
+    const landing = takeLanding(LINK);
+    expect(landing?.landed).toBeUndefined();
+    expect(landing?.head.length).toBe(HASH_CHUNK);
+  });
+
+  it('keeps the newest reading’s outcome after it failed, until the player closes', async () => {
+    serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      await chain(url, init);
+      return answer(new Response('', { status: 403 }), `${CDN}?token=t1`, 'basic');
+    });
+    const reading = readStreamHash(LINK);
+    expect(await hashReadingFor(LINK)).toMatchObject({ failed: 'refused', step: 'start' });
+    expect(hashReadingFor(LINK)).toBe(reading);
+    expect(takeLanding(LINK)).toBeUndefined();
+    // Another link's reading takes its place.
+    serve(file(3 * HASH_CHUNK));
+    await readStreamHash(`${LINK}?next`);
+    expect(hashReadingFor(LINK)).toBeUndefined();
+    forgetLanding();
+    expect(takeLanding(`${LINK}?next`)).toBeUndefined();
+    // The hash read is still kept by its link, for the subtitles asked again.
+    expect(await hashReadingFor(`${LINK}?next`)).toMatchObject({ found: {} });
+  });
+
   it('says the start read failed when the first one is refused, and walks no more', async () => {
     const asked = serveChain({ type: 'basic' });
     const chain = globalThis.fetch;
@@ -418,6 +501,30 @@ describe('reading the hash through a link that redirects twice', () => {
       walks: 1,
     });
     expect(walks(asked)).toBe(1);
+  });
+
+  it('says a busy server (429, 503) apart from a refusal, at the start or the end', async () => {
+    for (const status of [429, 503, 502, 408]) {
+      forgetHashes();
+      serveChain({ type: 'basic' });
+      const chain = globalThis.fetch;
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        await chain(url, init);
+        return answer(new Response('', { status }), `${CDN}?token=t1`, 'basic');
+      });
+      expect(await readStreamHash(LINK)).toMatchObject({ failed: 'busy', step: 'start' });
+    }
+    // The end busy where it landed, and through the stream's link too.
+    forgetHashes();
+    serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const range = (init?.headers as Record<string, string> | undefined)?.Range ?? '';
+      if (range.startsWith('bytes=0-')) return chain(url, init);
+      await chain(url, init);
+      return answer(new Response('', { status: 503 }), `${CDN}?token=t2`, 'basic');
+    });
+    expect(await readStreamHash(LINK)).toMatchObject({ failed: 'busy', step: 'end' });
   });
 
   it('reads both ends through the stream’s link when the fetch can’t say where it landed', async () => {
