@@ -1,7 +1,15 @@
+import type { Cue } from '@bannertv/core';
 import { describe, expect, it } from 'vitest';
 import {
   COARSE_TIMING_STEPS,
   formatOffset,
+  lineKey,
+  lineText,
+  MATCH_ROWS,
+  MATCH_WINDOW_S,
+  type MatchRow,
+  matchRows,
+  preferredRow,
   offsetWay,
   stepAmount,
   stepLabel,
@@ -87,5 +95,78 @@ describe('subtitle timing', () => {
     expect(
       timingSummary({ choice: file, offset: 0, drift: null, sync: { state: 'moved' } }),
     ).toEqual({ offset: '0.0 s', linedUp: true, driftFixed: false });
+  });
+});
+
+describe('the lines to match', () => {
+  const cue = (start: number, n: number, end = start + 2): Cue => ({
+    start,
+    end,
+    lines: [[{ text: `Test line ${n}` }], [{ text: ' ' }, { text: 'more', italic: true }]],
+  });
+  /** A line every 5 s, from 0 to 200 s. */
+  const film = Array.from({ length: 41 }, (_, i) => cue(i * 5, i + 1));
+  const starts = (cues: readonly Cue[], rows: readonly MatchRow[]) =>
+    rows.map((row) => cues[row.index]!.start);
+
+  it('two lines before now and two after, within 30 s', () => {
+    expect(starts(film, matchRows(film, 101))).toEqual([95, 100, 105, 110]);
+    // Near the start, there are fewer before: the later ones fill up.
+    expect(starts(film, matchRows(film, 1))).toEqual([0, 5, 10, 15]);
+    // Near the end, fewer after: the earlier ones fill up.
+    expect(starts(film, matchRows(film, 202))).toEqual([185, 190, 195, 200]);
+    // Nothing within 30 s.
+    expect(matchRows(film, 300)).toEqual([]);
+    expect(matchRows([], 10)).toEqual([]);
+    expect(starts(film, matchRows(film, 228))).toEqual([200]);
+    expect(lineText(film[2]!)).toBe('Test line 3 more');
+  });
+
+  it('only past lines for a track Android hands over: four of them', () => {
+    const heard = film.slice(0, 21);
+    expect(starts(heard, matchRows(heard, 101))).toEqual([85, 90, 95, 100]);
+  });
+
+  it('says which line is on screen', () => {
+    const rows = matchRows(film, 101);
+    expect(rows.map((row) => row.onScreen)).toEqual([false, true, false, false]);
+    // Between two lines, none is.
+    expect(matchRows(film, 103).some((row) => row.onScreen)).toBe(false);
+  });
+
+  it('keeps the focused line among the rows as the film plays on', () => {
+    const pinned = lineKey(film, 19);
+    expect(starts(film, matchRows(film, 101, pinned))).toEqual([95, 100, 105, 110]);
+    // Later on, the focused line would have left the rows: it takes the place of the farthest.
+    expect(starts(film, matchRows(film, 112, pinned))).toEqual([95, 105, 110, 115]);
+    expect(matchRows(film, 112, pinned)).toContainEqual(
+      expect.objectContaining({ index: 19, key: pinned }),
+    );
+    // A key no line has any more changes nothing.
+    expect(starts(film, matchRows(film, 112, '999999-0'))).toEqual([105, 110, 115, 120]);
+  });
+
+  it('a line’s key stays when older lines are dropped, and lines starting together get their own', () => {
+    const together = [cue(1, 1), cue(10, 2), cue(10, 3), cue(12.0004, 4)];
+    expect(together.map((_, i) => lineKey(together, i))).toEqual([
+      '1000-0',
+      '10000-0',
+      '10000-1',
+      '12000-0',
+    ]);
+    // Android's history drops the oldest: the keys of the rest stay.
+    const later = together.slice(1);
+    expect(later.map((_, i) => lineKey(later, i))).toEqual(['10000-0', '10000-1', '12000-0']);
+  });
+
+  it('the newest line heard is the one focused first', () => {
+    const rows = matchRows(film, 103);
+    expect(film[preferredRow(rows, film, 103)!.index]!.start).toBe(100);
+    // Before the first line, the first row.
+    const early = matchRows(film, -1);
+    expect(film[preferredRow(early, film, -1)!.index]!.start).toBe(0);
+    expect(preferredRow([], film, 10)).toBeUndefined();
+    expect(MATCH_WINDOW_S).toBe(30);
+    expect(MATCH_ROWS).toBe(4);
   });
 });

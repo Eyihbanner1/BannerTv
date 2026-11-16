@@ -4,22 +4,26 @@ import {
   type Cue,
   type DriftChoice,
   fileReleaseMatch,
+  fitTwoTaps,
   judgeSubtitleFit,
   languageKey,
   type LineTiming,
   linkedToVideo,
   otherEpisode,
+  releaseGroup,
   type StreamEntry,
   type SubtitleFit,
   subtitleFileKey,
   subtitleRelease,
+  type Tap,
+  tapOffset,
   type VideoLength,
   videoFacts,
 } from '@bannertv/core';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addonCollection } from '../../data/addons';
 import { subtitleDrifts, subtitleOffsets } from '../../data/library';
-import { subtitlePicks } from '../../data/playback';
+import { releaseTimings, subtitlePicks } from '../../data/playback';
 import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
 import { mark } from '../../platform/marks';
 import { streamTitle } from '../../player/describe';
@@ -27,6 +31,7 @@ import {
   DRIFT_RATES,
   driftInUse,
   driftKeptWithTiming,
+  driftOfRate,
   type LineMove,
   stretchCues,
   type SubtitleDrift,
@@ -82,8 +87,11 @@ import {
   traceAlignment,
   traceFileReference,
   traceFileText,
+  traceMatch,
+  traceOffer,
   traceReason,
   traceReference,
+  type SubtitleTrace,
 } from '../../player/subtitle-trace';
 import { playingRelease, sameChoice } from '../../player/subtitle-versions';
 import {
@@ -152,6 +160,23 @@ export type SubtitleSync =
     };
 
 /**
+ * What matching a line did: one press set the timing (`again` where a second, much later in
+ * the film, could fix a drift too); two presses set the timing and the drift fix they agree on
+ * (null: no drift), or kept no steady pace, so the newer alone set the timing. Seconds, in
+ * tenths.
+ */
+export type MatchResult =
+  | { presses: 1; offset: number; again: boolean }
+  | { presses: 2; offset: number; drift: SubtitleDrift | null }
+  | { presses: 2; offset: number; unsteady: true };
+
+/** Last episode's timing for this release, offered here: never applied by itself. */
+export interface TimingOffer {
+  offset: number;
+  drift: SubtitleDrift | null;
+}
+
+/**
  * How the viewer chose: a version from a language's list, which stays as
  * picked; or a language, whose version is then chosen as at the start of a
  * stream (the sheet starts it on its best placed version).
@@ -218,7 +243,29 @@ export interface Subtitles {
   isRemembered(choice: NonNullable<SubtitleChoice>): boolean;
   /** Lines for the hard of hearing are wanted: the viewer picked such a version for this title. */
   wantsHearing(): boolean;
+  /** Lines are showing that can be matched: not off, not a picture track, not still loading. */
+  canMatch: boolean;
+  /** A picture track Android draws itself (PGS, DVB): its timing can't be changed. */
+  pictureTrack: boolean;
+  /**
+   * The viewer pressed on the line they just heard, `cues[index]`, at the video's clock and
+   * speed then: the timing is set so it shows there. A second press at least two minutes from
+   * the first on the same file also fixes a drift. Null when there is nothing to match.
+   */
+  matchLine(index: number, at: { time: number; speed: number }): MatchResult | null;
+  /** Puts back the timing and drift fix there were before the last match. */
+  undoMatch(): void;
+  /** Sets the timing and the drift fix together, the fix written first. */
+  setTiming(next: { offset: number; drift: SubtitleDrift | 'none' }): void;
+  /** Last episode's timing for this release, offered for the file showing; null where not. */
+  offer: TimingOffer | null;
+  /** Uses the offer. */
+  takeOffer(): void;
+  /** Declines the offer for this episode. */
+  declineOffer(): void;
 }
+
+const tenths = (seconds: number) => Math.round(seconds * 10) / 10;
 
 const EMPTY: SubtitleListState = { options: [], pending: 0 };
 const noop = () => () => undefined;
@@ -1483,6 +1530,15 @@ export function useSubtitles(
   const keptDrift = useSyncExternalStore(subtitleDrifts.subscribe, (): DriftChoice | null =>
     offsetKey === null ? null : (subtitleDrifts.get(offsetKey) ?? null),
   );
+  // The release the timing is kept for, to be offered on its next episode: named by its group
+  // or the addon's binge group, never by the video alone.
+  const releaseNow = entry ? pickReleaseOf(entry) : null;
+  const timingRelease = releaseNow !== null && !releaseNow.startsWith('video:') ? releaseNow : null;
+  const savedTiming = useSyncExternalStore(releaseTimings.subscribe, () =>
+    timingRelease !== null && metaId !== undefined
+      ? releaseTimings.get(metaId, timingRelease)
+      : undefined,
+  );
   // Not for the stream's own track where it comes in step with the video: Android's, and on the
   // TV's player the video file's own (ADR 0005, decision 6).
   const canFixDrift = !(
@@ -1515,6 +1571,16 @@ export function useSubtitles(
   });
   const touchedNow = (url: string) =>
     touched.current.entry === entry && touched.current.links.has(url);
+  // The same, for the screen: last episode's timing is not offered over timing set here.
+  const [timedHere, setTimedHere] = useState<{
+    entry: StreamEntry | null;
+    links: ReadonlySet<string>;
+  }>({ entry: null, links: new Set() });
+  // Last episode's timing, used or declined on this stream: offered no more.
+  const [offerDone, setOfferDone] = useState<{ entry: StreamEntry | null; done: boolean }>({
+    entry: null,
+    done: false,
+  });
   // A version the viewer picked from the list, or the one kept for the release: files that agree
   // never move it.
   const pickedNow = () => {
@@ -1662,6 +1728,7 @@ export function useSubtitles(
     }
     return { state: 'unchecked' };
   })();
+  const syncState = sync === null ? null : sync.state;
 
   /**
    * Whether a file reads as in step with the video, for its row: lined up for sure, and, showing,
@@ -1707,6 +1774,10 @@ export function useSubtitles(
       if (touched.current.entry !== entry) touched.current = { entry, links: new Set() };
       touched.current.links.add(fileUrl);
     }
+    if (fileUrl !== null && !(timedHere.entry === entry && timedHere.links.has(fileUrl))) {
+      const links = new Set(timedHere.entry === entry ? timedHere.links : []);
+      setTimedHere({ entry, links: links.add(fileUrl) });
+    }
     const made = decided.current;
     if (made?.entry !== entry || !made.auto) return;
     decided.current = { ...made, auto: false, timed: true };
@@ -1738,6 +1809,215 @@ export function useSubtitles(
       linesShown.current = { entry, url: fileUrl };
     }
   }, [shownNow, entry, fileUrl]);
+
+  // A picture track Android draws itself: its timing can't be changed, so nothing to match.
+  const pictureTrack =
+    trackId !== null &&
+    state.engine === 'android' &&
+    tracks.find((t) => t.id === trackId)?.picture === true;
+  const canMatch = choice !== null && !pictureTrack && cues !== null;
+
+  /**
+   * Keeps the timing set by hand on a file for the release playing, offered on its next episode:
+   * not for a track, Lab streams or Demo checks, a release known only by its video, or timing
+   * set on lines BannerTV moved (on another episode, it would add to a move not made there).
+   * No timing and no drift fix of the viewer's forgets it.
+   */
+  const keepForRelease = (offsetKept: number, driftKept: DriftChoice | null) => {
+    if (trackId !== null || !fileOption || !entry || metaId === undefined) return;
+    if (timingRelease === null || driftKept === 'aligned') return;
+    const drift = driftKept === 'ahead' || driftKept === 'behind' ? driftKept : undefined;
+    if (tenths(offsetKept) === 0 && !drift) {
+      void releaseTimings.forget(metaId, timingRelease);
+      return;
+    }
+    const subGroup = releaseGroup(fileOption.label ?? '');
+    void releaseTimings.remember({
+      metaId,
+      release: timingRelease,
+      source: fileOption.source,
+      lang: fileOption.lang,
+      ...(subGroup !== undefined && { subGroup }),
+      offset: offsetKept,
+      ...(drift && { drift }),
+      videoId,
+    });
+  };
+
+  const setOffsetNow = (next: number) => {
+    // The timing already in use, set again (Reset at +0.0 s), changes nothing.
+    if (offsetKey === null || next === timing.offset) return;
+    keepShowing();
+    // Moving the timing of a file with no drift choice of the viewer's keeps 'auto' beside it:
+    // the player's fix is worked out from each stream's own evidence, so the lines stay
+    // stretched as they see them, and another release whose length shows a drift is still
+    // fixed. Kept first: both are saved in the order asked, so the lines never show for a
+    // moment without it. Not for the stream's own track: no length of it shows a drift.
+    const keep =
+      trackId === null
+        ? driftKeptWithTiming(
+            { canFix: canFixDrift, evidence, kept: keptDrift, offset, aligned: appliedMove },
+            next,
+          )
+        : null;
+    if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
+    void subtitleOffsets.remember(offsetKey, next);
+    keepForRelease(next, keep ?? keptDrift);
+  };
+
+  const setDriftNow = (next: SubtitleDrift | null) => {
+    if (offsetKey === null) return;
+    // The fix already in use, pressed again, is kept as it was: the player's own stays its own,
+    // worked out on each stream, and is not made a fixed drift for the file on every release.
+    // Lines a move stretched to another rate than the two fixes show none of them in use.
+    if (next === driftShown) return;
+    keepShowing();
+    // No fix is kept where the file's length shows a drift, or the player moved its lines on
+    // this stream: the player does not fix it again, and a drift choice of the viewer's means
+    // no move at all.
+    const keepNone = next === null && (evidence !== null || appliedMove !== null);
+    const written = keepNone ? 'none' : next;
+    void subtitleDrifts.remember(offsetKey, written);
+    keepForRelease(offset, written);
+  };
+
+  /** The timing and drift fix at once: the fix written first, so the lines never show without it. */
+  const setTiming = (next: { offset: number; drift: SubtitleDrift | 'none' }) => {
+    if (offsetKey === null) return;
+    if (trackId !== null) {
+      setOffsetNow(next.offset);
+      return;
+    }
+    keepShowing();
+    void subtitleDrifts.remember(offsetKey, next.drift);
+    void subtitleOffsets.remember(offsetKey, next.offset);
+    keepForRelease(next.offset, next.drift);
+  };
+
+  // The first press of Match a line, for a second to fix a drift; and the timing there was
+  // before the last, for Undo. Both for the file showing on the stream playing only.
+  const anchorRef = useRef<(Tap & { entry: StreamEntry | null; offsetKey: string }) | null>(null);
+  const undoRef = useRef<{ offsetKey: string; offset: number; drift: DriftChoice | null } | null>(
+    null,
+  );
+  const lastMatch = useRef<NonNullable<SubtitleTrace['matched']> | null>(null);
+  useEffect(() => {
+    anchorRef.current = null;
+    undoRef.current = null;
+    lastMatch.current = null;
+  }, [entry, offsetKey]);
+
+  const matchLine = (index: number, at: { time: number; speed: number }): MatchResult | null => {
+    const line = cues?.[index];
+    const rawLine = rawCues?.[index];
+    if (!canMatch || offsetKey === null || !line || !rawLine) return null;
+    undoRef.current = { offsetKey, offset: subtitleOffsets.get(offsetKey) ?? 0, drift: keptDrift };
+    const press = { entry, offsetKey, at: at.time, speed: at.speed, start: rawLine.start };
+    const before = anchorRef.current;
+    const anchor =
+      before && before.entry === entry && before.offsetKey === offsetKey ? before : null;
+    anchorRef.current = press;
+    let result: MatchResult | null = null;
+    if (anchor && trackId === null && canFixDrift) {
+      const fit = fitTwoTaps(anchor, press, [1, DRIFT_RATES.ahead, DRIFT_RATES.behind]);
+      if (fit && 'rate' in fit) {
+        const drift = driftOfRate(fit.rate);
+        setTiming({ offset: fit.offset, drift: drift ?? 'none' });
+        result = { presses: 2, offset: fit.offset, drift };
+      } else if (fit) {
+        const one = tapOffset({ at: at.time, speed: at.speed, start: line.start });
+        setOffsetNow(one);
+        result = { presses: 2, offset: tenths(one), unsteady: true };
+      }
+    }
+    if (!result) {
+      // On lines BannerTV moved, this keeps the move and adds to it ('aligned').
+      const one = tapOffset({ at: at.time, speed: at.speed, start: line.start });
+      setOffsetNow(one);
+      result = { presses: 1, offset: tenths(one), again: trackId === null && canFixDrift };
+    }
+    const traced: NonNullable<SubtitleTrace['matched']> =
+      result.presses === 1
+        ? { presses: 1, offset: result.offset }
+        : 'unsteady' in result
+          ? { presses: 2, offset: result.offset, unsteady: true }
+          : { presses: 2, offset: result.offset, drift: result.drift ?? 'none' };
+    lastMatch.current = traced;
+    traceMatch(videoId, traced);
+    return result;
+  };
+
+  const undoMatch = () => {
+    const before = undoRef.current;
+    if (before) {
+      void subtitleDrifts.remember(before.offsetKey, before.drift);
+      void subtitleOffsets.remember(before.offsetKey, before.offset);
+      keepForRelease(before.offset, before.drift);
+    }
+    undoRef.current = null;
+    anchorRef.current = null;
+    if (lastMatch.current) traceMatch(videoId, { ...lastMatch.current, undone: true });
+    lastMatch.current = null;
+  };
+
+  // Last episode's timing for this release, offered once for the episode on the file showing,
+  // where it is from the same source in the same language (and subtitle group, where both name
+  // one), and nothing set the timing here: not the file, the viewer, or BannerTV lining it up.
+  const offerTaken = offerDone.entry === entry && offerDone.done;
+  const optionGroup = fileOption ? releaseGroup(fileOption.label ?? '') : undefined;
+  const offer: TimingOffer | null =
+    trackId === null &&
+    fileOption &&
+    fileUrl !== null &&
+    offsetKey !== null &&
+    metaId !== undefined &&
+    timingRelease !== null &&
+    savedTiming &&
+    savedTiming.videoId !== videoId &&
+    savedTiming.declined !== videoId &&
+    fileOption.source === savedTiming.source &&
+    fileOption.lang === savedTiming.lang &&
+    !(
+      savedTiming.subGroup !== undefined &&
+      optionGroup !== undefined &&
+      savedTiming.subGroup !== optionGroup
+    ) &&
+    subtitleOffsets.get(offsetKey) === undefined &&
+    keptDrift === null &&
+    !(timedHere.entry === entry && timedHere.links.has(fileUrl)) &&
+    // Nothing settled the file's timing here: nothing to check it against, no match, found out
+    // of step too late, or files that disagree. Never while checking, nor once moved, in step,
+    // or the viewer's.
+    (syncState === null ||
+      syncState === 'unchecked' ||
+      syncState === 'unmatched' ||
+      syncState === 'late' ||
+      syncState === 'disagree') &&
+    !offerTaken
+      ? { offset: savedTiming.offset, drift: savedTiming.drift ?? null }
+      : null;
+  const offerShown = useRef<string | null>(null);
+  const offering = offer !== null;
+  useEffect(() => {
+    if (!offering || offerShown.current === videoId) return;
+    offerShown.current = videoId;
+    traceOffer(videoId, 'shown');
+  }, [offering, videoId]);
+
+  const takeOffer = () => {
+    if (!offer) return;
+    if (offer.drift) setTiming({ offset: offer.offset, drift: offer.drift });
+    else setOffsetNow(offer.offset);
+    setOfferDone({ entry, done: true });
+    traceOffer(videoId, 'used');
+  };
+
+  const declineOffer = () => {
+    if (!offer || metaId === undefined || timingRelease === null) return;
+    void releaseTimings.decline(metaId, timingRelease, videoId);
+    setOfferDone({ entry, done: true });
+    traceOffer(videoId, 'declined');
+  };
 
   return {
     options,
@@ -1866,37 +2146,15 @@ export function useSubtitles(
         }
       }
     },
-    setOffset(next) {
-      // The timing already in use, set again (Reset at +0.0 s), changes nothing.
-      if (offsetKey === null || next === timing.offset) return;
-      keepShowing();
-      // Moving the timing of a file with no drift choice of the viewer's keeps 'auto' beside it:
-      // the player's fix is worked out from each stream's own evidence, so the lines stay
-      // stretched as they see them, and another release whose length shows a drift is still
-      // fixed. Kept first: both are saved in the order asked, so the lines never show for a
-      // moment without it. Not for the stream's own track: no length of it shows a drift.
-      const keep =
-        trackId === null
-          ? driftKeptWithTiming(
-              { canFix: canFixDrift, evidence, kept: keptDrift, offset, aligned: appliedMove },
-              next,
-            )
-          : null;
-      if (keep !== null) void subtitleDrifts.remember(offsetKey, keep);
-      void subtitleOffsets.remember(offsetKey, next);
-    },
-    setDrift(next) {
-      if (offsetKey === null) return;
-      // The fix already in use, pressed again, is kept as it was: the player's own stays its own,
-      // worked out on each stream, and is not made a fixed drift for the file on every release.
-      // Lines a move stretched to another rate than the two fixes show none of them in use.
-      if (next === driftShown) return;
-      keepShowing();
-      // No fix is kept where the file's length shows a drift, or the player moved its lines on
-      // this stream: the player does not fix it again, and a drift choice of the viewer's means
-      // no move at all.
-      const keepNone = next === null && (evidence !== null || appliedMove !== null);
-      void subtitleDrifts.remember(offsetKey, keepNone ? 'none' : next);
-    },
+    setOffset: setOffsetNow,
+    setDrift: setDriftNow,
+    canMatch,
+    pictureTrack,
+    matchLine,
+    undoMatch,
+    setTiming,
+    offer,
+    takeOffer,
+    declineOffer,
   };
 }

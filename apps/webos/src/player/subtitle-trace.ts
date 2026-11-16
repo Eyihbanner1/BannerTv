@@ -171,6 +171,19 @@ export interface SubtitleTrace {
   aligned?: Record<number, AlignTrace>;
   /** What the files that agree found, where they were needed. */
   agreement?: AgreementTrace;
+  /**
+   * The timing the viewer set by matching a line, last: one press, or two that fixed a drift,
+   * found none ('none') or kept no steady pace; `undone` once Undo put it back.
+   */
+  matched?: {
+    presses: 1 | 2;
+    offset: number;
+    drift?: 'ahead' | 'behind' | 'none';
+    unsteady?: true;
+    undone?: true;
+  };
+  /** Last episode's timing, offered here: shown, used or declined. */
+  offered?: 'shown' | 'used' | 'declined';
 }
 
 interface Running extends SubtitleTrace {
@@ -302,6 +315,20 @@ export function traceAgreement(videoId: string, outcome: AgreementTrace): void {
   trace.agreement = outcome;
 }
 
+/** The viewer set the timing by matching a line, or undid that. */
+export function traceMatch(videoId: string, matched: NonNullable<SubtitleTrace['matched']>): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  trace.matched = { ...matched };
+}
+
+/** What became of last episode's timing, offered on this one. */
+export function traceOffer(videoId: string, state: 'shown' | 'used' | 'declined'): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  trace.offered = state;
+}
+
 /** The first subtitle line of the play now went on screen. */
 export function traceFirstLine(now = Date.now()): void {
   const trace = traces[0];
@@ -323,6 +350,7 @@ export function recentSubtitleTraces(): SubtitleTrace[] {
     delete (copy as Partial<Running>).fileReference;
     if (trace.aligned) copy.aligned = { ...trace.aligned };
     if (trace.agreement) copy.agreement = { ...trace.agreement };
+    if (trace.matched) copy.matched = { ...trace.matched };
     delete (copy as Partial<Running>).startedAt;
     return copy;
   });
@@ -593,6 +621,26 @@ function agreementText(agreement: AgreementTrace | undefined): string | undefine
   }
 }
 
+/** How the viewer matched a line: one press, two, or two with no steady pace. */
+function matchText(matched: SubtitleTrace['matched']): string | undefined {
+  if (!matched) return undefined;
+  const amount = signed(matched.offset);
+  const said = matched.unsteady
+    ? `two lines matched kept no steady pace: the newer one set ${amount}`
+    : matched.presses === 1
+      ? `timing set by matching a line: ${amount}`
+      : `timing set by matching two lines: ${amount}${
+          matched.drift === 'none' ? ', no drift' : matched.drift ? ', drift fixed' : ''
+        }`;
+  return matched.undone ? `${said} (undone)` : said;
+}
+
+const OFFER_WORDS: Readonly<Record<NonNullable<SubtitleTrace['offered']>, string>> = {
+  shown: 'last episode’s timing offered',
+  used: 'last episode’s timing offered: used',
+  declined: 'last episode’s timing offered: declined',
+};
+
 function reasonText(trace: SubtitleTrace): string {
   if (!trace.reason) return 'none chosen yet';
   const said = trace.reason === 'off' ? 'off' : `${trace.language ?? '?'}, ${trace.reason}`;
@@ -613,6 +661,8 @@ export function subtitleTraceRows(
       reasonText(trace),
       agreementText(trace.agreement),
       alignText(trace),
+      matchText(trace.matched),
+      trace.offered ? OFFER_WORDS[trace.offered] : undefined,
       trace.firstLineMs === undefined
         ? 'no line yet'
         : `first line after ${seconds(trace.firstLineMs)}`,
