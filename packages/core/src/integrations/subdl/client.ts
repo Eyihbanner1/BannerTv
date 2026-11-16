@@ -90,7 +90,8 @@ export interface SubdlClientOptions {
   queries: QueryCache;
   usage: SubdlUsage;
   key: () => SubdlKeyRecord | null;
-  setKeyState: (state: SubdlKeyRecord['state']) => void;
+  /** What SubDL said of a key: only for that key, never one saved since. */
+  setKeyState: (key: string, state: SubdlKeyRecord['state']) => void;
   kidsOnly: () => boolean;
   /** Resolves once the key has been read; the search's fetch waits for it. */
   ready?: () => Promise<void>;
@@ -176,7 +177,7 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
       // A refusal is the key's, not the ask's: the key's state stops the
       // searches, and a key saved since is asked with straight away.
       if (failure === 'refused') {
-        setKeyState('refused');
+        setKeyState(record.key, 'refused');
         throw new SubdlFailureError(failure);
       }
       if (failure === 'limit') usage.rest('limit');

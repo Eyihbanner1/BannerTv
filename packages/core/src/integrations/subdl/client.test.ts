@@ -48,6 +48,7 @@ function setup(
   let record: SubdlKeyRecord | null =
     options.record === undefined ? { key: FAKE_SUBDL_KEY, state: 'works' } : options.record;
   const states: string[] = [];
+  const marks: Array<[string, string]> = [];
   const store = options.store ?? memoryCacheStore();
   const kv = options.kv ?? memoryKeyValueStore();
   const now = options.now ?? Date.now;
@@ -60,9 +61,11 @@ function setup(
     queries: createQueryCache({ store, now }),
     usage,
     key: () => record,
-    setKeyState: (state) => {
+    setKeyState: (refusedKey, state) => {
       states.push(state);
-      if (record) record = { ...record, state };
+      marks.push([refusedKey, state]);
+      // As the apps do: only the key SubDL said it of.
+      if (record && record.key === refusedKey) record = { ...record, state };
     },
     kidsOnly: () => options.kids === true,
     run: (type, videoId, task) => {
@@ -87,6 +90,7 @@ function setup(
     kv,
     usage,
     runs,
+    marks,
     record: () => record,
     setRecord(next: SubdlKeyRecord | null) {
       record = next;
@@ -252,6 +256,26 @@ describe('createSubdlClient', () => {
     });
     expect(requests).toHaveLength(2);
     expect(requests[1]?.headers).toMatchObject({ 'X-API-Key': 'FAKE-SUBDL-KEY-0002' });
+  });
+
+  it('marks refused only the key it was asked with, not one saved meanwhile', async () => {
+    let answer: (value: Answer) => void = () => undefined;
+    const { client, setRecord, record, marks } = setup({
+      record: { key: FAKE_SUBDL_KEY, state: 'unchecked' },
+      answer: () =>
+        new Promise<Answer>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const search = client.search('movie', 'tt9900001', ['en']);
+    search.load();
+    await flush();
+    setRecord({ key: 'FAKE-SUBDL-KEY-0002', state: 'unchecked' });
+    answer({ status: 401, body: undefined });
+    await flush();
+    expect(search.get()).toMatchObject({ status: 'failed', why: 'refused' });
+    expect(marks).toEqual([[FAKE_SUBDL_KEY, 'refused']]);
+    expect(record()).toEqual({ key: 'FAKE-SUBDL-KEY-0002', state: 'unchecked' });
   });
 
   it('rests on a slow-down and on a daily limit', async () => {

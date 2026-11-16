@@ -44,11 +44,8 @@ export const subdl: SubdlClient = createSubdlClient({
   usage: subdlUsage,
   key: () => subdlKey.get(),
   ready: () => subdlKey.load(),
-  setKeyState: (state) => {
-    void subdlKey.update((record) =>
-      record && record.state !== state ? { ...record, state } : record,
-    );
-  },
+  // The key a search was sent with may have been replaced while it was out.
+  setKeyState: (key, state) => setSubdlKeyState(key, state),
   kidsOnly: isKidsProfile,
   run: runForPlay,
 });

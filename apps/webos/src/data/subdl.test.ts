@@ -90,6 +90,32 @@ describe('the SubDL key', () => {
     expect(subdlKey.get()?.state).toBe('unchecked');
   });
 
+  it('leaves a key saved meanwhile as it is when the old key is refused', async () => {
+    saveSubdlKey(FAKE);
+    let answer: (value: { status: number; body: unknown }) => void = () => undefined;
+    const before = sub.answer;
+    sub.answer = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }) as unknown as { status: number; body: unknown };
+    try {
+      const search = subdl.search('movie', 'tt9900005', ['en']);
+      search.load();
+      await vi.waitFor(() => expect(sub.seen.length).toBeGreaterThan(0));
+      // The account brings a new key while the old one's search is out.
+      await subdlKey.updateNow(() => ({ key: 'FAKE-SUBDL-KEY-0002', state: 'unchecked' }));
+      answer({ status: 401, body: undefined });
+      await vi.waitFor(() =>
+        expect(search.get()).toMatchObject({ status: 'failed', why: 'refused' }),
+      );
+      await flush();
+      expect(subdlKey.get()).toEqual({ key: 'FAKE-SUBDL-KEY-0002', state: 'unchecked' });
+    } finally {
+      sub.answer = before;
+      sub.seen.length = 0;
+    }
+  });
+
   it('is removed', async () => {
     saveSubdlKey(FAKE);
     removeSubdlKey();
