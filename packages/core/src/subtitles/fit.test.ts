@@ -150,6 +150,18 @@ describe('profileSubtitles', () => {
     // A release name with more to it than signs: the film "Signs" is not a forced file.
     expect(profileSubtitles([], 'Signs.2002.1080p.BluRay.x264').forcedLabel).toBe(false);
   });
+
+  it('reads a release name for signs and songs by its tag alone, not by a track name’s words', () => {
+    const forced = (label: string) => profileSubtitles([], label).forcedLabel;
+    // "Full" and "Dialogue" in a film's title say nothing of the file's lines.
+    expect(forced('The.Full.Monty.1997.Signs.&.Songs.srt')).toBe(true);
+    expect(forced('Full Metal Panic S01E01 Signs & Songs')).toBe(true);
+    expect(forced('Dialogue.2019.1080p.Signs.and.Songs')).toBe(true);
+    // A release name that is signs alone is the film, not a forced file.
+    expect(forced('Signs (2002)')).toBe(false);
+    expect(forced('Signs.srt')).toBe(false);
+    expect(forced('English Signs')).toBe(false);
+  });
 });
 
 describe('judgeScript', () => {

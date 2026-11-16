@@ -202,8 +202,20 @@ const NOT_FORCED = /(?:^|[^a-z])no[nt]?[ ._-]*forced(?=[^a-z]|$)/gi;
  */
 const FORCED_TITLE = /^[\s._-]*forced(?=[ ._-]+(?!(?:srt|ass|ssa|vtt|sub|txt)$)[a-z0-9])/i;
 
+/**
+ * Whether a name carries a forced or signs-and-songs tag: "Forced", "Signs & Songs". "Non-Forced",
+ * "no forced" and "not forced" say the opposite.
+ */
+function hasForcedTag(name: string): boolean {
+  return SONGS_LABEL.test(name) || FORCED_WORD.test(name.replace(NOT_FORCED, ' '));
+}
+
+/**
+ * A release or file name, read for its tag alone: the words a track name is read for besides
+ * ("Full", "Dialogue", "Signs" alone) may be the film's title ("The.Full.Monty", "Signs.2002").
+ */
 function isForcedLabel(label: string): boolean {
-  return isForcedName(label.replace(FORCED_TITLE, ''));
+  return hasForcedTag(label.replace(FORCED_TITLE, ''));
 }
 
 /** Words that say a name has the whole dialogue too: "Dialogue + Signs & Songs", "Full Subs". */
