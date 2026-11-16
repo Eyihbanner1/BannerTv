@@ -25,7 +25,12 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { addonCollection } from '../../data/addons';
 import { subtitleDrifts, subtitleOffsets } from '../../data/library';
 import { releaseTimings, subtitlePicks } from '../../data/playback';
-import { chooseSubtitleLanguage, heardLanguages, wantedSubtitle } from '../../data/tracks';
+import {
+  chooseSubtitleLanguage,
+  heardLanguages,
+  subtitleLanguagesToAsk,
+  wantedSubtitle,
+} from '../../data/tracks';
 import { mark } from '../../platform/marks';
 import { streamTitle } from '../../player/describe';
 import {
@@ -96,8 +101,10 @@ import {
 } from '../../player/subtitle-trace';
 import { playingRelease, sameChoice } from '../../player/subtitle-versions';
 import {
+  capSubdlFiles,
   clearSubtitleCache,
   loadSubtitles,
+  SUBDL_AGREEMENT_FILES,
   subtitleList,
   type SubtitleListState,
   type SubtitleOption,
@@ -569,8 +576,20 @@ export function useSubtitles(
     const addon = addonCollection
       .get()
       .addons.find((candidate) => candidate.manifest.id === entry.addonId);
-    return subtitleList(type, videoId, entry.stream, addon?.manifest.name ?? entry.addonId);
-  }, [type, videoId, entry]);
+    // SubDL is asked for titles with a page, not for Lab streams or BannerTV Demo's checks.
+    const subdlAsk =
+      metaId !== undefined && !isSubtitleCheck(entry)
+        ? { languages: subtitleLanguagesToAsk(metaId), release: playingRelease(entry, videoId) }
+        : undefined;
+    return subtitleList(
+      type,
+      videoId,
+      entry.stream,
+      addon?.manifest.name ?? entry.addonId,
+      subdlAsk,
+    );
+    // The languages are those wanted as the play starts: a choice made later asks once more.
+  }, [type, videoId, metaId, entry]);
   const listState = useSyncExternalStore(
     list ? list.subscribe : noop,
     list ? list.get : () => EMPTY,
@@ -836,7 +855,11 @@ export function useSubtitles(
       length,
       today: showing,
       ranked: rankedFiles(offered, showing.lang, contextIn(offered, showing.lang, stream, length)),
-      files: offered.filter((option) => !unreadable(option.url) && !otherEpisode(option, release)),
+      // SubDL's first few only, so its files never outnumber the reads it allows.
+      files: capSubdlFiles(
+        offered.filter((option) => !unreadable(option.url) && !otherEpisode(option, release)),
+        SUBDL_AGREEMENT_FILES,
+      ),
       known: (url) => {
         const lines = checks.lines(url);
         const profile = checks.profile(url);
@@ -2154,6 +2177,8 @@ export function useSubtitles(
       setChosen({ entry, choice: next });
       if (isSubtitleCheck(entry)) return;
       chooseSubtitleLanguage(metaId, language);
+      // A language SubDL was not asked for, turned on: it is asked once more.
+      if (language !== null) list?.askSubdl(language);
       if (pressed) wake.current?.();
       // A version picked from the list is the one for this release; the stream's own track
       // picked over it takes its place, no file tried first, and whether it is for the hard of

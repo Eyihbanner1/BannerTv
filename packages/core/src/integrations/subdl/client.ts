@@ -146,7 +146,9 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
       if (!record) throw new SubdlSkipError('no key');
       if (record.state === 'refused') throw new SubdlSkipError('key refused');
       await usage.load();
-      if (usage.resting()) throw new SubdlSkipError('resting');
+      // A rest until SubDL's day turns says so: the searches are used up.
+      const rest = usage.resting();
+      if (rest) throw new SubdlSkipError(rest.why === 'limit' ? 'daily limit' : 'resting');
       const failed = failures.get(cacheKey);
       if (failed && elapsed() - failed.at < SUBDL_FAILURE_MEMORY_MS) {
         throw new SubdlFailureError(failed.failure);

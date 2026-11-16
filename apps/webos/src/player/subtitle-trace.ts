@@ -1,4 +1,9 @@
-import { type AlignConfidence, languageKey } from '@bannertv/core';
+import {
+  type AlignConfidence,
+  languageKey,
+  type SubdlFailure,
+  type SubdlOff,
+} from '@bannertv/core';
 import { mark } from '../platform/marks';
 import type { FileTextCost, FileTextReport, FileTextSkip } from './file-subtitles';
 import type { HashFailure, HashSkip, HashStep } from './stream-hash';
@@ -149,6 +154,26 @@ export interface FileTrace {
   reference?: string;
 }
 
+/**
+ * How SubDL's search went for the play: not asked and why, asking, answered
+ * (files by language, how long, whether from a saved answer), or failed and
+ * why. `saved`: the files of an older saved answer used meanwhile. Counts by
+ * language only: never a key, a link or a file's name.
+ */
+export type SubdlTrace =
+  | { state: 'off'; why: SubdlOff; saved?: Record<string, number> }
+  | { state: 'asking' }
+  | { state: 'answered'; files: Record<string, number>; ms: number; saved: boolean }
+  | { state: 'failed'; why: SubdlFailure; ms: number; saved?: Record<string, number> };
+
+/** SubDL asked again for a language the viewer turned on: its files, or why there are none. */
+export interface SubdlMoreTrace {
+  language: string;
+  files?: number;
+  failed?: SubdlFailure;
+  off?: SubdlOff;
+}
+
 /** One play's subtitles, as Diagnostics shows them. */
 export interface SubtitleTrace {
   /** The video's id ("tt3581920:1:1"): never a link. */
@@ -184,6 +209,10 @@ export interface SubtitleTrace {
   };
   /** Last episode's timing, offered here: shown, used or declined. */
   offered?: 'shown' | 'used' | 'declined';
+  /** SubDL's search, where SubDL could be asked. */
+  subdl?: SubdlTrace;
+  /** SubDL asked again, for a language the viewer turned on. */
+  subdlMore?: SubdlMoreTrace;
 }
 
 interface Running extends SubtitleTrace {
@@ -315,6 +344,42 @@ export function traceAgreement(videoId: string, outcome: AgreementTrace): void {
   trace.agreement = outcome;
 }
 
+/** Counts by language key, for SubDL's traces. */
+function keyed(counts: Record<string, number> | undefined): Record<string, number> | undefined {
+  if (!counts) return undefined;
+  const out: Record<string, number> = {};
+  for (const lang of Object.keys(counts)) {
+    const key = languageKey(lang) || lang;
+    out[key] = (out[key] ?? 0) + counts[lang]!;
+  }
+  return out;
+}
+
+/** How SubDL's search for the play goes now. */
+export function traceSubdl(videoId: string, outcome: SubdlTrace): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  const before = trace.subdl;
+  if (outcome.state === 'answered') {
+    trace.subdl = { ...outcome, files: keyed(outcome.files)! };
+  } else if (outcome.state === 'off' || outcome.state === 'failed') {
+    const saved = keyed(outcome.saved);
+    const copy = { ...outcome };
+    delete copy.saved;
+    trace.subdl = saved ? { ...copy, saved } : copy;
+  } else {
+    trace.subdl = { state: 'asking' };
+  }
+  if (before?.state !== trace.subdl.state) mark(`sub:subdl:${trace.subdl.state}`);
+}
+
+/** How SubDL's second search goes now, for a language the viewer turned on. */
+export function traceSubdlMore(videoId: string, more: SubdlMoreTrace): void {
+  const trace = current(videoId);
+  if (!trace) return;
+  trace.subdlMore = { ...more, language: languageKey(more.language) || more.language };
+}
+
 /** The viewer set the timing by matching a line, or undid that. */
 export function traceMatch(videoId: string, matched: NonNullable<SubtitleTrace['matched']>): void {
   const trace = current(videoId);
@@ -351,6 +416,8 @@ export function recentSubtitleTraces(): SubtitleTrace[] {
     if (trace.aligned) copy.aligned = { ...trace.aligned };
     if (trace.agreement) copy.agreement = { ...trace.agreement };
     if (trace.matched) copy.matched = { ...trace.matched };
+    if (trace.subdl) copy.subdl = { ...trace.subdl };
+    if (trace.subdlMore) copy.subdlMore = { ...trace.subdlMore };
     delete (copy as Partial<Running>).startedAt;
     return copy;
   });
@@ -516,6 +583,81 @@ function filesText(trace: SubtitleTrace): string {
   return `files ${shown.join(', ')}${others} (${total} in all)`;
 }
 
+/** Counts by language, the one showing first, then the most: three at most, then how many more. */
+function countsByLanguage(counts: Record<string, number>, showing: string | undefined): string {
+  const entries = Object.keys(counts).map((lang) => [lang, counts[lang]!] as const);
+  const shown = entries
+    .slice()
+    .sort(
+      (a, b) =>
+        Number(b[0] === showing) - Number(a[0] === showing) ||
+        b[1] - a[1] ||
+        (a[0] < b[0] ? -1 : 1),
+    )
+    .slice(0, 3)
+    .map(([lang, count]) => `${lang} ${count}`);
+  const more = entries.length - shown.length;
+  const others = more > 0 ? `, +${more} ${more === 1 ? 'language' : 'languages'}` : '';
+  return `${shown.join(', ')}${others}`;
+}
+
+const SUBDL_OFF_WORDS: Readonly<Record<SubdlOff, string>> = {
+  'no key': 'no key',
+  kids: 'not on kids profiles',
+  'key refused': 'key not accepted',
+  'not imdb': 'not asked (not an IMDb title)',
+  special: 'not asked (special episode)',
+  'subtitles off': 'not asked (subtitles off)',
+  resting: 'resting (too many requests)',
+  'daily limit': 'daily limit reached',
+};
+
+const SUBDL_FAILED_WORDS: Readonly<Record<SubdlFailure, string>> = {
+  timeout: 'no answer in 8 s',
+  network: 'couldn’t be reached',
+  busy: 'too many requests, resting',
+  limit: 'daily limit reached',
+  refused: 'key not accepted',
+  challenge: 'blocked for now, try later',
+  server: 'server error',
+  invalid: 'unreadable answer',
+};
+
+const hasCounts = (counts: Record<string, number> | undefined): counts is Record<string, number> =>
+  !!counts && Object.keys(counts).length > 0;
+
+/** SubDL's search for the play, as words. */
+function subdlText(trace: SubtitleTrace): string | undefined {
+  const subdl = trace.subdl;
+  if (!subdl) return undefined;
+  const saved = (counts: Record<string, number> | undefined) =>
+    hasCounts(counts) ? `, saved answer ${countsByLanguage(counts, trace.language)}` : '';
+  switch (subdl.state) {
+    case 'asking':
+      return 'SubDL: asking';
+    case 'off':
+      return `SubDL: ${SUBDL_OFF_WORDS[subdl.why]}${saved(subdl.saved)}`;
+    case 'failed':
+      return `SubDL: ${SUBDL_FAILED_WORDS[subdl.why]}${saved(subdl.saved)}`;
+    case 'answered': {
+      const when = subdl.saved ? ' (saved answer)' : ` in ${seconds(subdl.ms)}`;
+      return hasCounts(subdl.files)
+        ? `SubDL ${countsByLanguage(subdl.files, trace.language)}${when}`
+        : `SubDL: no files${when}`;
+    }
+  }
+}
+
+/** SubDL asked again for a language the viewer turned on. */
+function subdlMoreText(more: SubdlMoreTrace | undefined): string | undefined {
+  if (!more) return undefined;
+  const said = `SubDL asked again for ${more.language}`;
+  if (more.failed) return `${said}: ${SUBDL_FAILED_WORDS[more.failed]}`;
+  if (more.off) return `${said}: ${SUBDL_OFF_WORDS[more.off]}`;
+  if (more.files === undefined) return `${said}: asking`;
+  return `${said}: ${more.files === 0 ? 'no files' : counted(more.files, 'file')}`;
+}
+
 const REFERENCE_WORDS: Readonly<Record<ReferenceKind, string>> = {
   track: 'the stream’s track',
   linked: 'a file linked by hash',
@@ -658,6 +800,8 @@ export function subtitleTraceRows(
       hashText(trace.hash),
       fileText(trace.file),
       filesText(trace),
+      subdlText(trace),
+      subdlMoreText(trace.subdlMore),
       reasonText(trace),
       agreementText(trace.agreement),
       alignText(trace),

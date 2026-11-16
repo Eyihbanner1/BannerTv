@@ -161,6 +161,9 @@ const world = vi.hoisted(() => ({
   passes: [] as string[],
   cached: new Set<string>(),
   cleared: 0,
+  /** What SubDL was to be asked as each list was made, and the languages asked again. */
+  subdlAsks: [] as unknown[],
+  subdlMore: [] as string[],
 }));
 
 vi.mock('../../player/subtitles', () => ({
@@ -179,8 +182,15 @@ vi.mock('../../player/subtitles', () => ({
       }, file.ms),
     );
   },
-  subtitleList(_type: string, _videoId: string, stream: unknown) {
+  subtitleList(_type: string, _videoId: string, stream: unknown, _addon: string, subdl: unknown) {
+    world.subdlAsks.push(subdl);
     return world.lists.get(stream);
+  },
+  SUBDL_AGREEMENT_FILES: 6,
+  // As the real one: every file not SubDL's, and the first of SubDL's.
+  capSubdlFiles<T extends { key: string }>(files: readonly T[], max: number): T[] {
+    let left = max;
+    return files.filter((one) => !one.key.startsWith('subdl#') || left-- > 0);
   },
   clearSubtitleCache() {
     world.cleared++;
@@ -287,6 +297,7 @@ function offer(
     subscribe: store.subscribe,
     start: () => undefined,
     stop: () => undefined,
+    askSubdl: (language: string) => world.subdlMore.push(language),
   });
   return (more: SubtitleOption[], stillPending = 0, stillComing = false) =>
     store.set({
@@ -435,6 +446,8 @@ beforeEach(async () => {
   world.passes = [];
   world.cached.clear();
   world.cleared = 0;
+  world.subdlAsks = [];
+  world.subdlMore = [];
   const kv = memoryKeyValueStore();
   stores.writes = [];
   const set = kv.set;
@@ -2793,5 +2806,97 @@ describe('last episode’s timing', () => {
     again.unmount();
     const next = await playEpisode(3, [sub('e3')]);
     expect(next.subtitles.offer).toEqual({ offset: 0.5, drift: null });
+  });
+});
+
+describe('SubDL beside the addons', () => {
+  const RELEASE = 'Test.Film.2026.1080p.WEB-DL.DDP5.1.H.264-GRPA';
+  /** A file SubDL offers: listed as any addon's, under its own key. */
+  function subdlFile(id: string, cues: Cue[] | null, extra: Parameters<typeof file>[2] = {}) {
+    return { ...file(`subdl-${id}`, cues, extra), key: `subdl#${id}`, source: 'SubDL' };
+  }
+
+  it('is asked for the languages wanted, with the release playing, but not for a Lab stream', async () => {
+    const entry = streamEntry(RELEASE);
+    offer(entry, []);
+    play(entry);
+    expect(world.subdlAsks[0]).toEqual({
+      languages: ['eng'],
+      release: { filename: `${RELEASE}.mkv`, title: `${RELEASE}.mkv` },
+    });
+    const lab = streamEntry('lab');
+    offer(lab, []);
+    play(lab, {}, true);
+    expect(world.subdlAsks[world.subdlAsks.length - 1]).toBeUndefined();
+  });
+
+  it('asks once more for a language turned on, through the list', async () => {
+    const entry = streamEntry('film');
+    const french = file('fr', FULL, { lang: 'fre' });
+    offer(entry, [file('en', FULL), french]);
+    const player = play(entry);
+    await player.wait(300);
+    player.subtitles.choose(fileChoice(french), 'version');
+    await player.flush();
+    expect(world.subdlMore).toEqual(['fre']);
+    player.subtitles.choose(null);
+    await player.flush();
+    expect(world.subdlMore).toEqual(['fre']);
+  });
+
+  it('never holds the first line longer while it is still asking', async () => {
+    const firstLineAt = async (pending: number) => {
+      const entry = streamEntry(`film-${pending}`);
+      offer(entry, [file(`a${pending}`, SIGNS), file(`b${pending}`, FULL, { ms: 4000 })], pending);
+      const player = play(entry);
+      let waited = 0;
+      while (player.subtitles.cues === null && waited < 10_000) {
+        await player.wait(50);
+        waited += 50;
+      }
+      player.unmount();
+      return waited;
+    };
+    const without = await firstLineAt(0);
+    const asking = await firstLineAt(1);
+    expect(without).toBeLessThan(10_000);
+    expect(asking).toBe(without);
+  });
+
+  it('keeps a SubDL file picked by hand over one named for the release that comes later', async () => {
+    const entry = streamEntry(RELEASE);
+    const picked = subdlFile('picked', FULL, { label: 'Test.Film.2026.720p.HDTV-OTHER' });
+    const more = offer(entry, [file('os', FULL), picked], 1);
+    const player = play(entry);
+    await player.wait(300);
+    player.subtitles.choose(fileChoice(picked), 'version');
+    await player.wait(300);
+    more([subdlFile('named', FULL, { label: RELEASE })], 0);
+    await player.wait(3000);
+    expect(player.subtitles.choice).toEqual(fileChoice(picked));
+  });
+
+  it('gives the files that agree at most six of its files', async () => {
+    const shift = (cues: Cue[], by: number): Cue[] =>
+      cues.map((cue) => ({ ...cue, start: cue.start + by, end: cue.end + by }));
+    const AMZN = 'Show.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264';
+    const entry = streamEntry('Show.S01E06.2160p.AMZN.WEB-DL.DDP5.1.HEVC-Grp');
+    const real = file('real', shift(FULL, 8), { label: 'Show.S01E06.WEB.REAL.srt' });
+    const amzn = [
+      file('ntb', FULL, { lang: 'spa', label: `${AMZN}-NTb.srt` }),
+      file('flux', FULL, { lang: 'dut', label: `${AMZN}-FLUX.srt` }),
+    ];
+    const fromSubdl = Array.from({ length: 10 }, (_, i) =>
+      subdlFile(`s${i}`, FULL, { lang: 'ger', label: `${AMZN}-G${i}.srt` }),
+    );
+    offer(entry, [real, ...amzn, ...fromSubdl]);
+    const player = play(entry);
+    await player.wait(6000);
+    const read = new Set(world.loads.filter((url) => url.indexOf('/subdl-') !== -1));
+    expect(read.size).toBeGreaterThan(0);
+    expect(read.size).toBeLessThanOrEqual(6);
+    expect(Array.from(read).every((url) => fromSubdl.slice(0, 6).some((f) => f.url === url))).toBe(
+      true,
+    );
   });
 });

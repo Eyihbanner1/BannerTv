@@ -247,6 +247,10 @@ describe('createSubdlClient', () => {
     const limit = setup({ answer: () => ({ status: 429, body: { error: 'daily_limit' } }) });
     await settle(limit.client.search('movie', 'tt9900001', ['en']));
     expect(limit.usage.resting()?.why).toBe('limit');
+    expect(await settle(limit.client.search('movie', 'tt9900003', ['en']))).toEqual({
+      status: 'off',
+      why: 'daily limit',
+    });
   });
 
   it('serves an older copy while resting, with no request', async () => {

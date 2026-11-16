@@ -18,6 +18,9 @@ import {
   traceFileText,
   traceReason,
   traceReference,
+  traceSubdl,
+  traceSubdlMore,
+  type SubdlTrace,
 } from './subtitle-trace';
 import type { FileTextCost, FileTextReport, FileTextSkip } from './file-subtitles';
 
@@ -505,5 +508,101 @@ describe('the subtitles of the last few plays', () => {
       traceFileReference('tt0000002', null);
       expect(recentSubtitleTraces()[0]!.file).toBeUndefined();
     });
+  });
+});
+
+describe("SubDL's search, in Diagnostics", () => {
+  const VIDEO = 'tt9900001';
+  /** The SubDL part of the play's row for this trace. */
+  const said = (trace: SubdlTrace, showing?: string) => {
+    forgetSubtitleTraces();
+    startSubtitleTrace(VIDEO, 0);
+    traceFiles(VIDEO, ['eng']);
+    if (showing) traceReason(VIDEO, 'best fit', showing);
+    traceSubdl(VIDEO, trace);
+    return subtitleTraceRows()[0]![1]
+      .split(' · ')
+      .filter((part) => part.startsWith('SubDL'));
+  };
+
+  it('says what it answered, the language showing first, and whether the answer was saved', () => {
+    expect(said({ state: 'answered', files: { es: 4, eng: 29 }, ms: 600, saved: false })).toEqual([
+      'SubDL en 29, es 4 in 0.6 s',
+    ]);
+    expect(
+      said(
+        { state: 'answered', files: { en: 29, es: 4, fr: 2, de: 1, it: 1 }, ms: 600, saved: false },
+        'fr',
+      ),
+    ).toEqual(['SubDL fr 2, en 29, es 4, +2 languages in 0.6 s']);
+    expect(said({ state: 'answered', files: { en: 29 }, ms: 5, saved: true })).toEqual([
+      'SubDL en 29 (saved answer)',
+    ]);
+    expect(said({ state: 'answered', files: {}, ms: 600, saved: false })).toEqual([
+      'SubDL: no files in 0.6 s',
+    ]);
+    expect(said({ state: 'asking' })).toEqual(['SubDL: asking']);
+  });
+
+  it('says why it was not asked', () => {
+    const words: Array<[Extract<SubdlTrace, { state: 'off' }>['why'], string]> = [
+      ['no key', 'SubDL: no key'],
+      ['kids', 'SubDL: not on kids profiles'],
+      ['key refused', 'SubDL: key not accepted'],
+      ['not imdb', 'SubDL: not asked (not an IMDb title)'],
+      ['special', 'SubDL: not asked (special episode)'],
+      ['subtitles off', 'SubDL: not asked (subtitles off)'],
+      ['resting', 'SubDL: resting (too many requests)'],
+      ['daily limit', 'SubDL: daily limit reached'],
+    ];
+    for (const [why, text] of words) expect(said({ state: 'off', why })).toEqual([text]);
+    expect(said({ state: 'off', why: 'resting', saved: { en: 12 } })).toEqual([
+      'SubDL: resting (too many requests), saved answer en 12',
+    ]);
+  });
+
+  it('says how it failed', () => {
+    const words: Array<[Extract<SubdlTrace, { state: 'failed' }>['why'], string]> = [
+      ['timeout', 'SubDL: no answer in 8 s'],
+      ['network', 'SubDL: couldn’t be reached'],
+      ['busy', 'SubDL: too many requests, resting'],
+      ['limit', 'SubDL: daily limit reached'],
+      ['refused', 'SubDL: key not accepted'],
+      ['challenge', 'SubDL: blocked for now, try later'],
+      ['server', 'SubDL: server error'],
+      ['invalid', 'SubDL: unreadable answer'],
+    ];
+    for (const [why, text] of words)
+      expect(said({ state: 'failed', why, ms: 100 })).toEqual([text]);
+    expect(said({ state: 'failed', why: 'server', ms: 100, saved: { eng: 12 } })).toEqual([
+      'SubDL: server error, saved answer en 12',
+    ]);
+  });
+
+  it('says what asking again for a language turned on brought, after the first search', () => {
+    forgetSubtitleTraces();
+    startSubtitleTrace(VIDEO, 0);
+    traceSubdl(VIDEO, { state: 'answered', files: { en: 3 }, ms: 400, saved: false });
+    const row = () => subtitleTraceRows()[0]![1];
+    traceSubdlMore(VIDEO, { language: 'fre' });
+    expect(row()).toContain('SubDL en 3 in 0.4 s · SubDL asked again for fr: asking');
+    traceSubdlMore(VIDEO, { language: 'fre', files: 3 });
+    expect(row()).toContain('SubDL asked again for fr: 3 files');
+    traceSubdlMore(VIDEO, { language: 'fre', files: 1 });
+    expect(row()).toContain('SubDL asked again for fr: 1 file');
+    traceSubdlMore(VIDEO, { language: 'fre', failed: 'timeout' });
+    expect(row()).toContain('SubDL asked again for fr: no answer in 8 s');
+    // Straight after the files.
+    expect(row().indexOf('no files · SubDL en 3')).toBeGreaterThan(-1);
+  });
+
+  it('holds no link and no key', () => {
+    forgetSubtitleTraces();
+    startSubtitleTrace(VIDEO, 0);
+    traceSubdl(VIDEO, { state: 'failed', why: 'refused', ms: 100, saved: { en: 2 } });
+    traceSubdlMore(VIDEO, { language: 'fr', off: 'resting' });
+    const text = JSON.stringify(recentSubtitleTraces()) + JSON.stringify(subtitleTraceRows());
+    expect(text).not.toContain('http');
+    expect(text).not.toContain('FAKE-SUBDL-KEY');
   });
 });
