@@ -4,8 +4,10 @@ import { preferences, setPreference, type Preferences } from '@tv/data/preferenc
 import { allAddons } from '@tv/data/addons';
 import { activeProfile, activeProfileId, isKidsProfile, profiles } from '@tv/data/profiles';
 import { accountSection, accountState, checkAccountSection, refreshAccount } from '@tv/data/sync';
+import { subdlKey } from '@tv/data/subdl';
 import { traktAccount } from '@tv/data/trakt';
 import { androidHelperState } from '@tv/platform/android';
+import { subdlSettingsValue } from '@tv/screens/settings/subdl-status';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -155,6 +157,7 @@ export function SettingsScreen() {
   // Every install, those switched off too: Addons lists them all.
   const addons = useSyncExternalStore(allAddons.subscribe, allAddons.get);
   const trakt = useSyncExternalStore(traktAccount.subscribe, traktAccount.get);
+  const subdlValue = subdlSettingsValue(useSyncExternalStore(subdlKey.subscribe, subdlKey.get));
   const [choosing, setChoosing] = useState<Choice | null>(null);
   const [styling, setStyling] = useState(false);
   const look = useSubtitleStyle();
@@ -315,16 +318,27 @@ export function SettingsScreen() {
             </Section>
           ) : null}
 
-          {services.tmdb ? (
-            <Section title={t('settings.services')}>
+          <Section title={t('settings.services')}>
+            <ListRow
+              title={t('settings.subdl', {
+                value: t(
+                  subdlValue === 'refused' ? 'settings.subdlRefused' : `common.${subdlValue}`,
+                ),
+              })}
+              detail={t('phone.subdlDetail')}
+              onPress={() => router.push('/subdl')}
+            />
+            {services.tmdb ? (
               <Toggle
                 title={t('settings.tmdb', { value: prefs.tmdb ? t('common.on') : t('common.off') })}
                 value={prefs.tmdb}
                 onChange={(next) => setPreference('tmdb', next)}
               />
-              {prefs.tmdb ? <Text style={styles.credit}>{t('settings.tmdbCredit')}</Text> : null}
-            </Section>
-          ) : null}
+            ) : null}
+            {services.tmdb && prefs.tmdb ? (
+              <Text style={styles.credit}>{t('settings.tmdbCredit')}</Text>
+            ) : null}
+          </Section>
 
           <ThisAppSection version={version} />
         </>

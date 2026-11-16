@@ -298,3 +298,11 @@ describe('redact: secrets', () => {
     for (const line of plain) expect(redact(line)).toBe(line);
   });
 });
+
+describe('redact: a SubDL key', () => {
+  it('is gone from a header line and from a named value', () => {
+    check('X-API-Key: FAKE-SUBDL-KEY-0000 sent to SubDL', ['FAKE-SUBDL-KEY-0000'], ['SubDL']);
+    check('api_key=FAKE-SUBDL-KEY-0000', ['FAKE-SUBDL-KEY-0000']);
+    check('{"x-api-key":"FAKE-SUBDL-KEY-0000"}', ['FAKE-SUBDL-KEY-0000']);
+  });
+});
