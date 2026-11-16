@@ -863,7 +863,10 @@ describe('bestSubdlRelease', () => {
 
 describe('capSubdlFiles', () => {
   it('keeps every file not SubDL’s, and the first of SubDL’s', () => {
-    const files = ['os#1', 'subdl#1', 'subdl#2', 'os#2', 'subdl#3'].map((key) => ({ key }));
+    const files = ['os#1', 'subdl#1', 'subdl#2', 'os#2', 'subdl#3'].map((key) => ({
+      key,
+      lang: 'en',
+    }));
     expect(capSubdlFiles(files, 2).map((file) => file.key)).toEqual([
       'os#1',
       'subdl#1',
@@ -871,6 +874,22 @@ describe('capSubdlFiles', () => {
       'os#2',
     ]);
     expect(capSubdlFiles(files, 0).map((file) => file.key)).toEqual(['os#1', 'os#2']);
+  });
+
+  it('keeps SubDL’s files in the language showing first, then others in their order', () => {
+    const files = [
+      { key: 'os#1', lang: 'ger' },
+      ...['en1', 'en2', 'en3'].map((id) => ({ key: `subdl#${id}`, lang: 'en' })),
+      { key: 'subdl#de1', lang: 'de' },
+      { key: 'subdl#de2', lang: 'de' },
+    ];
+    expect(capSubdlFiles(files, 3, 'ger').map((file) => file.key)).toEqual([
+      'os#1',
+      'subdl#en1',
+      'subdl#de1',
+      'subdl#de2',
+    ]);
+    expect(capSubdlFiles(files, 1, 'de').map((file) => file.key)).toEqual(['os#1', 'subdl#de1']);
   });
 });
 

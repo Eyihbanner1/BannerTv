@@ -320,10 +320,23 @@ export function bestSubdlRelease(
   return best ?? file.releases[0];
 }
 
-/** Every file not SubDL's, and the first `max` of SubDL's, in their order. */
-export function capSubdlFiles<T extends { key: string }>(files: readonly T[], max: number): T[] {
-  let left = max;
-  return files.filter((file) => !file.key.startsWith('subdl#') || left-- > 0);
+/**
+ * Every file not SubDL's, and `max` of SubDL's, in their order: those in
+ * `language` (the one showing) first, then the first of the others.
+ */
+export function capSubdlFiles<T extends { key: string; lang: string }>(
+  files: readonly T[],
+  max: number,
+  language?: string,
+): T[] {
+  const ours = files.filter((file) => file.key.startsWith('subdl#'));
+  const wanted = language === undefined ? undefined : languageKey(language);
+  const kept = new Set<T>();
+  for (const file of ours) {
+    if (kept.size < max && languageKey(file.lang) === wanted) kept.add(file);
+  }
+  for (const file of ours) if (kept.size < max) kept.add(file);
+  return files.filter((file) => !file.key.startsWith('subdl#') || kept.has(file));
 }
 
 /** What SubDL's search says for Diagnostics: counts by language, never a link. */

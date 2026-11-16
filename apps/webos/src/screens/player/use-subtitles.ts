@@ -855,10 +855,12 @@ export function useSubtitles(
       length,
       today: showing,
       ranked: rankedFiles(offered, showing.lang, contextIn(offered, showing.lang, stream, length)),
-      // SubDL's first few only, so its files never outnumber the reads it allows.
+      // A few of SubDL's only, so its files never outnumber the reads it allows: the
+      // language showing first.
       files: capSubdlFiles(
         offered.filter((option) => !unreadable(option.url) && !otherEpisode(option, release)),
         SUBDL_AGREEMENT_FILES,
+        showing.lang,
       ),
       known: (url) => {
         const lines = checks.lines(url);
