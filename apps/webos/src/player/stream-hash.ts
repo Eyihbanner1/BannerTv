@@ -103,9 +103,14 @@ export function canHash(url: string): boolean {
  * file or a short piece; the file's size could not be learnt; the file is
  * too small to hash; the request was refused or never answered (a host
  * that sends no cross-origin headers, or no network: the page cannot tell
- * which); or it took longer than HASH_TIMEOUT_MS.
+ * which); the server was too busy to answer it (`busyStatus`), which says
+ * nothing of the link; or it took longer than HASH_TIMEOUT_MS.
  */
-export type HashFailure = 'no range' | 'no size' | 'too small' | 'refused' | 'timed out';
+export type HashFailure = 'no range' | 'no size' | 'too small' | 'refused' | 'busy' | 'timed out';
+
+/** Statuses of a server too busy to answer now (408, 425, 429, 5xx), which says nothing of the link. */
+export const busyStatus = (status: number) =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
 
 /** Which read a failure came at: the first 64 KB, the file's size, or the last 64 KB. */
 export type HashStep = 'start' | 'size' | 'end';
@@ -146,6 +151,8 @@ interface Answer<T> {
    * is not refused: the same host would send it again.
    */
   refused: boolean;
+  /** Of those, an answer from a server too busy for it now (`busyStatus`). */
+  busy?: boolean;
 }
 
 /** A read stopped by its own NATIVE_READ_MS: the host is sending more than was asked for. */
@@ -222,7 +229,11 @@ async function readRange(
         // A server that ignores the range sends the whole file: stop at the headers.
         if (response.status !== 206) {
           stop();
-          return { value: { total, landed, sizeReadable }, refused: !response.ok };
+          return {
+            value: { total, landed, sizeReadable },
+            refused: !response.ok,
+            ...(busyStatus(response.status) && { busy: true }),
+          };
         }
         const bytes = new Uint8Array(await response.arrayBuffer());
         return {
@@ -251,7 +262,11 @@ async function readSize(url: string, signal: AbortSignal | undefined): Promise<A
     return await fetchWith(url, {}, signal, async (response, stop): Promise<Answer<number>> => {
       const length = Number(response.headers.get('content-length'));
       stop();
-      return { value: response.ok && length > 0 ? length : undefined, refused: !response.ok };
+      return {
+        value: response.ok && length > 0 ? length : undefined,
+        refused: !response.ok,
+        ...(busyStatus(response.status) && { busy: true }),
+      };
     });
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -301,7 +316,7 @@ async function read(
 ): Promise<{ videoHash: string; videoSize: number }> {
   progress.walks++;
   const first = await readRange(url, 0, signal);
-  if (first.refused) throw new HashError('refused', 'start');
+  if (first.refused) throw new HashError(first.busy ? 'busy' : 'refused', 'start');
   if (!first.value?.bytes) throw new HashError('no range', 'start');
   const { landed, bytes: head } = first.value;
   if (slot === mine) {
@@ -331,7 +346,7 @@ async function read(
     if (!first.value.sizeReadable) throw new HashError('no size', 'size');
     const sized = await once((target) => readSize(target, signal));
     if (sized.value === undefined) {
-      throw new HashError(sized.refused ? 'refused' : 'no size', 'size');
+      throw new HashError(sized.busy ? 'busy' : sized.refused ? 'refused' : 'no size', 'size');
     }
     size = sized.value;
   }
@@ -344,9 +359,12 @@ async function read(
     // An answer that names another size is not this file's end.
     const total = answer.value?.total;
     if (bytes && total !== undefined && total !== size) return { refused: true };
-    return bytes ? { value: bytes, refused: false } : { refused: answer.refused };
+    if (bytes) return { value: bytes, refused: false };
+    return { refused: answer.refused, ...(answer.busy && { busy: true }) };
   });
-  if (!last.value) throw new HashError(last.refused ? 'refused' : 'no range', 'end');
+  if (!last.value) {
+    throw new HashError(last.busy ? 'busy' : last.refused ? 'refused' : 'no range', 'end');
+  }
   const videoHash = openSubtitlesHash(size, head, last.value);
   if (!videoHash) throw new HashError('too small', 'end');
   return { videoHash, videoSize: size };

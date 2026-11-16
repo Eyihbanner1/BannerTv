@@ -476,6 +476,7 @@ export function withFileSubtitles(
             // Its read of the end was refused by the stream's own link too: so would ours be.
             giveUp('refused');
           }
+          // A busy server says nothing of the link: the reader asks it itself, and tries again.
           if (done) return false;
         }
         // Its first bytes are good whatever came after, and where they landed, unless that

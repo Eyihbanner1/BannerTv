@@ -503,6 +503,30 @@ describe('reading the hash through a link that redirects twice', () => {
     expect(walks(asked)).toBe(1);
   });
 
+  it('says a busy server (429, 503) apart from a refusal, at the start or the end', async () => {
+    for (const status of [429, 503, 502, 408]) {
+      forgetHashes();
+      serveChain({ type: 'basic' });
+      const chain = globalThis.fetch;
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        await chain(url, init);
+        return answer(new Response('', { status }), `${CDN}?token=t1`, 'basic');
+      });
+      expect(await readStreamHash(LINK)).toMatchObject({ failed: 'busy', step: 'start' });
+    }
+    // The end busy where it landed, and through the stream's link too.
+    forgetHashes();
+    serveChain({ type: 'basic' });
+    const chain = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const range = (init?.headers as Record<string, string> | undefined)?.Range ?? '';
+      if (range.startsWith('bytes=0-')) return chain(url, init);
+      await chain(url, init);
+      return answer(new Response('', { status: 503 }), `${CDN}?token=t2`, 'basic');
+    });
+    expect(await readStreamHash(LINK)).toMatchObject({ failed: 'busy', step: 'end' });
+  });
+
   it('reads both ends through the stream’s link when the fetch can’t say where it landed', async () => {
     const asked = serveChain({ type: 'basic', noUrl: true });
     expect(await readStreamHash(LINK)).toMatchObject({

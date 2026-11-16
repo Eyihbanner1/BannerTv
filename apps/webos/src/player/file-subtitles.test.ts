@@ -1004,6 +1004,26 @@ describe('what the hash read found', () => {
     expect(asked).toEqual([]);
   });
 
+  it('reads the file itself where the hash read found the server busy at its start', async () => {
+    const { engine, asked } = await played({
+      file: await file('mkvmerge.mkv'),
+      reading: { failed: 'busy', step: 'start', ms: 300, walks: 1 },
+    });
+    expect(engine.textTracks()).toHaveLength(5);
+    expect(asked[0]).toMatchObject({ url: LINK, start: 0 });
+  });
+
+  it('reads from the hash’s first bytes where the server was busy for its end', async () => {
+    const mkv = await file('mkvmerge.mkv');
+    const head = await mkv.read(0, 65536);
+    const { engine } = await played({
+      file: mkv,
+      landing: { landed: `${CDN}?token=t0`, head, total: mkv.size },
+      reading: { failed: 'busy', step: 'end', ms: 900, walks: 1 },
+    });
+    expect(engine.textTracks()).toHaveLength(5);
+  });
+
   it('reads from the hash’s first bytes, and where they landed, after it failed later', async () => {
     const long = syntheticFile({
       tracks: [{ number: 2, codecId: 'S_TEXT/UTF8', language: 'eng' }],

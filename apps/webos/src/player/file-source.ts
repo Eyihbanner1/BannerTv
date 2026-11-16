@@ -1,5 +1,5 @@
 import type { ByteSource, ReadSignal } from '@bannertv/core';
-import { landedAt } from './stream-hash';
+import { busyStatus, landedAt } from './stream-hash';
 
 /*
  * A direct-play file's bytes, read by ranges from the page, for the reader of
@@ -121,10 +121,6 @@ type Answer =
   /** No answer, or a body that stopped coming: no network for a moment, or a hidden refusal. */
   | { kind: 'unanswered'; typeError: boolean }
   | { kind: 'aborted' };
-
-/** Statuses of a server too busy to answer now, which says nothing of the link. */
-const busy = (status: number) =>
-  status === 408 || status === 425 || status === 429 || status >= 500;
 
 const EMPTY = new Uint8Array(0);
 
@@ -280,7 +276,7 @@ export function createFetchSource(
       }
       if (response.status !== 206) {
         stop();
-        return busy(response.status) ? { kind: 'busy' } : { kind: 'refused' };
+        return busyStatus(response.status) ? { kind: 'busy' } : { kind: 'refused' };
       }
       // Hidden behind cross-origin checks where the host does not expose it: the 206 is enough.
       const range = /^\s*bytes\s+(\d+)-\d+\/(\d+|\*)/i.exec(
