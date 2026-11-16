@@ -14,8 +14,11 @@ const KEY_GAP_MS = 120;
  * storage earlier than that, as a plain init script does when the document is created, storage
  * apart from the page's: after a reload the page then has none of what the document before it
  * saved (a journey's seeded preferences gone, or its "seeded once" mark gone and the seed stored
- * again over what the app saved since). Touched from here, it never does. IndexedDB is not
- * affected, so a script that only opens it can stay a plain init script.
+ * again over what the app saved since). Touched from here, it almost never does. One plain init
+ * script that touches storage is enough to bring it back for the whole journey, so every such
+ * script of a file:// journey comes through here. IndexedDB is not affected, so a script that
+ * only opens it can stay a plain init script, and so can one for the Android page, served over
+ * https, where storage is not lost.
  */
 export async function addStorageInitScript<Arg>(
   page: Page,
@@ -23,8 +26,10 @@ export async function addStorageInitScript<Arg>(
   arg?: Arg,
 ): Promise<void> {
   const whenParsed = (run: (value: unknown) => void, value: unknown) => {
+    // A document already past loading when the script runs (none of the app's is) runs it now.
+    if (document.readyState !== 'loading') return run(value);
     const parsed = () => {
-      if (document.readyState !== 'interactive') return;
+      if (document.readyState === 'loading') return;
       document.removeEventListener('readystatechange', parsed);
       run(value);
     };

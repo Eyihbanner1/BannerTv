@@ -21,7 +21,7 @@ import {
   video,
 } from './player';
 import { openAsLgTv } from './homebrew';
-import { press, pressBack } from './tv';
+import { addStorageInitScript, press, pressBack } from './tv';
 
 /*
  * The video file's own subtitles on the TV's own player (ADR 0003, decision 9): MKV files
@@ -41,7 +41,7 @@ interface Play {
 
 /** Plays an MKV file of fixtures/mkv through the redirects, to its first picture. */
 async function playFile(page: Page, play: Play) {
-  await page.addInitScript(() =>
+  await addStorageInitScript(page, () =>
     localStorage.setItem('bannertv.tuning', JSON.stringify({ marks: true })),
   );
   await recordShownAt(page);

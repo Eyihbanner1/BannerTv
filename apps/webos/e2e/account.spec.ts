@@ -45,7 +45,8 @@ const UNREACHED = /^Failed to load resource: net::ERR_FAILED/;
  */
 async function seedWatching(page: Page): Promise<void> {
   const at = Math.floor((Date.now() - 60000) / 1000) * 1000 + 123;
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     (seed: Record<string, unknown>) => {
       const navigation = performance.getEntriesByType('navigation')[0] as
         PerformanceNavigationTiming | undefined;
@@ -682,7 +683,7 @@ test("a join's reload that misses what the join wrote to localStorage puts it ba
   // As on a TV whose reload reads localStorage before the join's last writes have arrived.
   // The address carries what to lose, since a reload here may not see sessionStorage yet,
   // and window.name is the join's own.
-  await other.addInitScript(() => {
+  await addStorageInitScript(other, () => {
     const prefix = '#lost-join=';
     if (location.hash.indexOf(prefix) !== 0) return;
     const lost = decodeURIComponent(location.hash.slice(prefix.length));

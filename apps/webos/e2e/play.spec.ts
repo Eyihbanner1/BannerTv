@@ -21,7 +21,15 @@ import {
   type TestStream,
   type TestSubtitle,
 } from './play';
-import { APP_URL, expectFocus, focusedKey, openSection, press, pressBack } from './tv';
+import {
+  addStorageInitScript,
+  APP_URL,
+  expectFocus,
+  focusedKey,
+  openSection,
+  press,
+  pressBack,
+} from './tv';
 import { openAsLgTv } from './homebrew';
 import {
   heardApart,
@@ -2145,7 +2153,7 @@ test('BannerTV Demo’s subtitle checks wait to be picked, and leave the languag
   await mockPlayback(page);
   await routeDemoFilms(page);
   // This viewer reads English subtitles.
-  await page.addInitScript(() =>
+  await addStorageInitScript(page, () =>
     localStorage.setItem('bannertv.preferences', JSON.stringify({ subtitleLanguage: 'eng' })),
   );
   await page.goto(APP_URL);
@@ -4881,7 +4889,7 @@ test('Settings shows subtitle style in the same sheet, with a sample line above 
 test('with timing marks on, the stages of a Play read in order, and no mark names an address', async ({
   page,
 }) => {
-  await page.addInitScript(() =>
+  await addStorageInitScript(page, () =>
     localStorage.setItem('bannertv.tuning', JSON.stringify({ marks: true })),
   );
   await mockAddons(page);

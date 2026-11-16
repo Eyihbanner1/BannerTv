@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { FIRST_ROW, mockAddons, png, SERIES_ROW } from './addons';
 import { mockPlayback, seedStreamAddon } from './play';
-import { APP_URL, expectFocus, openSection, press, pressBack } from './tv';
+import { addStorageInitScript, APP_URL, expectFocus, openSection, press, pressBack } from './tv';
 
 /**
  * The switches the TV comparisons of the first walk down Home tried (see
@@ -24,7 +24,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function tune(page: Page, value: object): Promise<void> {
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     (stored) => localStorage.setItem('bannertv.tuning', stored),
     JSON.stringify(value),
   );

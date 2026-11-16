@@ -1,7 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
 import { API_SERVICE } from '../src/data/api-service';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
-import { APP_URL, expectFocus, expectFocusLabel, press, pressBack, watchErrors } from './tv';
+import {
+  addStorageInitScript,
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  press,
+  pressBack,
+  watchErrors,
+} from './tv';
 
 test.beforeEach(async ({ page }) => {
   await mockAddons(page);
@@ -380,7 +388,8 @@ test('Home still works with every tuning switch at its leanest', async ({ page }
     decoding: 'async',
     mips: false,
   };
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     (value) => localStorage.setItem('bannertv.tuning', value),
     JSON.stringify(lean),
   );
@@ -413,7 +422,8 @@ test('the earlier sliding look still works from tuning', async ({ page }) => {
     mips: true,
     heroFade: true,
   };
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     (value) => localStorage.setItem('bannertv.tuning', value),
     JSON.stringify(earlier),
   );

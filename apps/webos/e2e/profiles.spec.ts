@@ -5,6 +5,7 @@ import { FIRST_ROW, mockAddons } from './addons';
 import { seedStreamAddon } from './play';
 import { GUEST_ID, KIDS_ID, lockedWith, main, seedProfiles } from './profiles';
 import {
+  addStorageInitScript,
   APP_URL,
   expectFocus,
   expectFocusLabel,
@@ -162,7 +163,7 @@ test('opening BannerTV again from the launcher asks who is watching when the pro
     askAtLaunch: false,
   });
   // As on a TV that loses a storage write made just before a reload: the choice comes back.
-  await page.addInitScript(() => {
+  await addStorageInitScript(page, () => {
     const lost = sessionStorage.getItem('test.lostChoice');
     if (lost === null) return;
     sessionStorage.removeItem('test.lostChoice');
@@ -441,7 +442,8 @@ test("a kids profile's Discover leaves out a sports catalog, even one offering F
     },
   ];
   // Before mockAddons, so its usual list is not stored over this one.
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     ({ stored, settings }) => {
       if (sessionStorage.getItem('bannertv.test.addons')) return;
       sessionStorage.setItem('bannertv.test.addons', '1');
@@ -737,13 +739,17 @@ test('Forgot PIN? for Main on a TV with no account resets BannerTV and starts it
     lastId: 'main',
     askAtLaunch: true,
   };
-  await page.addInitScript((saved) => {
-    if (window.name === 'seeded') return;
-    window.name = 'seeded';
-    localStorage.setItem('bannertv.welcomed', '1');
-    localStorage.setItem('bannertv.profiles', saved);
-    localStorage.setItem('bannertv.tuning', '{"kept":true}');
-  }, JSON.stringify(state));
+  await addStorageInitScript(
+    page,
+    (saved) => {
+      if (window.name === 'seeded') return;
+      window.name = 'seeded';
+      localStorage.setItem('bannertv.welcomed', '1');
+      localStorage.setItem('bannertv.profiles', saved);
+      localStorage.setItem('bannertv.tuning', '{"kept":true}');
+    },
+    JSON.stringify(state),
+  );
   // What is taken out of localStorage is noted as it goes, before and after the restart. Read
   // afterwards, it can't tell: over file://, this test browser sometimes starts the reloaded
   // page with none of what was stored, even keys nothing touched (a bare page does the same).

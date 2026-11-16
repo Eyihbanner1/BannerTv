@@ -12,6 +12,7 @@ import {
   type SportsOptions,
 } from './sports';
 import {
+  addStorageInitScript,
   APP_URL,
   expectFocus,
   expectFocusLabel,
@@ -1268,7 +1269,7 @@ async function dataScripts(page: Page): Promise<string[]> {
 
 test.describe('with the team list held back until the launch settles (matcherAt idle)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() =>
+    await addStorageInitScript(page, () =>
       localStorage.setItem('bannertv.tuning', JSON.stringify({ matcherAt: 'idle' })),
     );
   });

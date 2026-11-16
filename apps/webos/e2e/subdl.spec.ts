@@ -11,7 +11,15 @@ import {
   SUBDL_FILM_RELEASE,
   type SubdlScenario,
 } from './subdl';
-import { APP_URL, expectFocus, expectFocusLabel, openSection, press, pressBack } from './tv';
+import {
+  addStorageInitScript,
+  APP_URL,
+  expectFocus,
+  expectFocusLabel,
+  openSection,
+  press,
+  pressBack,
+} from './tv';
 
 /*
  * SubDL beside the addons, with the viewer's own key (ADR 0003, step D), against a stand-in for
@@ -251,7 +259,8 @@ test('a kids profile has no SubDL row and never asks SubDL, even with a key stor
     },
   });
   // The kids profile's own choice: English subtitles, so SubDL would be asked if it could be.
-  await page.addInitScript(
+  await addStorageInitScript(
+    page,
     (key) => localStorage.setItem(key, JSON.stringify({ subtitleLanguage: 'eng' })),
     `bannertv.preferences.${KIDS_ID}`,
   );
