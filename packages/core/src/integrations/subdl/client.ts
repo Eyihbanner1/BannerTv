@@ -18,11 +18,17 @@ import type { SubdlUsage } from './usage';
  * viewer's own key (ADR 0003, step D). Answers are kept a day, and an older
  * one stands in for a week while SubDL fails or rests. Nothing here ever
  * holds the video back: a search that has not answered in SUBDL_SEARCH_MS
- * is over for the play, and an answer after that only goes into the cache.
+ * is over for the play, and an answer after that, within SUBDL_ANSWER_MS of
+ * the request, only goes into the cache.
  */
 
 /** How long a play waits for SubDL's answer. */
 export const SUBDL_SEARCH_MS = 8000;
+/**
+ * How long the request itself waits, from when it is sent: well past the
+ * play's wait, so a slow answer still fills the cache for the next play.
+ */
+export const SUBDL_ANSWER_MS = 30_000;
 /** The same ask that failed is not sent again for this long in a session. */
 export const SUBDL_FAILURE_MEMORY_MS = 10 * 60 * 1000;
 const KEY_CHECK_MS = 10_000;
@@ -159,7 +165,7 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
       let answer: { status: number; body: unknown };
       try {
         answer = await run(type, videoId, () =>
-          http(request.url, { headers: request.headers, timeoutMs: SUBDL_SEARCH_MS }),
+          http(request.url, { headers: request.headers, timeoutMs: SUBDL_ANSWER_MS }),
         );
       } catch (error) {
         const failure: SubdlFailure =

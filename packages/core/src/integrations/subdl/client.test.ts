@@ -9,6 +9,7 @@ import {
 } from '../../storage';
 import {
   createSubdlClient,
+  SUBDL_ANSWER_MS,
   SUBDL_FAILURE_MEMORY_MS,
   SUBDL_SEARCH_MS,
   type SubdlHttp,
@@ -39,11 +40,22 @@ function setup(
   } = {},
 ) {
   const requests: Array<{ url: string; headers: Record<string, string>; timeoutMs: number }> = [];
+  let clock = 0;
+  const timers: Array<{ at: number; fn: () => void; done: boolean }> = [];
+  // As the app's requestJson: no answer within timeoutMs of the request is a timeout.
   const http: SubdlHttp = (url, init) => {
     requests.push({ url, ...init });
-    return Promise.resolve(
+    const answer = Promise.resolve(
       options.answer ? options.answer(url) : { status: 200, body: filmAnswer() },
     );
+    const late = new Promise<never>((_, reject) => {
+      timers.push({
+        at: clock + init.timeoutMs,
+        fn: () => reject(new HttpError('timeout', 'No answer')),
+        done: false,
+      });
+    });
+    return Promise.race([answer, late]);
   };
   let record: SubdlKeyRecord | null =
     options.record === undefined ? { key: FAKE_SUBDL_KEY, state: 'works' } : options.record;
@@ -53,8 +65,6 @@ function setup(
   const kv = options.kv ?? memoryKeyValueStore();
   const now = options.now ?? Date.now;
   const usage = options.usage ?? createSubdlUsage({ storage: kv, now });
-  let clock = 0;
-  const timers: Array<{ at: number; fn: () => void; done: boolean }> = [];
   const runs: Array<[string, string]> = [];
   const client = createSubdlClient({
     http,
@@ -155,7 +165,7 @@ describe('createSubdlClient', () => {
     expect(filmFiles(first.get())).toEqual(['9000001-9100001']);
     expect(requests).toHaveLength(1);
     expect(requests[0]!.headers).toEqual({ 'X-API-Key': FAKE_SUBDL_KEY });
-    expect(requests[0]!.timeoutMs).toBe(SUBDL_SEARCH_MS);
+    expect(requests[0]!.timeoutMs).toBe(SUBDL_ANSWER_MS);
     expect(runs).toEqual([['movie', 'tt9900001']]);
     const second = client.search('movie', 'tt9900001', ['eng']);
     expect(await settle(second)).toMatchObject({ status: 'answered', saved: true });
@@ -219,6 +229,51 @@ describe('createSubdlClient', () => {
     expect(told).toBe(toldThen);
     const later = client.search('movie', 'tt9900001', ['en']);
     expect(await settle(later)).toMatchObject({ status: 'answered', saved: true });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('saves an answer that comes after the play gave up, and counts no failure for it', async () => {
+    const answers: Array<(value: Answer) => void> = [];
+    const { client, pass, requests, usage } = setup({
+      answer: () =>
+        new Promise<Answer>((resolve) => {
+          answers.push(resolve);
+        }),
+    });
+    // Three plays in a row on a link where SubDL takes 9 s to answer.
+    for (const id of ['tt9900001', 'tt9900002', 'tt9900003']) {
+      const search = client.search('movie', id, ['en']);
+      search.load();
+      await flush();
+      pass(SUBDL_SEARCH_MS);
+      expect(search.get()).toMatchObject({ status: 'failed', why: 'timeout' });
+      pass(1000);
+      answers[answers.length - 1]!({ status: 200, body: filmAnswer() });
+      await flush();
+    }
+    expect(usage.resting()).toBeNull();
+    for (const id of ['tt9900001', 'tt9900002', 'tt9900003']) {
+      expect(await settle(client.search('movie', id, ['en']))).toMatchObject({
+        status: 'answered',
+        saved: true,
+      });
+    }
+    expect(requests).toHaveLength(3);
+  });
+
+  it('gives the request up once it has had no answer for 30 s, as a timeout', async () => {
+    const { client, pass, requests } = setup({
+      answer: () => new Promise<Answer>(() => undefined),
+    });
+    const search = client.search('movie', 'tt9900001', ['en']);
+    search.load();
+    await flush();
+    pass(SUBDL_ANSWER_MS);
+    await flush();
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toMatchObject({
+      status: 'failed',
+      why: 'timeout',
+    });
     expect(requests).toHaveLength(1);
   });
 
