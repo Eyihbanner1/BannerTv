@@ -178,6 +178,36 @@ describe('synthetic files', () => {
     },
   );
 
+  // The group's size is written 8 bytes wide, so the real block is a few places into the
+  // guess, and its 400 bytes of text are more than the first read holds: the place that parses
+  // whole is then the frame's tail alone, and the real one only asks for more bytes.
+  it.each([
+    { name: 'a BlockGroup of track 32', track: 32, blocks: 'group' as const },
+    { name: 'a SimpleBlock of track 35', track: 35, blocks: 'simple' as const },
+  ])(
+    'does not take the end of the frame before $name for a block longer than the bytes in hand',
+    async ({ track, blocks }) => {
+      const list = lines(12, track, 2500).map((line, i) => ({
+        ...line,
+        text: `Line ${i + 1}${' of a long seeded line'.repeat(18)}`,
+      }));
+      const { file } = await fileOf({
+        tracks: [{ ...SRT, number: track }],
+        lines: list,
+        length: 40000,
+        frameRate: 1,
+        videoRate: 40000,
+        blocks,
+        clusterSizeWidths: [8],
+        noCueDuration: blocks === 'simple',
+        videoTail: () => Uint8Array.from([0xa1, 0xc0]),
+      });
+      const { cues, stats } = await readAll(file, track);
+      expect(stats.problems).toEqual({});
+      expect(cues.map((cue) => cue.lines)).toEqual(list.map((line) => [[{ text: line.text }]]));
+    },
+  );
+
   it('reads every line right after frames that end in random bytes, whatever the size width', async () => {
     let seed = 0x2545f491;
     const random = () => {

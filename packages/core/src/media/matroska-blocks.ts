@@ -464,6 +464,8 @@ export function createBlockReader(
    * SimpleBlock that holds another place may be the last bytes of the frame
    * before, read as a block that swallows the real one, so then the place
    * is not certain, nor is it when the winner is laced, as text never is.
+   * A place that asks for more bytes than are in hand is read further first,
+   * once: it may be the real block, behind a tail that parses whole.
    */
   async function guessedBlock(
     bytes: Bytes,
@@ -478,7 +480,16 @@ export function createBlockReader(
       for (let k = 0; k <= MAX_CLUSTER_HEADER - MIN_CLUSTER_HEADER; k++) {
         const parsed = parseBlockAt(view.data, k, view.start, trackNumber, true);
         if (isBlock(parsed)) found.push(parsed);
-        else if (parsed && found.length === 0) needs = Math.max(needs, k + parsed.needs);
+        else if (parsed) needs = Math.max(needs, k + parsed.needs);
+      }
+      // A place that asks for more bytes may be the real block, and one that parsed whole the
+      // frame's tail before it: every place is parsed whole before one is taken.
+      if (needs > view.data.length) {
+        if (attempt === 0) {
+          view = await bytesAt(view, first, needs);
+          continue;
+        }
+        return 'unsure';
       }
       if (found.length > 0) {
         const outer = found[0]!;
@@ -492,8 +503,7 @@ export function createBlockReader(
         }
         return outer;
       }
-      if (needs <= view.data.length) break;
-      view = await bytesAt(view, first, needs);
+      break;
     }
     return 'unsure';
   }
