@@ -2734,6 +2734,47 @@ describe('last episode’s timing', () => {
     expect(player.subtitles.offset).toBe(0);
   });
 
+  it('Undo after a match puts back the timing kept from the episode before', async () => {
+    await setOn(sub('e1'), 2);
+    const e2 = sub('e2');
+    const player = await playEpisode(2, [e2]);
+    const cues = player.subtitles.cues!;
+    const i = lineAt(cues, 600);
+    player.subtitles.matchLine(i, heard(cues[i]!.start, 1));
+    await player.flush();
+    expect(stores.releaseTimings.get(SERIES, 'binge:test-show')).toMatchObject({
+      offset: 1,
+      videoId: episode(2),
+    });
+    player.subtitles.undoMatch();
+    await player.flush();
+    expect(player.subtitles.offset).toBe(0);
+    expect(stores.releaseTimings.get(SERIES, 'binge:test-show')).toMatchObject({
+      offset: 2,
+      videoId: episode(1),
+    });
+    player.unmount();
+    // So the next episode is offered it still.
+    const next = await playEpisode(3, [sub('e3')]);
+    expect(next.subtitles.offer).toEqual({ offset: 2, drift: null });
+  });
+
+  it('Undo after a match on the first timing for the release keeps none', async () => {
+    const entry = release('ep1');
+    const e1 = sub('e1');
+    offer(entry, [e1]);
+    const player = play(entry, {}, false, episode(1));
+    await player.wait(2500);
+    const cues = player.subtitles.cues!;
+    const i = lineAt(cues, 600);
+    player.subtitles.matchLine(i, heard(cues[i]!.start, 1));
+    await player.flush();
+    expect(stores.releaseTimings.get(SERIES, 'binge:test-show')?.offset).toBe(1);
+    player.subtitles.undoMatch();
+    await player.flush();
+    expect(stores.releaseTimings.get(SERIES, 'binge:test-show')).toBeUndefined();
+  });
+
   it('No thanks holds for this episode only', async () => {
     await setOn(sub('e1'), 0.5);
     const e2 = sub('e2');

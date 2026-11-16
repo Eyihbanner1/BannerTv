@@ -11,6 +11,7 @@ import {
   linkedToVideo,
   otherEpisode,
   releaseGroup,
+  type ReleaseTiming,
   type StreamEntry,
   type SubtitleFit,
   subtitleFileKey,
@@ -1895,11 +1896,15 @@ export function useSubtitles(
   };
 
   // The first press of Match a line, for a second to fix a drift; and the timing there was
-  // before the last, for Undo. Both for the file showing on the stream playing only.
+  // before the last, for Undo, with the release's kept timing the press replaced. Both for the
+  // file showing on the stream playing only.
   const anchorRef = useRef<(Tap & { entry: StreamEntry | null; offsetKey: string }) | null>(null);
-  const undoRef = useRef<{ offsetKey: string; offset: number; drift: DriftChoice | null } | null>(
-    null,
-  );
+  const undoRef = useRef<{
+    offsetKey: string;
+    offset: number;
+    drift: DriftChoice | null;
+    release: { metaId: string; release: string; kept: ReleaseTiming | undefined } | null;
+  } | null>(null);
   const lastMatch = useRef<NonNullable<SubtitleTrace['matched']> | null>(null);
   useEffect(() => {
     anchorRef.current = null;
@@ -1911,7 +1916,15 @@ export function useSubtitles(
     const line = cues?.[index];
     const rawLine = rawCues?.[index];
     if (!canMatch || offsetKey === null || !line || !rawLine) return null;
-    undoRef.current = { offsetKey, offset: subtitleOffsets.get(offsetKey) ?? 0, drift: keptDrift };
+    undoRef.current = {
+      offsetKey,
+      offset: subtitleOffsets.get(offsetKey) ?? 0,
+      drift: keptDrift,
+      release:
+        metaId !== undefined && timingRelease !== null
+          ? { metaId, release: timingRelease, kept: releaseTimings.get(metaId, timingRelease) }
+          : null,
+    };
     const press = { entry, offsetKey, at: at.time, speed: at.speed, start: rawLine.start };
     const before = anchorRef.current;
     const anchor =
@@ -1952,7 +1965,18 @@ export function useSubtitles(
     if (before) {
       void subtitleDrifts.remember(before.offsetKey, before.drift);
       void subtitleOffsets.remember(before.offsetKey, before.offset);
-      keepForRelease(before.offset, before.drift);
+      // The release's timing as it was before the press, which may come from another episode:
+      // never worked out again from the file's.
+      const release = before.release;
+      if (release?.kept) {
+        const { kept } = release;
+        void releaseTimings.remember(kept);
+        if (kept.declined !== undefined) {
+          void releaseTimings.decline(kept.metaId, kept.release, kept.declined);
+        }
+      } else if (release) {
+        void releaseTimings.forget(release.metaId, release.release);
+      }
     }
     undoRef.current = null;
     anchorRef.current = null;
