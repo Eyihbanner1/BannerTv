@@ -181,8 +181,12 @@ function unpackEntries(row: Fields): UnpackEntry[] {
   return out;
 }
 
-/** How surely an unpacked file is for the episode asked: 4 best; 0 drops it. */
-function episodeRank(entry: UnpackEntry, ask: SubdlAsk): number {
+/**
+ * How surely an unpacked file is for the episode asked: 4 best; 0 drops it.
+ * In a row SubDL lists for the asked episode alone (`single`), a file whose
+ * name and entry say nothing is that episode's.
+ */
+function episodeRank(entry: UnpackEntry, ask: SubdlAsk, single: boolean): number {
   const named = releaseFeatures(baseName(entry.name));
   let name: 'says' | 'other' | 'nothing' = 'nothing';
   if (named.episodes) {
@@ -197,7 +201,7 @@ function episodeRank(entry: UnpackEntry, ask: SubdlAsk): number {
   if (name === 'says' && server === 'says') return 4;
   if (name === 'says') return 3;
   if (server === 'says') return 2;
-  return 0;
+  return single ? 1 : 0;
 }
 
 /** The files in SubDL's answer that BannerTV can use, in SubDL's order. */
@@ -244,7 +248,7 @@ export function parseSubdlFiles(body: unknown, ask: SubdlAsk): SubdlFile[] {
         let best: UnpackEntry | undefined;
         let bestRank = 0;
         for (const entry of entries) {
-          const rank = episodeRank(entry, ask);
+          const rank = episodeRank(entry, ask, facts.single);
           if (rank > bestRank) {
             best = entry;
             bestRank = rank;

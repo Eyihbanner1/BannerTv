@@ -199,6 +199,30 @@ describe('parseSubdlFiles', () => {
     ).toEqual([]);
   });
 
+  it("takes an unpacked file that names no episode from a row for the episode's alone", () => {
+    const single = {
+      full_season: false,
+      episode_from: 3,
+      episode_end: 3,
+      release_name: 'Test.Show.S02E03.1080p.WEB-DL-GRPA',
+    };
+    const plain = { name: 'English.srt', url: '/subtitle/9100001/1', episode: 0 };
+    expect(
+      parseSubdlFiles(showAnswer([packRow({ ...single, unpack_files: [plain] })]), episode),
+    ).toEqual([
+      expect.objectContaining({
+        url: 'https://dl.subdl.com/subtitle/9100001/1',
+        season: 2,
+        episode: 3,
+      }),
+    ]);
+    // A name for another episode is still never used, even in a row for this one.
+    const contradicts = { name: 'Test.Show.S02E04.srt', url: '/subtitle/9100001/2', episode: 0 };
+    expect(
+      parseSubdlFiles(showAnswer([packRow({ ...single, unpack_files: [contradicts] })]), episode),
+    ).toEqual([]);
+  });
+
   it('falls back to the ZIP, with the episode in the link for packs only', () => {
     const files = parseSubdlFiles(
       showAnswer([
