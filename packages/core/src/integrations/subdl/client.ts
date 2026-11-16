@@ -138,6 +138,24 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
   const started = new Map<string, number>();
   const running = new Set<string>();
 
+  // When each refused key was last checked again this launch.
+  const rechecked = new Map<string, number>();
+
+  /**
+   * A refused key is checked again, with the request that counts no search,
+   * once a launch and then at most once a day: a refusal can pass (a key
+   * suspended, then restored), and a screen with no key field, such as the
+   * native TV app, has no other way to find out. The play goes on without it.
+   */
+  function recheck(refused: string) {
+    const last = rechecked.get(refused);
+    if (last !== undefined && elapsed() - last < DAY) return;
+    rechecked.set(refused, elapsed());
+    void checkKey(refused).then((answer) => {
+      if (answer === 'works') setKeyState(refused, 'works');
+    });
+  }
+
   function remember(cacheKey: string, failure: SubdlFailure): SubdlFailureError {
     failures.set(cacheKey, { failure, at: elapsed() });
     return new SubdlFailureError(failure);
@@ -183,6 +201,8 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
       // A refusal is the key's, not the ask's: the key's state stops the
       // searches, and a key saved since is asked with straight away.
       if (failure === 'refused') {
+        // Just found out: not checked again for a day.
+        rechecked.set(record.key, elapsed());
         setKeyState(record.key, 'refused');
         throw new SubdlFailureError(failure);
       }
@@ -211,8 +231,11 @@ export function createSubdlClient(options: SubdlClientOptions): SubdlClient {
     if (kidsOnly()) return offSearch('kids');
     const record = key();
     if (!record) return offSearch('no key');
-    if (record.state === 'refused') return offSearch('key refused');
     const asked = subdlAskFor(type, videoId, wanted);
+    if (record.state === 'refused') {
+      if (!('skip' in asked)) recheck(record.key);
+      return offSearch('key refused');
+    }
     if ('skip' in asked) return offSearch(asked.skip);
     const ask = asked;
     const cacheKey = subdlCacheKey(ask);

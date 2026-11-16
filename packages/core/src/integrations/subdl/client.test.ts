@@ -293,6 +293,43 @@ describe('createSubdlClient', () => {
     expect(requests).toHaveLength(1);
   });
 
+  it('checks a refused key again once a launch, and searches with it once SubDL takes it', async () => {
+    let works = false;
+    const { client, requests, marks, record, pass } = setup({
+      record: { key: FAKE_SUBDL_KEY, state: 'refused' },
+      answer: (url) =>
+        url.endsWith('/api/v2/me')
+          ? works
+            ? { status: 200, body: { ok: true } }
+            : { status: 401, body: undefined }
+          : { status: 200, body: filmAnswer() },
+    });
+    // Still refused: the play goes on without SubDL, and one check that counts no search is sent.
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toEqual({
+      status: 'off',
+      why: 'key refused',
+    });
+    expect(requests.map((request) => request.url)).toEqual(['https://api.subdl.com/api/v2/me']);
+    expect(requests[0]!.headers).toEqual({ 'X-API-Key': FAKE_SUBDL_KEY });
+    expect(record()?.state).toBe('refused');
+    // Not again in the same launch, until a day has passed.
+    await settle(client.search('movie', 'tt9900002', ['en']));
+    expect(requests).toHaveLength(1);
+    works = true;
+    pass(24 * 60 * 60 * 1000);
+    expect(await settle(client.search('movie', 'tt9900002', ['en']))).toEqual({
+      status: 'off',
+      why: 'key refused',
+    });
+    expect(requests).toHaveLength(2);
+    expect(marks).toEqual([[FAKE_SUBDL_KEY, 'works']]);
+    expect(await settle(client.search('movie', 'tt9900001', ['en']))).toMatchObject({
+      status: 'answered',
+      saved: false,
+    });
+    expect(requests).toHaveLength(3);
+  });
+
   it('asks again, with the key saved since, a title the old key was refused for', async () => {
     let status = 401;
     const { client, requests, setRecord } = setup({
