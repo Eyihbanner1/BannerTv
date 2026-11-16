@@ -63,6 +63,7 @@ import { color, controls as sizes, layout, motion, px, spacing, type } from '../
 import { endsAt, seekTarget } from './clock';
 import { ProgressBar } from './ProgressBar';
 import { SubtitleText } from './SubtitleText';
+import { TimingColumn } from './TimingColumn';
 
 /** The next episode's streams are looked up this long before the end. */
 const PREFETCH_NEXT_S = 120;
@@ -735,6 +736,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
               <SheetNote>{t('player.stillAsking', { count: subtitles.pending })}</SheetNote>
             ) : null}
           </SheetColumn>
+          <TimingColumn subtitles={subtitles} />
           <SheetColumn title={t('player.style')}>
             {SUBTITLE_SIZES.map((size) => (
               <SheetOption

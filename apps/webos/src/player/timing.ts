@@ -4,6 +4,13 @@ export const TIMING_STEPS: readonly number[] = [-0.5, -0.1, 0.1, 0.5];
 /** Big steps for a file that is far out, which the phone offers beside TIMING_STEPS. */
 export const COARSE_TIMING_STEPS: readonly number[] = [-5, 5];
 
+/**
+ * The steps of the native TV app's Timing column, top to bottom: the fine ones first, each
+ * later before earlier, then the big ones. The same steps as TIMING_STEPS and
+ * COARSE_TIMING_STEPS together.
+ */
+export const TIMING_COLUMN_STEPS: readonly number[] = [0.1, -0.1, 0.5, -0.5, 5, -5];
+
 /** How far a step moves, for its words: "0.5" or "5". */
 export function stepAmount(step: number): string {
   const size = Math.abs(step);
@@ -25,6 +32,24 @@ export function formatOffset(offset: number): string {
   const rounded = tenths(offset);
   if (rounded === 0) return '0.0 s';
   return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)} s`;
+}
+
+/**
+ * What a Timing title says beside its name: the offset, whether BannerTV lined the file up and
+ * whether a drift fix is on. Null with subtitles off, and for subtitles as the file has them
+ * (no offset, no drift fix, not moved).
+ */
+export function timingSummary(s: {
+  choice: unknown;
+  offset: number;
+  drift: unknown;
+  sync: { state: string } | null;
+}): { offset: string; linedUp: boolean; driftFixed: boolean } | null {
+  if (s.choice === null) return null;
+  const linedUp = s.sync?.state === 'moved';
+  const driftFixed = s.drift !== null;
+  if (s.offset === 0 && !driftFixed && !linedUp) return null;
+  return { offset: formatOffset(s.offset), linedUp, driftFixed };
 }
 
 /** The offset one step on, kept to tenths so steps never drift. */

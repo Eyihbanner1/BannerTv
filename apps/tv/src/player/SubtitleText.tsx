@@ -13,7 +13,11 @@ const COLOURS: Record<SubtitleStyle['colour'], string> = {
   green: '#8CF28C',
 };
 
-/** Subtitle files from addons, drawn over the picture in the viewer's style (Android draws a stream's own). */
+/**
+ * Subtitles drawn over the picture in the viewer's style: addon files, and the file's own text
+ * subtitles, which Android hands over line by line (banner-cues). Picture subtitles (PGS, DVB)
+ * Android still draws itself.
+ */
 export function SubtitleText({
   cues,
   offset,
@@ -70,14 +74,12 @@ export function SubtitleText({
           borderRadius: px(6),
         }
       : null;
-  const bottom = visible.filter((cue) => !cue.top);
-  const top = visible.filter((cue) => cue.top);
-  const lowPlace =
-    look.position === 'top'
-      ? styles.top
-      : look.position === 'raised' || raised
-        ? styles.raised
-        : styles.bottom;
+  // At the top by the viewer's choice, every line goes there; otherwise only lines the file
+  // places at the top.
+  const allAtTop = look.position === 'top';
+  const top = allAtTop ? visible : visible.filter((cue) => cue.top);
+  const bottom = allAtTop ? [] : visible.filter((cue) => !cue.top);
+  const lowPlace = look.position === 'raised' || raised ? styles.raised : styles.bottom;
   const render = (cue: Cue, at: number) => (
     <View key={`${cue.start}-${at}`} style={[styles.cue, box]}>
       {cue.lines.map((spans, lineIndex) => (
