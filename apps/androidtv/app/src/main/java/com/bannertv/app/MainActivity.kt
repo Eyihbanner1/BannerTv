@@ -134,7 +134,11 @@ class MainActivity : ComponentActivity() {
 
         val js = JsEvents(web)
         val userAgent = "BannerTV/${BuildConfig.VERSION_NAME} (Android)"
-        val hashes = HashReads(StreamHashReader(userAgent = userAgent), emit = js::send)
+        val hashes =
+            HashReads(
+                read = StreamHashReader(userAgent = userAgent)::read,
+                emit = { fields -> js.send(JSONObject(fields).put("type", "hash")) },
+            )
         val controller =
             PlayerController(
                 context = this,

@@ -273,7 +273,9 @@ export function takeAndroidLink(): unknown {
 }
 
 const hashWaiters = new Map<number, (answer: AndroidHashAnswer) => void>();
-let nextHashId = 1;
+// Started somewhere new on each load: the app's reads outlive a reload, and an answer for the page
+// before must never match a request of this one. Kept well inside the app's whole numbers.
+let nextHashId = 1 + Math.floor(Math.random() * 2 ** 30);
 
 /** What the page asks the app to read: the stream's link, its size when known, its headers. */
 export interface AndroidHashRequest {

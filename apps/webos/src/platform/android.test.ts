@@ -321,6 +321,28 @@ describe('initAndroid', () => {
     expect(late).not.toHaveBeenCalled();
   });
 
+  it('a page loaded again asks with ids of its own, so an answer meant for the page before never reaches it', async () => {
+    const asked: { id: number }[] = [];
+    onAndroid({ hash: (request: string) => asked.push(JSON.parse(request) as (typeof asked)[0]) });
+    const before = await load();
+    before.initAndroid();
+    void before.androidHashReader()!({ url: 'https://cdn.example/a.mkv' }).answer;
+    // A profile switch reloads the page while the app still reads the first video's hash.
+    const after = await load();
+    after.initAndroid();
+    const asking = after.androidHashReader()!({ url: 'https://cdn.example/b.mkv' });
+    const [old, mine] = asked.map((request) => request.id);
+    expect(mine).not.toBe(old);
+    for (const id of [old!, mine!]) {
+      expect(Number.isInteger(id) && id > 0 && id < 2 ** 31).toBe(true);
+    }
+    const heard = vi.fn();
+    void asking.answer.then(heard);
+    send({ type: 'hash', id: old, hash: '0123456789abcdef', size: 1000000, walks: 1 });
+    await Promise.resolve();
+    expect(heard).not.toHaveBeenCalled();
+  });
+
   it('androidHashReader is null without hash()', async () => {
     onAndroid();
     const android = await load();
