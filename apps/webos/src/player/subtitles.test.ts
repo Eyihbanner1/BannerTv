@@ -1037,6 +1037,31 @@ describe('a SubDL download', () => {
     for (const url of fetched) expect(url).not.toContain(FAKE);
   });
 
+  it('opens a ZIP listed for the episode alone at its file, never one named for another', async () => {
+    serveBytes(
+      storedZip([
+        ['Test.Show.S01E04.srt', srt('Line 4') + '\n' + srt('Line 4 again')],
+        ['Test.Show.S01E05.srt', srt('Line 5')],
+      ]),
+    );
+    const episode = { lang: 'en', season: 1, episode: 5 };
+    expect(
+      lines(await loadSubtitles({ url: 'https://dl.subdl.com/subtitle/5-6.zip', ...episode })),
+    ).toEqual(['Line 5']);
+    // An addon's file that turns out to be a ZIP, likewise.
+    expect(
+      lines(await loadSubtitles({ url: 'https://subs.example.com/e5.zip', ...episode })),
+    ).toEqual(['Line 5']);
+    serveBytes(storedZip([['Test.Show.S01E04.srt', srt('Line 4')]]));
+    await expect(
+      loadSubtitles({ url: 'https://dl.subdl.com/subtitle/7-8.zip', ...episode }),
+    ).rejects.toThrow('The subtitle archive could not be read');
+    serveBytes(storedZip([['Test.Show.srt', srt('Line 1')]]));
+    expect(
+      lines(await loadSubtitles({ url: 'https://dl.subdl.com/subtitle/9-10.zip', ...episode })),
+    ).toEqual(['Line 1']);
+  });
+
   it('says an archive that cannot be read could not be, and a pack without the episode', async () => {
     serveBytes(storedZip([['Test.Show.S02E02.srt', srt('Line 2')]]));
     await expect(

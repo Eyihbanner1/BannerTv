@@ -20,6 +20,7 @@ import {
   subtitleFromZip,
   type VideoRelease,
   ZipError,
+  type ZipPick,
 } from '@bannertv/core';
 import type { Stream, Subtitle } from '@bannertv/protocol';
 import { addonClient } from '../data/addons';
@@ -144,12 +145,23 @@ async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayB
 /** The episode wanted from a ZIP that may hold others, as SubDL's list marks it on the link: "#s2e3". */
 const PACK_EPISODE = /#s(\d+)e(\d+)$/;
 
-async function download(url: string, lang: string): Promise<Cue[]> {
+async function download(option: LoadedOption): Promise<Cue[]> {
+  const { url, lang } = option;
   // The fragment says which file of a pack is wanted; it is never sent.
   const cut = url.indexOf('#');
   const fetchUrl = cut === -1 ? url : url.slice(0, cut);
   const packed = PACK_EPISODE.exec(url);
-  const pick = packed ? { season: Number(packed[1]), episode: Number(packed[2]) } : {};
+  // A file for one episode that is a ZIP (a SubDL row for the episode alone, or an addon's) is
+  // opened at that episode's file, or one named for none: never one named for another.
+  const pick: ZipPick = packed
+    ? { season: Number(packed[1]), episode: Number(packed[2]) }
+    : option.episode !== undefined
+      ? {
+          ...(option.season !== undefined && { season: option.season }),
+          episode: option.episode,
+          loose: true,
+        }
+      : {};
   // A SubDL file counts against the day's downloads; never with the key.
   if (isSubdlDownload(fetchUrl) && !subdlUsage.takeDownload()) {
     throw new SubtitleLoadError('SubDL files are used up for today');
@@ -195,8 +207,11 @@ async function download(url: string, lang: string): Promise<Cue[]> {
  * dozens, which would push out those the viewer switches between): one kept
  * already, or being read, is still shared.
  */
+/** What reading a file needs: the season and episode it is for open a ZIP at that file. */
+type LoadedOption = Pick<SubtitleOption, 'url' | 'lang' | 'season' | 'episode'>;
+
 export function loadSubtitles(
-  option: Pick<SubtitleOption, 'url' | 'lang'>,
+  option: LoadedOption,
   { keep = true }: { keep?: boolean } = {},
 ): Promise<Cue[]> {
   const existing = cache.get(option.url);
@@ -207,7 +222,7 @@ export function loadSubtitles(
     return existing;
   }
   const reading = passing.get(option.url);
-  const promise = reading ?? download(option.url, option.lang);
+  const promise = reading ?? download(option);
   if (!keep) {
     if (!reading) {
       passing.set(option.url, promise);

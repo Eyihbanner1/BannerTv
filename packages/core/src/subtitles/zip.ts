@@ -34,6 +34,11 @@ export class ZipError extends Error {
 export interface ZipPick {
   season?: number;
   episode?: number;
+  /**
+   * The archive is said to be that episode's alone: with no file named for
+   * it, the largest named for no episode and no other season is taken.
+   */
+  loose?: boolean;
 }
 
 export interface ZipLimits {
@@ -183,7 +188,8 @@ function unpack(bytes: Uint8Array, entry: Entry, limits: ZipLimits): Uint8Array 
 /**
  * The bytes of the subtitle file wanted out of a ZIP archive. With an
  * episode, the largest of the files whose names give that episode (and that
- * season, or none); otherwise the largest subtitle file. Throws ZipError.
+ * season, or none), or with `loose` and none such, the largest whose names
+ * give no episode; otherwise the largest subtitle file. Throws ZipError.
  */
 export function subtitleFromZip(
   bytes: Uint8Array,
@@ -197,14 +203,21 @@ export function subtitleFromZip(
   let chosen = subtitles;
   if (pick.episode !== undefined) {
     const episode = pick.episode;
-    chosen = subtitles.filter((entry) => {
-      const found = releaseFeatures(baseName(entry.name));
-      return (
-        !!found.episodes &&
-        found.episodes.indexOf(episode) !== -1 &&
-        (found.season === undefined || pick.season === undefined || found.season === pick.season)
-      );
-    });
+    const named = subtitles.map((entry) => ({
+      entry,
+      found: releaseFeatures(baseName(entry.name)),
+    }));
+    const sameSeason = (season: number | undefined) =>
+      season === undefined || pick.season === undefined || season === pick.season;
+    chosen = named
+      .filter(({ found }) => !!found.episodes && found.episodes.indexOf(episode) !== -1)
+      .filter(({ found }) => sameSeason(found.season))
+      .map(({ entry }) => entry);
+    if (chosen.length === 0 && pick.loose) {
+      chosen = named
+        .filter(({ found }) => !found.episodes && sameSeason(found.season))
+        .map(({ entry }) => entry);
+    }
     // Never another episode's file in its place.
     if (chosen.length === 0) throw new ZipError('no-subtitle');
   }

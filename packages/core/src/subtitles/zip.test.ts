@@ -98,6 +98,27 @@ describe('subtitleFromZip', () => {
     expect(text(subtitleFromZip(zip, {}))).toBe(seededSrt(50, 500));
   });
 
+  it('takes, from an archive said to be the episode’s, its file before one named for another', async () => {
+    const loose = (season: number, episode: number): ZipPick => ({ season, episode, loose: true });
+    const named = await zipOf([
+      { name: 'Show.S01E04.srt', data: utf8(seededSrt(50, 400)) },
+      { name: 'Show.S01E05.srt', data: utf8(seededSrt(5, 500)) },
+    ]);
+    expect(text(subtitleFromZip(named, loose(1, 5)))).toBe(seededSrt(5, 500));
+    // A file named for no episode is the episode's, never one named for another.
+    const plain = await zipOf([
+      { name: 'Show.S01E03.srt', data: utf8(seededSrt(50, 300)) },
+      { name: 'Show.srt', data: utf8(seededSrt(5, 200)) },
+    ]);
+    expect(text(subtitleFromZip(plain, loose(1, 2)))).toBe(seededSrt(5, 200));
+    const other = await zipOf([{ name: 'Show.S01E05.srt', data: utf8(seededSrt(5)) }]);
+    expect(reason(other, loose(1, 2))).toBe('no-subtitle');
+    const season = await zipOf([{ name: 'Show.S02.srt', data: utf8(seededSrt(5)) }]);
+    expect(reason(season, loose(1, 2))).toBe('no-subtitle');
+    // Without `loose`, as for a season pack, only a file named for the episode.
+    expect(reason(plain, { season: 1, episode: 2 })).toBe('no-subtitle');
+  });
+
   it('never gives another episode when the one wanted is missing', async () => {
     const zip = await zipOf([
       { name: 'Test.Show.S02E01.srt', data: utf8(seededSrt(5)) },
