@@ -110,7 +110,7 @@ class StreamHashReader(
         override fun fillInStackTrace(): Throwable = this
     }
 
-    /** Stopped before a request: cancelled, or past the deadline. */
+    /** Stopped before a request or while its bytes came: cancelled, or past the deadline. */
     private class Stop(val cancelled: Boolean) : Exception() {
         override fun fillInStackTrace(): Throwable = this
     }
@@ -171,7 +171,7 @@ class StreamHashReader(
             return HashResult.Found(hash, size, walks, fellBack)
         }
 
-        /** Before every request: stopped when cancelled or past the deadline. */
+        /** Before every request, and between pieces of an answer: stopped when cancelled or late. */
         fun check() {
             if (cancelled()) throw Stop(cancelled = true)
             if (now() >= deadline) throw Stop(cancelled = false)
@@ -242,7 +242,7 @@ class StreamHashReader(
                 }
                 val landed = current.toString()
                 if (rangeStart != null && status == 206) {
-                    val bytes = readChunk(c.inputStream)
+                    val bytes = readChunk(run, c.inputStream)
                     return Answer(
                         refused = false,
                         bytes = bytes,
@@ -270,8 +270,12 @@ class StreamHashReader(
         }
     }
 
-    /** Exactly CHUNK bytes, or null for fewer or more. */
-    private fun readChunk(input: InputStream): ByteArray? {
+    /**
+     * Exactly CHUNK bytes, or null for fewer or more. A host that sends them slowly is given up on
+     * at the deadline, or as soon as a newer request cancels the read, between one piece and the
+     * next: the read timeout bounds each piece only.
+     */
+    private fun readChunk(run: Run, input: InputStream): ByteArray? {
         val buffer = ByteArray(StreamHash.CHUNK + 1)
         var filled = 0
         input.use {
@@ -279,6 +283,7 @@ class StreamHashReader(
                 val n = it.read(buffer, filled, buffer.size - filled)
                 if (n < 0) break
                 filled += n
+                if (filled < buffer.size) run.check()
             }
         }
         return if (filled == StreamHash.CHUNK) buffer.copyOf(StreamHash.CHUNK) else null

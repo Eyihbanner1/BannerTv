@@ -36,6 +36,9 @@ class StreamHashReaderTest {
     @Volatile private var wholeClosedEarly = false
     private val wholeDone = CountDownLatch(1)
 
+    // How much of the first 64 KB the trickling host has sent.
+    private val trickled = AtomicInteger(0)
+
     private val base get() = "http://127.0.0.1:${server.address.port}"
     private val expected
         get() = StreamHash.hash(SIZE.toLong(), body.copyOfRange(0, CHUNK), body.copyOfRange(SIZE - CHUNK, SIZE))!!
@@ -104,6 +107,7 @@ class StreamHashReaderTest {
                 Thread.sleep(3000)
                 serve(exchange, body, range)
             }
+            path == "/trickle" -> trickle(exchange)
             else -> status(exchange, 404)
         }
     }
@@ -136,6 +140,28 @@ class StreamHashReaderTest {
         if (contentRange) exchange.responseHeaders.add("Content-Range", "bytes $start-$end/$total")
         exchange.sendResponseHeaders(206, (end - start + 1).toLong())
         exchange.responseBody.write(file, start, end - start + 1)
+    }
+
+    /**
+     * The first 64 KB for a range, a little at a time: 1 KB every 100 ms, each piece well inside
+     * the read timeout, the whole over 6 s.
+     */
+    private fun trickle(exchange: HttpExchange) {
+        exchange.responseHeaders.add("Content-Range", "bytes 0-${CHUNK - 1}/$SIZE")
+        exchange.sendResponseHeaders(206, CHUNK.toLong())
+        val out = exchange.responseBody
+        var sent = 0
+        try {
+            while (sent < CHUNK) {
+                out.write(body, sent, 1024)
+                out.flush()
+                sent += 1024
+                trickled.set(sent)
+                Thread.sleep(100)
+            }
+        } catch (e: InterruptedException) {
+            // The server is stopping.
+        }
     }
 
     /** The whole of a large file for a range, counting what the reader's socket took. */
@@ -246,6 +272,25 @@ class StreamHashReaderTest {
         val took = (System.nanoTime() - started) / 1_000_000
         assertEquals(HashResult.Failed("timed out", "start", 1), result)
         assertTrue("took $took ms", took < 3000)
+    }
+
+    @Test
+    fun givesUpAtTheDeadlineWhileTheBytesTrickleIn() {
+        val started = System.nanoTime()
+        val result = read(request("/trickle"), deadlineMs = 1500)
+        val took = (System.nanoTime() - started) / 1_000_000
+        assertEquals(HashResult.Failed("timed out", "start", 1), result)
+        assertTrue("took $took ms", took < 2500)
+        assertTrue(trickled.get() < CHUNK)
+    }
+
+    @Test
+    fun aNewerRequestCancelsItWhileTheBytesTrickleIn() {
+        val started = System.nanoTime()
+        val result = reader().read(request("/trickle")) { trickled.get() >= 4096 }
+        val took = (System.nanoTime() - started) / 1_000_000
+        assertEquals(HashResult.Cancelled, result)
+        assertTrue("took $took ms", took < 2500)
     }
 
     @Test
