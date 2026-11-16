@@ -2723,6 +2723,17 @@ describe('last episode’s timing', () => {
     expect(player.subtitles.sync?.state).not.toBe('moved');
   });
 
+  it('not on a file linked to this very video, the only one offered', async () => {
+    await setOn(sub('e1'), 2);
+    const linked = sub('linked', { label: 'some_show_subs.srt', hashMatch: true });
+    const player = await playEpisode(2, [linked]);
+    expect(player.subtitles.choice).toEqual(fileChoice(linked));
+    // What the others would be checked against, with none to check.
+    expect(player.subtitles.sync).toBeNull();
+    expect(player.subtitles.offer).toBeNull();
+    expect(player.subtitles.offset).toBe(0);
+  });
+
   it('No thanks holds for this episode only', async () => {
     await setOn(sub('e1'), 0.5);
     const e2 = sub('e2');

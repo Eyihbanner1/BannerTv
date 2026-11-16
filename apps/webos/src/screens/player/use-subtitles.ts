@@ -1985,6 +1985,9 @@ export function useSubtitles(
     subtitleOffsets.get(offsetKey) === undefined &&
     keptDrift === null &&
     !(timedHere.entry === entry && timedHere.links.has(fileUrl)) &&
+    // Never on the file the others are checked against: linked to this very video, or named for
+    // its release, and so timed for it, with or without others to check.
+    !isReference(fileUrl) &&
     // Nothing settled the file's timing here: nothing to check it against, no match, found out
     // of step too late, or files that disagree. Never while checking, nor once moved, in step,
     // or the viewer's.
