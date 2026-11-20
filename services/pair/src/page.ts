@@ -1,11 +1,20 @@
 /**
- * The phone page, served by the Worker. The TV's QR code opens it with the
+ * The phone pages, served by the Worker. The TV's QR code opens `/` with the
  * code in the fragment (`#code=ABC123`), and the add-from-settings flow adds
- * `&configure=<addon settings URL>`. A fragment never reaches a server, and
- * the page clears it from the address bar once read.
+ * `&configure=<addon settings URL>`. The SubDL screen's QR code opens `/subdl`
+ * with `#code=ABC123&k=<the TV's sealing key>`, and that page seals the key
+ * before sending it, so the relay only ever holds what it cannot open. A
+ * fragment never reaches a server, and each page clears it from the address
+ * bar once read.
  */
 
-import { CODE_ALPHABET, CODE_LENGTH } from './rules';
+import {
+  CODE_ALPHABET,
+  CODE_LENGTH,
+  SUBDL_KEY_AAD_PREFIX,
+  SUBDL_KEY_PATTERN,
+  SUBDL_PAGE_PATH,
+} from './rules';
 
 const LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#7B4DFF" d="M25.64 14 83.64 50 25.64 86Z"/><path fill="#C9B5FF" d="M25.64 14 83.64 50 45.64 50Z"/><path fill="#4B23C8" d="M25.64 14 45.64 50 25.64 86Z"/></svg>`;
 
@@ -159,29 +168,195 @@ const JS = `'use strict';
 })();
 `;
 
+const SUBDL_HTML = `<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Send your SubDL key to BannerTV</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app.css">
+<script src="${SUBDL_PAGE_PATH}.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="brand"><img src="/logo.svg" alt="" width="36" height="36"><span>Banner<b>TV</b></span></header>
+  <h1>Send your SubDL key to BannerTV</h1>
+  <p id="scan" class="lead">Scan the QR code on your TV's SubDL screen.</p>
+  <div id="ready" hidden>
+    <p class="lead">Paste your SubDL key here and your TV saves it.</p>
+    <form id="send" novalidate>
+      <div class="steps">
+        <p>1. Get your free key: sign in at SubDL and copy your API key.</p>
+        <a class="button secondary" href="https://subdl.com/panel/api" target="_blank" rel="noopener noreferrer">Open SubDL</a>
+        <p>2. Paste the key below.</p>
+      </div>
+      <div class="field">
+        <label for="key">SubDL key</label>
+        <input id="key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <button id="submit" class="button" type="submit">Send to TV</button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </form>
+    <p class="small">Your key is locked on this phone before it's sent, and only your TV can unlock it, so BannerTV's server never sees it. The server forgets it 30 seconds after your TV picks it up, or after ten minutes. Nothing is logged.</p>
+  </div>
+</main>
+</body>
+</html>
+`;
+
+// The TV's sealing key (k) rides in the fragment only and stays in this
+// page's memory. The key the viewer pastes never leaves the page unsealed:
+// not in an address, a log or a message.
+const SUBDL_JS = `'use strict';
+(function () {
+  var ALPHABET = '${CODE_ALPHABET}';
+  var LENGTH = ${CODE_LENGTH};
+  var KEY_PATTERN = ${SUBDL_KEY_PATTERN};
+  var AAD_PREFIX = '${SUBDL_KEY_AAD_PREFIX}';
+  var MESSAGES = {
+    sent: "Sent. Check your TV: it's checking the key with SubDL now.",
+    'invalid-key': "That doesn't look like a SubDL key. Copy it again from SubDL.",
+    expired: 'That code has run out. Open SubDL subtitles on your TV for a new one.',
+    'already-sent': 'Your TV already has a key from this code. Scan the new code on your TV to send another.',
+    'wrong-kind': "That code is for adding an addon. Scan the code on your TV's SubDL screen.",
+    'no-crypto': "This browser can't lock the key before sending it. Try another browser.",
+    offline: "Couldn't reach BannerTV. Check your connection and try again.",
+    other: 'Something went wrong. Try again.'
+  };
+  MESSAGES['not-found'] = MESSAGES.expired;
+
+  function $(id) { return document.getElementById(id); }
+  function readCode(value) {
+    var code = String(value || '').toUpperCase().replace(/[\\s-]/g, '');
+    if (code.length !== LENGTH) return '';
+    for (var i = 0; i < code.length; i++) if (ALPHABET.indexOf(code[i]) === -1) return '';
+    return code;
+  }
+  // The TV's sealing key: 32 bytes, base64url with or without padding.
+  function readSealingKey(value) {
+    var text = String(value || '');
+    if (!/^[A-Za-z0-9_-]{43}=?$/.test(text)) return null;
+    var binary;
+    try {
+      binary = atob(text.slice(0, 43).replace(/-/g, '+').replace(/_/g, '/') + '=');
+    } catch (error) {
+      return null;
+    }
+    if (binary.length !== 32) return null;
+    var bytes = new Uint8Array(32);
+    for (var i = 0; i < 32; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  function base64Url(bytes) {
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+  }
+  function show(text, kind) {
+    $('status').textContent = text;
+    $('status').className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  var webCrypto = window.crypto;
+  var canSeal = !!(webCrypto && webCrypto.subtle && webCrypto.getRandomValues && window.TextEncoder);
+
+  // As the TV opens it: AES-256-GCM with a fresh 12-byte IV and a 128-bit tag,
+  // the prefix and this code as additional data, and base64url (no padding) of
+  // the IV followed by the ciphertext.
+  function seal(sealingKey, code, key) {
+    var encoder = new TextEncoder();
+    var iv = new Uint8Array(12);
+    webCrypto.getRandomValues(iv);
+    return webCrypto.subtle.importKey('raw', sealingKey, { name: 'AES-GCM' }, false, ['encrypt'])
+      .then(function (aesKey) {
+        return webCrypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: iv, additionalData: encoder.encode(AAD_PREFIX + code), tagLength: 128 },
+          aesKey,
+          encoder.encode(key)
+        );
+      })
+      .then(function (ciphertext) {
+        var sealed = new Uint8Array(12 + ciphertext.byteLength);
+        sealed.set(iv, 0);
+        sealed.set(new Uint8Array(ciphertext), 12);
+        return base64Url(sealed);
+      });
+  }
+
+  var params = new URLSearchParams(location.hash.slice(1));
+  var code = readCode(params.get('code'));
+  var sealingKey = readSealingKey(params.get('k'));
+  if (location.hash) history.replaceState(null, '', location.pathname);
+  // Without both, there is nothing to send to: only the scan message shows.
+  if (!code || !sealingKey) return;
+
+  $('scan').hidden = true;
+  $('ready').hidden = false;
+  if (!canSeal) show(MESSAGES['no-crypto'], 'error');
+
+  $('send').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var key = $('key').value.trim();
+    if (!KEY_PATTERN.test(key)) { show(MESSAGES['invalid-key'], 'error'); $('key').focus(); return; }
+    if (!canSeal) { show(MESSAGES['no-crypto'], 'error'); return; }
+    $('submit').disabled = true;
+    show('Sending…');
+    seal(sealingKey, code, key).then(function (sealed) {
+      return fetch('/api/sessions/' + code, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sealed: sealed })
+      }).then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (body) {
+          if (response.ok) {
+            $('key').value = '';
+            show(MESSAGES.sent, 'done');
+          } else {
+            show(MESSAGES[body.error] || MESSAGES.other, 'error');
+          }
+        });
+      }, function () {
+        show(MESSAGES.offline, 'error');
+      });
+    }, function () {
+      show(MESSAGES['no-crypto'], 'error');
+    }).then(function () {
+      $('submit').disabled = false;
+    });
+  });
+})();
+`;
+
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'public, max-age=300',
 };
 
+const PAGE_HEADERS = {
+  ...SECURITY_HEADERS,
+  'Content-Type': 'text/html; charset=utf-8',
+  // form-action 'none' also stops a form posting what was typed in a URL if the script fails.
+  'Content-Security-Policy':
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+};
+
 export const PAGE_FILES: Record<string, { body: string; headers: Record<string, string> }> = {
-  '/': {
-    body: HTML,
-    headers: {
-      ...SECURITY_HEADERS,
-      'Content-Type': 'text/html; charset=utf-8',
-      // form-action 'none' also stops the form posting the address in a URL if the script fails.
-      'Content-Security-Policy':
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-    },
-  },
+  '/': { body: HTML, headers: PAGE_HEADERS },
+  [SUBDL_PAGE_PATH]: { body: SUBDL_HTML, headers: PAGE_HEADERS },
   '/app.css': {
     body: CSS,
     headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/css; charset=utf-8' },
   },
   '/app.js': {
     body: JS,
+    headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8' },
+  },
+  [`${SUBDL_PAGE_PATH}.js`]: {
+    body: SUBDL_JS,
     headers: { ...SECURITY_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8' },
   },
   '/logo.svg': { body: LOGO, headers: { ...SECURITY_HEADERS, 'Content-Type': 'image/svg+xml' } },

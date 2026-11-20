@@ -42,3 +42,78 @@ export function readAddonUrl(value: unknown): string | undefined {
   }
   return text;
 }
+
+/**
+ * What a session carries: an addon address (the first kind, and the default)
+ * or a viewer's SubDL key, sealed on the phone with a key only the TV holds.
+ */
+export type SessionKind = 'addon' | 'subdl-key';
+export const SESSION_KINDS: readonly SessionKind[] = ['addon', 'subdl-key'];
+
+/**
+ * The kind a TV asks for with `?for=`. None is an addon session, as before
+ * there were kinds. Anything else is undefined, so a TV asking for a kind this
+ * relay does not know hears so, rather than getting a session of another kind.
+ */
+export function readSessionKind(value: string | null): SessionKind | undefined {
+  if (value === null) return 'addon';
+  for (const kind of SESSION_KINDS) if (kind === value) return kind;
+  return undefined;
+}
+
+/** The phone page a SubDL key session's QR code opens; `/` stays the addon page. */
+export const SUBDL_PAGE_PATH = '/subdl';
+
+/**
+ * A SubDL key as the phone page checks it before sealing. It must match
+ * SUBDL_KEY_PATTERN in packages/core/src/integrations/subdl/key.ts, which the
+ * TV checks again once it has opened the key. The relay never sees a key.
+ */
+export const SUBDL_KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
+/**
+ * The phone seals a key with this and the session's code as its additional
+ * data, so a sealed key opens only for the session it was sent to.
+ */
+export const SUBDL_KEY_AAD_PREFIX = 'bannertv subdl-key v1 ';
+
+/**
+ * A sealed key is base64url, with no padding, of a 12-byte IV, the ciphertext
+ * and a 16-byte tag: 48 characters for the shortest key (8 bytes) and 208 for
+ * the longest (128). The cap leaves room and bounds what a session holds.
+ */
+export const SEALED_MIN_LENGTH = 48;
+export const SEALED_MAX_LENGTH = 256;
+
+/** A sealed key as the phone sent it. The relay cannot open it, only check its shape. */
+export function readSealed(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length < SEALED_MIN_LENGTH || value.length > SEALED_MAX_LENGTH) return undefined;
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
+}
+
+/** What a session holds once the phone has sent it, and what the TV collects. */
+export type Payload = { url: string } | { sealed: string };
+
+export type SubmitError = 'invalid-url' | 'too-long' | 'invalid-key' | 'wrong-kind';
+
+/**
+ * What the phone sent, read by the rules of the session's kind. Each kind
+ * takes one field. The other kind's field on its own means the phone has the
+ * wrong page for this code, so it hears that rather than a format error.
+ */
+export function readSubmission(kind: SessionKind, body: unknown): Payload | { error: SubmitError } {
+  const { url, sealed } = (typeof body === 'object' && body !== null ? body : {}) as {
+    url?: unknown;
+    sealed?: unknown;
+  };
+  if (kind === 'subdl-key') {
+    if (sealed === undefined && url !== undefined) return { error: 'wrong-kind' };
+    const value = readSealed(sealed);
+    return value === undefined ? { error: 'invalid-key' } : { sealed: value };
+  }
+  if (url === undefined && sealed !== undefined) return { error: 'wrong-kind' };
+  if (typeof url === 'string' && url.trim().length > MAX_URL_LENGTH) return { error: 'too-long' };
+  const value = readAddonUrl(url);
+  return value === undefined ? { error: 'invalid-url' } : { url: value };
+}
