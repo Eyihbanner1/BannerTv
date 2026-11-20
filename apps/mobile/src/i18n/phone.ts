@@ -159,7 +159,7 @@ const PHONE = {
   yourTv: 'Your TV',
   streamHelperDetail: 'Your LG plays some add-on streams through this phone',
   subdlDetail: 'More subtitles, with your own free key',
-  subdlGetKey: "Sign in at subdl.com (it's free), open the API page and copy your key.",
+  subdlGetKey: "Sign in at subdl.com (it's free) and copy your API key there.",
   subdlOpenSite: 'Open subdl.com',
   streamHelperSwitch: 'Use the stream helper',
   streamHelperNotificationsOff:

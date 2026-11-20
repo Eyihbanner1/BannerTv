@@ -2,10 +2,12 @@
  * The phone pairing relay: a Cloudflare Worker with one Durable Object per code.
  *
  * The TV opens a session and shows its code in a QR code. The phone opens the
- * page in that QR code and sends an addon address; the TV collects it with the
- * session's secret, which ends the session. A session lasts ten minutes and
- * takes one address. Addon addresses can carry account keys, so nothing here
- * logs, and the address is held in memory only, never in storage.
+ * page in that QR code and sends what the session is for: an addon address, or
+ * a SubDL key sealed on the phone with a key only the TV holds (it rides in the
+ * QR code's fragment and never reaches this Worker). The TV collects it with
+ * the session's secret, which ends the session. A session lasts ten minutes
+ * and takes one thing. Addon addresses can carry account keys, so nothing here
+ * logs, and what the phone sent is held in memory only, never in storage.
  *
  * A Worker module may export only its handler and Durable Object classes (and
  * types), so the rules the tests check live in rules.ts.
@@ -14,11 +16,14 @@ import { PAGE_FILES } from './page';
 import {
   CODE_ALPHABET,
   CODE_LENGTH,
-  MAX_URL_LENGTH,
-  readAddonUrl,
+  type Payload,
   readCode,
+  readSessionKind,
+  readSubmission,
   REDELIVER_MS,
   SESSION_TTL_MS,
+  type SessionKind,
+  SUBDL_PAGE_PATH,
 } from './rules';
 
 // The few Workers runtime types this file uses, so it needs no type package.
@@ -46,12 +51,18 @@ export interface Env {
 interface Session {
   secretHash: string;
   expiresAt: number;
+  /** Missing from sessions opened before there were kinds, which are addon sessions. */
+  kind?: SessionKind;
 }
 
 interface Delivery {
   secretHash: string;
-  url: string;
+  payload: Payload;
   until: number;
+}
+
+function kindOf(stored: Session): SessionKind {
+  return stored.kind === 'subdl-key' ? 'subdl-key' : 'addon';
 }
 
 const API_HEADERS = {
@@ -101,6 +112,9 @@ function session(env: Env, code: string) {
 }
 
 async function openSession(request: Request, env: Env): Promise<Response> {
+  const address = new URL(request.url);
+  const kind = readSessionKind(address.searchParams.get('for'));
+  if (!kind) return json({ error: 'unknown-kind' }, 400, TV_HEADERS);
   const secret = base64Url(crypto.getRandomValues(new Uint8Array(32)));
   const secretHash = await hashSecret(secret);
   // A clash with a live session is unlikely (31^6 codes), but try again if it happens.
@@ -108,17 +122,18 @@ async function openSession(request: Request, env: Env): Promise<Response> {
     const code = randomCode();
     const response = await session(env, code).fetch('https://session/open', {
       method: 'POST',
-      body: JSON.stringify({ secretHash }),
+      body: JSON.stringify({ secretHash, kind }),
     });
     if (response.status === 409) continue;
     if (!response.ok) break;
-    const origin = new URL(request.url).origin;
+    const page = kind === 'subdl-key' ? SUBDL_PAGE_PATH : '/';
     return json(
       {
         code,
         secret,
         expiresIn: Math.round(SESSION_TTL_MS / 1000),
-        pageUrl: `${origin}/#code=${code}`,
+        pageUrl: `${address.origin}${page}#code=${code}`,
+        kind,
       },
       201,
       TV_HEADERS,
@@ -134,15 +149,23 @@ async function submit(request: Request, env: Env, code: string): Promise<Respons
   } catch {
     return json({ error: 'invalid-url' }, 400);
   }
-  const value = (body as { url?: unknown } | null)?.url;
-  if (typeof value === 'string' && value.trim().length > MAX_URL_LENGTH) {
-    return json({ error: 'too-long' }, 400);
+  const { url, sealed } = (typeof body === 'object' && body !== null ? body : {}) as {
+    url?: unknown;
+    sealed?: unknown;
+  };
+  // Where the one field sent settles it, a malformed one is answered before the session is
+  // asked, as before there were kinds, so a phone hears about it even for a code that has run
+  // out. Anything else needs the session's kind (wrong-kind among it), so the session reads it.
+  if (url !== undefined && sealed === undefined) {
+    const sent = readSubmission('addon', { url });
+    if ('error' in sent) return json({ error: sent.error }, 400);
+  } else if (sealed !== undefined && url === undefined) {
+    const sent = readSubmission('subdl-key', { sealed });
+    if ('error' in sent) return json({ error: sent.error }, 400);
   }
-  const url = readAddonUrl(value);
-  if (!url) return json({ error: 'invalid-url' }, 400);
   return session(env, code).fetch('https://session/submit', {
     method: 'POST',
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, sealed }),
   });
 }
 
@@ -193,17 +216,18 @@ export default {
 
 /**
  * One pairing session, stored under the name of its code. Storage holds only
- * the secret's hash and the expiry time. The address stays in this object's
- * memory: SQLite-backed storage can be restored to any point in the last 30
- * days, so anything written there outlives deleteAll(). The TV asks every
- * three seconds, which keeps the object in memory between the phone's send
- * and the TV's collect. If the object is evicted anyway, the address is lost
- * and the phone can send it again.
+ * the secret's hash, the expiry time and the session's kind. What the phone
+ * sent (an address or a sealed key) stays in this object's memory:
+ * SQLite-backed storage can be restored to any point in the last 30 days, so
+ * anything written there outlives deleteAll(). The TV asks every three
+ * seconds, which keeps the object in memory between the phone's send and the
+ * TV's collect. If the object is evicted anyway, it is lost and the phone can
+ * send it again.
  */
 export class PairSession {
-  /** The address the phone sent, until the TV collects it. */
-  private url: string | undefined;
-  /** The address just collected, kept briefly in case the answer never reached the TV. */
+  /** What the phone sent, until the TV collects it. */
+  private payload: Payload | undefined;
+  /** What was just collected, kept briefly in case the answer never reached the TV. */
   private delivered: Delivery | undefined;
 
   constructor(private readonly state: SessionState) {}
@@ -214,7 +238,7 @@ export class PairSession {
   }
 
   private async end(): Promise<void> {
-    this.url = undefined;
+    this.payload = undefined;
     this.delivered = undefined;
     await this.state.storage.deleteAlarm();
     await this.state.storage.deleteAll();
@@ -222,24 +246,30 @@ export class PairSession {
 
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
-    const body = (await request.json()) as { secretHash?: string; url?: string };
+    const body = (await request.json()) as {
+      secretHash?: string;
+      kind?: string;
+      url?: unknown;
+      sealed?: unknown;
+    };
 
     if (this.delivered && this.delivered.until <= Date.now()) this.delivered = undefined;
     if (pathname === '/collect' && this.delivered) {
       // The TV asks again only when it did not get the first answer.
       if (body.secretHash !== this.delivered.secretHash) return json({ error: 'forbidden' }, 403);
-      return json({ status: 'sent', url: this.delivered.url });
+      return json({ status: 'sent', ...this.delivered.payload });
     }
 
     const current = await this.live();
 
     if (pathname === '/open') {
       if (current || this.delivered) return json({ error: 'in-use' }, 409);
-      this.url = undefined;
+      this.payload = undefined;
       const expiresAt = Date.now() + SESSION_TTL_MS;
       await this.state.storage.put<Session>('session', {
         secretHash: body.secretHash ?? '',
         expiresAt,
+        kind: body.kind === 'subdl-key' ? 'subdl-key' : 'addon',
       });
       await this.state.storage.setAlarm(expiresAt);
       return json({ ok: true }, 201);
@@ -248,14 +278,17 @@ export class PairSession {
     if (!current) return json({ error: 'expired' }, 404);
 
     if (pathname === '/submit') {
-      if (this.url !== undefined) return json({ error: 'already-sent' }, 409);
-      this.url = body.url;
-      // An address sent just before the end still gives the TV time to collect it.
+      const sent = readSubmission(kindOf(current), body);
+      if ('error' in sent) return json({ error: sent.error }, 400);
+      if (this.payload !== undefined) return json({ error: 'already-sent' }, 409);
+      this.payload = sent;
+      // Something sent just before the end still gives the TV time to collect it.
       const until = Date.now() + REDELIVER_MS;
       if (current.expiresAt < until) {
         await this.state.storage.put<Session>('session', {
           secretHash: current.secretHash,
           expiresAt: until,
+          kind: kindOf(current),
         });
         await this.state.storage.setAlarm(until);
       }
@@ -266,20 +299,24 @@ export class PairSession {
       if (!body.secretHash || body.secretHash !== current.secretHash) {
         return json({ error: 'forbidden' }, 403);
       }
-      const url = this.url;
-      if (url === undefined) {
+      const payload = this.payload;
+      if (payload === undefined) {
         return json({
           status: 'waiting',
           expiresIn: Math.round((current.expiresAt - Date.now()) / 1000),
         });
       }
       // The session ends now: the phone can send nothing more, and only a
-      // repeat collect inside the short window gets the address again.
-      this.url = undefined;
-      this.delivered = { secretHash: current.secretHash, url, until: Date.now() + REDELIVER_MS };
+      // repeat collect inside the short window gets the same answer again.
+      this.payload = undefined;
+      this.delivered = {
+        secretHash: current.secretHash,
+        payload,
+        until: Date.now() + REDELIVER_MS,
+      };
       await this.state.storage.deleteAll();
       await this.state.storage.setAlarm(this.delivered.until);
-      return json({ status: 'sent', url });
+      return json({ status: 'sent', ...payload });
     }
 
     return json({ error: 'not-found' }, 404);

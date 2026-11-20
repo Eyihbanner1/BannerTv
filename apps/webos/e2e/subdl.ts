@@ -1,11 +1,21 @@
 import { crc32, deflateRawSync } from 'node:zlib';
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
+import jsQR from 'jsqr';
+import { PAGE_FILES } from '../../../services/pair/src/page';
+import pairWorker, {
+  type Env,
+  PairSession,
+  type SessionNamespace,
+  type SessionStorage,
+} from '../../../services/pair/src/worker';
+import { PAIR_SERVICE } from '../src/data/pairing';
 import { speech, srt } from './play';
 
 /**
  * A stand-in for SubDL's API and download host. Every answer is made up, shaped like the real
  * API's: "Test Film" and "Test Show", their releases and file ids invented, and the files test
- * lines only. The key is obviously fake, and no real key is ever used.
+ * lines only. The key is obviously fake, and no real key is ever used. Below it, the pairing
+ * relay for a key sent from the phone, and a reader for the QR codes the TV draws.
  */
 
 export const FAKE_SUBDL_KEY = 'FAKE-SUBDL-KEY-0000';
@@ -295,4 +305,194 @@ export async function standInSubdl(page: Page, scenario: SubdlScenario): Promise
     });
   });
   return seen;
+}
+
+/**
+ * The pairing relay for a SubDL key sent from the phone: the real Worker from services/pair, run
+ * in the test with its sessions in memory (as BannerTV Demo is in addons.ts), so the TV and the
+ * real phone page talk to one relay. It notes everything sent to it, so a journey can show it
+ * only ever held what it cannot read.
+ */
+export interface KeyRelay {
+  /** What each session the TV opened was asked for (`?for=`, '' for none), in order. */
+  opened: string[];
+  /** The code of each session the relay opened, in order. */
+  codes: string[];
+  /** Every body either page sent to the relay, as sent. */
+  bodies: string[];
+  /** What the phone page posted to a code, as sent. */
+  submitted: string[];
+  /** The TV's collects. */
+  collects: number;
+  /** Collects answered with what the phone sent. */
+  deliveries: number;
+  /** Routes the relay's API on the TV's page. Call after mockAddons: it replaces that relay. */
+  serveTv(page: Page): Promise<void>;
+  /** Routes the relay's phone pages (services/pair/src/page.ts) and its API on a phone's page. */
+  servePhone(phone: Page): Promise<void>;
+}
+
+export interface KeyRelayOptions {
+  /** Changes one character of the first sealed key on its way to the TV. */
+  tamper?: boolean;
+  /**
+   * A relay from before session kinds: it ignores `?for=` and opens an addon session, and its
+   * answer has no kind (the page in it is the addon page, `/#code=`).
+   */
+  older?: boolean;
+  /** The first session the TV asks for does not open: the request fails, as with no relay. */
+  failFirstOpen?: boolean;
+  /** The first session opened runs out at once: its collects answer 404, as the relay's then do. */
+  expireFirst?: boolean;
+}
+
+/** The relay's Durable Objects in memory, one PairSession per code, as its own tests have them. */
+function sessionsInMemory(): Env {
+  const sessions = new Map<string, PairSession>();
+  const namespace: SessionNamespace = {
+    idFromName: (name) => name,
+    get(id) {
+      const name = id as string;
+      let session = sessions.get(name);
+      if (!session) {
+        const values = new Map<string, unknown>();
+        const storage: SessionStorage = {
+          get: async <T>(key: string) => values.get(key) as T | undefined,
+          put: async (key, value) => void values.set(key, value),
+          deleteAll: async () => values.clear(),
+          // No alarm rings: a session past its time is expired all the same.
+          setAlarm: async () => undefined,
+          deleteAlarm: async () => undefined,
+        };
+        session = new PairSession({ storage });
+        sessions.set(name, session);
+      }
+      const object = session;
+      return { fetch: (url, init) => object.fetch(new Request(url, init)) };
+    },
+  };
+  return { SESSIONS: namespace };
+}
+
+/** `text` with its middle character changed: every bit there is the sealed bytes', none padding. */
+function changeOne(text: string): string {
+  const at = Math.floor(text.length / 2);
+  return text.slice(0, at) + (text[at] === 'A' ? 'B' : 'A') + text.slice(at + 1);
+}
+
+/** A new relay, for one journey. */
+export function keyRelay(options: KeyRelayOptions = {}): KeyRelay {
+  const env = sessionsInMemory();
+
+  const api = async (route: Route) => {
+    const request = route.request();
+    const method = request.method();
+    const body = request.postData() ?? undefined;
+    relay.bodies.push(body ?? '');
+    const address = new URL(request.url());
+    const opening = method === 'POST' && address.pathname === '/api/sessions';
+    if (opening) relay.opened.push(address.searchParams.get('for') ?? '');
+    else if (address.pathname.endsWith('/collect')) relay.collects++;
+    else if (method === 'POST') relay.submitted.push(body ?? '');
+    if (opening && options.failFirstOpen && relay.opened.length === 1) {
+      return route.abort('connectionfailed');
+    }
+    if (options.expireFirst && address.pathname === `/api/sessions/${relay.codes[0]}/collect`) {
+      return route.fulfill({
+        status: 404,
+        headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'expired' }),
+      });
+    }
+    if (options.older) address.search = '';
+    const response = await pairWorker.fetch(
+      new Request(address.href, method === 'POST' ? { method, body } : { method }),
+      env,
+    );
+    let text = await response.text();
+    if (response.headers.get('content-type')?.startsWith('application/json')) {
+      const answer = JSON.parse(text) as Record<string, unknown>;
+      if (opening && typeof answer.code === 'string') {
+        relay.codes.push(answer.code);
+        if (options.older) delete answer.kind;
+      }
+      if (answer.status === 'sent') {
+        relay.deliveries++;
+        if (options.tamper && relay.deliveries === 1 && typeof answer.sealed === 'string') {
+          answer.sealed = changeOne(answer.sealed);
+        }
+      }
+      text = JSON.stringify(answer);
+    }
+    return route.fulfill({
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: text,
+    });
+  };
+
+  const relay: KeyRelay = {
+    opened: [],
+    codes: [],
+    bodies: [],
+    submitted: [],
+    collects: 0,
+    deliveries: 0,
+    async serveTv(page) {
+      await page.route(`${PAIR_SERVICE}/api/**`, api);
+    },
+    async servePhone(phone) {
+      // Anything else fails, as on the TV.
+      await phone.route(/^https?:\/\//, (route) => route.abort());
+      await phone.route(`${PAIR_SERVICE}/**`, (route) => {
+        const request = route.request();
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith('/api/')) return api(route);
+        const file = request.method() === 'GET' ? PAGE_FILES[pathname] : undefined;
+        if (!file) {
+          return route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' });
+        }
+        return route.fulfill({ status: 200, headers: file.headers, body: file.body });
+      });
+    },
+  };
+  return relay;
+}
+
+/** Pixels to each module of a QR code drawn for reading. */
+const QR_SCALE = 8;
+
+/**
+ * What the QR code inside `box` holds, read as a phone camera reads it. QrCode draws one SVG
+ * path of `M x y h w v1 h-w z` runs of dark modules, with the quiet zone inside its viewBox:
+ * each run is drawn here as pixels on white and the picture read with jsQR. A path holding
+ * anything else fails, so a change to the drawing shows up here.
+ */
+export async function readQrCode(box: Locator): Promise<string> {
+  const { viewBox, path } = await box.locator('svg').evaluate((svg) => ({
+    viewBox: svg.getAttribute('viewBox') ?? '',
+    path: svg.querySelector('path')?.getAttribute('d') ?? '',
+  }));
+  const modules = Number(/^0 0 (\d+) \1$/.exec(viewBox)?.[1] ?? 0);
+  if (!modules) throw new Error(`The QR code is not square: viewBox "${viewBox}"`);
+  const width = modules * QR_SCALE;
+  const pixels = new Uint8ClampedArray(width * width * 4).fill(255);
+  let read = 0;
+  for (const [run, x, y, length] of path.matchAll(/M(\d+) (\d+)h(\d+)v1h-\3z/g)) {
+    read += run.length;
+    const left = Number(x) * QR_SCALE;
+    const right = (Number(x) + Number(length)) * QR_SCALE;
+    for (let row = Number(y) * QR_SCALE; row < (Number(y) + 1) * QR_SCALE; row++) {
+      // Red, green and blue to 0; alpha stays 255.
+      for (let at = (row * width + left) * 4; at < (row * width + right) * 4; at += 4) {
+        pixels.fill(0, at, at + 3);
+      }
+    }
+  }
+  if (read === 0 || read !== path.length) {
+    throw new Error('The QR code is not drawn as runs of dark modules');
+  }
+  const code = jsQR(pixels, width, width, { inversionAttempts: 'dontInvert' });
+  if (!code) throw new Error('No QR code could be read');
+  return code.data;
 }

@@ -80,5 +80,8 @@ export function isSubdlDownload(url: string): boolean {
   return url.startsWith(SUBDL_DOWNLOADS + '/');
 }
 
-/** Where the viewer gets a key: SubDL's API page (to confirm with a real account). */
-export const SUBDL_KEY_PAGE = 'https://subdl.com/api-doc';
+/**
+ * Where the viewer gets a key: the API page of their SubDL account, where the
+ * key is made and copied (from a public guide). The phone app links to it too.
+ */
+export const SUBDL_KEY_PAGE = 'https://subdl.com/panel/api';

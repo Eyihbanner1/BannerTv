@@ -1,10 +1,12 @@
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Button } from '../../components/Button';
 import { QrCode } from '../../components/QrCode';
 import { TextField } from '../../components/TextField';
+import { createPairing, PAIR_SERVICE } from '../../data/pairing';
+import { createPhoneKeyLink, type PhoneKeyLink, type PhoneKeyState } from '../../data/phone-key';
 import {
   removeSubdlKey,
   saveSubdlKey,
@@ -15,19 +17,48 @@ import {
   subdlResting,
   subdlUsage,
 } from '../../data/subdl';
+import { pageCrypto, webCryptoWorks } from '../../platform/web-crypto';
 import screen from '../Screen.module.css';
-import { type SubdlNotice, subdlStatus } from './subdl-status';
+import { createSubdlChecks } from './subdl-checks';
+import { type SubdlNotice, subdlStatus, subdlStatusKey } from './subdl-status';
 import styles from './SubdlScreen.module.css';
-
-/** "Check again" is offered at most this often. */
-const CHECK_AGAIN_MS = 10_000;
 
 const restWhy = () => subdlResting()?.why ?? null;
 
 /**
- * Settings > SubDL subtitles: the profile's own free SubDL key. The field
- * always starts empty and is emptied once the key is saved, so the key is
- * never shown; one check runs at a time.
+ * Sending the key from the phone, where this TV can: it needs the pairing
+ * relay, and Web Crypto that passes its self-test to open what the phone
+ * sealed. Elsewhere the screen shows the code that opens SubDL's API page, as
+ * it always has.
+ */
+function createPhoneLink(): PhoneKeyLink | null {
+  if (!PAIR_SERVICE) return null;
+  const crypto = pageCrypto();
+  if (!crypto) return null;
+  return createPhoneKeyLink(
+    createPairing({ service: PAIR_SERVICE, kind: 'subdl-key' }),
+    crypto,
+    webCryptoWorks,
+  );
+}
+
+const createChecks = () =>
+  createSubdlChecks({
+    checkKey: (key) => subdl.checkKey(key),
+    save: saveSubdlKey,
+    saved: () => subdlKey.get()?.key,
+    setState: setSubdlKeyState,
+    remove: removeSubdlKey,
+  });
+
+const OFF: PhoneKeyState = { status: 'off' };
+const noPhone = () => OFF;
+const noChanges = () => () => undefined;
+
+/**
+ * Settings > SubDL subtitles: the profile's own free SubDL key, typed here or
+ * sent from the phone. The field always starts empty and is emptied once the
+ * key is saved, so the key is never shown; one check runs at a time.
  */
 export function SubdlScreen() {
   const { t } = useTranslation();
@@ -35,98 +66,127 @@ export function SubdlScreen() {
   const rest = useSyncExternalStore(subdlUsage.subscribe, restWhy);
   const [text, setText] = useState('');
   const [notice, setNotice] = useState<SubdlNotice | null>(null);
-  const checking = useRef(false);
-  const lastCheck = useRef(0);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const [checks] = useState(createChecks);
+  const [link] = useState(createPhoneLink);
+  const phone = useSyncExternalStore(link ? link.subscribe : noChanges, link ? link.get : noPhone);
+  useEffect(() => checks.onNotice(setNotice), [checks]);
   useScreenFocus('subdl-key');
 
-  const check = async (key: string) => {
-    if (checking.current) return;
-    checking.current = true;
-    lastCheck.current = Date.now();
-    setNotice('checking');
-    const answer = await subdl.checkKey(key);
-    checking.current = false;
-    if (answer !== 'unreachable') setSubdlKeyState(key, answer);
-    // A key removed while it was checked stays removed, and says so.
-    if (mounted.current && subdlKey.get()?.key === key) setNotice(answer);
-  };
+  // The phone's session runs while the screen is open. A key still being opened
+  // when it closes is saved all the same: the relay has already let it go.
+  useEffect(() => {
+    if (!link) return undefined;
+    link.onKey((key) => (key === null ? checks.failed() : checks.receive(key)));
+    link.start();
+    return () => link.stop();
+  }, [link, checks]);
 
   const save = () => {
-    if (checking.current) return;
-    if (saveSubdlKey(text) === 'bad') {
-      setNotice('badFormat');
-      return;
-    }
-    setText('');
-    const key = subdlKey.get()?.key;
-    if (key) void check(key);
+    if (checks.save(text) === 'saved') setText('');
   };
 
-  const checkAgain = () => {
-    const key = subdlKey.get()?.key;
-    if (!key || Date.now() - lastCheck.current < CHECK_AGAIN_MS) return;
-    void check(key);
+  const retry = () => {
+    void setFocus('subdl-key');
+    link?.start();
   };
 
   const status = subdlStatus(notice, record?.state ?? null, rest);
+
+  let side;
+  if (!link || phone.status === 'off') {
+    side = (
+      <section className={styles.side}>
+        <p className={styles.help}>{t('subdl.getKey')}</p>
+        <div className={styles.qrBox} data-testid="subdl-page-qr">
+          <QrCode className={styles.qr} text={SUBDL_KEY_PAGE} size={200} />
+        </div>
+      </section>
+    );
+  } else {
+    let body;
+    if (phone.status === 'waiting') {
+      body = (
+        <>
+          <div className={styles.qrBox} data-testid="subdl-phone-qr">
+            <QrCode className={styles.qr} text={phone.qrText} size={240} />
+          </div>
+          <p className={styles.phoneHelp}>{t('subdl.phone.scan')}</p>
+          <p className={styles.host}>{phone.host}</p>
+        </>
+      );
+    } else if (phone.status === 'opening') {
+      body = <p className={styles.placeholder}>{t('subdl.phone.opening')}</p>;
+    } else {
+      const expired = phone.status === 'expired';
+      body = (
+        <>
+          <p className={styles.placeholder}>
+            {expired ? t('subdl.phone.expired') : t('subdl.phone.unavailable')}
+          </p>
+          <Button
+            focusKey="subdl-phone-retry"
+            label={expired ? t('subdl.phone.newCode') : t('subdl.phone.retry')}
+            onPress={retry}
+          />
+        </>
+      );
+    }
+    side = (
+      <section className={styles.side}>
+        <h2 className={styles.phoneTitle}>{t('subdl.phone.title')}</h2>
+        {body}
+      </section>
+    );
+  }
 
   return (
     <div className={screen.screen}>
       <h1 className={screen.title}>{t('subdl.title')}</h1>
       <p className={screen.lead}>{t('subdl.lead')}</p>
-      <section className={styles.getKey}>
-        <p className={styles.help}>{t('subdl.getKey')}</p>
-        <QrCode className={styles.qr} text={SUBDL_KEY_PAGE} size={200} />
-      </section>
-      <div className={`${screen.column} ${styles.actions}`}>
-        {record && <p className={styles.note}>{t('subdl.saved')}</p>}
-        <TextField
-          focusKey="subdl-key"
-          label={t('subdl.key')}
-          placeholder={t('subdl.placeholder')}
-          value={text}
-          type="text"
-          onChange={setText}
-          onSubmit={save}
-        />
-        <Button
-          block
-          variant="primary"
-          focusKey="subdl-save"
-          label={t('subdl.save')}
-          onPress={save}
-        />
-        {notice === 'unreachable' && record && (
+      <div className={styles.body}>
+        <div className={`${screen.column} ${styles.actions}`}>
+          {record && <p className={styles.note}>{t('subdl.saved')}</p>}
+          <TextField
+            focusKey="subdl-key"
+            label={t('subdl.key')}
+            placeholder={t('subdl.placeholder')}
+            value={text}
+            type="text"
+            onChange={setText}
+            onSubmit={save}
+          />
           <Button
             block
-            focusKey="subdl-check-again"
-            label={t('subdl.checkAgain')}
-            onPress={checkAgain}
+            variant="primary"
+            focusKey="subdl-save"
+            label={t('subdl.save')}
+            onPress={save}
           />
-        )}
-        <p className={styles.status} aria-live="polite" data-testid="subdl-status">
-          {status ? t(`subdl.${status}`) : ''}
-        </p>
-        {record && (
-          <Button
-            block
-            focusKey="subdl-remove"
-            label={t('subdl.remove')}
-            onPress={() => {
-              removeSubdlKey();
-              setNotice('removed');
-              void setFocus('subdl-key');
-            }}
-          />
-        )}
-        <p className={styles.note}>{t('subdl.private')}</p>
+          {notice === 'unreachable' && record && (
+            <Button
+              block
+              focusKey="subdl-check-again"
+              label={t('subdl.checkAgain')}
+              onPress={() => checks.checkAgain()}
+            />
+          )}
+          <p className={styles.status} aria-live="polite" data-testid="subdl-status">
+            {status ? t(subdlStatusKey(status)) : ''}
+          </p>
+          {record && (
+            <Button
+              block
+              focusKey="subdl-remove"
+              label={t('subdl.remove')}
+              onPress={() => {
+                checks.remove();
+                void setFocus('subdl-key');
+              }}
+            />
+          )}
+          <p className={styles.note}>{t('subdl.private')}</p>
+        </div>
+        {side}
       </div>
     </div>
   );
