@@ -33,6 +33,7 @@
     "@webos-tools/cli": "^3.2.6",
     "es-check": "^9.8.1",
     "hls.js": "1.7.3",
+    "jsqr": "1.4.0",
     "shaka-player": "5.3.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
