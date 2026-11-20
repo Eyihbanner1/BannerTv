@@ -1,0 +1,69 @@
+name: Website
+
+# Publishes site/ (privacy policy, terms of use, help) to GitHub Pages. Only
+# site/ is published, never docs/ or the code. Deploys run from main once the
+# repository variable PAGES_ENABLED is "true" (see docs/STORE.md); until then, and
+# on pull requests and other branches, the job only checks the pages. After
+# setting the variable, run this workflow on main once to publish.
+
+on:
+  pull_request:
+    paths: ['site/**', 'tools/scripts/check-site.mjs', '.github/workflows/pages.yml']
+  push:
+    branches: [main]
+    paths: ['site/**', 'tools/scripts/check-site.mjs', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The check needs no dependencies, so skip setup-node's automatic pnpm
+      # cache (it looks for pnpm because package.json names it).
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Decide whether to publish
+        id: mode
+        run: echo "publish=${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Links and placeholders
+        run: node tools/scripts/check-site.mjs ${{ steps.mode.outputs.publish == 'true' && '--publish' || '' }}
+
+      - name: Upload the site
+        if: steps.mode.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
