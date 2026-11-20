@@ -1,7 +1,9 @@
 package com.bannertv.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteKeysTest {
@@ -29,6 +31,17 @@ class RemoteKeysTest {
         // Back (4) arrives through OnBackPressedDispatcher; D-pad, centre, Enter and digits reach the page.
         for (keyCode in listOf(4, 19, 20, 21, 22, 23, 66, 7, 16, 82, 0)) {
             assertNull("key code $keyCode", RemoteKeys.nameFor(keyCode))
+        }
+    }
+
+    @Test
+    fun knowsTheOkKeys() {
+        // D-pad centre, Enter, the number pad's Enter and a game controller's A.
+        for (keyCode in listOf(23, 66, 160, 96)) {
+            assertTrue("key code $keyCode", RemoteKeys.isOk(keyCode))
+        }
+        for (keyCode in listOf(4, 19, 20, 21, 22, 82, 85, 0)) {
+            assertFalse("key code $keyCode", RemoteKeys.isOk(keyCode))
         }
     }
 }
