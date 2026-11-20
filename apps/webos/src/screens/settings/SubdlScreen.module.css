@@ -1,24 +1,11 @@
-/* Where to get a key, with the code that opens SubDL's API page beside it. */
-.getKey {
-  margin-bottom: 40px;
-}
-
-.help {
-  display: inline-block;
-  vertical-align: middle;
-  width: 640px;
-  font: 500 24px/1.4 var(--bt-font);
-  color: var(--bt-text-muted);
-}
-
-.qr {
-  display: inline-block;
-  vertical-align: middle;
-  margin-left: 48px;
-  border-radius: 16px;
+/* The key on the left; beside it the phone's QR code, or the code that opens SubDL's API page. */
+.body {
+  display: flex;
+  align-items: flex-start;
 }
 
 .actions {
+  flex: none;
   display: flex;
   flex-direction: column;
 }
@@ -35,4 +22,60 @@
 .status {
   min-height: 1.4em;
   color: var(--bt-text);
+}
+
+/* As the addon dialog's phone panel. */
+.side {
+  flex: none;
+  width: 392px;
+  margin-left: 48px;
+  padding-left: 48px;
+  border-left: 2px solid var(--bt-surface-3);
+}
+
+.help {
+  margin-bottom: 24px;
+  font: 500 24px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+}
+
+.phoneTitle {
+  margin-bottom: 20px;
+  font: var(--bt-text-label);
+}
+
+.qrBox {
+  line-height: 0;
+}
+
+.qr {
+  display: block;
+  border-radius: 16px;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 240px;
+  height: 240px;
+  margin-bottom: 24px;
+  padding: 24px;
+  border-radius: 16px;
+  background: var(--bt-surface-2);
+  font: var(--bt-text-label);
+  color: var(--bt-text-muted);
+  text-align: center;
+}
+
+.phoneHelp {
+  margin-top: 12px;
+  font: 500 22px/1.4 var(--bt-font);
+  color: var(--bt-text-muted);
+}
+
+.host {
+  margin-top: 4px;
+  font: 600 22px/1.4 var(--bt-font);
+  color: var(--bt-accent);
 }

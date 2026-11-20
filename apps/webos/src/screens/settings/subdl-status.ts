@@ -1,10 +1,21 @@
 import type { SubdlKeyRecord, SubdlRestWhy } from '@bannertv/core';
 
-/** What the SubDL screen last did, shown until the viewer does something else. */
+/**
+ * What the SubDL screen last did, shown until the viewer does something else.
+ * `phoneChecking` is `checking` for a key that came from the phone, and
+ * `phoneFailed` is something from the phone that did not open.
+ */
 export type SubdlNotice =
-  'badFormat' | 'checking' | 'works' | 'refused' | 'unreachable' | 'removed';
+  | 'badFormat'
+  | 'checking'
+  | 'works'
+  | 'refused'
+  | 'unreachable'
+  | 'removed'
+  | 'phoneChecking'
+  | 'phoneFailed';
 
-/** The status line's string under `subdl.`, or null for none. */
+/** What the status line says, or null for nothing: subdlStatusKey gives its string. */
 export type SubdlStatus = SubdlNotice | 'resting' | 'usedUp';
 
 /**
@@ -22,6 +33,13 @@ export function subdlStatus(
   if (rest === 'busy' || rest === 'failing') return 'resting';
   if (rest === 'limit') return 'usedUp';
   return null;
+}
+
+/** The status line's string. The phone's two sit with the phone's other strings. */
+export function subdlStatusKey(status: SubdlStatus): string {
+  if (status === 'phoneChecking') return 'subdl.phone.checking';
+  if (status === 'phoneFailed') return 'subdl.phone.failed';
+  return `subdl.${status}`;
 }
 
 /** The SubDL row's value in Settings. */
