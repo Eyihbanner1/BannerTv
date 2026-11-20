@@ -10,8 +10,15 @@ import type { PartChange, SyncPart } from '../sync/part';
 import { collectionPart, createProfileStores, profileParts } from '../sync/parts';
 import { openDocument } from '../sync/seal';
 import { fakeSyncService, manualTimers, memoryPart, webCryptoForTests } from '../sync/testing';
-import { createAddonCollection, installIdOf } from './collection';
-import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './defaults';
+import demoManifest from './bannertv-demo.manifest.json';
+import { createAddonCollection, installIdOf, type StoredAddon } from './collection';
+import {
+  BANNERTV_DEMO_URL,
+  CINEMETA_URL,
+  DEFAULT_ADDONS,
+  OPENSUBTITLES_V3_URL,
+  RETIRED_DEFAULT_ADDONS,
+} from './defaults';
 import { addonSwitchesPart, createAddonSwitches, switchedOnOnly } from './switches';
 
 /** A configured addon: its address holds a key, which nothing about its switch may hold. */
@@ -59,7 +66,7 @@ describe('createAddonSwitches', () => {
     switches.set(idOf(EXTRA_URL), true);
     await settle();
     expect(switches.get().off).toEqual(new Set([idOf(EXTRA_URL)]));
-    expect(switches.isOff(collection.get().addons[3]!)).toBe(true);
+    expect(switches.isOff(collection.get().addons[2]!)).toBe(true);
     const saved = await storage.get('addons.off');
     expect(saved).toEqual([idOf(EXTRA_URL)]);
     expect(JSON.stringify(saved)).not.toContain('secret123');
@@ -69,7 +76,7 @@ describe('createAddonSwitches', () => {
     await settle();
     expect(switches.get().off.size).toBe(0);
     expect(await storage.get('addons.off')).toEqual([]);
-    expect(urls(collection)[3]).toBe(EXTRA_URL);
+    expect(urls(collection)[2]).toBe(EXTRA_URL);
   });
 
   it('gives the same object until a switch changes', async () => {
@@ -114,7 +121,7 @@ describe('createAddonSwitches', () => {
     expect(switches.get().off).toEqual(new Set([idOf(CINEMETA_URL)]));
     expect(await storage.get('addons.off')).toEqual([idOf(CINEMETA_URL)]);
     await collection.install(EXTRA_URL);
-    expect(switches.isOff(collection.get().addons[3]!)).toBe(false);
+    expect(switches.isOff(collection.get().addons[2]!)).toBe(false);
   });
 
   it('keeps the switch of an addon set up again with new settings', async () => {
@@ -157,9 +164,9 @@ describe('switchedOnOnly', () => {
 
     switches.set(idOf(CINEMETA_URL), true);
     await settle();
-    expect(urls(view)).toEqual([BANNERTV_DEMO_URL, OPENSUBTITLES_V3_URL]);
-    expect(urls(collection)).toEqual([BANNERTV_DEMO_URL, CINEMETA_URL, OPENSUBTITLES_V3_URL]);
-    expect(view.get().addons[0]).toBe(collection.get().addons[0]);
+    expect(urls(view)).toEqual([OPENSUBTITLES_V3_URL]);
+    expect(urls(collection)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL]);
+    expect(view.get().addons[0]).toBe(collection.get().addons[1]);
     expect(view.toStored().map((item) => item.transportUrl)).toEqual(urls(view));
 
     switches.set(idOf(CINEMETA_URL), false);
@@ -189,7 +196,7 @@ describe('switchedOnOnly', () => {
     expect(view.get()).toBe(view.get());
     await switches.load();
     expect(view.get().ready).toBe(true);
-    expect(view.get().addons).toHaveLength(3);
+    expect(view.get().addons).toHaveLength(2);
   });
 
   it('gives the same object, and tells nobody, until what it holds changes', async () => {
@@ -204,15 +211,15 @@ describe('switchedOnOnly', () => {
 
     // Moving the switched-off addon changes the collection, but nothing the view holds.
     collection.move(EXTRA_URL, -1);
-    expect(urls(collection)[2]).toBe(EXTRA_URL);
+    expect(urls(collection)[1]).toBe(EXTRA_URL);
     expect(view.get()).toBe(shown);
     expect(listener).not.toHaveBeenCalled();
 
-    collection.move(CINEMETA_URL, -1);
+    collection.move(OPENSUBTITLES_V3_URL, -2);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(urls(view)).toEqual([CINEMETA_URL, BANNERTV_DEMO_URL, OPENSUBTITLES_V3_URL]);
+    expect(urls(view)).toEqual([OPENSUBTITLES_V3_URL, CINEMETA_URL]);
     off();
-    collection.move(CINEMETA_URL, 1);
+    collection.move(OPENSUBTITLES_V3_URL, 2);
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
@@ -224,9 +231,9 @@ describe('switchedOnOnly', () => {
     const added = await view.install(EXTRA_URL);
     expect(fetchJson).toHaveBeenCalledTimes(1);
     expect(added.transportUrl).toBe(EXTRA_URL);
-    expect(urls(view)).toEqual([BANNERTV_DEMO_URL, OPENSUBTITLES_V3_URL, EXTRA_URL]);
+    expect(urls(view)).toEqual([OPENSUBTITLES_V3_URL, EXTRA_URL]);
     view.remove(CINEMETA_URL);
-    expect(urls(collection)).toEqual([BANNERTV_DEMO_URL, OPENSUBTITLES_V3_URL, EXTRA_URL]);
+    expect(urls(collection)).toEqual([OPENSUBTITLES_V3_URL, EXTRA_URL]);
   });
 });
 
@@ -288,23 +295,35 @@ function world() {
 
 type World = ReturnType<typeof world>;
 
+/** The addons builds before BannerTV Demo was taken away installed on first launch. */
+const DEMO_DEFAULTS: readonly StoredAddon[] = [
+  { transportUrl: BANNERTV_DEMO_URL, manifest: demoManifest, official: true, fetchedAt: 0 },
+  ...DEFAULT_ADDONS,
+];
+
 /**
  * A screen with the default addons and, unless `older`, the switches' part.
  * Given the storage of an older screen, it is that screen updated in place.
+ * `withDemo`: a build from before BannerTV Demo was taken away.
  */
-function screen(w: World, options: { older?: boolean; storage?: KeyValueStore } = {}) {
+function screen(
+  w: World,
+  options: { older?: boolean; storage?: KeyValueStore; withDemo?: boolean } = {},
+) {
   const storage = options.storage ?? memoryKeyValueStore();
   const clock = createAccountClock({ now: w.now });
   const profiles = memoryPart('profiles');
   profiles.set('main', 1, 0);
+  const defaults = options.withDemo ? DEMO_DEFAULTS : DEFAULT_ADDONS;
   const collection = createAddonCollection({
     storage,
     fetchJson: () => Promise.resolve(EXTRA_MANIFEST),
-    defaults: DEFAULT_ADDONS,
+    defaults,
+    retired: options.withDemo ? [] : RETIRED_DEFAULT_ADDONS,
     now: w.now,
   });
   const switches = createAddonSwitches({ storage, collection });
-  const accountParts: SyncPart[] = [profiles.part, collectionPart(collection)];
+  const accountParts: SyncPart[] = [profiles.part, collectionPart(collection, { defaults })];
   // A build from before the switches has no part for them.
   if (!options.older) accountParts.push(addonSwitchesPart(switches));
   const storesOf = (id: string) =>
@@ -360,7 +379,7 @@ describe('switches across screens', () => {
     await settle();
     const extra = a.idOf(EXTRA_URL);
     expect(b.switches.get().off).toEqual(new Set([extra]));
-    expect(urls(b.view)).toEqual([BANNERTV_DEMO_URL, CINEMETA_URL, OPENSUBTITLES_V3_URL]);
+    expect(urls(b.view)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL]);
     // Still installed there, its settings with it.
     expect(urls(b.collection)).toContain(EXTRA_URL);
 
@@ -373,7 +392,7 @@ describe('switches across screens', () => {
     await a.engine.syncNow();
     await settle();
     expect(a.switches.get().off).toEqual(new Set([a.idOf(CINEMETA_URL)]));
-    expect(urls(a.view)).toEqual([BANNERTV_DEMO_URL, OPENSUBTITLES_V3_URL, EXTRA_URL]);
+    expect(urls(a.view)).toEqual([OPENSUBTITLES_V3_URL, EXTRA_URL]);
     const items = await accountAddons(w, code);
     expect(items[`off/${extra}`]).toMatchObject({ x: 1 });
     expect(items[`off/${a.idOf(CINEMETA_URL)}`]).toMatchObject({ v: 1 });
@@ -408,18 +427,17 @@ describe('switches across screens', () => {
     await old.engine.join(code, 'use');
     await settle();
     await w.time.advance(1000);
-    old.collection.move(OPENSUBTITLES_V3_URL, -2);
+    old.collection.move(OPENSUBTITLES_V3_URL, -1);
     await old.engine.flush();
     const items = await accountAddons(w, code);
     expect(items[`off/${cinemeta}`]).toMatchObject({ v: 1 });
-    expect(items.order).toMatchObject({
-      v: [old.idOf(OPENSUBTITLES_V3_URL), expect.anything(), cinemeta],
-    });
+    expect(items.order).toMatchObject({ v: [old.idOf(OPENSUBTITLES_V3_URL), cinemeta] });
 
     await a.engine.syncNow();
     await settle();
     expect(a.switches.get().off).toEqual(new Set([cinemeta]));
-    expect(urls(a.view)).toEqual([OPENSUBTITLES_V3_URL, BANNERTV_DEMO_URL]);
+    expect(urls(a.view)).toEqual([OPENSUBTITLES_V3_URL]);
+    expect(urls(a.collection)).toEqual([OPENSUBTITLES_V3_URL, CINEMETA_URL]);
   });
 
   it('a screen that gains the switches brings the account’s in, rather than switching them on', async () => {
@@ -445,5 +463,57 @@ describe('switches across screens', () => {
     await settle();
     expect(after.switches.get().off).toEqual(new Set([a.idOf(CINEMETA_URL)]));
     expect((await accountAddons(w, code))[`off/${a.idOf(CINEMETA_URL)}`]).toMatchObject({ v: 1 });
+  });
+});
+
+describe('BannerTV Demo, no longer installed', () => {
+  it('leaves a screen updated in place and the account, and a screen that joins never gets it', async () => {
+    const w = world();
+    // A screen on an earlier build, with BannerTV Demo and an addon of the viewer's.
+    const storage = memoryKeyValueStore();
+    const before = screen(w, { storage, withDemo: true });
+    await before.start();
+    await before.collection.install(EXTRA_URL);
+    await settle();
+    const code = await before.engine.create();
+    await before.engine.confirmCreate();
+    const demo = before.idOf(BANNERTV_DEMO_URL);
+    expect((await accountAddons(w, code))[`a/${demo}`]).toMatchObject({
+      v: { u: BANNERTV_DEMO_URL, o: true },
+    });
+
+    // Updated in place: the Demo goes from the screen, then from the account.
+    const after = screen(w, { storage });
+    await after.start();
+    expect(urls(after.collection)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL, EXTRA_URL]);
+    await w.time.advance(5000);
+    await after.engine.syncNow();
+    await settle();
+    await after.engine.flush();
+    expect((await accountAddons(w, code))[`a/${demo}`]).toMatchObject({ x: 1 });
+
+    const other = screen(w);
+    await other.start();
+    await other.engine.join(code, 'use');
+    await settle();
+    expect(urls(other.collection)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL, EXTRA_URL]);
+  });
+
+  it('is not brought back from an account that still holds it', async () => {
+    const w = world();
+    // Only the defaults on the earlier build: a screen with nothing of its own sends nothing over.
+    const old = screen(w, { withDemo: true });
+    await old.start();
+    const code = await old.engine.create();
+    await old.engine.confirmCreate();
+
+    const updated = screen(w);
+    await updated.start();
+    await updated.engine.join(code, 'use');
+    await settle();
+    await w.time.advance(5000);
+    await updated.engine.syncNow();
+    await settle();
+    expect(urls(updated.collection)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL]);
   });
 });

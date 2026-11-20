@@ -21,12 +21,12 @@ function toAccount(join: boolean): void {
 
 /**
  * First run: what BannerTV is, the notice the LG store asks for (BannerTV
- * hosts nothing beyond its Demo addon's Creative Commons films; the user picks
- * the addons), and a way into Home or straight into adding an addon. Beside
- * them, the BannerTV account is offered (Create an account, Join with a code)
- * where Settings would offer it: on Main, once its service has answered, and
- * only on a screen the engine has found signed out. Start browsing keeps focus, since the
- * account is optional (ADR 0006). Back here leaves the app, like Back on Home.
+ * hosts nothing; the user picks the addons), and a way into Home or straight
+ * into adding an addon. Beside them, the BannerTV account is offered (Create
+ * an account, Join with a code) where Settings would offer it: on Main, once
+ * its service has answered, and only on a screen the engine has found signed
+ * out. Start browsing keeps focus, since the account is optional (ADR 0006).
+ * Back here leaves the app, like Back on Home.
  */
 export function WelcomeScreen() {
   const { t } = useTranslation();

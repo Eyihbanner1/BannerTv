@@ -2,7 +2,7 @@ import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import { buildBoard } from './board';
 import type { InstalledAddon } from './collection';
-import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from './defaults';
+import { DEFAULT_ADDONS } from './defaults';
 
 function installed(
   manifest: unknown,
@@ -12,8 +12,8 @@ function installed(
 }
 
 const defaults = DEFAULT_ADDONS.map((a) => installed(a.manifest, a.transportUrl));
-/** Cinemeta and OpenSubtitles v3 as shipped, without BannerTV Demo. */
-const stremio = defaults.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL);
+/** Cinemeta and OpenSubtitles v3 as shipped. */
+const stremio = defaults;
 
 describe('buildBoard', () => {
   it('turns Cinemeta into Popular and Featured rows plus genre rows', () => {
@@ -67,16 +67,13 @@ describe('buildBoard', () => {
     expect(cinemetaGenres.map((r) => r.type)).toEqual(['series', 'series', 'series']);
   });
 
-  it('starts a new TV on BannerTV Demo, with genre rows still from Cinemeta', () => {
+  it('starts a new TV on Cinemeta, without the Blender open movies', () => {
     const rows = buildBoard(defaults);
-    expect(rows.slice(0, 3).map((r) => [r.key, r.name, r.style])).toEqual([
-      ['0-movie-blender', 'Blender open movies', 'poster'],
-      ['1-movie-top', 'Popular', 'poster'],
-      ['1-series-top', 'Popular', 'poster'],
+    expect(rows.slice(0, 2).map((r) => [r.key, r.name, r.style])).toEqual([
+      ['0-movie-top', 'Popular', 'poster'],
+      ['0-series-top', 'Popular', 'poster'],
     ]);
-    const genres = rows.filter((r) => r.kind === 'genre');
-    expect(genres.length).toBeGreaterThan(0);
-    expect(genres.every((r) => r.key.indexOf('1-') === 0)).toBe(true);
+    expect(rows.some((r) => r.name === 'Blender open movies')).toBe(false);
   });
 
   it('is empty without addons', () => {

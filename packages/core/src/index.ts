@@ -89,6 +89,7 @@ export {
   HASH_MATCHING_ADDON_IDS,
   OPENSUBTITLES_V3_ID,
   OPENSUBTITLES_V3_URL,
+  RETIRED_DEFAULT_ADDONS,
 } from './addons/defaults';
 export {
   type CatalogPager,

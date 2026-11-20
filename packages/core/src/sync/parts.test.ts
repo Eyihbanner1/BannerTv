@@ -1,7 +1,7 @@
 import type { MetaPreview } from '@bannertv/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { createAddonCollection, installIdOf, type StoredAddon } from '../addons/collection';
-import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from '../addons/defaults';
+import { CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from '../addons/defaults';
 import { createHomeLayout } from '../addons/layout';
 import { createLibrary } from '../library/library';
 import { createPlayedVideos } from '../playback/continue';
@@ -497,8 +497,8 @@ describe('collectionPart', () => {
     const ids = collection.get().addons.map((addon) => installIdOf(addon));
     expect(snapshot.get('order')).toEqual({ v: ids });
     const first = snapshot.get(`a/${ids[0]}`)!;
-    expect(first.v).toMatchObject({ u: BANNERTV_DEMO_URL, o: true });
-    expect(part.compare!(`a/${ids[0]}`, first.v)).toEqual({ u: BANNERTV_DEMO_URL, o: true });
+    expect(first.v).toMatchObject({ u: CINEMETA_URL, o: true });
+    expect(part.compare!(`a/${ids[0]}`, first.v)).toEqual({ u: CINEMETA_URL, o: true });
     expect(part.snapshot().get(`a/${ids[0]}`)).toBe(first);
     expect(part.ownData!()).toBe(false);
     expect(part.removedDefaults!()).toEqual([]);
@@ -507,24 +507,23 @@ describe('collectionPart', () => {
   it("adopts the account's addons and order without asking any addon", async () => {
     const { collection, fetchJson, part } = setup();
     await collection.load();
-    const [demo, cinemeta] = collection.toStored();
+    const [cinemeta, subtitles] = collection.toStored();
     await part.adopt(
       change(
         {
           'a/extra1': { t: 5, v: { u: EXTRA_URL, o: false, m: EXTRA_MANIFEST } },
-          order: { t: 5, v: ['extra1', cinemeta!.installId!] },
+          order: { t: 5, v: ['extra1', subtitles!.installId!] },
         },
-        [`a/${demo!.installId}`],
+        [`a/${cinemeta!.installId}`],
       ),
     );
     expect(fetchJson).not.toHaveBeenCalled();
     expect(collection.get().addons.map((addon) => addon.transportUrl)).toEqual([
       EXTRA_URL,
-      CINEMETA_URL,
-      DEFAULT_ADDONS[2]!.transportUrl,
+      OPENSUBTITLES_V3_URL,
     ]);
     expect(part.ownData!()).toBe(true);
-    expect(part.removedDefaults!()).toEqual([`a/${demo!.installId}`]);
+    expect(part.removedDefaults!()).toEqual([`a/${cinemeta!.installId}`]);
   });
 
   it('sees no change from a daily refresh that finds the same manifests, which still saves the time', async () => {
