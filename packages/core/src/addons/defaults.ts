@@ -4,6 +4,8 @@ import openSubtitles from './opensubtitles-v3.manifest.json';
 import type { StoredAddon } from './collection';
 
 export const BANNERTV_DEMO_URL = 'https://demo.bannertv.workers.dev/manifest.json';
+/** Its manifest as the app ships it (services/demo checks the Worker still sends it). */
+export const BANNERTV_DEMO_MANIFEST: unknown = demo;
 /** Its manifest id, which stream entries carry as `addonId`. */
 export const BANNERTV_DEMO_ID = demo.id;
 export const CINEMETA_URL = 'https://v3-cinemeta.strem.io/manifest.json';
