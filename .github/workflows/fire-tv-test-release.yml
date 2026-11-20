@@ -1,0 +1,60 @@
+name: Fire TV test release
+
+# One-off, on this thread's branch only: puts the Android TV test APK from one CI run on a public
+# pre-release, so a Fire TV can download it with the Downloader app (no GitHub sign-in, no zip).
+# Runs when this file is pushed. To swap in a newer build, change RUN_ID and push again: the asset
+# is replaced in place, so the download link stays the same.
+
+on:
+  push:
+    branches: [claude/project-thread-dm5j81]
+    paths: ['.github/workflows/fire-tv-test-release.yml']
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: fire-tv-test-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish the Fire TV test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUN_ID: '44759952348'
+      # The commit that run built: main's, so the tag points at code main has.
+      SOURCE_SHA: 982551e7f6b45ef998107a9864be52a826c966bf
+      TAG: fire-tv-test
+      ASSET: bannertv.apk
+    steps:
+      - name: Download the APK from the CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: bannertv-apk
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          path: apk
+
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l apk
+          # Exactly one debug APK, or cp fails.
+          cp apk/*-debug.apk "$ASSET"
+          sha256sum "$ASSET" | tee "$ASSET.sha256"
+          notes="Test build of BannerTV for Android TV, Google TV and Fire TV, from CI run $RUN_ID ($SOURCE_SHA).
+          Debug-signed: it installs as \"BannerTV test\". Not a store release.
+          SHA-256: $(cut -d' ' -f1 "$ASSET.sha256")"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+            gh release edit "$TAG" --notes "$notes"
+          else
+            gh release create "$TAG" "$ASSET" --prerelease --target "$SOURCE_SHA" \
+              --title "Fire TV test build" --notes "$notes"
+          fi
+          echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET" >> "$GITHUB_STEP_SUMMARY"
