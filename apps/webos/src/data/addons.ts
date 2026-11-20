@@ -14,6 +14,7 @@ import {
   installIdOf,
   MANIFEST_TIMEOUT_MS,
   observeAnswers,
+  RETIRED_DEFAULT_ADDONS,
   switchedOnOnly,
 } from '@bannertv/core';
 import { type Manifest, normalizeManifestUrl, parseManifest } from '@bannertv/protocol';
@@ -57,6 +58,7 @@ export const allAddons = createAddonCollection({
   storage: storage.kv,
   fetchJson: watchedFetch,
   defaults: DEFAULT_ADDONS,
+  retired: RETIRED_DEFAULT_ADDONS,
 });
 
 /**

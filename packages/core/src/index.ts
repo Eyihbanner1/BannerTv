@@ -83,12 +83,14 @@ export {
 } from './addons/switches';
 export {
   BANNERTV_DEMO_ID,
+  BANNERTV_DEMO_MANIFEST,
   BANNERTV_DEMO_URL,
   CINEMETA_URL,
   DEFAULT_ADDONS,
   HASH_MATCHING_ADDON_IDS,
   OPENSUBTITLES_V3_ID,
   OPENSUBTITLES_V3_URL,
+  RETIRED_DEFAULT_ADDONS,
 } from './addons/defaults';
 export {
   type CatalogPager,

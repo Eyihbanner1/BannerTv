@@ -8,10 +8,24 @@ import {
   installIdOf,
   type StoredAddon,
 } from './collection';
-import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS } from './defaults';
+import demoManifest from './bannertv-demo.manifest.json';
+import {
+  BANNERTV_DEMO_URL,
+  CINEMETA_URL,
+  DEFAULT_ADDONS,
+  RETIRED_DEFAULT_ADDONS,
+} from './defaults';
 
-/** Cinemeta and OpenSubtitles v3 as shipped: two official addons, without BannerTV Demo. */
-const STREMIO_DEFAULTS = DEFAULT_ADDONS.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL);
+/** Cinemeta and OpenSubtitles v3 as shipped: two official addons. */
+const STREMIO_DEFAULTS = DEFAULT_ADDONS;
+
+/** BannerTV Demo as builds before this one installed it on first launch. */
+const OLD_DEMO: StoredAddon = {
+  transportUrl: BANNERTV_DEMO_URL,
+  manifest: demoManifest,
+  official: true,
+  fetchedAt: 0,
+};
 
 const EXTRA_URL = 'https://addon.example.com/conf/manifest.json';
 const EXTRA_MANIFEST = {
@@ -32,6 +46,7 @@ function setup(
     storage,
     fetchJson,
     defaults,
+    retired: RETIRED_DEFAULT_ADDONS,
     now: () => time,
   });
   return { storage, collection, fetchJson, setTime: (t: number) => (time = t) };
@@ -41,18 +56,56 @@ const urls = (collection: { get(): { addons: readonly { transportUrl: string }[]
   collection.get().addons.map((a) => a.transportUrl);
 
 describe('createAddonCollection', () => {
-  it('installs BannerTV Demo, Cinemeta and OpenSubtitles on first launch and saves them', async () => {
+  it('installs Cinemeta and OpenSubtitles on first launch and saves them', async () => {
     const { collection, storage } = setup(undefined, DEFAULT_ADDONS);
     expect(collection.get().ready).toBe(false);
     await collection.load();
     expect(collection.get().ready).toBe(true);
     expect(collection.get().addons.map((a) => a.manifest.name)).toEqual([
-      'BannerTV Demo',
       'Cinemeta',
       'OpenSubtitles v3',
     ]);
     expect(collection.get().addons.every((a) => a.official)).toBe(true);
-    expect(((await storage.get('addons')) as StoredAddon[]).length).toBe(3);
+    expect(((await storage.get('addons')) as StoredAddon[]).length).toBe(2);
+  });
+
+  it('takes away BannerTV Demo that an earlier build installed, and saves the list without it', async () => {
+    const { collection, storage } = setup();
+    const extra = {
+      transportUrl: EXTRA_URL,
+      manifest: EXTRA_MANIFEST,
+      official: false,
+      fetchedAt: 1,
+    };
+    await storage.set('addons', [OLD_DEMO, ...STREMIO_DEFAULTS, extra]);
+    await collection.load();
+    expect(urls(collection)).toEqual([...STREMIO_DEFAULTS.map((a) => a.transportUrl), EXTRA_URL]);
+    expect(((await storage.get('addons')) as StoredAddon[]).map((a) => a.transportUrl)).toEqual(
+      urls(collection),
+    );
+  });
+
+  it('keeps BannerTV Demo that the viewer added by its address', async () => {
+    const { collection, storage } = setup();
+    await storage.set('addons', [{ ...OLD_DEMO, official: false }, ...STREMIO_DEFAULTS]);
+    await collection.load();
+    expect(urls(collection)[0]).toBe(BANNERTV_DEMO_URL);
+  });
+
+  it('leaves out BannerTV Demo the account brings from an earlier build, but not one added by hand', async () => {
+    const { collection } = setup();
+    await collection.load();
+    const before = collection.get();
+    await collection.adopt({
+      set: [{ ...OLD_DEMO, installId: addressTag(BANNERTV_DEMO_URL) }],
+      order: [addressTag(BANNERTV_DEMO_URL)],
+    });
+    // Nothing changed, so screens are not told.
+    expect(collection.get()).toBe(before);
+    await collection.adopt({
+      set: [{ ...OLD_DEMO, official: false, installId: addressTag(BANNERTV_DEMO_URL) }],
+    });
+    expect(urls(collection)).toContain(BANNERTV_DEMO_URL);
   });
 
   it('keeps an empty collection empty instead of bringing the defaults back', async () => {

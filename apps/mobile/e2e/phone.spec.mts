@@ -147,8 +147,13 @@ test('first run: welcome, Home, an addon, a title, All streams and the player', 
   await openApp(page);
 
   await expect(page.getByText('Welcome to BannerTV')).toBeVisible();
+  await expect(
+    page.getByText('Cinemeta is already added, so Home is ready to browse.', { exact: false }),
+  ).toBeVisible();
   await page.getByText('Start browsing').click();
-  await expect(page.getByText('Blender open movies')).toBeVisible();
+  // Cinemeta's rows lead Home: BannerTV Demo's Blender open movies are no longer added.
+  await expect(page.getByText('Popular', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Blender open movies')).toHaveCount(0);
 
   await addStreamAddon(page);
 

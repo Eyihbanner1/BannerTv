@@ -6,7 +6,7 @@ import { createQueryCache } from '../query';
 import { memoryKeyValueStore } from '../storage';
 import { createAddonClient, metahubAtSize, NotFoundError, withArtwork } from './client';
 import { createAddonCollection } from './collection';
-import { BANNERTV_DEMO_URL, CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './defaults';
+import { CINEMETA_URL, DEFAULT_ADDONS, OPENSUBTITLES_V3_URL } from './defaults';
 
 // Lets queued promise callbacks run. The core has no timers to wait on.
 async function flush() {
@@ -330,15 +330,10 @@ describe('withArtwork', () => {
 });
 
 describe('the bundled manifests', () => {
-  it('still read, with BannerTV Demo first and then Cinemeta, each with a Home row', () => {
-    expect(DEFAULT_ADDONS.map((a) => a.transportUrl)).toEqual([
-      BANNERTV_DEMO_URL,
-      CINEMETA_URL,
-      OPENSUBTITLES_V3_URL,
-    ]);
-    for (const addon of DEFAULT_ADDONS.slice(0, 2)) {
-      expect(boardCatalogs(parseManifest(addon.manifest)).length).toBeGreaterThan(0);
-    }
+  it('still read, with Cinemeta first and its Home rows, then OpenSubtitles', () => {
+    expect(DEFAULT_ADDONS.map((a) => a.transportUrl)).toEqual([CINEMETA_URL, OPENSUBTITLES_V3_URL]);
+    expect(boardCatalogs(parseManifest(DEFAULT_ADDONS[0]!.manifest)).length).toBeGreaterThan(0);
+    parseManifest(DEFAULT_ADDONS[1]!.manifest);
   });
 });
 
