@@ -1,5 +1,5 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
-import { DEMO_ROW, FIRST_ROW, mockAddons } from './addons';
+import { FIRST_ROW, mockAddons } from './addons';
 import { readKv } from './play';
 import { GUEST_ID, lockedWith, main, seedProfiles } from './profiles';
 import {
@@ -1396,7 +1396,7 @@ test('the welcome offers the account beside it: Create opens BannerTV account on
   // The screen has nothing of its own yet, so it simply becomes the account's, and starts
   // again on Home: the welcome was left for good.
   await reloadsAfter(other, () => other.keyboard.press('Enter'));
-  await expectFocus(other, `${DEMO_ROW}-tile-0`);
+  await expectFocus(other, `${FIRST_ROW}-tile-0`);
   expect(await other.evaluate(() => localStorage.getItem('bannertv.syncOn'))).toBe('1');
   expect(errors).toEqual([]);
   expect(otherErrors).toEqual([]);

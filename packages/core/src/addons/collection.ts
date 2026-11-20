@@ -151,9 +151,18 @@ export function createAddonCollection(options: {
   storage: KeyValueStore;
   fetchJson: FetchJson;
   defaults: readonly StoredAddon[];
+  /**
+   * Addresses of addons the app once installed itself and no longer does. A
+   * copy the app added (official) goes wherever it turns up: in the saved
+   * collection at launch, or from the BannerTV account. One the viewer added
+   * by its address is theirs, and stays.
+   */
+  retired?: readonly string[];
   now?: () => number;
 }): AddonCollection {
-  const { storage, fetchJson, defaults, now = Date.now } = options;
+  const { storage, fetchJson, defaults, retired = [], now = Date.now } = options;
+  const isRetired = (item: StoredAddon) =>
+    item.official === true && retired.indexOf(item.transportUrl) !== -1;
   const state = createStore<CollectionState>({ ready: false, addons: [] });
   // Raw manifests, kept so storage holds exactly what the addon sent.
   const raw = new Map<string, unknown>();
@@ -237,9 +246,10 @@ export function createAddonCollection(options: {
       }
       // An empty saved list means the user removed everything; only a missing one gets defaults.
       const list = Array.isArray(saved) ? (saved as StoredAddon[]) : defaults;
-      const addons = readAll(list);
+      const kept = list.filter((item) => !(item && isRetired(item)));
+      const addons = readAll(kept);
       state.set({ ready: true, addons });
-      if (!Array.isArray(saved)) save(addons);
+      if (!Array.isArray(saved) || kept.length < list.length) save(addons);
     },
 
     async install(input, options = {}) {
@@ -359,6 +369,8 @@ export function createAddonCollection(options: {
       list = list.filter((item) => !removing.has(item.installId!));
       for (const incoming of change.set ?? []) {
         if (!incoming || typeof incoming.transportUrl !== 'string' || !incoming.installId) continue;
+        // A screen still on an older build may hold one the app no longer installs.
+        if (isRetired(incoming)) continue;
         const at = list.findIndex(
           (item) =>
             item.installId === incoming.installId || item.transportUrl === incoming.transportUrl,

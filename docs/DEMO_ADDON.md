@@ -1,6 +1,6 @@
 # BannerTV Demo addon
 
-BannerTV has no films of its own, so a new viewer, and LG's testers, would open an empty app. The BannerTV Demo addon fixes that with three Creative Commons films from the Blender Foundation, served by BannerTV itself and preinstalled next to Cinemeta and OpenSubtitles v3 (PLAN.md, store section). It is a normal Stremio-protocol addon: any Stremio client can install it from `https://demo.bannertv.workers.dev/manifest.json`.
+BannerTV has no films of its own, so a new viewer, and LG's testers, would open an empty app. The BannerTV Demo addon fixes that with three Creative Commons films from the Blender Foundation, served by BannerTV itself (PLAN.md, store section). It was preinstalled next to Cinemeta and OpenSubtitles v3 from October to November 2026; the app no longer installs it, and takes away the copy it installed (see "Taking it down"), but anyone can still add it by its address. It is a normal Stremio-protocol addon: any Stremio client can install it from `https://demo.bannertv.workers.dev/manifest.json`.
 
 The code is in `services/demo`. This page covers what it serves and why, how the films are encoded, where it is hosted, what it costs, and how to deploy it.
 
@@ -34,7 +34,7 @@ Everything about a film lives in `services/demo/films.json`: its text, credit, l
 
 These choices come from how the TV app reads addons:
 
-- **First in the list.** Home loads catalog rows in addon order, and the first row also fills the hero. The Demo goes first in `DEFAULT_ADDONS` so its films are what a new viewer sees.
+- **First in the list.** Home loads catalog rows in addon order, and the first row also fills the hero. While it was preinstalled, the Demo went first in `DEFAULT_ADDONS` so its films were what a new viewer saw.
 - **Every catalog item is complete.** The hero shows catalog data only, so each item carries its own artwork and text. Our own id prefix means Cinemeta and OpenSubtitles are never asked about these films.
 - **Posters carry the title.** Poster tiles hide their caption once the image loads.
 - **No genre list.** A catalog that lists genres would take Home's genre rows from Cinemeta. Search is answered, so the films turn up when someone searches for them. The app searches as the viewer types and the Demo's row comes first, so only title words match as they are typed: "bun" finds Big Buck Bunny, but "an" on the way to another title finds nothing.
@@ -98,7 +98,7 @@ Everything below runs on Eyitayo's Windows laptop, which can reach blender.org a
 5. **Deploy:** from `services/demo`, `npx wrangler@4 login` (already done for the relay), then `npx wrangler@4 deploy`. Only new or changed files upload. If it stops with "Upload took too long", run it again and it carries on.
 6. **Check it:** `pnpm --filter @bannertv/demo check:live` fetches every film, every size's first and last segment, the subtitles and artwork, and tries IPv6.
 7. **Check from Korea:** check-host.net had no Korean node in October 2026, so use [Globalping](https://globalping.io), which does: an `http` measurement of `demo.bannertv.workers.dev` from `{"country": "KR"}`, for `/manifest.json`, a 288p segment, and again with `"ipVersion": 6`. Or ask someone there to play a film.
-8. **Let the preinstall merge:** the app puts the Demo first in `DEFAULT_ADDONS` (the last commit of the Demo's pull request), so that commit must not reach a TV build before the Demo answers.
+8. **The preinstall, until November 2026:** the app put the Demo first in `DEFAULT_ADDONS`, so that commit could not reach a TV build before the Demo answered. It no longer preinstalls it, so a redeploy needs nothing from the app.
 
 **Changing the manifest** (its version, name or catalog): copy the new one into `packages/core/src/addons/bannertv-demo.manifest.json`, which the app ships so Home can ask for the Demo's row before the live manifest arrives. A test fails until the two match.
 
@@ -107,5 +107,5 @@ Everything below runs on Eyitayo's Windows laptop, which can reach blender.org a
 **Taking it down.** Every TV that has launched keeps its own saved list of addons, the Demo included, so deleting the Worker or dropping it from `DEFAULT_ADDONS` alone would leave a failing first row on those TVs, after up to 30 days of cached films (`staleError`). In order:
 
 1. Deploy the Worker with an empty catalog and empty stream lists (an empty `FILMS` list in `src/addon.ts`). Each TV drops the row the next time it refreshes the catalog, within six hours (`cacheMaxAge`), since Home leaves out empty rows.
-2. Release an app that removes `https://demo.bannertv.workers.dev/manifest.json` from saved addon lists when it loads them, and drops it from `DEFAULT_ADDONS`.
+2. Release an app that removes `https://demo.bannertv.workers.dev/manifest.json` from saved addon lists when it loads them, and drops it from `DEFAULT_ADDONS`. Done in November 2026: it is in `RETIRED_DEFAULT_ADDONS` (`packages/core/src/addons/defaults.ts`), so the copy the app installed goes at launch and never comes back from the BannerTV account, while one a viewer added by its address stays.
 3. Once that release has reached TVs, Eyitayo deletes the `demo` Worker in the Cloudflare dashboard (Workers & Pages).

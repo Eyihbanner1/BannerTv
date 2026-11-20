@@ -1,6 +1,7 @@
 import { expect, type Locator, test } from '@playwright/test';
 import { creditSentence, FILMS } from '../../../services/demo/src/addon';
-import { DEMO_ROW, mockAddons } from './addons';
+import { DEMO_ROW, FIRST_ROW, mockAddons } from './addons';
+import { readKv } from './play';
 import { APP_URL, expectFocus, press, pressBack } from './tv';
 
 test('the first launch welcomes the user once, then opens Home', async ({ page }) => {
@@ -21,15 +22,49 @@ test('the first launch welcomes the user once, then opens Home', async ({ page }
   await press(page, 'ArrowLeft', 'welcome-start');
   await page.keyboard.press('Enter');
   await expect(welcome).toHaveCount(0);
-  await expectFocus(page, `${DEMO_ROW}-tile-0`);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
 
   await page.reload();
-  await expectFocus(page, `${DEMO_ROW}-tile-0`);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
-test('a new TV starts on BannerTV Demo’s films, credited on Details', async ({ page }) => {
+test('a new TV starts on Cinemeta’s rows, with no Blender open movies', async ({ page }) => {
   await mockAddons(page, { firstRun: true });
+  await page.goto(APP_URL);
+  await expectFocus(page, 'welcome-start');
+  await expect(
+    page.getByText('Cinemeta is already added, so Home is ready to browse.', { exact: false }),
+  ).toBeVisible();
+  await press(page, 'Enter', `${FIRST_ROW}-tile-0`);
+  const titles = page.locator('[data-row-key] h2');
+  await expect(titles.nth(0)).toHaveText('PopularMovies');
+  await expect(page.getByText('Blender open movies')).toHaveCount(0);
+  expect(
+    ((await readKv(page, 'addons')) as { transportUrl: string }[]).map((a) => a.transportUrl),
+  ).toEqual([
+    'https://v3-cinemeta.strem.io/manifest.json',
+    'https://opensubtitles-v3.strem.io/manifest.json',
+  ]);
+});
+
+test('BannerTV Demo installed by an earlier build is taken away at launch', async ({ page }) => {
+  await mockAddons(page, { demo: 'preinstalled' });
+  await page.goto(APP_URL);
+  await expectFocus(page, `${FIRST_ROW}-tile-0`);
+  await expect(page.locator('[data-row-key] h2').nth(0)).toHaveText('PopularMovies');
+  await expect(page.getByText('Blender open movies')).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      ((await readKv(page, 'addons')) as { transportUrl: string }[]).map((a) => a.transportUrl),
+    )
+    .not.toContain('https://demo.bannertv.workers.dev/manifest.json');
+});
+
+test('BannerTV Demo added by its address leads Home with its films, credited on Details', async ({
+  page,
+}) => {
+  await mockAddons(page, { firstRun: true, demo: 'added' });
   await page.goto(APP_URL);
   await expectFocus(page, 'welcome-start');
   await press(page, 'Enter', `${DEMO_ROW}-tile-0`);
@@ -54,10 +89,10 @@ test('a new TV starts on BannerTV Demo’s films, credited on Details', async ({
   await expectFocus(page, `${DEMO_ROW}-tile-0`);
 });
 
-test('if BannerTV Demo cannot be reached on a new TV, Cinemeta’s first title fills the hero', async ({
+test('if BannerTV Demo, added first, cannot be reached, Cinemeta’s first title fills the hero', async ({
   page,
 }) => {
-  await mockAddons(page, { firstRun: true });
+  await mockAddons(page, { firstRun: true, demo: 'added' });
   await page.route(/^https:\/\/demo\.bannertv\.workers\.dev\//, (route) => route.abort());
   await page.goto(APP_URL);
   await expectFocus(page, 'welcome-start');
@@ -77,7 +112,7 @@ const hiddenPixels = (paragraph: Locator) =>
 test('every BannerTV Demo film’s text fits the hero and Details, credit and licence included', async ({
   page,
 }) => {
-  await mockAddons(page, { firstRun: true });
+  await mockAddons(page, { firstRun: true, demo: 'added' });
   await page.goto(APP_URL);
   await expectFocus(page, 'welcome-start');
   await press(page, 'Enter', `${DEMO_ROW}-tile-0`);

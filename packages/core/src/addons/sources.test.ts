@@ -1,7 +1,7 @@
 import { parseManifest } from '@bannertv/protocol';
 import { describe, expect, it } from 'vitest';
 import type { InstalledAddon } from './collection';
-import { BANNERTV_DEMO_URL, DEFAULT_ADDONS } from './defaults';
+import { DEFAULT_ADDONS } from './defaults';
 import { discoverSources, orderedTypes, searchSources } from './sources';
 
 function installed(manifest: unknown, transportUrl: string): InstalledAddon {
@@ -9,8 +9,8 @@ function installed(manifest: unknown, transportUrl: string): InstalledAddon {
 }
 
 const defaults = DEFAULT_ADDONS.map((a) => installed(a.manifest, a.transportUrl));
-/** Cinemeta and OpenSubtitles v3 as shipped, without BannerTV Demo. */
-const stremio = defaults.filter((a) => a.transportUrl !== BANNERTV_DEMO_URL);
+/** Cinemeta and OpenSubtitles v3 as shipped. */
+const stremio = defaults;
 
 const anime = installed(
   {
@@ -53,11 +53,10 @@ describe('searchSources', () => {
     expect(searchSources(stremio.slice(1))).toEqual([]);
   });
 
-  it('searches BannerTV Demo’s films before Cinemeta’s on a new TV', () => {
+  it('searches Cinemeta’s films and series on a new TV, and no Blender open movies', () => {
     expect(searchSources(defaults).map((s) => [s.key, s.addon.manifest.name])).toEqual([
-      ['0-movie-blender', 'BannerTV Demo'],
-      ['1-movie-top', 'Cinemeta'],
-      ['1-series-top', 'Cinemeta'],
+      ['0-movie-top', 'Cinemeta'],
+      ['0-series-top', 'Cinemeta'],
     ]);
   });
 });

@@ -2149,7 +2149,7 @@ test('on a broadcast, Left and Right with the controls hidden add up behind live
 test('BannerTV Demo’s subtitle checks wait to be picked, and leave the language other titles start with', async ({
   page,
 }) => {
-  await mockAddons(page, { firstRun: true });
+  await mockAddons(page, { firstRun: true, demo: 'added' });
   await mockPlayback(page);
   await routeDemoFilms(page);
   // This viewer reads English subtitles.

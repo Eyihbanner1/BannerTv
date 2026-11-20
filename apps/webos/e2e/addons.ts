@@ -18,16 +18,16 @@ import { addStorageInitScript } from './tv';
 const CORE = resolve(import.meta.dirname, '../../../packages/core/src/addons');
 const CINEMETA_MANIFEST = readFileSync(resolve(CORE, 'cinemeta.manifest.json'), 'utf8');
 const SUBTITLES_MANIFEST = readFileSync(resolve(CORE, 'opensubtitles-v3.manifest.json'), 'utf8');
+const DEMO_MANIFEST = readFileSync(resolve(CORE, 'bannertv-demo.manifest.json'), 'utf8');
 
 export const FIRST_ROW = 'home-0-movie-top';
 export const SERIES_ROW = 'home-0-series-top';
-/** On a first launch BannerTV Demo comes first, so its row leads Home. */
+/** BannerTV Demo's row, which leads Home when the Demo is first in the list (MockOptions.demo). */
 export const DEMO_ROW = 'home-0-movie-blender';
 
 /**
- * Later launches start from the addons a viewer had before BannerTV Demo was
- * preinstalled, so the journeys keep browsing Cinemeta's rows. The first-run
- * journeys see the Demo.
+ * Later launches start from the default addons, Cinemeta and OpenSubtitles,
+ * as an earlier launch saved them, so the journeys browse Cinemeta's rows.
  */
 const EARLIER_ADDONS = [
   {
@@ -215,6 +215,12 @@ export interface MockOptions {
   /** Shows the first-run screen. Otherwise the journeys start on Home, as on any later launch. */
   firstRun?: boolean;
   /**
+   * BannerTV Demo first in the saved list: `added` by the viewer at its
+   * address, so it stays, or `preinstalled` by a build from before it was
+   * taken away, so the app removes it. The first run too then starts with it.
+   */
+  demo?: 'added' | 'preinstalled';
+  /**
    * Answers for particular catalog paths, e.g. `series/top`. Returning
    * undefined instead of a promise falls through to the usual list.
    */
@@ -282,6 +288,14 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
 
   if (!options.firstRun) {
     await addStorageInitScript(page, () => localStorage.setItem('bannertv.welcomed', '1'));
+  }
+  if (!options.firstRun || options.demo) {
+    const demo = options.demo && {
+      transportUrl: 'https://demo.bannertv.workers.dev/manifest.json',
+      manifest: JSON.parse(DEMO_MANIFEST) as unknown,
+      official: options.demo === 'preinstalled',
+      fetchedAt: 0,
+    };
     // Stored once per test, and only if nothing else (seedStreamAddon) stored a list first.
     await addStorageInitScript(
       page,
@@ -306,7 +320,7 @@ export async function mockAddons(page: Page, options: MockOptions = {}): Promise
           tx.oncomplete = () => db.close();
         };
       },
-      EARLIER_ADDONS,
+      demo ? [demo, ...EARLIER_ADDONS] : EARLIER_ADDONS,
     );
   }
 

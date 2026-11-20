@@ -262,7 +262,7 @@ const OVERRIDES = {
   welcome: {
     lead: PHONE.welcomeLead,
     ready:
-      'Cinemeta and BannerTV Demo are already added, so Home is ready to browse, with a few free films to play. You can add more addons at any time in Settings, Addons.',
+      'Cinemeta is already added, so Home is ready to browse. You can add more addons at any time in Settings, Addons.',
   },
   player: {
     sleep: { offNote: 'Off: the phone plays on.' },

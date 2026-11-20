@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { DEMO_ROW, mockAddons } from './addons';
+import { FIRST_ROW, mockAddons } from './addons';
 import { readKv } from './play';
 import { heardApart, openTiming, playForMatching, seekVideo, video } from './player';
 import { APP_URL, expectFocus, press } from './tv';
@@ -41,7 +41,7 @@ test('on a phone the whole TV layout fits the screen, in the middle, and the pag
     shown: 780,
   });
 
-  await press(page, 'Enter', `${DEMO_ROW}-tile-0`);
+  await press(page, 'Enter', `${FIRST_ROW}-tile-0`);
   expect(await layout(page)).toMatchObject({ left: 70, width: 640, pageWidth: 780, shown: 780 });
 });
 
