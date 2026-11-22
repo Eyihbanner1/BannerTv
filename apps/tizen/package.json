@@ -1,0 +1,10 @@
+{
+  "name": "@bannertv/tizen",
+  "private": true,
+  "description": "BannerTV for Samsung TVs: packages the LG app's web build as a Tizen .wgt (ADR 0009)",
+  "type": "module",
+  "scripts": {
+    "package": "node package.mjs",
+    "test": "node --test"
+  }
+}

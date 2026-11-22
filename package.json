@@ -18,6 +18,7 @@
     "check:bundle": "pnpm --filter @bannertv/webos check:bundle",
     "check:version": "node tools/scripts/check-version.mjs",
     "package": "pnpm --filter @bannertv/webos package",
+    "package:tizen": "pnpm --filter @bannertv/tizen package",
     "ares": "pnpm --filter @bannertv/webos exec",
     "tv:install": "node tools/scripts/tv.mjs install",
     "tv:launch": "node tools/scripts/tv.mjs launch",
