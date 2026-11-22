@@ -18,12 +18,14 @@ Phase 1 (browse), in progress. Phase 0 put the app shell, remote navigation, pac
 - [ADR 0006](docs/adr/0006-account-and-sync.md): the BannerTV account, how screens sync through it, and the `sync` Worker.
 - [ADR 0007](docs/adr/0007-phone-app.md): the phone app, React Native on the TV's data layer.
 - [Android setup](docs/ANDROID_TV_SETUP.md): installing the Android app on a phone, an Android TV, a Fire TV or the emulator.
+- [ADR 0009](docs/adr/0009-samsung-tizen-app.md): the Samsung TV app, the same build packaged for Tizen.
+- [Samsung setup](docs/SAMSUNG_TV_SETUP.md): Developer Mode and installing the Samsung app on a Samsung TV.
 
 ## At a glance
 
 | | |
 | --- | --- |
-| Platform | LG webOS TV, packaged web app (.ipk), webOS 5.0 (2020) and newer. Android TV, Google TV and Fire TV (.apk), Android 7.1 and newer, from Phase 5 |
+| Platform | LG webOS TV, packaged web app (.ipk), webOS 5.0 (2020) and newer. Android TV, Google TV and Fire TV (.apk), Android 7.1 and newer, from Phase 5. Samsung TV, packaged web app (.wgt), Tizen 5.0 (2019) and newer, test builds |
 | Stack | TypeScript, React, Vite, Norigin Spatial Navigation |
 | App ID | `com.bannertv.app` |
 | Launch | United Kingdom, English, LG Content Store |
@@ -40,6 +42,7 @@ pnpm test         # unit tests
 pnpm build        # apps/webos/dist, one classic ES2017 script
 pnpm e2e          # remote journeys against the production build, loaded from file://
 pnpm package      # out/com.bannertv.app_<version>_all.ipk
+pnpm package:tizen # out/bannertv_<version>.wgt, for Samsung TVs (docs/SAMSUNG_TV_SETUP.md)
 pnpm tv:install   # build, check, package, install and open on the TV
 ```
 
@@ -47,13 +50,14 @@ The Android app (`apps/androidtv`) is built by CI from the same `apps/webos/dist
 
 `pnpm lint`, `pnpm typecheck`, `pnpm format:check` and `pnpm check:bundle` run in CI's quick check, with the unit tests and the build, on every push. `check:bundle` fails when the bundle uses syntax or built-ins newer than webOS 5.0's Chromium 68, or grows past its budget.
 
-The journeys, the `.ipk`, the Android TV APK and the phone APK run only on a full build: every push to the combined test build (`test/all-together`), once each time the `full-ci` label is added to a pull request, or a run started by hand (Actions, CI, Run workflow). On a `full-ci` pull request that changes nothing on the phone's native side (Expo's native fingerprint matches the base's), the phone job runs its journeys and checks the Android bundle but skips the APK, which is most of its time. To put a pull request on a phone, add the `phone-apk` label instead: it runs the quick check and the phone job alone, about 25 minutes, and always builds the APK. Like `full-ci`, it acts once, when it is added: remove and add it for another APK. That keeps CI inside the 2,000 minutes a month GitHub Free gives this private repository. Pushes that change only Markdown or `docs/` run no CI.
+The journeys, the `.ipk`, the Samsung `.wgt`, the Android TV APK and the phone APK run only on a full build: every push to the combined test build (`test/all-together`), once each time the `full-ci` label is added to a pull request, or a run started by hand (Actions, CI, Run workflow). On a `full-ci` pull request that changes nothing on the phone's native side (Expo's native fingerprint matches the base's), the phone job runs its journeys and checks the Android bundle but skips the APK, which is most of its time. To put a pull request on a phone, add the `phone-apk` label instead: it runs the quick check and the phone job alone, about 25 minutes, and always builds the APK. Like `full-ci`, it acts once, when it is added: remove and add it for another APK. That keeps CI inside the 2,000 minutes a month GitHub Free gives this private repository. Pushes that change only Markdown or `docs/` run no CI.
 
 ## Layout
 
 | Path | What lives there |
 | --- | --- |
 | `apps/webos` | The webOS app: React UI, remote navigation, webOS platform calls, `appinfo.json` |
+| `apps/tizen` | The Samsung TV app: packages the webOS app's build as a Tizen `.wgt` with its `config.xml` |
 | `packages/protocol` | Stremio addon protocol v3: types, lenient parsing of addon responses, request URLs and routing rules |
 | `packages/core` | Framework-free TypeScript shared by any future client: addon collection, addon client, request limiter, cache, Home rows |
 | `brand` | Logo, icons, splash, palette and type tokens |
