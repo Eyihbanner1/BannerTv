@@ -1,0 +1,82 @@
+name: Samsung TV test release
+
+# One-off, on this thread's branch only (delete before merging): builds the Samsung TV test app and
+# puts it on a public pre-release, so Apps2Samsung can install it straight from a link. Runs when
+# this branch's web app, the Tizen packager or this file is pushed. The asset is replaced in place,
+# so the link stays the same. Each publish counts up the last part of the version (0.0.N), below
+# every real version, so a test build always installs over the one before and a real one over it.
+
+on:
+  push:
+    branches: [claude/project-thread-wp8xdj]
+    paths:
+      - '.github/workflows/samsung-test-release.yml'
+      - 'apps/tizen/**'
+      - 'apps/webos/**'
+      - 'packages/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: samsung-test-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish the Samsung TV test app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TAG: samsung-test
+      ASSET: bannertv.wgt
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm --filter @bannertv/webos --filter @bannertv/tizen test
+
+      - name: Build
+        run: pnpm --filter @bannertv/webos build
+
+      - name: Check the build
+        run: pnpm check:bundle
+
+      - name: Install Playwright's Chromium
+        run: pnpm --filter @bannertv/webos exec playwright install --with-deps chromium
+
+      # The journeys that play the part of a 2019 Samsung TV, and the plain navigation ones.
+      - name: Samsung journeys
+        run: pnpm --filter @bannertv/webos exec playwright test e2e/samsung.spec.ts e2e/navigation.spec.ts --trace off
+
+      - name: Package .wgt
+        run: node apps/tizen/package.mjs --version "0.0.$GITHUB_RUN_NUMBER" --out "$ASSET"
+
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sha256sum "$ASSET" | tee "$ASSET.sha256"
+          notes="Test build of BannerTV for Samsung TVs (Tizen 5.0, 2019, and newer), version 0.0.$GITHUB_RUN_NUMBER, from $GITHUB_SHA on $GITHUB_REF_NAME.
+          Unsigned: install it with Apps2Samsung, which signs it for your TV (docs/SAMSUNG_TV_SETUP.md). Not a store release.
+          SHA-256: $(cut -d' ' -f1 "$ASSET.sha256")"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+            gh release edit "$TAG" --notes "$notes"
+          else
+            gh release create "$TAG" "$ASSET" --prerelease --target "$GITHUB_SHA" \
+              --title "Samsung TV test build" --notes "$notes"
+          fi
+          echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET" >> "$GITHUB_STEP_SUMMARY"
