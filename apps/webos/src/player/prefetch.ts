@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import type { EventPlay } from '../app/router';
 import { preferences } from '../data/preferences';
 import { isAndroid } from '../platform/android';
+import { isTizen } from '../platform/tizen';
 import { knownCapabilities } from '../platform/capabilities';
 import { tuning } from '../platform/tuning';
 import { stopProbing, type StreamFinder, streamFinder } from './finder';
@@ -30,6 +31,8 @@ export function probingAllowed(): boolean {
   const setting = preferences.get().probing;
   if (setting !== 'auto') return setting === 'on';
   if (isAndroid()) return false;
+  // Not measured on a Samsung TV yet, whose decoder the hidden test would share.
+  if (isTizen()) return false;
   return knownCapabilities().webOS !== 5;
 }
 

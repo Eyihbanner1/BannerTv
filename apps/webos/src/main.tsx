@@ -1,5 +1,7 @@
 // First, so it reads the clock as the bundle starts to run (a launch mark).
 import { bootInfo } from './platform/boot';
+// Second: fills in what Samsung's 2019 engine lacks before any other module runs.
+import './platform/legacy';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../../brand/tokens/tokens.css';
@@ -34,6 +36,7 @@ import { afterLaunch } from './platform/launch';
 import { bootMark, mark } from './platform/marks';
 import { noteAppStarted } from './platform/shell';
 import { applyTuning, changedTuning, tuning } from './platform/tuning';
+import { initTizen } from './platform/tizen';
 import { initLifecycle, isWebOS } from './platform/webos';
 import { readPlayMarks } from './player/play-marks';
 
@@ -80,6 +83,7 @@ function start() {
   // A card on Android's own home screen opens its title, cold or while the app runs.
   const onOpen = isAndroid() ? startOpenLinks(takeAndroidLink) : undefined;
   initAndroid({ onRelaunch: askAgainOnRelaunch, onOpen });
+  initTizen({ onRelaunch: askAgainOnRelaunch });
   startStreamHelper();
   startAddons();
   startPlaybackData();

@@ -1,6 +1,7 @@
 import type { TvCapabilities } from '@bannertv/core';
 import { androidCapabilities } from './android';
 import { parseChromiumMajor, webOSReleaseForChromium, webOSReleaseForSdkVersion } from './engine';
+import { tizenCapabilities } from './tizen';
 import { isWebOS, lunaCall } from './webos';
 
 const UNKNOWN: TvCapabilities = {
@@ -52,6 +53,16 @@ async function detect(): Promise<TvCapabilities> {
   // Android tells what its decoders, screen and HDMI audio take (apps/androidtv DeviceFacts).
   const android = androidCapabilities();
   if (android) return { ...android, webOS: null };
+  // A Samsung TV: its product APIs and Samsung's format tables, with the decoder asked for codecs.
+  const tizen = tizenCapabilities();
+  if (tizen) {
+    return {
+      ...tizen,
+      webOS: null,
+      hevc: decodes('video/mp4; codecs="hvc1.1.6.L123.B0"'),
+      av1: decodes('video/mp4; codecs="av01.0.08M.08"'),
+    };
+  }
   // Off the TV (a laptop, Playwright) nothing is known, so no stream gets a TV warning.
   if (!isWebOS()) return UNKNOWN;
   const [system, configs] = await Promise.all([

@@ -29,15 +29,26 @@
     </style>
     <script>
       // Runs before the app bundle and must stay ES5. TVs older than webOS 5.0
-      // (Chromium 68) cannot parse the bundle, so they get this screen instead.
+      // (Chromium 68) or Tizen 5.0 (Samsung's 2019 TVs, Chromium 63, made up
+      // for by platform/legacy.ts) cannot run the bundle, so they get this
+      // screen instead.
       (function () {
         var ua = navigator.userAgent;
-        if (ua.indexOf('Web0S') === -1) return;
-        var match = /Chr[o0]me\/(\d+)/.exec(ua);
-        var major = match ? parseInt(match[1], 10) : 0;
-        if (major >= 68) return;
+        var tizen = /\bTizen (\d+)\./.exec(ua);
+        if (tizen) {
+          if (parseInt(tizen[1], 10) >= 5) return;
+        } else {
+          if (ua.indexOf('Web0S') === -1) return;
+          var match = /Chr[o0]me\/(\d+)/.exec(ua);
+          var major = match ? parseInt(match[1], 10) : 0;
+          if (major >= 68) return;
+        }
         window.__BANNERTV_UNSUPPORTED__ = true;
         document.addEventListener('DOMContentLoaded', function () {
+          if (tizen) {
+            document.getElementById('unsupported-needs').textContent =
+              'BannerTV needs a Samsung TV with Tizen 5.0 or newer, which means most Samsung TVs from 2019 on.';
+          }
           document.getElementById('unsupported').style.display = 'block';
         });
       })();
@@ -47,7 +58,9 @@
     <div id="root"></div>
     <div id="unsupported" role="alert">
       <h1>This TV is not supported</h1>
-      <p>BannerTV needs an LG TV with webOS 5.0 or newer, which means most LG TVs from 2020 on.</p>
+      <p id="unsupported-needs">
+        BannerTV needs an LG TV with webOS 5.0 or newer, which means most LG TVs from 2020 on.
+      </p>
       <p>Press the Home button on your remote to leave.</p>
     </div>
     <script type="module" src="/src/main.tsx"></script>

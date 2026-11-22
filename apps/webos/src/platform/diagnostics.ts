@@ -9,6 +9,7 @@ import {
   webOSReleaseForChromium,
   webOSReleaseForSdkVersion,
 } from './engine';
+import { isTizen, MIN_TIZEN, tizenCapabilities, tizenEngine, tizenFacts } from './tizen';
 import { changedTuning } from './tuning';
 import { pageCrypto } from './web-crypto';
 import { isWebOS, lunaCall, readDeviceInfo } from './webos';
@@ -142,8 +143,30 @@ function androidRows(): DiagnosticRow[] {
   return rows;
 }
 
+function tizenRows(): DiagnosticRow[] {
+  const facts = tizenFacts();
+  if (!facts) return [];
+  const rows: DiagnosticRow[] = [
+    ['Model', text(facts.model)],
+    ['Model code', text(facts.modelCode)],
+    ['Firmware', text(facts.firmware)],
+    ['Tizen', text(facts.release === null ? null : facts.release.toFixed(1))],
+    ['UHD panel', text(facts.uhd)],
+    ['8K panel', text(facts.uhd8k)],
+    ['HDR', text(facts.hdr)],
+    // Missing when the TV would not run Samsung's own script (apps/tizen/package.mjs).
+    ['Product API', window.webapis?.productinfo ? 'loaded' : 'not loaded'],
+  ];
+  const caps = tizenCapabilities();
+  if (caps) {
+    for (const [label, value] of Object.entries(caps)) rows.push([label, text(value)]);
+  }
+  return rows;
+}
+
 async function tvRows(): Promise<DiagnosticRow[]> {
   if (isAndroid()) return androidRows();
+  if (isTizen()) return tizenRows();
   if (!isWebOS()) return [['Running on webOS', 'no (laptop or test browser)']];
   const device = readDeviceInfo() ?? {};
   const rows: DiagnosticRow[] = [
@@ -208,7 +231,9 @@ function backTimes(): string {
 
 export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
   const ua = navigator.userAgent;
-  const chromium = parseChromiumMajor(ua);
+  const tizen = isTizen() ? tizenEngine(ua) : null;
+  // A Samsung app's user agent names no "Chrome/": its Chromium comes from the Tizen release.
+  const chromium = tizen ? tizen.chromium : parseChromiumMajor(ua);
   const [indexedDBResult, tv, webCrypto] = await Promise.all([
     checkIndexedDB(),
     tvRows(),
@@ -234,20 +259,22 @@ export async function collectDiagnostics(): Promise<DiagnosticSection[]> {
       title: 'Web engine',
       rows: [
         ['Chromium', chromium === null ? '—' : String(chromium)],
-        [
-          'webOS release',
-          chromium === null || isAndroid()
-            ? '—'
-            : (webOSReleaseForChromium(chromium) ?? 'older than 3'),
-        ],
-        ['Supported', yesNo(isSupportedEngine(ua))],
+        tizen
+          ? ['Tizen release', tizen.release === null ? '—' : tizen.release.toFixed(1)]
+          : [
+              'webOS release',
+              chromium === null || isAndroid()
+                ? '—'
+                : (webOSReleaseForChromium(chromium) ?? 'older than 3'),
+            ],
+        ['Supported', yesNo(tizen ? (tizen.release ?? 0) >= MIN_TIZEN : isSupportedEngine(ua))],
         ['Secure context', yesNo(window.isSecureContext === true)],
         ['Web Crypto', webCrypto],
         ['Window', `${window.innerWidth} x ${window.innerHeight} @ ${window.devicePixelRatio}x`],
         ['User agent', ua],
       ],
     },
-    { title: isAndroid() ? 'Android' : 'TV', rows: tv },
+    { title: isAndroid() ? 'Android' : isTizen() ? 'Samsung TV' : 'TV', rows: tv },
     { title: 'Media: native / MSE', rows: mediaRows() },
   ];
 }

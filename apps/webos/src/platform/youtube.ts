@@ -1,4 +1,5 @@
 import { isAndroid, openExternal } from './android';
+import { isTizen, playTrailerOnTizen } from './tizen';
 import { isWebOS, lunaCall } from './webos';
 
 /** LG's YouTube app. Every LG TV since webOS 3 ships it. */
@@ -19,6 +20,8 @@ export function playTrailer(youtubeId: string): Promise<void> {
     openExternal(`https://www.youtube.com/watch?v=${encodeURIComponent(youtubeId)}`);
     return Promise.resolve();
   }
+  // A Samsung TV launches its own YouTube app with the video.
+  if (isTizen()) return playTrailerOnTizen(youtubeId);
   if (!isWebOS()) {
     window.dispatchEvent(new CustomEvent(TRAILER_EVENT, { detail: youtubeId }));
     return Promise.resolve();
