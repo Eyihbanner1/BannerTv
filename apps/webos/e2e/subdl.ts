@@ -182,6 +182,27 @@ const show = {
   ],
 };
 
+/** The film's unpacked file on the download host, as v2 names it: its page, then the file. */
+export const SUBDL_FILM_FILE = '/subtitle/TestPage01/TestFile01';
+
+/**
+ * The answer with every link signed with the caller's key, as SubDL's v2
+ * search sends them (`…zip?api_key=…`, each unpacked file's too). The TV must
+ * cut the key off: a download asked with it marks `keyInUrl`.
+ */
+function signLinks(body: unknown, key: string): unknown {
+  if (Array.isArray(body)) return body.map((item) => signLinks(item, key));
+  if (typeof body !== 'object' || body === null) return body;
+  const out: Row = {};
+  for (const [field, value] of Object.entries(body)) {
+    out[field] =
+      field === 'url' && typeof value === 'string'
+        ? `${value}?api_key=${encodeURIComponent(key)}`
+        : signLinks(value, key);
+  }
+  return out;
+}
+
 /** What each scenario's search answers, as status and body. */
 function searchAnswer(scenario: SubdlScenario): { status: number; body: unknown } {
   switch (scenario) {
@@ -191,11 +212,12 @@ function searchAnswer(scenario: SubdlScenario): { status: number; body: unknown 
         body: film([
           filmRow({
             url: '/subtitle/9000001-9100001.zip',
+            // v2's ids of letters and digits.
             unpack_files: [
               {
                 name: `${SUBDL_FILM_RELEASE}.srt`,
-                url: '/subtitle/9000001/9200001',
-                file_n_id: 9200001,
+                url: SUBDL_FILM_FILE,
+                file_n_id: 'TestFile01',
               },
             ],
           }),
@@ -216,7 +238,7 @@ function searchAnswer(scenario: SubdlScenario): { status: number; body: unknown 
 
 /** The files on the download host, by path. */
 function download(path: string): { contentType: string; body: Buffer } | undefined {
-  if (path === '/subtitle/9000001/9200001') {
+  if (path === SUBDL_FILM_FILE) {
     return { contentType: 'application/x-subrip', body: Buffer.from(SUBDL_FILM_TEXT, 'utf8') };
   }
   if (path === '/subtitle/9000003-9100003.zip') {
@@ -284,7 +306,7 @@ export async function standInSubdl(page: Page, scenario: SubdlScenario): Promise
     }
     if (isMe) return fulfil(route, 200, { status: true, user: { name: 'test-viewer' } });
     const { status, body } = searchAnswer(scenario);
-    return fulfil(route, status, body);
+    return fulfil(route, status, signLinks(body, key));
   });
   await page.route(DOWNLOADS, async (route) => {
     const request = route.request();

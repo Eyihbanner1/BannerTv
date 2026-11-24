@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { filmAnswer, filmRow, FILM_RELEASE, packRow, showAnswer } from './fixtures';
+import {
+  FAKE_SUBDL_KEY,
+  filmAnswer,
+  filmRow,
+  FILM_RELEASE,
+  packRow,
+  showAnswer,
+  signed,
+  v2FilmRow,
+  v2PackRow,
+} from './fixtures';
 import { classifySubdlAnswer, parseSubdlFiles, SUBDL_MAX_FILES } from './parse';
 import type { SubdlAsk } from './request';
 
@@ -308,5 +318,98 @@ describe('parseSubdlFiles', () => {
     expect(file!.url).toBe('https://dl.subdl.com/subtitle/9000002-9100002.zip#s2e3');
     vi.doUnmock('./request');
     vi.resetModules();
+  });
+});
+
+describe("SubDL's v2 answers, whose links carry the key", () => {
+  const keyless = (files: unknown) => {
+    const said = JSON.stringify(files);
+    expect(said).not.toContain(FAKE_SUBDL_KEY);
+    expect(said).not.toContain('api_key');
+  };
+
+  it("lists a film row's unpacked file at its link without the key", () => {
+    const files = parseSubdlFiles(filmAnswer([v2FilmRow()]), film);
+    expect(files).toEqual([
+      {
+        id: '9000011-9100011-TestFile01',
+        url: 'https://dl.subdl.com/subtitle/TestPage01/TestFile01',
+        lang: 'en',
+        label: FILM_RELEASE,
+        releases: [FILM_RELEASE],
+        fps: 23.976,
+      },
+    ]);
+    keyless(files);
+    const outcome = classifySubdlAnswer(200, filmAnswer([v2FilmRow()]), film);
+    expect('files' in outcome && outcome.files).toHaveLength(1);
+  });
+
+  it('falls back to the ZIP without the key, from a relative or a full link', () => {
+    const files = parseSubdlFiles(
+      filmAnswer([
+        v2FilmRow({ unpack_files: [] }),
+        v2FilmRow({
+          url: `https://dl.subdl.com${signed('/subtitle/9000013-9100013.zip')}`,
+          unpack_files: undefined,
+        }),
+      ]),
+      film,
+    );
+    expect(files.map((file) => file.url)).toEqual([
+      'https://dl.subdl.com/subtitle/9000011-9100011.zip',
+      'https://dl.subdl.com/subtitle/9000013-9100013.zip',
+    ]);
+    keyless(files);
+  });
+
+  it("takes the episode's file SubDL sends from a pack, without the key", () => {
+    const files = parseSubdlFiles(showAnswer([v2PackRow()]), episode);
+    expect(files).toEqual([
+      expect.objectContaining({
+        id: '9000012-9100012-TestFile23',
+        url: 'https://dl.subdl.com/subtitle/TestPage02/TestFile23',
+        label: '03 Test Episode Three.en',
+        season: 2,
+        episode: 3,
+      }),
+    ]);
+    keyless(files);
+    // Its ZIP, when the file is not listed, is opened for the episode only.
+    const [zip] = parseSubdlFiles(showAnswer([v2PackRow({ unpack_files: [] })]), episode);
+    expect(zip!.url).toBe('https://dl.subdl.com/subtitle/9000012-9100012.zip#s2e3');
+  });
+
+  it("drops SubDL's machine translations, which v2 marks only by their author", () => {
+    expect(parseSubdlFiles(filmAnswer([v2FilmRow({ author: 'SUBDL AI' })]), film)).toEqual([]);
+    expect(parseSubdlFiles(filmAnswer([v2FilmRow({ author: 'subdl ai ' })]), film)).toEqual([]);
+    expect(parseSubdlFiles(filmAnswer([v2FilmRow({ author: 'SUBDL AI fan' })]), film)).toHaveLength(
+      1,
+    );
+  });
+
+  it("drops an unpacked file whose link or id is not SubDL's", () => {
+    const entry = (fields: Record<string, unknown>) =>
+      v2FilmRow({
+        unpack_files: [{ name: 'Test.Film.srt', file_n_id: 'TestFile09', ...fields }],
+      });
+    const urls = (row: Record<string, unknown>) =>
+      parseSubdlFiles(filmAnswer([row]), film).map((file) => [file.id, file.url]);
+    // Not on the download host, or not a page and a file: the row's ZIP is used instead.
+    for (const url of [
+      'https://evil.example/subtitle/TestPage01/TestFile09',
+      signed('/subtitle/TestPage01/TestFile09/extra'),
+      signed('/subtitle/Test Page/TestFile09'),
+    ]) {
+      expect(urls(entry({ url }))).toEqual([
+        ['9000011-9100011', 'https://dl.subdl.com/subtitle/9000011-9100011.zip'],
+      ]);
+    }
+    // An id that is not one is replaced by the link's.
+    expect(
+      urls(entry({ url: signed('/subtitle/TestPage01/TestFile09'), file_n_id: 'a/b' })),
+    ).toEqual([
+      ['9000011-9100011-TestFile09', 'https://dl.subdl.com/subtitle/TestPage01/TestFile09'],
+    ]);
   });
 });
