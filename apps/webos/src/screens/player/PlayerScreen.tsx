@@ -602,6 +602,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
       remember,
       continueRow: !sportsEvent,
       fileSubtitles: !props.lab,
+      scorecard: !props.lab,
     });
     setSession(created);
     if (!props.lab) finder.start();
@@ -1475,7 +1476,9 @@ export function PlayerScreen(props: PlayerScreenProps) {
     toast = switching.label
       ? t('player.switchingTo', { quality: switching.label })
       : t('player.switchingStream');
-  } else if (state.steppedDown && waiting) toast = t('player.steppingDown');
+  } else if (state.offline) toast = t('player.offline');
+  else if (state.reconnecting && waiting) toast = t('player.reconnecting');
+  else if (state.steppedDown && waiting) toast = t('player.steppingDown');
   else if (state.failedOver && waiting) toast = t('player.tryingAnother');
   else if (state.struggling && state.status === 'buffering') {
     // Only name a button that is there and would help.
@@ -1699,11 +1702,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setPanel(null);
     if (!session) return;
     chooseAudioLanguage(metaId, language);
+    session.noteChoice('audio');
     session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
     setSwitching({ entry });
   }
 
   const chooseAudio = (track: EngineTrack) => {
+    session?.noteChoice('audio');
     session?.selectAudio(track.id);
     if (track.lang) chooseAudioLanguage(props.lab ? undefined : metaId, track.lang);
   };

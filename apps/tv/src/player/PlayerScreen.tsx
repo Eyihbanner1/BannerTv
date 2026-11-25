@@ -450,6 +450,8 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
   const source = state.entry ? names.get(state.entry.addonId) : undefined;
   const ends = endsAt(state.position, state.duration, state.rate, now);
   const toast = (() => {
+    if (state.offline) return t('player.offline');
+    if (state.reconnecting && waiting) return t('player.reconnecting');
     if (state.steppedDown && waiting) return t('player.steppingDown');
     if (state.failedOver && waiting) return t('player.tryingAnother');
     if (state.struggling && buffering) return t('player.keepsBufferingPlain');
@@ -701,6 +703,7 @@ export function PlayerScreen({ route, active }: { route: PlayerRoute; active: bo
                   selected={track.active}
                   {...(track.active ? { preferred: true } : {})}
                   onPress={() => {
+                    session?.noteChoice('audio');
                     session?.selectAudio(track.id);
                     if (track.lang) chooseAudioLanguage(metaId, track.lang);
                   }}

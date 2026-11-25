@@ -8,6 +8,11 @@
   margin-right: 32px;
 }
 
+/* Two columns' width, for one play a line on the scorecard page. */
+.wide {
+  width: 1032px;
+}
+
 .section {
   margin-bottom: 28px;
 }
@@ -46,6 +51,16 @@
   display: inline;
 }
 
+/* One play in a line: its day and time, then how it went. */
+.play {
+  display: flex;
+  font: 500 24px/1.3 var(--bt-font);
+}
+
+.play .label {
+  width: 150px;
+}
+
 .value {
   flex: 1;
   min-width: 0;
@@ -56,4 +71,10 @@
   position: absolute;
   top: 96px;
   right: var(--bt-safe-x);
+  display: flex;
+}
+
+/* Margins, not gap: webOS 5's Chromium 68 has no gap in flex layouts. */
+.actions > * + * {
+  margin-left: 24px;
 }

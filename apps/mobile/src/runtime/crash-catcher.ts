@@ -151,6 +151,27 @@ function phone(): string {
   });
 }
 
+type ReportRows = readonly (readonly [label: string, value: string])[];
+
+let playbackRows: () => ReportRows = () => [];
+
+/**
+ * What the report says about playback on this phone: the playback scorecard, once the data
+ * layer that keeps it has started (boot.ts). Kept apart so this file never loads the data layer.
+ */
+export function reportPlayback(rows: () => ReportRows): void {
+  playbackRows = rows;
+}
+
+/** The scorecard's lines, or none: a report must still go when they can't be read. */
+function playback(): ReportRows {
+  try {
+    return playbackRows();
+  } catch {
+    return [];
+  }
+}
+
 /** The report as it would be sent now. */
 export function reportNow(): string {
   return reportText({
@@ -161,6 +182,7 @@ export function reportNow(): string {
     screen: drawing,
     screens: trail,
     problems: problems.get(),
+    playback: playback(),
   });
 }
 

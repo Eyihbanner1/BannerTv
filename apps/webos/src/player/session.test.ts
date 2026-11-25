@@ -1,6 +1,7 @@
 import {
   BANNERTV_DEMO_ID,
   type LiveWindow,
+  type PlayRecord,
   type Resolution,
   type StreamEntry,
 } from '@bannertv/core';
@@ -62,6 +63,7 @@ const kept = vi.hoisted(() => ({
   cleared: vi.fn(),
   sourceMemory: vi.fn(),
   releases: vi.fn(() => Promise.resolve()),
+  scorecard: vi.fn<(play: PlayRecord) => boolean>(() => true),
   bandwidth: {
     maxBitrate: () => 40e6,
     struggled: vi.fn<(bitrate: number, ceiling?: number) => void>(),
@@ -87,6 +89,7 @@ vi.mock('../data/playback', () => ({
   progress: { record: kept.progress, clear: kept.cleared },
   sourceMemory: { record: kept.sourceMemory },
   releaseMemory: { remember: kept.releases },
+  scorecard: { record: kept.scorecard },
   bandwidth: kept.bandwidth,
 }));
 
@@ -299,6 +302,18 @@ function struggle(video: FakeVideo) {
   }
 }
 
+/**
+ * The stream stops loading after it played: it is opened again once, where it
+ * was, and that stops too before a picture, so the session goes on as it did
+ * before opening streams again.
+ */
+async function stopTwice() {
+  lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+  await settle();
+  lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+  await settle();
+}
+
 beforeEach(() => {
   vi.stubGlobal('window', globalThis);
   vi.useFakeTimers();
@@ -310,6 +325,7 @@ beforeEach(() => {
   kept.cleared.mockClear();
   kept.sourceMemory.mockClear();
   kept.releases.mockClear();
+  kept.scorecard.mockClear();
   kept.bandwidth.struggled.mockClear();
   kept.bandwidth.smooth.mockClear();
   account.pushSoon.mockClear();
@@ -341,10 +357,14 @@ describe('a paused stream', () => {
     expect(markFailed).not.toHaveBeenCalled();
     expect(session.get()).toMatchObject({ status: 'paused', entry: first });
 
-    // Played again and still starved, it moves on as before.
+    // Played again and still starved, it is opened again where it was, then moves on as before.
     session.resume();
     video.fire('waiting');
     await vi.advanceTimersByTimeAsync(STALL_MS);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get()).toMatchObject({ entry: first, reconnecting: true });
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream did not start'));
     expect(markFailed).toHaveBeenCalledWith(first);
     expect(session.get().entry).toBe(second);
   });
@@ -1355,6 +1375,10 @@ describe('a live stream', () => {
     expect(session.moves()).toBe(0);
 
     lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: first, reconnecting: true, live: false });
+    await settle();
+    expect(lastEngine().startAt).toBe(0);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream did not start'));
     expect(session.get()).toMatchObject({ entry: second, failedOver: true, live: false });
     await settle();
     expect(lastEngine().startAt).toBe(0);
@@ -1426,12 +1450,218 @@ describe('a live stream', () => {
   });
 });
 
+describe('a stream that stops after it played', () => {
+  it('is opened again once, where it was, before any other, and nothing is blamed', async () => {
+    const { video, session, markFailed } = setup();
+    await start(session, video, first, 600);
+    lastEngine().audio = [track('eng'), track('rus', true)];
+    session.selectAudio('eng');
+    playFor(video, 40);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: first, reconnecting: true, failedOver: false });
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(kept.sourceMemory).not.toHaveBeenCalledWith('org.bannertv.lab', false);
+    expect(session.get().attempts).toEqual([]);
+    await settle();
+    expect(lastEngine().startAt).toBe(640);
+    // The same file keeps the audio the viewer chose.
+    lastEngine().audio = [track('eng'), track('rus', true)];
+    lastEngine().listener.tracks();
+    expect(lastEngine().audio.find((t) => t.active)?.id).toBe('eng');
+    void video.play();
+    video.fire('playing');
+    expect(session.get().reconnecting).toBe(false);
+  });
+
+  it('is opened again after a later stop too, once it has played half a minute since', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 40);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    await settle();
+    void video.play();
+    video.fire('playing');
+    playFor(video, 31);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: first, reconnecting: true });
+  });
+
+  it('moves on as before when it stops again within half a minute of being opened again', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 40);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    await settle();
+    void video.play();
+    video.fire('playing');
+    playFor(video, 10);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    expect(session.get()).toMatchObject({ entry: second, failedOver: true, reconnecting: false });
+  });
+
+  it('is not opened again when it never played', async () => {
+    const { session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream did not start'));
+    expect(session.get()).toMatchObject({ entry: second, failedOver: true });
+  });
+
+  it('is not opened again when the file itself is broken', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 40);
+    lastEngine().listener.fatal(new PlaybackError('decode', 'The decoder gave up'));
+    expect(session.get()).toMatchObject({ entry: second, failedOver: true });
+  });
+});
+
+describe('a screen that loses its connection', () => {
+  let online: EventTarget;
+  const connection = { onLine: false };
+
+  beforeEach(() => {
+    online = new EventTarget();
+    connection.onLine = false;
+    vi.stubGlobal('navigator', connection);
+    vi.stubGlobal('addEventListener', online.addEventListener.bind(online));
+    vi.stubGlobal('removeEventListener', online.removeEventListener.bind(online));
+  });
+
+  it('waits for it, trying nothing else, then opens the same stream where it was', async () => {
+    const { video, session, markFailed } = setup();
+    await start(session, video, first, 600);
+    playFor(video, 20);
+    wait(video, STALL_MS);
+    expect(session.get()).toMatchObject({ status: 'loading', entry: first, offline: true });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(session.get().entry).toBe(first);
+    connection.onLine = true;
+    online.dispatchEvent(new Event('online'));
+    expect(session.get()).toMatchObject({ entry: first, offline: false, reconnecting: true });
+    await settle();
+    expect(lastEngine().startAt).toBe(620);
+  });
+
+  it('asks again every few seconds, should no event say the connection is back', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream did not start'));
+    expect(session.get()).toMatchObject({ entry: first, offline: true });
+    connection.onLine = true;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(session.get()).toMatchObject({ entry: first, offline: false, reconnecting: true });
+    void video;
+  });
+
+  it('stops waiting when the player closes', async () => {
+    const { video, session } = setup();
+    await start(session, video, first, 600);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    const engines = fake.engines.length;
+    session.destroy();
+    connection.onLine = true;
+    online.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fake.engines.length).toBe(engines);
+  });
+});
+
+describe('the playback scorecard', () => {
+  it('keeps how long the picture took, the waits, what auto-play did and what played', async () => {
+    const { video, session } = setup();
+    session.play(first, 0);
+    await settle();
+    vi.advanceTimersByTime(1800);
+    void video.play();
+    video.fire('playing');
+    playFor(video, 30);
+    rebuffer(video, 1500);
+    rebuffer(video, 400);
+    playFor(video, 30);
+    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    await settle();
+    void video.play();
+    video.fire('playing');
+    playFor(video, 10);
+    session.destroy();
+    expect(kept.scorecard).toHaveBeenCalledTimes(1);
+    expect(kept.scorecard.mock.calls[0]![0]).toMatchObject({
+      kind: 'film',
+      outcome: 'played',
+      startMs: 1800,
+      // Each stream's first second goes to its clock settling: 70 played, 68 counted.
+      playedS: 68,
+      waits: 1,
+      waitMs: 1900,
+      failovers: 0,
+      stepDowns: 0,
+      retries: 1,
+      audioChanged: false,
+      subtitlesChanged: false,
+    });
+  });
+
+  it("counts the viewer's changes of audio or subtitles in the first two minutes only", async () => {
+    const { video, session } = setup({ type: 'series', videoId: 'tt1:1:2' });
+    await start(session, video, first, 0);
+    playFor(video, 30);
+    session.noteChoice('subtitles');
+    playFor(video, 100);
+    session.noteChoice('audio');
+    session.destroy();
+    expect(kept.scorecard.mock.calls[0]![0]).toMatchObject({
+      kind: 'episode',
+      audioChanged: false,
+      subtitlesChanged: true,
+    });
+  });
+
+  it('says a play failed, or was left before its picture', async () => {
+    const failed = setup({ autoFailover: false });
+    failed.session.play(first, 0);
+    await settle();
+    lastEngine().listener.fatal(new PlaybackError('format', 'The TV cannot play this'));
+    failed.session.destroy();
+    expect(kept.scorecard.mock.calls[0]![0]).toMatchObject({ outcome: 'failed' });
+    expect(kept.scorecard.mock.calls[0]![0].startMs).toBeUndefined();
+
+    const left = setup();
+    left.session.play(first, 0);
+    await settle();
+    left.session.destroy();
+    expect(kept.scorecard.mock.calls[1]![0]).toMatchObject({ outcome: 'left', playedS: 0 });
+  });
+
+  it('keeps nothing for the Lab’s test streams', async () => {
+    const video = new FakeVideo();
+    const session = createPlaybackSession({
+      video: video as unknown as HTMLVideoElement,
+      type: 'movie',
+      metaId: 'lab',
+      videoId: 'lab',
+      finder: {
+        next: () => undefined,
+        runtimeSeconds: () => 7200,
+        knownRuntimeSeconds: () => undefined,
+      } as unknown as StreamFinder,
+      autoFailover: false,
+      remember: false,
+      scorecard: false,
+    });
+    await start(session, video, first, 0);
+    session.destroy();
+    expect(kept.scorecard).not.toHaveBeenCalled();
+  });
+});
+
 describe('a stream picked from the list', () => {
   it('stops at the problem box when it fails, rather than move to another', async () => {
     const { video, session, markFailed } = setup();
     await start(session, video, second, 600, { chosen: true, handPicked: true });
-    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
-    await settle();
+    await stopTwice();
     expect(session.get()).toMatchObject({ status: 'failed', entry: second, failedOver: false });
     expect(markFailed).toHaveBeenCalledWith(second);
   });
@@ -1564,7 +1794,7 @@ describe('a stream with an end', () => {
     const { video, session } = setup({ autoFailover: false });
     await start(session, video, first, 600);
     playFor(video, 30);
-    lastEngine().listener.fatal(new PlaybackError('network', 'The stream stopped loading'));
+    await stopTwice();
     expect(session.get().status).toBe('failed');
     expect(kept.progress).toHaveBeenLastCalledWith(
       expect.objectContaining({ position: 630, duration: 7200 }),
@@ -1630,8 +1860,7 @@ describe('the streams tried', () => {
   it('lists the one stream picked from the list that would not play', async () => {
     const { video, session } = setup();
     await start(session, video, second, 600, { chosen: true, handPicked: true });
-    lastEngine().listener.fatal(new PlaybackError('network', 'The link has expired'));
-    await settle();
+    await stopTwice();
     expect(session.get().attempts.map((attempt) => attempt.entry)).toEqual([second]);
   });
 });

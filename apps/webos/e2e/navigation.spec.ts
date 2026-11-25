@@ -155,6 +155,13 @@ test('Back closes screens, goes Home, returns to the first row, then exits', asy
   const skips = page.locator('section', { hasText: 'Skip timings' });
   await expect(skips).toContainText('IntroDB itselfno answer (blocked or offline)');
   await expect(skips).toContainText('Via BannerTVreads timings');
+  // How plays went on this screen, on its own page: none yet in a fresh browser.
+  await press(page, 'ArrowLeft', 'diagnostics-page');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('section', { hasText: 'Playback scorecard' })).toContainText(
+    'Playsnone yet on this screen',
+  );
+  await expect(page.getByRole('button', { name: 'Device report' })).toBeVisible();
 
   await pressBack(page);
   await expectFocus(page, 'settings-diagnostics');

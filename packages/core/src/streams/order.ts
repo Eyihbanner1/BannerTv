@@ -271,6 +271,60 @@ export function playableCandidates(
   return groups[0]!.concat(groups[1]!, groups[2]!, groups[3]!);
 }
 
+/**
+ * The best resolution a stream can have here, as `resolutionRank` counts it:
+ * 4K on a 4K TV, 1080p on one known to lack it, never above the profile's
+ * highest picture. Undefined while the TV has not said which it is.
+ */
+function bestResolutionRank(tv: TvCapabilities, options: OrderOptions): number | undefined {
+  if (tv.uhd === null) return undefined;
+  const panel = RESOLUTIONS.indexOf(tv.uhd ? '2160p' : '1080p');
+  const limit =
+    options.maxResolution === undefined ? panel : RESOLUTIONS.indexOf(options.maxResolution);
+  return RESOLUTIONS.length - Math.max(panel, limit);
+}
+
+/**
+ * The best HDR a stream can have here, as `hdrRank` counts it: Dolby Vision
+ * on a TV known to have it, HDR10 on one known to show HDR, none on one known
+ * to lack it or with the profile avoiding HDR. Undefined while the TV has not
+ * said whether it shows HDR.
+ */
+function bestHdrRank(tv: TvCapabilities, options: OrderOptions): number | undefined {
+  if (options.avoidHdr === true) return 0;
+  if (tv.dolbyVision === true) return 2;
+  if (tv.hdr10 === null) return undefined;
+  return tv.hdr10 ? 1 : 0;
+}
+
+/**
+ * Whether no stream still to come could rank above `entry` for its picture
+ * or for how surely it plays: auto-play can start it without waiting for
+ * slower addons (ADR 0003 item 4). It plays here with no severe warning, is
+ * no cinema recording, is in the audio language wanted, within the profile's
+ * limits and the connection's, and is a cached debrid link. In the quality
+ * order it also has the best resolution and HDR this TV and the profile
+ * allow; in the fast order it is 1080p. What a later stream could still win
+ * on comes after the picture: the release's source, the addon's record and
+ * the seeders. Never while the TV has not said what it shows.
+ */
+export function cannotBeOutranked(
+  entry: StreamEntry,
+  order: Exclude<StreamOrder, 'addon'>,
+  tv: TvCapabilities,
+  options: OrderOptions = {},
+): boolean {
+  if (streamTier(entry) !== 0 || isCinema(entry)) return false;
+  if (entry.facts.cached !== true) return false;
+  if (languageRank(entry.facts, wantedLanguages(options.audioLanguage)) !== 0) return false;
+  if (pictureLimits(entry, options) !== 0 || heavy(entry, options) !== 0) return false;
+  if (order === 'fast') return entry.facts.resolution === '1080p';
+  const resolution = bestResolutionRank(tv, options);
+  const hdr = bestHdrRank(tv, options);
+  if (resolution === undefined || hdr === undefined) return false;
+  return resolutionRank(entry, tv) >= resolution && hdrRank(entry, tv) >= hdr;
+}
+
 // How well a stream's audio fits the language heard now, lower is better.
 /** It names a language heard now, or neither it nor what plays names one. */
 const SAME_LANGUAGE = 0;

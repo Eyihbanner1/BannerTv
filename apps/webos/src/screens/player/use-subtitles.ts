@@ -1912,6 +1912,7 @@ export function useSubtitles(
   const setOffsetNow = (next: number) => {
     // The timing already in use, set again (Reset at +0.0 s), changes nothing.
     if (offsetKey === null || next === timing.offset) return;
+    session?.noteChoice('subtitles');
     keepShowing();
     // Moving the timing of a file with no drift choice of the viewer's keeps 'auto' beside it:
     // the player's fix is worked out from each stream's own evidence, so the lines stay
@@ -1936,6 +1937,7 @@ export function useSubtitles(
     // worked out on each stream, and is not made a fixed drift for the file on every release.
     // Lines a move stretched to another rate than the two fixes show none of them in use.
     if (next === driftShown) return;
+    session?.noteChoice('subtitles');
     keepShowing();
     // No fix is kept where the file's length shows a drift, or the player moved its lines on
     // this stream: the player does not fix it again, and a drift choice of the viewer's means
@@ -1953,6 +1955,7 @@ export function useSubtitles(
       setOffsetNow(next.offset);
       return;
     }
+    session?.noteChoice('subtitles');
     keepShowing();
     void subtitleDrifts.remember(offsetKey, next.drift);
     void subtitleOffsets.remember(offsetKey, next.offset);
@@ -1980,6 +1983,7 @@ export function useSubtitles(
     const line = cues?.[index];
     const rawLine = rawCues?.[index];
     if (!canMatch || offsetKey === null || !line || !rawLine) return null;
+    session?.noteChoice('subtitles');
     undoRef.current = {
       offsetKey,
       offset: subtitleOffsets.get(offsetKey) ?? 0,
@@ -2188,6 +2192,8 @@ export function useSubtitles(
       // The version already showing, pressed again, changes nothing: it stays as it was chosen,
       // and is not kept for the release. One that could not be read is tried again.
       if (sameChoice(next, choice) && !fileFailed) return;
+      // Soon after the start, the scorecard counts it: the automatic choice was not wanted.
+      session?.noteChoice('subtitles');
       // A version picked before and still loading is given up on: it is not kept.
       handPicked.current = null;
       if (next?.kind === 'file') {

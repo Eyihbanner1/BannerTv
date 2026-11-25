@@ -310,6 +310,33 @@ describe('settling', () => {
     spy.mockRestore();
   });
 
+  it('starts a stream nothing still to come could beat, without waiting for the rest', async () => {
+    setPreference('streamChoice', 'fast');
+    const cached = { url: 'https://media.example.com/cached.mkv', name: '[TB+] Test\n1080p' };
+    addons.installs = [{ id: 'org.test.quick', streams: [cached] }, addons.installs[1]!];
+    const finder = streamFinder('movie', 'tt-settle-early');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose().then((entry) => (chosen = fileOf(entry)));
+    answer('tt-settle-early', 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finder.get().settled).toBe(false);
+    expect(chosen).toBe('cached');
+    setPreference('streamChoice', 'quality');
+  });
+
+  it('waits as before for a stream a later one could beat: one not known to be cached', async () => {
+    setPreference('streamChoice', 'fast');
+    const finder = streamFinder('movie', 'tt-settle-uncached');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose().then((entry) => (chosen = fileOf(entry)));
+    answer('tt-settle-uncached', 0);
+    await vi.advanceTimersByTimeAsync(SETTLE_AFTER_FIRST_MS - 1);
+    expect(chosen).toBe('none yet');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(chosen).toBe('quick');
+    setPreference('streamChoice', 'quality');
+  });
+
   it('gives them the time the settleAfterFirstMs switch says', async () => {
     tuned.settleAfterFirstMs = 500;
     const finder = streamFinder('movie', 'tt-settle-tuned');
@@ -538,6 +565,39 @@ describe('the next episode', () => {
     const finder = streamFinder('series', 'tt-binge:1:2');
     expect(fileOf(await finder.choose())).toBe('best');
     expect(fileOf(await finder.choose(hint))).toBe('same');
+  });
+
+  it('starts on that release as soon as its addon answers, before the rest have', async () => {
+    addons.answering = false;
+    const finder = streamFinder('series', 'tt-binge:1:6');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose(hint).then((entry) => (chosen = fileOf(entry)));
+    answer('tt-binge:1:6', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finder.get().settled).toBe(false);
+    expect(chosen).toBe('same');
+  });
+
+  it('waits for that release over a stream nothing else could beat', async () => {
+    setPreference('streamChoice', 'fast');
+    addons.installs = [
+      {
+        id: 'org.test.first',
+        streams: [{ url: 'https://media.example.com/cached.mkv', name: '[TB+] Test\n1080p' }],
+      },
+      addons.installs[1]!,
+    ];
+    addons.answering = false;
+    const finder = streamFinder('series', 'tt-binge:1:7');
+    let chosen: string | undefined = 'none yet';
+    void finder.choose(hint).then((entry) => (chosen = fileOf(entry)));
+    answer('tt-binge:1:7', 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(chosen).toBe('none yet');
+    answer('tt-binge:1:7', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(chosen).toBe('same');
+    setPreference('streamChoice', 'quality');
   });
 
   it("waits a little for that release's addon after the rest have settled", async () => {

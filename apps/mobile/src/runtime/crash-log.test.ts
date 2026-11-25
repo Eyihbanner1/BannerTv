@@ -276,6 +276,28 @@ describe('reportText', () => {
     expect(reportText({ ...base, screens: [] })).toContain('Recent screens: none yet');
   });
 
+  it('ends with the playback scorecard when there is one', () => {
+    const text = reportText({
+      ...base,
+      playback: [
+        ['Plays', '3 kept · 0.5 h played'],
+        ['25/11 17:31', 'film · 1.4 s · 0 waits · 52 min'],
+      ],
+    });
+    expect(
+      text.endsWith(
+        [
+          'No problems recorded.',
+          '',
+          'Playback scorecard:',
+          '  Plays: 3 kept · 0.5 h played',
+          '  25/11 17:31: film · 1.4 s · 0 waits · 52 min',
+        ].join('\n'),
+      ),
+    ).toBe(true);
+    expect(reportText({ ...base, playback: [] })).not.toContain('Playback scorecard');
+  });
+
   it('lists each problem with its screen, time, message, frames and screens', () => {
     const crash = problemFrom(
       hermesError("Cannot read property 'id' of undefined", [
