@@ -58,8 +58,8 @@ describe('subdlSearchRequest', () => {
 
 describe('subdlCacheKey', () => {
   it('names the ask and never the key', () => {
-    expect(subdlCacheKey(film)).toBe('subdl:1|movie|tt9900001|||EN');
-    expect(subdlCacheKey(episode)).toBe('subdl:1|tv|tt9900002|2|3|EN,BR_PT');
+    expect(subdlCacheKey(film)).toBe('subdl:2|movie|tt9900001|||EN');
+    expect(subdlCacheKey(episode)).toBe('subdl:2|tv|tt9900002|2|3|EN,BR_PT');
     expect(subdlCacheKey(film)).not.toContain(FAKE_SUBDL_KEY);
   });
 });

@@ -87,19 +87,38 @@ export function classifySubdlAnswer(status: number, body: unknown, ask: SubdlAsk
 
 const ROW_PATH = /^\/subtitle\/[\w./-]+$/;
 const STEM = /\/([\w-]{1,48})\.zip$/;
-const FILE_PATH = /^\/subtitle\/\d+\/(\d+)$/;
+// "/subtitle/<page>/<file>": ids of letters and digits in v2 ("/subtitle/AbCd012345/EfGh678901"), digits before.
+const FILE_PATH = /^\/subtitle\/[\w-]{1,64}\/([\w-]{1,64})$/;
+const FILE_ID = /^[\w-]{1,64}$/;
 const SUBTITLE_NAME = /\.(srt|ass|ssa|vtt)$/i;
 const ABSOLUTE = /^https:\/\/dl\.subdl\.com(\/[^?#]*)$/i;
 
-function rowPath(url: unknown): string | undefined {
+/**
+ * A link's path on SubDL's download host, or undefined. SubDL's v2 search
+ * signs every link it sends with the caller's key (`…zip?api_key=…`): the
+ * query and anything after it are cut off here, so the key never reaches a
+ * file's link, a saved answer or Diagnostics. The bare link downloads as
+ * before, with no key.
+ */
+function downloadPath(url: unknown): string | undefined {
   if (typeof url !== 'string') return undefined;
-  const absolute = ABSOLUTE.exec(url);
-  const path = absolute ? absolute[1]! : url;
-  return ROW_PATH.test(path) ? path : undefined;
+  const cut = url.search(/[?#]/);
+  const bare = cut === -1 ? url : url.slice(0, cut);
+  const absolute = ABSOLUTE.exec(bare);
+  return absolute ? absolute[1]! : bare;
 }
+
+function rowPath(url: unknown): string | undefined {
+  const path = downloadPath(url);
+  return path !== undefined && ROW_PATH.test(path) ? path : undefined;
+}
+
+/** The author SubDL's v2 gives a machine translation, which has no field of its own there. */
+const AI_AUTHOR = 'subdl ai';
 
 function isJunk(row: Fields): boolean {
   if (row.ai_translated === true) return true;
+  if (text(row.author).trim().toLowerCase() === AI_AUTHOR) return true;
   const release = text(row.release_name);
   const comment = text(row.comment);
   if ([release, text(row.name), comment].some((name) => /\btrailer\b/i.test(name))) return true;
@@ -165,14 +184,15 @@ function unpackEntries(row: Fields): UnpackEntry[] {
   for (const item of row.unpack_files) {
     if (!isObject(item)) continue;
     const name = text(item.name);
-    const path = text(item.url);
-    const found = FILE_PATH.exec(path);
-    if (!found || !SUBTITLE_NAME.test(name)) continue;
-    const own = count(item.file_n_id);
+    const path = downloadPath(item.url);
+    const found = path !== undefined ? FILE_PATH.exec(path) : null;
+    if (!path || !found || !SUBTITLE_NAME.test(name)) continue;
+    const own =
+      typeof item.file_n_id === 'number' ? String(count(item.file_n_id)) : text(item.file_n_id);
     out.push({
       name,
       path,
-      fileId: own > 0 ? String(own) : found[1]!,
+      fileId: own !== '0' && FILE_ID.test(own) ? own : found[1]!,
       release: text(item.release_name).trim(),
       episode: count(item.episode),
     });

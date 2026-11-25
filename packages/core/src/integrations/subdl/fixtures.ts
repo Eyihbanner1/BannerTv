@@ -77,3 +77,89 @@ export function showAnswer(rows: Row[]): Row {
     subtitles: rows,
   };
 }
+
+/**
+ * SubDL's v2 search signs every link with the caller's key, the row's and
+ * each unpacked file's, and gives unpacked files ids of letters and digits.
+ * Shaped like answers other open-source clients recorded in 2026; every id,
+ * name and the key are made up.
+ */
+export const signed = (path: string) => `${path}?api_key=${FAKE_SUBDL_KEY}`;
+
+export function v2FilmRow(overrides: Row = {}): Row {
+  return {
+    release_name: FILM_RELEASE,
+    name: `${FILM_RELEASE}.zip`,
+    lang: 'English',
+    author: 'test-author',
+    url: signed('/subtitle/9000011-9100011.zip'),
+    subtitlePage: '/s/info/TestPage01',
+    season: 0,
+    episode: null,
+    language: 'EN',
+    framerate: 2,
+    fps: '23.976',
+    hi: false,
+    episode_from: null,
+    episode_end: 0,
+    full_season: false,
+    releases: [FILM_RELEASE],
+    unpack_files: [
+      {
+        file_n_id: 'TestFile01',
+        name: `${FILM_RELEASE}.srt`,
+        release_name: FILM_RELEASE,
+        season: 0,
+        episode: 0,
+        language: 'EN',
+        hi: false,
+        format: 'srt',
+        size: 80000,
+        md5: '00000000000000000000000000000000',
+        url: signed('/subtitle/TestPage01/TestFile01'),
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * A v2 row for season 2 of "Test Show" asked for episode 3: SubDL sends only
+ * that episode's file from the pack, marked `from_pack`, its own season 0.
+ */
+export function v2PackRow(overrides: Row = {}): Row {
+  return {
+    release_name: 'Test.Show.S02.1080p.WEB-DL-GRPA',
+    name: 'SUBDL::test-show-second-season-english-9100012.zip',
+    lang: 'english',
+    author: 'test-author',
+    url: signed('/subtitle/9000012-9100012.zip'),
+    subtitlePage: '/s/info/TestPage02',
+    season: 2,
+    episode: null,
+    language: 'EN',
+    framerate: 0,
+    fps: null,
+    hi: false,
+    episode_from: null,
+    episode_end: 0,
+    full_season: true,
+    unpack_files: [
+      {
+        file_n_id: 'TestFile23',
+        name: '03 Test Episode Three.en.srt',
+        release_name: '03 Test Episode Three.en',
+        season: 0,
+        episode: 3,
+        language: 'EN',
+        hi: false,
+        format: 'srt',
+        size: 40000,
+        md5: '00000000000000000000000000000000',
+        url: signed('/subtitle/TestPage02/TestFile23'),
+        from_pack: true,
+      },
+    ],
+    ...overrides,
+  };
+}

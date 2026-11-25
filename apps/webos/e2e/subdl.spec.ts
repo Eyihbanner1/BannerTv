@@ -12,6 +12,7 @@ import {
   readQrCode,
   standInSubdl,
   SUBDL_EPISODE_RELEASE,
+  SUBDL_FILM_FILE,
   SUBDL_FILM_RELEASE,
   type SubdlScenario,
 } from './subdl';
@@ -494,7 +495,7 @@ test("a film's SubDL file named for the release is chosen, with one search and o
   const { subdl } = await setUp(page, 'films');
   await playFilm(page);
   await expect(page.getByText('SubDL film, line 1')).toBeVisible();
-  await expect.poll(() => subdl.downloads).toEqual(['/subtitle/9000001/9200001']);
+  await expect.poll(() => subdl.downloads).toEqual([SUBDL_FILM_FILE]);
   expect(subdl.searches).toHaveLength(1);
   expect(subdl.searches[0]).toContain('imdb_id=tt0807840');
   expect(subdl.searches[0]).toContain('languages=en');
@@ -698,6 +699,7 @@ test("a season pack's file for the episode playing is downloaded, never another 
   // Neither the file named E04 that SubDL says is E03, nor E04's own.
   expect(subdl.downloads).not.toContain('/subtitle/9000002/9200024');
   expect(subdl.downloads).not.toContain('/subtitle/9000002/9200014');
+  expect(subdl.keyInUrl).toBe(false);
 });
 
 test("a film's subtitles in a ZIP are unpacked in the page", async ({ page }) => {
@@ -705,6 +707,7 @@ test("a film's subtitles in a ZIP are unpacked in the page", async ({ page }) =>
   await playFilm(page);
   await expect(page.getByText('From the ZIP, line 1')).toBeVisible();
   expect(subdl.downloads).toEqual(['/subtitle/9000003-9100003.zip']);
+  expect(subdl.keyInUrl).toBe(false);
 });
 
 test('the second play of a film uses the saved answer and asks SubDL nothing', async ({ page }) => {
@@ -905,7 +908,7 @@ test("on Android, a film's SubDL file named for the release is chosen", async ({
   await androidOpens(page);
   await expect(page.getByText('SubDL film, line 1')).toBeVisible();
   expect(subdl.searches).toHaveLength(1);
-  expect(subdl.downloads).toEqual(['/subtitle/9000001/9200001']);
+  expect(subdl.downloads).toEqual([SUBDL_FILM_FILE]);
   await openSheet(page, 'player-tracks-lang-en');
   await expect(subdlRows(page)).toContainText('Same release');
   expect(subdl.keyInUrl).toBe(false);

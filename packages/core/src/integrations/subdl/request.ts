@@ -66,10 +66,13 @@ export function subdlAskFor(
   return ask;
 }
 
-/** The answer's place in the query cache. Never holds the key. */
+/**
+ * The answer's place in the query cache. Never holds the key. Version 2:
+ * answers saved before links signed with the key were read listed no files.
+ */
 export function subdlCacheKey(ask: SubdlAsk): string {
   return [
-    'subdl:1',
+    'subdl:2',
     ask.type,
     ask.imdbId,
     ask.season ?? '',
