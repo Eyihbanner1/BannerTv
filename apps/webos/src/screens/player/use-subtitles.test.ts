@@ -328,6 +328,8 @@ const BASE: SessionState = {
   error: null,
   failedOver: false,
   steppedDown: false,
+  reconnecting: false,
+  offline: false,
   struggling: false,
   audio: [],
   text: [],
@@ -351,10 +353,13 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
   const playing = createStore<SessionState>({ ...BASE, entry: first, ...state });
   // The tracks the engine was asked for, last last.
   const selected: Array<string | null> = [];
+  // What the viewer changed by hand, as the scorecard is told.
+  const noted: Array<'audio' | 'subtitles'> = [];
   const session = {
     get: playing.get,
     subscribe: playing.subscribe,
     selectText: (id: string | null) => selected.push(id),
+    noteChoice: (kind: 'audio' | 'subtitles') => noted.push(kind),
     trustedPosition: () => playing.get().position,
   } as unknown as PlaybackSession;
   let entry = first;
@@ -388,6 +393,7 @@ function play(first: StreamEntry, state: Partial<SessionState> = {}, lab = false
       return result;
     },
     selected,
+    noted,
     flush,
     /** Lets time pass, drawing again as often as anything changes, as React would. */
     async wait(ms: number) {
@@ -749,8 +755,12 @@ describe('the automatic choice, once the viewer acts on it', () => {
   it('becomes the viewer’s as they move its timing: the hold ends and nothing takes over', async () => {
     const { sdh, player } = await hardOfHearingShowing();
     expect(player.subtitles.cues).toBeNull();
+    // What BannerTV chose by itself is not the viewer's change.
+    expect(player.noted).toEqual([]);
     player.subtitles.setOffset(0.5);
     await player.flush();
+    // The scorecard hears the viewer moved the timing.
+    expect(player.noted).toContain('subtitles');
     expect(player.subtitles.choice).toEqual(fileChoice(sdh));
     expect(player.subtitles.cues).toHaveLength(1200);
     await player.wait(6000);

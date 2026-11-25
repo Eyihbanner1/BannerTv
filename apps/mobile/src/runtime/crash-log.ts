@@ -334,6 +334,11 @@ export interface ReportInput {
   screens: readonly ScreenVisit[];
   /** The kept problems, newest first. */
   problems: readonly Problem[];
+  /**
+   * How plays went on this phone (the playback scorecard), label and value, numbers only. Last,
+   * so a long problem list keeps its place when the report is cut to length.
+   */
+  playback?: readonly (readonly [label: string, value: string])[];
 }
 
 /**
@@ -367,5 +372,10 @@ export function reportText(input: ReportInput): string {
     for (const frame of frames) lines.push(`  ${clean(frame, LINE_MAX)}`);
     lines.push(`Screens: ${screensLine(problem.screens)}`);
   });
+  if (input.playback && input.playback.length > 0) {
+    lines.push('', 'Playback scorecard:');
+    for (const [label, value] of input.playback)
+      lines.push(`  ${label}: ${clean(value, LINE_MAX)}`);
+  }
   return clip(lines.join('\n'), REPORT_MAX);
 }

@@ -227,6 +227,18 @@ export {
   steadyBaseline,
 } from './playback/speed';
 export {
+  createPlayScorecard,
+  EARLY_CHANGE_S,
+  MAX_PLAYS,
+  type PlayKind,
+  type PlayOutcome,
+  type PlayRecord,
+  type PlayScorecard,
+  type ScorecardSummary,
+  summarisePlays,
+  TARGET_START_MS,
+} from './playback/scorecard';
+export {
   askStillWatching,
   STILL_WATCHING_EPISODES,
   STILL_WATCHING_QUIET_MS,
@@ -418,6 +430,7 @@ export {
 export { describeStream } from './streams/facts';
 export { isNoticeStream, NOTICE_MAX, noticeText } from './streams/notice';
 export {
+  cannotBeOutranked,
   closestCandidate,
   namesOnlyOthers,
   orderStreams,

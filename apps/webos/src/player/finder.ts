@@ -3,6 +3,7 @@ import {
   assessStream,
   bingeEntry,
   type BingeHint,
+  cannotBeOutranked,
   closestCandidate,
   createStore,
   describeStream,
@@ -359,11 +360,39 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
             let timer: number | undefined;
             let unsubscribe: (() => void) | undefined;
             let done = false;
+            const finish = (entry: StreamEntry | undefined) => {
+              done = true;
+              clearTimeout(timer);
+              unsubscribe?.();
+              resolve(entry);
+            };
             const decide = () => {
               if (done) return;
               const current = state.get();
-              if (!current.settled) return;
               const binge = prefer && bingeEntry(current.candidates, prefer);
+              const works = current.candidates.find((e) => probes[entryKey(e)] === 'works');
+              const untried = current.candidates.find((e) => probes[entryKey(e)] !== 'failed');
+              const best = works || untried || current.candidates[0];
+              if (!current.settled) {
+                // The release played last is chosen whatever comes later, so it starts as soon
+                // as its addon has answered (ADR 0003 item 4).
+                if (binge && !answering(binge.addonId)) finish(binge);
+                // As does a stream nothing still to come could beat on its picture, once the
+                // addon of the release played last has answered without it.
+                else if (
+                  best &&
+                  (!prefer || !answering(prefer.addonId)) &&
+                  cannotBeOutranked(
+                    best,
+                    preferences.get().streamChoice,
+                    knownCapabilities(),
+                    orderOptions(),
+                  )
+                ) {
+                  finish(best);
+                }
+                return;
+              }
               // A hint naming no release can find nothing: no wait for it.
               if (prefer?.bingeGroup && !binge && answering(prefer.addonId)) {
                 waitUntil = waitUntil ?? Date.now() + BINGE_WAIT_MS;
@@ -373,12 +402,7 @@ function create(type: string, videoId: string, sources?: readonly ItemSource[]):
                   return;
                 }
               }
-              done = true;
-              clearTimeout(timer);
-              unsubscribe?.();
-              const works = current.candidates.find((e) => probes[entryKey(e)] === 'works');
-              const untried = current.candidates.find((e) => probes[entryKey(e)] !== 'failed');
-              resolve(binge || works || untried || current.candidates[0]);
+              finish(binge || best);
             };
             decide();
             if (!done) unsubscribe = state.subscribe(decide);

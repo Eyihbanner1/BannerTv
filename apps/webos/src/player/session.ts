@@ -4,18 +4,20 @@ import {
   createProgressTracker,
   createStore,
   type Cue,
+  EARLY_CHANGE_S,
   estimateBitrate,
   isMuchShorter,
   judgeLive,
   type LineTiming,
   type LiveWindow,
   type PlayAttempt,
+  type PlayKind,
   type ProgressTracker,
   type ProgressUpdate,
   type QualityReference,
   type StreamEntry,
 } from '@bannertv/core';
-import { bandwidth, progress, releaseMemory, sourceMemory } from '../data/playback';
+import { bandwidth, progress, releaseMemory, scorecard, sourceMemory } from '../data/playback';
 import { pushAccountSoon } from '../data/sync';
 import { tuning } from '../platform/tuning';
 import { chooseEngine, createEngine, type EngineName, fallbackEngine } from './engines/choose';
@@ -61,6 +63,8 @@ const MAX_STEP_DOWNS = 2;
 export const SMOOTH_AFTER_S = 600;
 /** How often a broadcast is judged against live, so it falls behind while paused too. */
 export const LIVE_TICK_MS = 1000;
+/** While the screen is offline, how often it is asked again, should no 'online' event come. */
+export const OFFLINE_CHECK_MS = 3000;
 
 export type SessionStatus =
   /** Nothing loaded: still choosing a stream, or asking where to start. */
@@ -97,6 +101,13 @@ export interface SessionState {
   failedOver: boolean;
   /** Set when auto-play moved to a lighter stream because this one kept buffering, until playback resumes. */
   steppedDown: boolean;
+  /**
+   * Set when the stream that stopped is being opened again where it was
+   * (a moment's drop, or the connection back), until playback resumes.
+   */
+  reconnecting: boolean;
+  /** The screen has no connection: the session waits for it, then opens the same stream again. */
+  offline: boolean;
   /**
    * The stream keeps buffering and the session will not leave it by itself:
    * the viewer chose it, or nothing lighter is left. Until another stream plays.
@@ -164,6 +175,8 @@ export interface SessionOptions {
    * BannerTV Demo's, whose tracks only check how subtitles look.
    */
   fileSubtitles?: boolean;
+  /** Whether the play goes on the playback scorecard. False for the Lab's test streams. */
+  scorecard?: boolean;
 }
 
 export interface PlaybackSession {
@@ -200,6 +213,11 @@ export interface PlaybackSession {
   setRate(rate: number): void;
   selectAudio(id: string): void;
   selectText(id: string | null): void;
+  /**
+   * The viewer chose another audio track, or other subtitles or their timing:
+   * soon after the start, the playback scorecard counts it as a wrong pick.
+   */
+  noteChoice(kind: 'audio' | 'subtitles'): void;
   /** Saves where playback is now, for leaving or hiding the app. */
   saveProgress(): void;
   /**
@@ -271,6 +289,8 @@ export const INITIAL_SESSION_STATE: SessionState = {
   error: null,
   failedOver: false,
   steppedDown: false,
+  reconnecting: false,
+  offline: false,
   struggling: false,
   audio: [],
   text: [],
@@ -284,6 +304,11 @@ export const INITIAL_SESSION_STATE: SessionState = {
   attempts: [],
 };
 
+/** Whether the screen says it has no connection. Where it cannot tell (a phone), never. */
+function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
 export function createPlaybackSession(options: SessionOptions): PlaybackSession {
   const { video, type, metaId, videoId, finder } = options;
   const keep = options.remember !== false;
@@ -296,6 +321,21 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   let attempt = 0;
   let failovers = 0;
   let stepDowns = 0;
+  // The stream playing was opened again after it stopped, and has not played 30 s since.
+  let retriedSame = false;
+  // Stops waiting for the connection to come back.
+  let offlineStop: (() => void) | undefined;
+  // For the playback scorecard: when the player opened, the first picture, the video
+  // played, the waits for data, the same stream opened again, and the viewer's changes.
+  const openedAt = Date.now();
+  let firstPictureAt: number | undefined;
+  let playedS = 0;
+  let waits = 0;
+  let waitMs = 0;
+  let retries = 0;
+  let audioChanged = false;
+  let subtitlesChanged = false;
+  let everLive = false;
   let startedPlaying = false;
   // The viewer picked the stream playing now (the Quality menu), so buffering does not replace it.
   let viewerChose = false;
@@ -386,6 +426,7 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   function checkLive() {
     if (live || engine?.isLive() !== true) return;
     live = true;
+    everLive = true;
     patch({ live: true, duration: 0 });
     // Paused, the clock stands still while live moves on: no timeupdate says so.
     clearInterval(liveTimer);
@@ -488,6 +529,20 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     // While the stream still has its length: letting it go resets the element.
     save();
     const entry = state.get().entry;
+    // The connection itself is gone: every stream would stop the same way, and
+    // none of them is to blame. Wait for it, then open the same one again.
+    if (entry && error.kind === 'network' && isOffline()) {
+      waitForConnection(entry, current);
+      return;
+    }
+    // A stream that played and then stopped loading is opened again once, where it
+    // was, before any other: often a moment's drop, and a debrid link hands out a
+    // fresh address. The same file keeps its audio, its subtitles and their timing.
+    if (entry && error.kind === 'network' && startedPlaying && !clip && !retriedSame) {
+      retriedSame = true;
+      openAgain(entry, carryOn());
+      return;
+    }
     if (entry) {
       if (keep) sourceMemory.record(entry.addonId, false);
       finder.markFailed(entry);
@@ -509,6 +564,66 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
     }
     release();
     patch({ status: 'failed', error });
+  }
+
+  /** The same stream again, at `at`, as the viewer had it: chosen, picked, paused or not. */
+  function openAgain(entry: StreamEntry, at: number) {
+    retries++;
+    session.play(entry, at, { chosen: viewerChose, paused: pausedByViewer, handPicked });
+    patch({ reconnecting: true });
+  }
+
+  /**
+   * The screen says it has no connection. Nothing is set aside or tried while
+   * it lasts: once it is back (an 'online' event, or asking every few
+   * seconds, should none come), the same stream opens again where it was.
+   */
+  function waitForConnection(entry: StreamEntry, current: number) {
+    const at = carryOn();
+    release();
+    patch({ status: 'loading', offline: true, reconnecting: false });
+    function stop() {
+      window.removeEventListener('online', back);
+      clearInterval(timer);
+      offlineStop = undefined;
+    }
+    function back() {
+      if (isOffline()) return;
+      stop();
+      if (current !== attempt || destroyed) return;
+      openAgain(entry, at);
+    }
+    offlineStop?.();
+    window.addEventListener('online', back);
+    const timer = window.setInterval(back, OFFLINE_CHECK_MS);
+    offlineStop = stop;
+  }
+
+  /** The play as the scorecard keeps it, once the player closes. */
+  function scorePlay() {
+    if (options.scorecard === false) return;
+    const { status } = state.get();
+    const kind: PlayKind = everLive
+      ? 'live'
+      : type === 'movie'
+        ? 'film'
+        : type === 'series'
+          ? 'episode'
+          : 'other';
+    scorecard.record({
+      at: openedAt,
+      kind,
+      outcome: status === 'failed' ? 'failed' : firstPictureAt === undefined ? 'left' : 'played',
+      ...(firstPictureAt === undefined ? {} : { startMs: firstPictureAt - openedAt }),
+      playedS: Math.round(playedS),
+      waits,
+      waitMs,
+      failovers,
+      stepDowns,
+      retries,
+      audioChanged,
+      subtitlesChanged,
+    });
   }
 
   let lastStartAt = 0;
@@ -550,8 +665,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
   function endBuffering(): boolean {
     if (bufferingSince === undefined) return false;
     const last = rebuffers[rebuffers.length - 1];
-    if (last) last.ms = Date.now() - bufferingSince;
+    const ms = Date.now() - bufferingSince;
+    if (last) last.ms = ms;
     bufferingSince = undefined;
+    waitMs += ms;
+    if (ms >= COUNTED_REBUFFER_MS) waits++;
     return true;
   }
 
@@ -736,11 +854,14 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         clearTimers();
         if (!startedPlaying) playMark(finder, 'first-frame');
         startedPlaying = true;
+        if (firstPictureAt === undefined) firstPictureAt = Date.now();
         const buffered = endBuffering();
         patch({
           status: 'playing',
           failedOver: false,
           steppedDown: false,
+          reconnecting: false,
+          offline: false,
           error: null,
           attempts: [],
         });
@@ -838,6 +959,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         const playedFrom = live ? (firstTrusted ?? lastStartAt) : lastStartAt;
         if (!reportedWorked && trusted !== undefined && trusted - playedFrom >= WORKED_AFTER_S) {
           reportedWorked = true;
+          // Played again for a while: another stop later may open it again too.
+          retriedSame = false;
           const entry = state.get().entry;
           if (entry && keep) sourceMemory.record(entry.addonId, true);
           // Its release starts first the next time the title does (improvements list PL2):
@@ -850,7 +973,10 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         // Ten minutes in a row without buffering: the connection keeps up with this stream.
         if (trusted !== undefined && lastPosition !== undefined) {
           const step = trusted - lastPosition;
-          if (step > 0 && step < 5) smoothFor += step;
+          if (step > 0 && step < 5) {
+            smoothFor += step;
+            playedS += step;
+          }
         }
         lastPosition = trusted;
         // A stream already judged struggling says nothing good about the connection.
@@ -953,7 +1079,11 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       if (!previous || entryKey(previous) !== entryKey(entry)) {
         wantedAudio = null;
         wantedText = null;
+        // Another stream may be opened again after a stop of its own.
+        retriedSame = false;
       }
+      // Whatever the wait for the connection was for, this stream is opened now.
+      offlineStop?.();
       const current = ++attempt;
       const url = entry.stream.source.url;
       tried.add(entryKey(entry));
@@ -999,6 +1129,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
         error: null,
         failedOver: false,
         steppedDown: false,
+        reconnecting: false,
+        offline: false,
         struggling: false,
         audio: [],
         text: [],
@@ -1243,6 +1375,13 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       refreshTracks();
     },
 
+    noteChoice(kind) {
+      // Before the first picture too: chosen while it opened, so not what was wanted.
+      if (playedS >= EARLY_CHANGE_S) return;
+      if (kind === 'audio') audioChanged = true;
+      else subtitlesChanged = true;
+    },
+
     saveProgress: save,
     markCredits(at) {
       creditsAt = at !== undefined && isFinite(at) && at > 0 ? at : undefined;
@@ -1260,6 +1399,8 @@ export function createPlaybackSession(options: SessionOptions): PlaybackSession 
       if (destroyed) return;
       save();
       pushAccountSoon();
+      offlineStop?.();
+      scorePlay();
       destroyed = true;
       clearTimers();
       clearInterval(liveTimer);

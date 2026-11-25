@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { assessStream } from './assess';
 import { isLighter } from './bitrate';
 import {
+  cannotBeOutranked,
   closestCandidate,
   namesOnlyOthers,
   orderStreams,
@@ -1206,5 +1207,76 @@ describe('the first ranking, within the picture limits a profile set', () => {
         playableCandidates(list(), 'fast', UHD_HDR, { avoidHdr: true, maxResolution: '1080p' }),
       ),
     ).toEqual(['1080p', 'unknown', '1080p hdr', '2160p', '2160p hdr']);
+  });
+});
+
+describe('cannotBeOutranked', () => {
+  const best = (facts: Partial<StreamFacts>, tv: TvCapabilities, spec: Spec = {}) =>
+    entry('stream', { ...spec, facts }, tv);
+
+  it('takes a cached 4K HDR10 stream on a 4K HDR10 TV', () => {
+    const film = best({ resolution: '2160p', hdr: ['HDR10'], cached: true }, UHD_HDR);
+    expect(cannotBeOutranked(film, 'quality', UHD_HDR)).toBe(true);
+  });
+
+  it('waits for a better picture: 1080p or no HDR on that TV, or HDR10 on a Dolby Vision TV', () => {
+    const full = best({ resolution: '1080p', hdr: ['HDR10'], cached: true }, UHD_HDR);
+    const sdr = best({ resolution: '2160p', cached: true }, UHD_HDR);
+    expect(cannotBeOutranked(full, 'quality', UHD_HDR)).toBe(false);
+    expect(cannotBeOutranked(sdr, 'quality', UHD_HDR)).toBe(false);
+    const hdr10 = best({ resolution: '2160p', hdr: ['HDR10'], cached: true }, UHD_DV);
+    const dv = best({ resolution: '2160p', hdr: ['DV', 'HDR10'], cached: true }, UHD_DV);
+    expect(cannotBeOutranked(hdr10, 'quality', UHD_DV)).toBe(false);
+    expect(cannotBeOutranked(dv, 'quality', UHD_DV)).toBe(true);
+  });
+
+  it('takes the best the TV shows: cached 1080p SDR on an HD TV, 4K SDR on a 4K SDR TV', () => {
+    expect(cannotBeOutranked(best({ resolution: '1080p', cached: true }, HD), 'quality', HD)).toBe(
+      true,
+    );
+    expect(
+      cannotBeOutranked(best({ resolution: '2160p', cached: true }, UHD_SDR), 'quality', UHD_SDR),
+    ).toBe(true);
+  });
+
+  it("keeps to the profile's highest picture and its wish to avoid HDR", () => {
+    const full = best({ resolution: '1080p', hdr: ['HDR10'], cached: true }, UHD_HDR);
+    expect(cannotBeOutranked(full, 'quality', UHD_HDR, { maxResolution: '1080p' })).toBe(true);
+    expect(cannotBeOutranked(full, 'quality', UHD_HDR, { maxResolution: '720p' })).toBe(false);
+    const sdr = best({ resolution: '2160p', cached: true }, UHD_HDR);
+    expect(cannotBeOutranked(sdr, 'quality', UHD_HDR, { avoidHdr: true })).toBe(true);
+    const hdr = best({ resolution: '2160p', hdr: ['HDR10'], cached: true }, UHD_HDR);
+    expect(cannotBeOutranked(hdr, 'quality', UHD_HDR, { avoidHdr: true })).toBe(false);
+  });
+
+  it('never takes a link that is not known to be cached, a dub, a heavy file or a cinema copy', () => {
+    const top = { resolution: '2160p', hdr: ['HDR10'] } as const;
+    const tv = UHD_HDR;
+    expect(cannotBeOutranked(best({ ...top, hdr: ['HDR10'] }, tv), 'quality', tv)).toBe(false);
+    expect(
+      cannotBeOutranked(best({ ...top, hdr: ['HDR10'], cached: false }, tv), 'quality', tv),
+    ).toBe(false);
+    const dub = best({ ...top, hdr: ['HDR10'], cached: true, languages: ['es'] }, tv);
+    expect(cannotBeOutranked(dub, 'quality', tv, { audioLanguage: 'eng' })).toBe(false);
+    const heavy = best({ ...top, hdr: ['HDR10'], cached: true, sizeBytes: 80e9 }, tv);
+    expect(
+      cannotBeOutranked(heavy, 'quality', tv, { maxBitrate: 40e6, runtimeSeconds: 7200 }),
+    ).toBe(false);
+    const cam = best({ ...top, hdr: ['HDR10'], cached: true, releaseSource: 'CAM' }, tv);
+    expect(cannotBeOutranked(cam, 'quality', tv)).toBe(false);
+  });
+
+  it('never decides while the TV has not said what it shows', () => {
+    const film = best({ resolution: '2160p', hdr: ['HDR10'], cached: true }, UNKNOWN);
+    expect(cannotBeOutranked(film, 'quality', UNKNOWN)).toBe(false);
+  });
+
+  it('takes cached 1080p in the fast order, and nothing else there', () => {
+    expect(
+      cannotBeOutranked(best({ resolution: '1080p', cached: true }, UHD_HDR), 'fast', UHD_HDR),
+    ).toBe(true);
+    expect(
+      cannotBeOutranked(best({ resolution: '2160p', cached: true }, UHD_HDR), 'fast', UHD_HDR),
+    ).toBe(false);
   });
 });

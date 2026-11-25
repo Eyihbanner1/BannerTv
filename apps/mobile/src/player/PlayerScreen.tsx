@@ -973,6 +973,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
     setPanel(null);
     if (!session) return;
     chooseAudioLanguage(metaId, language);
+    session.noteChoice('audio');
     session.play(entry, session.carryOn(), { chosen: true, paused: state.status === 'paused' });
     setSwitching({ entry });
   };
@@ -992,6 +993,8 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
         ? t('player.switchingTo', { quality: switching.label })
         : t('player.switchingStream');
     }
+    if (state.offline) return t('player.offline');
+    if (state.reconnecting && waiting) return t('player.reconnecting');
     if (state.steppedDown && waiting) return t('player.steppingDown');
     if (state.failedOver && waiting) return t('player.tryingAnother');
     if (state.struggling && buffering) {
@@ -1460,6 +1463,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                           {...(detail ? { detail } : {})}
                           selected={track.active}
                           onPress={() => {
+                            session?.noteChoice('audio');
                             session?.selectAudio(track.id);
                             if (track.lang) chooseAudioLanguage(metaId, track.lang);
                             setPanel(null);

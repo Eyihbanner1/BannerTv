@@ -2,6 +2,7 @@ import {
   type BingeHint,
   createBandwidthMemory,
   createPlayedVideos,
+  createPlayScorecard,
   createProgressStore,
   createReleaseMemory,
   createReleaseTimingMemory,
@@ -57,6 +58,13 @@ export const releaseTimings = createReleaseTimingMemory({ storage: profileKv });
 /** Which playback speeds Settings > Lab measured this TV keeping, for each kind of stream. Shared by profiles. */
 export const speedMemory = createSpeedMemory({ storage: storage.kv });
 
+/**
+ * How each play on this screen went (time to the picture, waits for data, what
+ * auto-play had to do, the viewer's early changes), for Diagnostics' scorecard.
+ * Numbers only, never a link or a title. Shared by profiles, kept on this screen only.
+ */
+export const scorecard = createPlayScorecard({ storage: storage.kv });
+
 export function startPlaybackData(): void {
   void progress.load();
   void sourceMemory.load();
@@ -66,4 +74,5 @@ export function startPlaybackData(): void {
   void releaseMemory.load();
   void subtitlePicks.load();
   void releaseTimings.load();
+  void scorecard.load();
 }
