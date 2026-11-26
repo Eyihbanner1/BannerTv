@@ -15,7 +15,6 @@ import {
   introKnown,
   type IntroGuess,
   inLastStretch,
-  languageName,
   liveFraction,
   type LiveWindow,
   nextSleepCheck,
@@ -23,6 +22,7 @@ import {
   offersBackTo,
   parseRuntime,
   playedCard,
+  type QualityChoice,
   type QualityReference,
   qualityChoices,
   rearms,
@@ -67,7 +67,6 @@ import {
 } from '../../app/router';
 import { useScreenFocus } from '../../app/use-screen-focus';
 import { Artwork } from '../../components/Artwork';
-import { Menu } from '../../components/Menu';
 import { addonClient } from '../../data/addons';
 import {
   playedVideos,
@@ -118,6 +117,7 @@ import { SleepScreen, SleepWarning } from './SleepTimer';
 import { SourcesSheet } from './SourcesSheet';
 import { StillWatching } from './StillWatching';
 import { SubtitleLayer } from './SubtitleLayer';
+import { QualitySheet, qualityValue } from './QualitySheet';
 import { type SheetView, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
 import { useScrobble } from './use-scrobble';
@@ -156,7 +156,7 @@ const SLEEP_TICK_MS = 30 * 1000;
 
 type Panel = 'tracks' | 'sources' | 'episodes' | 'info' | 'quality' | null;
 /** The panels that rise from the bottom over the picture: the controls make way for them. */
-const SHEETS: readonly Panel[] = ['tracks', 'sources', 'episodes', 'info'];
+const SHEETS: readonly Panel[] = ['tracks', 'quality', 'sources', 'episodes', 'info'];
 const isSheet = (panel: Panel) => panel !== null && SHEETS.indexOf(panel) >= 0;
 
 interface PlayerScreenProps {
@@ -1668,6 +1668,22 @@ export function PlayerScreen(props: PlayerScreenProps) {
   }
 
   /** A stream picked in Sources plays from where the film is, and does not fail over. */
+  function chooseQuality(choice: QualityChoice) {
+    closedBy.current = 'pick';
+    setPanel(null);
+    // The resolution already playing stays as it is, whichever stream at it is playing.
+    if (qualityValue(choice) === currentQuality) {
+      hide();
+      return;
+    }
+    if (!session) return;
+    // A paused film stays paused, and a note says what is coming.
+    session.play(choice.entry, session.carryOn(), {
+      chosen: true,
+      paused: state.status === 'paused',
+    });
+    setSwitching({ entry: choice.entry, label: resolutionLabel(choice.resolution) });
+  }
   function chooseSource(entry: StreamEntry) {
     const action = entry.assessment.action;
     // The one playing: nothing to change, as with Quality.
@@ -1967,34 +1983,13 @@ export function PlayerScreen(props: PlayerScreenProps) {
         />
       )}
       {panel === 'quality' && (
-        <Menu
-          focusKey="player-quality"
-          title={t('player.quality')}
-          options={choices.map((choice) => ({
-            value: choice.resolution ?? 'other',
-            label: resolutionLabel(choice.resolution) ?? t('player.otherQuality'),
-            detail: choice.otherLanguages
-              ? t('player.otherAudio', {
-                  languages: choice.otherLanguages.map(languageName).join(', '),
-                })
-              : undefined,
-          }))}
-          selected={currentQuality}
-          returnFocusKey={panelFrom}
-          onSelect={(value) => {
-            setPanel(null);
-            // The resolution already playing stays as it is, whichever stream at it is playing.
-            if (value === currentQuality) return;
-            const choice = choices.find((c) => (c.resolution ?? 'other') === value);
-            if (session && choice) {
-              // A paused film stays paused, and a note says what is coming.
-              session.play(choice.entry, session.carryOn(), {
-                chosen: true,
-                paused: state.status === 'paused',
-              });
-              setSwitching({ entry: choice.entry, label: resolutionLabel(choice.resolution) });
-            }
-          }}
+        <QualitySheet
+          choices={choices}
+          current={currentQuality}
+          playing={state.entry}
+          returnFocusKey={sheetReturn('player-quality-button')}
+          onPick={chooseQuality}
+          onBack={backFromSheet}
           onClose={() => setPanel(null)}
         />
       )}

@@ -39,6 +39,7 @@ import {
   stepOffset,
   TIMING_STEPS,
 } from '../../player/timing';
+import { SheetDetail } from './SheetDetail';
 import { rowParts, type SheetRow, SheetList } from './SheetList';
 import { Pane } from './SheetTabs';
 import { SubtitleStyleChoices, useStyleSummary } from './SubtitleStylePanel';
@@ -461,20 +462,13 @@ export function TracksSheet(props: TracksSheetProps) {
               className={styles.versionList}
             />
             {shown && (
-              <div className={styles.box}>
-                <p className={styles.boxTitle}>{versionLabel(shown.item, shown.number)}</p>
-                {noteOf(shown.item, sameChoice(shown.item.choice, choice)).length > 0 && (
-                  <p className={styles.boxText}>
-                    {noteOf(shown.item, sameChoice(shown.item.choice, choice)).join(' · ')}
-                  </p>
-                )}
-                {shown.item.release && (
-                  <>
-                    <p className={styles.boxLabel}>{t('player.file')}</p>
-                    <p className={styles.boxName}>{shown.item.release}</p>
-                  </>
-                )}
-              </div>
+              <SheetDetail
+                className={styles.box}
+                title={versionLabel(shown.item, shown.number)}
+                text={noteOf(shown.item, sameChoice(shown.item.choice, choice)).join(' · ')}
+                label={t('player.file')}
+                name={shown.item.release}
+              />
             )}
           </>
         ) : (

@@ -1,0 +1,35 @@
+/*
+ * As Audio & subtitles: a 40px heading, then two-line rows of 100px, the
+ * focused one's stream in a box beside them.
+ */
+.view {
+  position: relative;
+  height: 480px;
+}
+
+.heading {
+  height: 40px;
+  padding-left: 72px;
+  font: var(--bt-text-label);
+  line-height: 40px;
+  color: var(--bt-text);
+}
+
+.list {
+  width: 1040px;
+}
+
+.top {
+  display: block;
+  font-size: 30px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.box {
+  top: 40px;
+  left: 1088px;
+  width: 640px;
+  height: 388px;
+}
