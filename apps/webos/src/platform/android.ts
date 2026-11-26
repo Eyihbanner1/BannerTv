@@ -1,5 +1,6 @@
 import type { TvCapabilities } from '@bannertv/core';
 import { KeyCode } from '../navigation/keys';
+import { playerPaused, pressKey } from '../navigation/press';
 import { EXIT_EVENT } from './webos';
 
 /**
@@ -333,25 +334,6 @@ export function keyCodeFor(key: string, videoPaused: boolean): number | undefine
   // Most Fire TV and Google TV remotes have one Play/Pause button.
   if (key === 'MediaPlayPause') return videoPaused ? KeyCode.Play : KeyCode.Pause;
   return KEY_CODES[key];
-}
-
-/** Presses `keyCode` as the TV would: keydown then keyup, on whatever has focus. */
-function pressKey(keyCode: number, key: string, repeat: boolean): void {
-  const target = document.activeElement ?? document.body;
-  for (const type of ['keydown', 'keyup'] as const) {
-    if (type === 'keyup' && repeat) break;
-    const event = new KeyboardEvent(type, { key, repeat, bubbles: true, cancelable: true });
-    // keyCode cannot be set through the constructor; the app reads it, as the TV sends it.
-    Object.defineProperty(event, 'keyCode', { get: () => keyCode });
-    Object.defineProperty(event, 'which', { get: () => keyCode });
-    target.dispatchEvent(event);
-  }
-}
-
-function playerPaused(): boolean {
-  // Not the link test's hidden element, which stays in the page once used.
-  const video = document.querySelector<HTMLVideoElement>('video:not([aria-hidden])');
-  return video ? video.paused : true;
 }
 
 export interface AndroidHooks {

@@ -52,6 +52,7 @@ export default defineConfig(
   {
     files: [
       'tools/**/*.mjs',
+      'apps/tizen/**/*.mjs',
       'services/*/scripts/**/*.mjs',
       'apps/webos/build/**',
       'apps/webos/e2e/**',

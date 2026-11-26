@@ -160,6 +160,8 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(terser@5.48.0))
 
+  apps/tizen: {}
+
   apps/webos:
     dependencies:
       '@bannertv/core':

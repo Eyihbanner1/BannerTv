@@ -1,6 +1,7 @@
 import { type Cue, hearingName, isForcedName, parseCueMarkup } from '@bannertv/core';
 import type Hls from 'hls.js';
 import type { CuesParsedData, ErrorData, MediaPlaylist } from 'hls.js';
+import { isTizen } from '../../platform/tizen';
 import { isWebOS } from '../../platform/webos';
 import { channelName, formatName } from '../audio';
 import { resetVideo } from './native';
@@ -120,11 +121,11 @@ export const createHlsEngine: EngineFactory = (video, listener) => {
     // Buffer limits in seconds: hls.js never caps by bytes, and when the TV's
     // buffer fills it shortens them itself. Not capLevelToPlayerSize: the
     // webOS page is 1920 wide, which would cap 4K. Not MediaCapabilities on
-    // the TV: it misreports there (Shaka turns it off too), and hls.js would
+    // a TV (LG or Samsung): it misreports there (Shaka turns it off too), and hls.js would
     // drop the 4K, HDR and 5.1 levels on its word.
     const instance = new HlsClass({
       startPosition: startAt > 0 ? startAt : -1,
-      useMediaCapabilities: !isWebOS(),
+      useMediaCapabilities: !isWebOS() && !isTizen(),
       renderTextTracksNatively: false,
       maxBufferLength: 15,
       maxMaxBufferLength: 30,

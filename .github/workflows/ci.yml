@@ -1,9 +1,9 @@
 name: CI
 
 # The repository is private on GitHub Free, so CI has 2,000 minutes a month. Every push runs one
-# quick check: format, lint, typecheck, unit tests and the TV build. The long jobs (the TV journeys
-# and .ipk, the Android TV APK and the phone APK) run only for a build someone will install, called
-# a full build here:
+# quick check: format, lint, typecheck, unit tests and the TV build. The long jobs (the TV journeys,
+# the .ipk and the Samsung .wgt, the Android TV APK and the phone APK) run only for a build someone
+# will install, called a full build here:
 # - every push to the combined test build (the test/all-together branch);
 # - once each time the full-ci label is added to a pull request (later pushes are quick again, so
 #   remove and add the label for another full build);
@@ -203,6 +203,18 @@ jobs:
         with:
           name: bannertv-ipk
           path: out/*.ipk
+          retention-days: 7
+          if-no-files-found: error
+
+      # The Samsung TV app: the same build as a .wgt, unsigned (apps/tizen, ADR 0009).
+      - name: Package .wgt
+        run: pnpm package:tizen
+
+      - name: Upload .wgt
+        uses: actions/upload-artifact@v4
+        with:
+          name: bannertv-wgt
+          path: out/*.wgt
           retention-days: 7
           if-no-files-found: error
 
