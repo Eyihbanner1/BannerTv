@@ -6,6 +6,7 @@ import {
   languageName,
   linkedToVideo,
   rankSubtitles,
+  releaseShort,
   type StreamEntry,
   type SubtitleDrift,
   type SubtitleFit,
@@ -313,14 +314,23 @@ export function versionNotes(
 }
 
 /**
- * A version's row detail: its notes, said in words, then its release name,
- * without a subtitle file's extension (OpenSubtitles names its files). The
- * notes first, on the TV and the phone alike: a long release name is cut at
- * the end, and why a row is dimmed must stay in sight.
+ * A version's release name as the sheet shows it in full: without a subtitle
+ * file's extension, which says nothing (OpenSubtitles names its files).
  */
-export function versionDetail(said: readonly string[], release?: string): string | undefined {
-  const name = release?.replace(/\.(?:srt|vtt|ass|ssa|sub)$/i, '');
-  return said.concat(name ? [name] : []).join(' · ') || undefined;
+export function versionRelease(release?: string): string | undefined {
+  return release?.replace(/\.(?:srt|vtt|ass|ssa|sub)$/i, '') || undefined;
+}
+
+/**
+ * A version's second line, on the TV and the phone alike: what else is known
+ * of it, said in words, then its release name cut to what tells copies apart
+ * (all of it when nothing can be cut). The notes first: why a row is dimmed
+ * must stay in sight.
+ */
+export function versionLine(said: readonly string[], release?: string): string | undefined {
+  const name = versionRelease(release);
+  const short = name ? (releaseShort(name) ?? name) : undefined;
+  return said.concat(short ? [short] : []).join(' · ') || undefined;
 }
 
 /**

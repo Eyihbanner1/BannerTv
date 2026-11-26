@@ -1,10 +1,4 @@
-import {
-  type LanguageGroup,
-  languageKey,
-  numberBySource,
-  releaseShort,
-  type StreamEntry,
-} from '@bannertv/core';
+import { type LanguageGroup, languageKey, numberBySource, type StreamEntry } from '@bannertv/core';
 import { preferences } from '@tv/data/preferences';
 import {
   createOrderMemory,
@@ -21,7 +15,9 @@ import {
   VERSION_NOTES,
   versionGroups,
   versionId,
+  versionLine,
   versionNotes,
+  versionRelease,
 } from '@tv/player/subtitle-versions';
 import {
   COARSE_TIMING_STEPS,
@@ -289,18 +285,19 @@ function VersionChoices({
             t(VERSION_NOTES[note]),
           );
           const label = versionLabel(item, number);
-          const short = item.release ? (releaseShort(item.release) ?? item.release) : undefined;
-          const line = notes.slice(1).concat(short ? [short] : []);
+          const line = versionLine(notes.slice(1), item.release);
           return (
             <ChoiceRow
               key={versionId(item.choice)}
               label={label}
               {...(notes[0] ? { chip: notes[0] } : {})}
-              {...(line.length > 0 ? { line: line.join(' · ') } : {})}
+              {...(line ? { line } : {})}
               selected={selected}
               // Passed over, for good reason: still there to pick by hand.
               dim={itemStatus === 'failed' || isUnfit(check)}
-              accessibilityLabel={[label, ...notes, item.release].filter(Boolean).join(', ')}
+              accessibilityLabel={[label, ...notes, versionRelease(item.release)]
+                .filter(Boolean)
+                .join(', ')}
               onPress={() => onChoose(item.choice)}
             />
           );
@@ -309,7 +306,7 @@ function VersionChoices({
         {chosen?.release ? (
           <View style={styles.file}>
             <Text style={styles.fileLabel}>{t('player.file')}</Text>
-            <Text style={styles.fileName}>{chosen.release}</Text>
+            <Text style={styles.fileName}>{versionRelease(chosen.release)}</Text>
           </View>
         ) : null}
       </ScrollView>

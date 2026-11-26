@@ -1669,13 +1669,11 @@ export function PlayerScreen(props: PlayerScreenProps) {
 
   /** A stream picked in Sources plays from where the film is, and does not fail over. */
   function chooseQuality(choice: QualityChoice) {
-    closedBy.current = 'pick';
     setPanel(null);
-    // The resolution already playing stays as it is, whichever stream at it is playing.
-    if (qualityValue(choice) === currentQuality) {
-      hide();
-      return;
-    }
+    // The resolution already playing stays as it is, whichever stream at it is playing,
+    // and focus goes back to Quality.
+    if (qualityValue(choice) === currentQuality) return;
+    closedBy.current = 'pick';
     if (!session) return;
     // A paused film stays paused, and a note says what is coming.
     session.play(choice.entry, session.carryOn(), {

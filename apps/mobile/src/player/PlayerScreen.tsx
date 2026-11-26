@@ -281,6 +281,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Controls: shown on a tap, hidden again after a while of playing.
   const [controls, setControls] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  // Each opening of Audio and subtitles starts on its columns, though the body of a panel
+  // still fading out may be drawn yet.
+  const [tracksOpenings, setTracksOpenings] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
   // Taps on the controls, which start the wait to hide them again (the clock does not).
   const [pokes, setPokes] = useState(0);
@@ -1191,7 +1194,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             </View>
             {state.live ? <Text style={styles.live}>{t('phone.live')}</Text> : null}
             <Pressable
-              onPress={() => setPanel('tracks')}
+              onPress={() => {
+                setTracksOpenings((count) => count + 1);
+                setPanel('tracks');
+              }}
               disabled={waiting}
               accessibilityRole="button"
               accessibilityLabel={t('phone.audioAndSubtitles')}
@@ -1445,6 +1451,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             each opening and its rows take their places anew. */}
         {() => (
           <TracksPanel
+            key={tracksOpenings}
             subtitles={subtitles}
             entry={state.entry}
             onChoose={chooseSubtitle}

@@ -1,10 +1,4 @@
-import {
-  languageKey,
-  languageName,
-  numberBySource,
-  releaseShort,
-  type StreamEntry,
-} from '@bannertv/core';
+import { languageKey, languageName, numberBySource, type StreamEntry } from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,7 +23,9 @@ import {
   type SubtitleVersion,
   VERSION_NOTES,
   versionGroups,
+  versionLine,
   versionNotes,
+  versionRelease,
 } from '../../player/subtitle-versions';
 import {
   formatOffset,
@@ -413,12 +409,11 @@ export function TracksSheet(props: TracksSheetProps) {
       const selected = sameChoice(item.choice, choice);
       const notes = noteOf(item, selected);
       const label = versionLabel(item, number);
-      const short = item.release ? (releaseShort(item.release) ?? item.release) : undefined;
-      const line = notes.slice(1).concat(short ? [short] : []);
+      const line = versionLine(notes.slice(1), item.release);
       return {
         focusKey: versionKey(item.choice),
         label,
-        spoken: [label, ...notes, short].filter(Boolean).join(', '),
+        spoken: [label, ...notes, versionRelease(item.release)].filter(Boolean).join(', '),
         selected,
         // Passed over, for good reason: still there to pick by hand.
         dim:
@@ -429,7 +424,7 @@ export function TracksSheet(props: TracksSheetProps) {
               <span className={styles.versionName}>{label}</span>
               {notes[0] && <span className={rowParts.chip}>{notes[0]}</span>}
             </span>
-            {line.length > 0 && <span className={rowParts.line}>{line.join(' · ')}</span>}
+            {line && <span className={rowParts.line}>{line}</span>}
           </>
         ),
         onFocus: () => setFocusedVersion(versionKey(item.choice)),
@@ -467,7 +462,7 @@ export function TracksSheet(props: TracksSheetProps) {
                 title={versionLabel(shown.item, shown.number)}
                 text={noteOf(shown.item, sameChoice(shown.item.choice, choice)).join(' · ')}
                 label={t('player.file')}
-                name={shown.item.release}
+                name={versionRelease(shown.item.release)}
               />
             )}
           </>

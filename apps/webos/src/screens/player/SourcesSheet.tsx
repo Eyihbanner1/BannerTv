@@ -22,6 +22,7 @@ import {
   shownStreams,
 } from '../../player/stream-filter';
 import { StreamFilterMenu } from '../streams/StreamFilterMenu';
+import { Pane } from './SheetTabs';
 import { SheetDetail } from './SheetDetail';
 import { rowParts, type SheetRow, SheetList } from './SheetList';
 import styles from './SourcesSheet.module.css';
@@ -210,7 +211,8 @@ export function SourcesSheet({
               {filteredStatus(t, state, shown, ordered.length)}
             </span>
           </h2>
-          <div className={styles.buttons}>
+          {/* Up from the rows lands on All streams, the way out of the sheet's few. */}
+          <Pane focusKey={`${SHEET}-buttons`} preferred={`${SHEET}-all`} className={styles.buttons}>
             <Pressable
               focusKey={`${SHEET}-filter`}
               label={filterLabel}
@@ -243,7 +245,7 @@ export function SourcesSheet({
             >
               {t('player.allStreams')}
             </Pressable>
-          </div>
+          </Pane>
         </div>
         {rows.length === 0 && state.settled && <p className={styles.empty}>{t('streams.none')}</p>}
         {/* Another order or filter starts afresh: its rows register anew. */}
