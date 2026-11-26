@@ -1,4 +1,10 @@
-import { type LanguageGroup, languageKey, numberBySource, type StreamEntry } from '@bannertv/core';
+import {
+  type LanguageGroup,
+  languageKey,
+  numberBySource,
+  releaseShort,
+  type StreamEntry,
+} from '@bannertv/core';
 import { preferences } from '@tv/data/preferences';
 import {
   createOrderMemory,
@@ -7,14 +13,12 @@ import {
   driftOn,
   isUnfit,
   languageFirstPick,
-  type OrderMemory,
   playingRelease,
   sameChoice,
   subtitleVersions,
   syncLine,
   type SubtitleVersion,
   VERSION_NOTES,
-  versionDetail,
   versionGroups,
   versionId,
   versionNotes,
@@ -33,12 +37,17 @@ import { type MatchClock, useMatchRows } from '@tv/screens/player/use-match-rows
 import type { MatchResult, SubtitleChoice, Subtitles } from '@tv/screens/player/use-subtitles';
 import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Chip } from '../ui/Chip';
 import { colors, radius, space, touch, type } from '../ui/theme';
-import { PanelOption } from './SidePanel';
+import { BackRow, ChoiceHeading, ChoiceRow } from './ChoiceRow';
+import { useSubtitleStyle } from './SubtitleStyle';
 
-type Tab = 'subtitles' | 'audio' | 'timing';
+/** What the panel shows: the three columns, or one of the chosen language's settings. */
+type PanelView = 'main' | 'versions' | 'timing';
+
+/** Narrower than this, the three columns stack: a phone held upright. */
+const COLUMNS_FROM = 600;
 
 export interface TracksPanelProps {
   subtitles: Subtitles;
@@ -47,201 +56,278 @@ export interface TracksPanelProps {
   /** Off or a version was picked: the panel closes. */
   onChoose: (choice: SubtitleChoice) => void;
   /**
-   * The Audio tab's rows, made by the player, which switches audio (and streams); null when
-   * the stream has no audio to choose from.
+   * The Audio column's rows, made by the player, which switches audio (and streams); null
+   * when the stream has no audio to choose from.
    */
   audioRows: ReactNode;
-  /** Opens the subtitle style, from the foot of the Subtitles tab. */
+  /** Opens the subtitle style, from the Style row. */
   onStyle?: () => void;
   /** The player's clock now, read as a line is tapped; null before there is a video. */
   clock: () => MatchClock | null;
 }
 
 /**
- * The player's audio and subtitles panel, as the TV's sheet has them: Subtitles, Audio and
- * Timing tabs. Subtitles lists Off and the languages, the last chosen first, each with how
- * many versions it has; the open language shows its versions under it, numbered by source,
- * each saying first whether it is loading, couldn't be read, or is linked to the video or the
- * same release. Rows keep their places while the panel is open, as more addons answer. Mount
- * it only while open, so each opening starts afresh, as the TV's sheet does.
+ * The player's audio and subtitles, as the TV's sheet has them: three columns side by side
+ * (the audio, the subtitle languages, and the chosen language's settings: its version, its
+ * timing and how subtitles look), stacked when the phone is held upright. A language starts
+ * on its best version; its versions, each on two lines with what is known of it, and its
+ * timing are one step in, with Back to the columns. Rows keep their places while the panel is
+ * open, as more addons answer. Mount it only while open, so each opening starts afresh.
  */
 export function TracksPanel(props: TracksPanelProps) {
   const { subtitles } = props;
   const { t } = useTranslation();
-  const [tab, setTab] = useState<Tab>('subtitles');
+  const { width } = useWindowDimensions();
+  const [view, setView] = useState<PanelView>('main');
   // The language last chosen comes first, as it was when the panel opened.
   const [firstLanguage] = useState(() => preferences.get().subtitleLanguage);
-  // Languages and versions keep the places they had when first shown, across tabs too.
+  // Languages and versions keep the places they had when first shown, across views too.
   const [order] = useState(createOrderMemory);
-  // The language whose versions show; until one is tapped, the one showing.
-  const [open, setOpen] = useState<string | null>(null);
+  const look = useSubtitleStyle();
 
   const { choice, offset, drift } = subtitles;
-  const moved = choice !== null && (offset !== 0 || drift !== null);
-  const linedUp = choice !== null && subtitles.sync?.state === 'moved';
-  const timingName =
-    moved || linedUp
-      ? [
-          `${t('player.timing')} ${formatOffset(offset)}`,
-          linedUp ? t('player.linedUp') : null,
-          drift ? t('player.driftFixed') : null,
-        ]
-          .filter((part): part is string => part !== null)
-          .join(' · ')
-      : t('player.timing');
-
-  return (
-    <View style={styles.root}>
-      <View style={styles.tabs}>
-        <Chip
-          label={t('phone.subtitles')}
-          on={tab === 'subtitles'}
-          onPress={() => setTab('subtitles')}
-        />
-        <Chip label={t('phone.audio')} on={tab === 'audio'} onPress={() => setTab('audio')} />
-        <Chip label={timingName} on={tab === 'timing'} onPress={() => setTab('timing')} />
-      </View>
-      <View style={styles.content}>
-        {tab === 'subtitles' ? (
-          <SubtitleChoices
-            subtitles={subtitles}
-            entry={props.entry}
-            firstLanguage={firstLanguage}
-            order={order}
-            open={open}
-            onOpen={setOpen}
-            onChoose={props.onChoose}
-            {...(props.onStyle ? { onStyle: props.onStyle } : {})}
-          />
-        ) : tab === 'audio' ? (
-          <AudioChoices rows={props.audioRows} />
-        ) : (
-          <TimingChoices subtitles={subtitles} clock={props.clock} />
-        )}
-      </View>
-    </View>
-  );
-}
-
-/** The Subtitles tab: Off, the languages, and the open language's versions under it. */
-function SubtitleChoices({
-  subtitles,
-  entry,
-  firstLanguage,
-  order,
-  open,
-  onOpen,
-  onChoose,
-  onStyle,
-}: {
-  subtitles: Subtitles;
-  entry: StreamEntry | null;
-  firstLanguage: string | null;
-  order: OrderMemory;
-  open: string | null;
-  onOpen: (language: string) => void;
-  onChoose: (choice: SubtitleChoice) => void;
-  onStyle?: () => void;
-}) {
-  const { t } = useTranslation();
-  const { choice } = subtitles;
   const versions = subtitleVersions(subtitles, t('phone.embeddedSubtitles'));
   const groups = versionGroups(versions, firstLanguage, order);
   const chosen = choice ? versions.find((v) => sameChoice(v.choice, choice)) : undefined;
   const chosenLanguage = chosen ? languageKey(chosen.lang) : null;
-  // A language the viewer opened stays open, whatever the start-of-stream choice settles on.
-  const shown =
-    groups.find((group) => group.key === open) ??
-    groups.find((group) => group.key === chosenLanguage);
-  const video = playingRelease(entry);
+  const chosenGroup = groups.find((group) => group.key === chosenLanguage);
+  const video = playingRelease(props.entry);
+  const versionLabel = (item: SubtitleVersion, number?: number) =>
+    number === undefined ? item.source : t('player.sourceNumber', { source: item.source, number });
+  const status =
+    subtitles.pending > 0
+      ? t('player.stillAsking', { count: subtitles.pending })
+      : subtitles.subdlAsking
+        ? t('player.stillSubdl')
+        : subtitles.hashReading
+          ? t('player.stillLinking')
+          : undefined;
 
-  const versionRow = ({ item, number }: { item: SubtitleVersion; number?: number }) => {
-    const selected = sameChoice(item.choice, choice);
-    const status = subtitles.statusOf(item.choice);
-    const check = subtitles.checkOf(item.choice);
-    const notes = versionNotes(item, selected, status, video, check).map((note) =>
-      t(VERSION_NOTES[note]),
-    );
-    const label =
-      number === undefined
-        ? item.source
-        : t('player.sourceNumber', { source: item.source, number });
-    // The notes first: a long release name is cut at the end, and the notes must stay in sight.
-    const detail = versionDetail(notes, item.release);
+  if (view === 'versions' && chosenGroup) {
     return (
-      <PanelOption
-        key={versionId(item.choice)}
-        label={label}
-        {...(detail ? { detail } : {})}
-        selected={selected}
-        // Passed over, for good reason: still there to pick by hand.
-        dim={status === 'failed' || isUnfit(check)}
-        accessibilityLabel={detail ? `${label}, ${detail}` : label}
-        onPress={() => onChoose(item.choice)}
+      <VersionChoices
+        group={chosenGroup}
+        subtitles={subtitles}
+        video={video}
+        status={status}
+        versionLabel={versionLabel}
+        onBack={() => setView('main')}
+        onChoose={props.onChoose}
       />
     );
-  };
+  }
+  if (view === 'timing') {
+    return (
+      <View style={styles.root}>
+        <BackRow
+          title={t('player.timingHeading')}
+          backLabel={t('common.back')}
+          onPress={() => setView('main')}
+        />
+        <TimingChoices subtitles={subtitles} clock={props.clock} />
+      </View>
+    );
+  }
 
-  // A language not showing starts on its best placed version, which the player may move
-  // from once it has read the language's files, and the panel stays open on its versions;
-  // the language showing only opens.
+  // A language not showing starts on its best placed version, which the player may move from
+  // once it has read the language's files, and the panel stays open; the language showing
+  // goes on to its versions.
   const pickLanguage = (group: LanguageGroup<SubtitleVersion>) => {
-    onOpen(group.key);
-    if (group.key === chosenLanguage) return;
+    if (group.key === chosenLanguage) {
+      setView('versions');
+      return;
+    }
     subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
   };
+  const timingValue =
+    subtitles.offer && choice !== null
+      ? t('player.timingOffered')
+      : [
+          formatOffset(offset),
+          subtitles.sync?.state === 'moved' ? t('player.linedUp') : null,
+          drift ? t('player.driftFixed') : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(' · ');
+  const chosenNumber = chosenGroup
+    ? numberBySource(chosenGroup.items).find((v) => v.item === chosen)?.number
+    : undefined;
+  const styleSummary = t('player.styleSummary', {
+    size: t(`player.styleValue.size.${look.size}`),
+    colour: t(`player.styleColourInline.${look.colour}`),
+  });
 
+  // Side by side, each column scrolls on its own; stacked, the whole panel scrolls.
+  const wide = width >= COLUMNS_FROM;
+  const List = wide ? ScrollView : View;
+  const column = wide ? styles.column : undefined;
+  const audio = (
+    <View style={column}>
+      <ChoiceHeading>{t('phone.audio')}</ChoiceHeading>
+      <AudioChoices rows={props.audioRows} scroll={wide} />
+    </View>
+  );
+  const languages = (
+    <View style={column}>
+      <ChoiceHeading {...(status ? { aside: status } : {})}>{t('phone.subtitles')}</ChoiceHeading>
+      <List>
+        <ChoiceRow
+          label={t('phone.subtitlesOff')}
+          selected={choice === null}
+          onPress={() => props.onChoose(null)}
+        />
+        {groups.map((group) => (
+          <ChoiceRow
+            key={group.key}
+            label={group.name}
+            selected={group.key === chosenLanguage}
+            accessibilityLabel={`${group.name}, ${t('player.versions', { count: group.items.length })}`}
+            onPress={() => pickLanguage(group)}
+          />
+        ))}
+        {groups.length === 0 && !status ? (
+          <Text style={styles.note}>{t('player.noSubtitles')}</Text>
+        ) : null}
+      </List>
+    </View>
+  );
+  const settings = (
+    <View style={wide ? [styles.column, styles.settings] : undefined}>
+      <ChoiceHeading>
+        {chosenGroup
+          ? t('player.languageSubtitles', { language: chosenGroup.name })
+          : t('player.subtitleSettings')}
+      </ChoiceHeading>
+      <List>
+        {chosen && chosenGroup ? (
+          <ChoiceRow
+            label={t('player.version')}
+            line={`${versionLabel(chosen, chosenNumber)} · ${t('player.versions', {
+              count: chosenGroup.items.length,
+            })}`}
+            chevron
+            onPress={() => setView('versions')}
+          />
+        ) : null}
+        {choice !== null ? (
+          <ChoiceRow
+            label={t('player.timing')}
+            line={timingValue}
+            chevron
+            onPress={() => setView('timing')}
+          />
+        ) : null}
+        {props.onStyle ? (
+          <ChoiceRow
+            label={t('player.styleTab')}
+            line={styleSummary}
+            chevron
+            onPress={props.onStyle}
+          />
+        ) : null}
+      </List>
+    </View>
+  );
+
+  if (!wide) {
+    return (
+      <ScrollView contentContainerStyle={styles.stack}>
+        {languages}
+        {settings}
+        {audio}
+      </ScrollView>
+    );
+  }
   return (
-    <ScrollView>
-      <PanelOption
-        label={t('phone.subtitlesOff')}
-        selected={choice === null}
-        onPress={() => onChoose(null)}
-      />
-      {groups.map((group) => {
-        const versionsLabel = t('player.versions', { count: group.items.length });
-        return (
-          <View key={group.key}>
-            <PanelOption
-              label={group.name}
-              detail={versionsLabel}
-              selected={group.key === chosenLanguage}
-              accessibilityLabel={`${group.name}, ${versionsLabel}`}
-              onPress={() => pickLanguage(group)}
-            />
-            {group.key === shown?.key ? (
-              <View style={styles.versions}>{numberBySource(group.items).map(versionRow)}</View>
-            ) : null}
-          </View>
-        );
-      })}
-      {subtitles.pending > 0 ? (
-        <Text style={styles.note}>{t('player.stillAsking', { count: subtitles.pending })}</Text>
-      ) : subtitles.subdlAsking ? (
-        <Text style={styles.note}>{t('player.stillSubdl')}</Text>
-      ) : subtitles.hashReading ? (
-        <Text style={styles.note}>{t('player.stillLinking')}</Text>
-      ) : groups.length === 0 ? (
-        <Text style={styles.note}>{t('player.noSubtitles')}</Text>
-      ) : null}
-      {onStyle ? (
-        <PanelOption label={t('player.style')} detail={t('phone.styleFor')} onPress={onStyle} />
-      ) : null}
-    </ScrollView>
+    <View style={styles.columns}>
+      {audio}
+      {languages}
+      <View style={styles.divider} />
+      {settings}
+    </View>
   );
 }
 
 /**
- * The Audio tab: the rows the player made (its audio tracks, as the panel has always listed
- * them), or a note when there are none. The player owns the rows, so one that is not a track
- * (a stream in the viewer's language) joins them there.
+ * The chosen language's versions, one step in: each on two lines, its name and the note that
+ * matters most, then what else is known and its release name cut to what tells copies apart.
+ * The version showing has its release name in full underneath.
  */
-function AudioChoices({ rows }: { rows: ReactNode }) {
+function VersionChoices({
+  group,
+  subtitles,
+  video,
+  status,
+  versionLabel,
+  onBack,
+  onChoose,
+}: {
+  group: LanguageGroup<SubtitleVersion>;
+  subtitles: Subtitles;
+  video: ReturnType<typeof playingRelease>;
+  status?: string;
+  versionLabel: (item: SubtitleVersion, number?: number) => string;
+  onBack: () => void;
+  onChoose: (choice: SubtitleChoice) => void;
+}) {
+  const { t } = useTranslation();
+  const { choice } = subtitles;
+  const chosen = group.items.find((item) => sameChoice(item.choice, choice));
+  return (
+    <View style={styles.root}>
+      <BackRow
+        title={t('player.versionsHeading', { language: group.name, count: group.items.length })}
+        backLabel={t('common.back')}
+        onPress={onBack}
+      />
+      <ScrollView>
+        {numberBySource(group.items).map(({ item, number }) => {
+          const selected = sameChoice(item.choice, choice);
+          const check = subtitles.checkOf(item.choice);
+          const itemStatus = subtitles.statusOf(item.choice);
+          const notes = versionNotes(item, selected, itemStatus, video, check).map((note) =>
+            t(VERSION_NOTES[note]),
+          );
+          const label = versionLabel(item, number);
+          const short = item.release ? (releaseShort(item.release) ?? item.release) : undefined;
+          const line = notes.slice(1).concat(short ? [short] : []);
+          return (
+            <ChoiceRow
+              key={versionId(item.choice)}
+              label={label}
+              {...(notes[0] ? { chip: notes[0] } : {})}
+              {...(line.length > 0 ? { line: line.join(' · ') } : {})}
+              selected={selected}
+              // Passed over, for good reason: still there to pick by hand.
+              dim={itemStatus === 'failed' || isUnfit(check)}
+              accessibilityLabel={[label, ...notes, item.release].filter(Boolean).join(', ')}
+              onPress={() => onChoose(item.choice)}
+            />
+          );
+        })}
+        {status ? <Text style={styles.note}>{status}</Text> : null}
+        {chosen?.release ? (
+          <View style={styles.file}>
+            <Text style={styles.fileLabel}>{t('player.file')}</Text>
+            <Text style={styles.fileName}>{chosen.release}</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * The Audio column: the rows the player made (its audio tracks), or a note when there are
+ * none. The player owns the rows, so one that is not a track (a stream in the viewer's
+ * language) joins them there.
+ */
+function AudioChoices({ rows, scroll }: { rows: ReactNode; scroll: boolean }) {
   const { t } = useTranslation();
   if (rows === null || rows === undefined || rows === false) {
     return <Text style={styles.note}>{t('player.noAudioChoice')}</Text>;
   }
-  return <ScrollView>{rows}</ScrollView>;
+  return scroll ? <ScrollView>{rows}</ScrollView> : <View>{rows}</View>;
 }
 
 /** A Timing step or Reset: a quiet pill, as wide as its row allows. */
@@ -276,7 +362,7 @@ function matchNote(result: MatchResult): { key: string; again: boolean } {
 }
 
 /**
- * The Timing tab: last episode's timing, offered where it may be; the lines around now, to tap
+ * Timing, one step in: last episode's timing, offered where it may be; the lines around now, to tap
  * the one just heard (a second tap, much later in the film, fixes a drift too); how far the
  * subtitles showing are moved, steps of a tenth and half a second and of 5 s either way,
  * Reset, Undo after a tap, and the drift fix for a file timed for another frame rate. Both are
@@ -360,10 +446,10 @@ function TimingChoices({
               const label = lineText(cues[row.index]!);
               const detail = row.onScreen ? t('player.matchOnScreen') : undefined;
               return (
-                <PanelOption
+                <ChoiceRow
                   key={`match-${row.key}`}
                   label={label}
-                  {...(detail ? { detail } : {})}
+                  {...(detail ? { line: detail } : {})}
                   accessibilityLabel={label}
                   onPress={() => {
                     // The clock as the viewer tapped, read now: never a value kept from a draw.
@@ -445,11 +531,16 @@ function TimingChoices({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, gap: space.m },
-  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s },
-  content: { flex: 1 },
-  versions: { marginLeft: space.l },
-  note: { ...type.small, color: colors.textMuted, padding: space.m },
+  root: { flex: 1 },
+  columns: { flex: 1, flexDirection: 'row', gap: space.l },
+  column: { flex: 1 },
+  settings: { flex: 1.25 },
+  divider: { width: 1, marginVertical: space.s, backgroundColor: 'rgba(241, 237, 255, 0.12)' },
+  stack: { gap: space.xl, paddingBottom: space.xl },
+  file: { paddingLeft: 32, paddingRight: space.m, marginTop: space.l },
+  fileLabel: { ...type.overline, color: colors.textSubtle },
+  fileName: { ...type.small, color: colors.textMuted, marginTop: space.xs },
+  note: { ...type.small, color: colors.textMuted, paddingVertical: space.m, paddingLeft: 32 },
   offerText: { ...type.body, color: colors.text, paddingHorizontal: space.m },
   offset: { ...type.heading, color: colors.text, paddingHorizontal: space.m },
   way: { ...type.small, color: colors.textMuted, paddingHorizontal: space.m },

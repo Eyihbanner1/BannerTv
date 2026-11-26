@@ -28,11 +28,17 @@ const SLIDE_FROM = 48;
 export function SidePanel({
   visible,
   title,
+  full = false,
   onClose,
   children,
 }: {
   visible: boolean;
   title: string;
+  /**
+   * Over the whole screen, dark and see-through, for lists side by side: audio, subtitles and
+   * their settings, as the TV's sheet has them.
+   */
+  full?: boolean;
   onClose: () => void;
   /**
    * Builds the panel's body. It is called only while the panel can be seen, so the player's
@@ -66,7 +72,9 @@ export function SidePanel({
     return () => animation.stop();
   }, [visible, slide]);
 
-  const panelWidth = Math.min(phone.sideSheetW + insets.right, Math.round(width * 0.62));
+  const panelWidth = full
+    ? width
+    : Math.min(phone.sideSheetW + insets.right, Math.round(width * 0.62));
   return (
     <Modal
       visible={visible}
@@ -88,8 +96,10 @@ export function SidePanel({
         <Animated.View
           style={[
             styles.panel,
+            full && styles.full,
             {
               width: panelWidth,
+              ...(full ? { paddingLeft: Math.max(insets.left, space.xl) } : {}),
               paddingRight: Math.max(insets.right, space.xl),
               paddingTop: Math.max(insets.top, 18),
               paddingBottom: Math.max(insets.bottom, 18),
@@ -189,6 +199,11 @@ export function PanelOption({
 
 const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row' },
+  full: {
+    backgroundColor: 'rgba(5, 3, 10, 0.94)',
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+  },
   backdrop: { flex: 1, backgroundColor: 'rgba(5, 3, 10, 0.55)' },
   panel: {
     position: 'absolute',

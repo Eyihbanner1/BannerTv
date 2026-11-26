@@ -42,7 +42,7 @@ import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
 import { audioDetail, audioSummary, audioSwitch, pickAudio } from '@tv/player/audio';
-import { problemText, resolutionLabel } from '@tv/player/describe';
+import { problemText, resolutionLabel, streamBadges } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
 import { formatTime } from '@tv/player/media';
 import { playProblem } from '@tv/player/problem';
@@ -114,6 +114,7 @@ import {
   switchedFrame,
   touchSpread,
 } from './picture-fit';
+import { ChoiceRow } from './ChoiceRow';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SkipRipple } from './SkipRipple';
 import { SleepPanel, SleepRow, SleepScreen, SleepWarning } from './SleepTimer';
@@ -1437,6 +1438,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <SidePanel
         visible={panel === 'tracks'}
         title={t('phone.audioAndSubtitles')}
+        full
         onClose={() => setPanel(null)}
       >
         {/* SidePanel builds its body only while it can be seen, so the panel mounts afresh at
@@ -1457,10 +1459,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                     ...state.audio.map((track) => {
                       const detail = audioDetail(track);
                       return (
-                        <PanelOption
+                        <ChoiceRow
                           key={track.id}
                           label={audioSummary(track)}
-                          {...(detail ? { detail } : {})}
+                          {...(detail ? { line: detail } : {})}
                           selected={track.active}
                           onPress={() => {
                             session?.noteChoice('audio');
@@ -1472,10 +1474,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                       );
                     }),
                     switchTo ? (
-                      <PanelOption
+                      <ChoiceRow
                         key="audio-switch"
                         label={t('player.audioSwitch', { language: languageName(switchLanguage) })}
-                        {...(switchDetail ? { detail: switchDetail } : {})}
+                        {...(switchDetail ? { line: switchDetail } : {})}
                         onPress={() => switchForAudio(switchTo, switchLanguage)}
                       />
                     ) : null,
@@ -1489,6 +1491,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <SidePanel
         visible={panel === 'style'}
         title={t('player.style')}
+        full
         onClose={() => setPanel('tracks')}
       >
         {() => <SubtitleStyleChoices />}
@@ -1629,18 +1632,25 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             ) : null}
             {choices.map((choice) => {
               const value = choice.resolution ?? 'other';
+              const here = value === currentQuality;
+              // What else is known of the stream it would play: HDR, sound, size, cached.
+              const entry = here && state.entry ? state.entry : choice.entry;
+              const line = [
+                here ? t('player.playingNow') : undefined,
+                ...streamBadges({ ...entry.facts, resolution: undefined }),
+                entry.facts.cached === true ? t('streams.cached') : undefined,
+                choice.otherLanguages
+                  ? t('player.otherAudio', {
+                      languages: choice.otherLanguages.map(languageName).join(', '),
+                    })
+                  : undefined,
+              ].filter((part): part is string => !!part);
               return (
-                <PanelOption
+                <ChoiceRow
                   key={value}
                   label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
-                  {...(choice.otherLanguages
-                    ? {
-                        detail: t('player.otherAudio', {
-                          languages: choice.otherLanguages.map(languageName).join(', '),
-                        }),
-                      }
-                    : {})}
-                  selected={value === currentQuality}
+                  {...(line.length > 0 ? { line: line.join(' · ') } : {})}
+                  selected={here}
                   onPress={() => pickQuality(value)}
                 />
               );
