@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BannerTV privacy policy</title>
+    <meta
+      name="description"
+      content="What BannerTV, the media centre for LG webOS TVs, does with your data."
+    />
+    <link rel="icon" href="../assets/bannertv-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site">
+      <div class="wrap">
+        <a href="../" aria-label="BannerTV home">
+          <picture>
+            <source srcset="../assets/bannertv-lockup.svg" media="(prefers-color-scheme: dark)" />
+            <img
+              src="../assets/bannertv-lockup-on-light.svg"
+              alt="BannerTV"
+              width="116"
+              height="32"
+            />
+          </picture>
+        </a>
+        <nav aria-label="Site">
+          <ul>
+            <li><a href="../">Help</a></li>
+            <li><a href="./" aria-current="page">Privacy</a></li>
+            <li><a href="../terms/">Terms</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main" class="wrap">
+      <h1>Privacy policy</h1>
+      <p class="meta">Last updated <time datetime="2026-10-28">28 October 2026</time></p>
+
+      <p class="lead">
+        BannerTV has no accounts, no adverts and no tracking. Almost everything it knows stays on
+        your TV. This page explains the few things that leave it, and where they go.
+      </p>
+
+      <h2 id="short">The short version</h2>
+      <ul>
+        <li>
+          Your settings, addons, list of recent searches and watch progress are stored on your TV,
+          not sent to me.
+        </li>
+        <li>
+          When you browse, search or play, your TV talks straight to the addons you've added, to the
+          sites they point to and to a few services BannerTV uses for artwork. They see your IP
+          address and what you ask for, including what you type in Search. Apart from BannerTV's own
+          demo addon, which keeps no logs, those requests don't come to me.
+        </li>
+        <li>
+          While you're adding an addon or changing its settings, a small relay I run lets you do it
+          from your phone. It holds an address you send in memory only, forgets it within about 11
+          minutes and keeps no logs.
+        </li>
+        <li>Trakt and crash reports only work if you turn them on.</li>
+        <li>I don't sell data, show adverts, use analytics or build profiles of anyone.</li>
+      </ul>
+
+      <h2 id="who">Who is responsible</h2>
+      <p>
+        BannerTV is made by <span class="todo">CONTROLLER_NAME</span>, an individual developer in
+        the United Kingdom ("I" or "me" on this page). I'm the controller of the personal data
+        described here under the UK General Data Protection Regulation (UK GDPR) and the Data
+        Protection Act 2018.
+      </p>
+      <p>
+        Contact me about anything on this page at
+        <a href="mailto:SUPPORT_EMAIL"><span class="todo">SUPPORT_EMAIL</span></a
+        >.
+      </p>
+
+      <h2 id="on-your-tv">What stays on your TV</h2>
+      <p>
+        BannerTV keeps the following in the app's own storage on your TV. None of it is sent to me,
+        and all of it is deleted when you remove BannerTV from the TV.
+      </p>
+      <div class="table">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">What</th>
+              <th scope="col">Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Your settings, and whether you've seen the welcome screen</td>
+              <td>So BannerTV starts the way you left it</td>
+            </tr>
+            <tr>
+              <td>
+                The addresses of the addons you've added. Some addon addresses contain an account
+                key for a service you use
+              </td>
+              <td>To ask those addons for catalogues, details, streams and subtitles</td>
+            </tr>
+            <tr>
+              <td>
+                Copies of catalogues and artwork addresses, and of the details of titles you've
+                opened, from your addons and from TMDB
+              </td>
+              <td>
+                So screens open quickly, even before your addons answer. Older copies are replaced
+                as new ones are saved, and TMDB copies are kept for 6 months at most
+              </td>
+            </tr>
+            <tr>
+              <td>Your last eight searches</td>
+              <td>So you can repeat a search without typing it again</td>
+            </tr>
+            <tr>
+              <td>
+                Watch progress, your library and profiles, and a profile PIN stored only as a
+                scrambled code, when those features are available
+              </td>
+              <td>To resume where you stopped and keep each person's list separate</td>
+            </tr>
+            <tr>
+              <td>Your Trakt sign-in token, and the history and lists BannerTV reads from Trakt</td>
+              <td>To keep Trakt linked and show your Trakt history, if you link Trakt</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        You can remove an addon or clear your searches in BannerTV at any time. When you remove an
+        addon, copies BannerTV saved from it, which include its address, can stay on the TV until
+        newer copies replace them or you remove BannerTV. BannerTV never writes addon addresses into
+        error messages or logs.
+      </p>
+
+      <h2 id="leaves-your-tv">What leaves your TV, and who receives it</h2>
+
+      <h3 id="addons">The addons you add</h3>
+      <p>
+        BannerTV has no content of its own, apart from the demo addon described below. It asks the
+        addons you've added for catalogues, title details, streams and subtitles, and searches them
+        as you type once you've typed two letters. It also re-checks each addon's details once a
+        day, shortly after BannerTV starts. These requests go directly from your TV to each addon's
+        server and include your IP address, the titles or episodes you open, what you type in
+        Search, and anything in the addon's address, such as an account key. Other people run these
+        addons and decide what to do with those requests under their own terms and privacy policies.
+      </p>
+      <p>
+        BannerTV comes with three addons already added: Cinemeta (titles and artwork) and
+        OpenSubtitles v3 (subtitles), which Stremio runs, and BannerTV Demo, which I run. You can
+        remove any of them.
+      </p>
+
+      <h3 id="demo">The BannerTV Demo addon</h3>
+      <p>
+        The demo addon offers three short films from the Blender Foundation, which are free to share
+        under Creative Commons licences, so there's always something legal to play. A Cloudflare
+        Worker at <code>demo.bannertv.workers.dev</code> serves its listings, films, artwork and
+        subtitles. When your TV browses, searches or plays it, Cloudflare handles the connection as
+        my processor. That includes your IP address, the film or file your TV asks for and, when you
+        search, the words you type, which are part of the request's address. The addon uses those
+        words only to pick matching films from its three, and keeps nothing: request logs, traces
+        and log exports are all turned off, so I can't see who watches or searches for what.
+      </p>
+
+      <h3 id="artwork-streams">Artwork, streams and subtitles</h3>
+      <p>
+        Posters and backdrops load from the image services your addons point to. BannerTV also fills
+        in missing backdrops and title logos from Metahub (<code>images.metahub.space</code>), an
+        image service run by Stremio, which sees your IP address and the IMDb number of the titles
+        on screen. Films, episodes and subtitle files load from wherever the addon's link points.
+        Those services see your IP address and the file your TV asks for.
+      </p>
+
+      <h3 id="relay">The phone relay</h3>
+      <p>
+        Typing a long address with a remote is slow, so BannerTV lets you send it from your phone
+        through a small relay I run at <code>pair.bannertv.workers.dev</code>:
+      </p>
+      <ul>
+        <li>
+          While the Add an addon window, or an addon's Settings window, is open on your TV, your TV
+          gets a six-character code from the relay, shows it with a QR code and checks back every 3
+          seconds. So the relay sees your TV's IP address even if you type the address on the TV
+          instead.
+        </li>
+        <li>
+          If you scan the code, your phone opens the relay's page and sends the address you paste.
+          The relay holds it in memory only, never on disk, and passes it to your TV.
+        </li>
+        <li>
+          The relay forgets the address 30 seconds after your TV has it, in case the first delivery
+          fails. Each code lasts 10 minutes, and nothing is held more than about 11 minutes after
+          the code was made. Apart from that, the relay stores only a scrambled copy of the TV's
+          session secret and the expiry time.
+        </li>
+        <li>Request logging is switched off. I can't see the addresses that pass through.</li>
+      </ul>
+      <p>
+        The relay runs on Cloudflare's global network, usually in the data centre nearest you.
+        Cloudflare, Inc., a United States company, handles the connections, including your TV's and
+        phone's IP addresses, as my processor under its data processing addendum. An addon's own
+        settings page, which opens from the QR code, is run by that addon, not by me.
+      </p>
+
+      <h3 id="trailers">Trailers</h3>
+      <p>
+        The Trailer button opens your TV's YouTube app with that trailer. From then on YouTube's own
+        terms and Google's privacy policy apply.
+      </p>
+
+      <h3 id="trakt">Trakt (optional)</h3>
+      <p>
+        If you link a Trakt account, BannerTV sends Trakt what you start, pause and finish watching,
+        and reads your watch history and lists from it, so Trakt can keep your history in step
+        across your devices. This goes directly between your TV and Trakt under Trakt's privacy
+        policy. BannerTV keeps the Trakt sign-in token, and the history and lists it reads, on your
+        TV until you unlink Trakt or remove the app. When you unlink Trakt in BannerTV's settings,
+        BannerTV deletes all of them from the TV. You can also revoke BannerTV's access in your
+        Trakt account settings, and delete what Trakt holds there. BannerTV uses Trakt but is not
+        endorsed or certified by Trakt.
+      </p>
+
+      <h3 id="tmdb">The Movie Database (TMDB)</h3>
+      <p>
+        BannerTV may fetch extra artwork, cast and episode details from TMDB for the titles you see.
+        Those requests go directly from your TV to TMDB and include your IP address and the title
+        being looked up. BannerTV uses TMDB and the TMDB APIs but is not endorsed, certified, or
+        otherwise approved by TMDB.
+      </p>
+
+      <h3 id="crash-reports">Crash reports (optional, off unless you turn them on)</h3>
+      <p>
+        If you turn on crash reports in Settings, BannerTV sends a report to Sentry when something
+        goes wrong. A report holds the error, the BannerTV version, your TV's model and webOS
+        version, and the name of the screen you were on. It never includes addon addresses, account
+        keys, the web addresses BannerTV was loading or what you were watching, and your IP address
+        is removed before a report is stored. Reports are kept in Sentry's EU region (Frankfurt,
+        Germany) by Functional Software, Inc. (Sentry), a United States company, as my processor,
+        and deleted after 90 days at most. You can turn crash reports off again at any time, and
+        nothing more is sent.
+      </p>
+
+      <h3 id="donations">Donations</h3>
+      <p>
+        The About screen shows a QR code for an external donation page. Scanning it opens that page
+        on your phone, where the donation service's own terms and privacy policy apply. BannerTV
+        never handles payments.
+      </p>
+
+      <h3 id="email">Emails you send me</h3>
+      <p>
+        If you email me, I receive your email address and what you write. My email is hosted by
+        <span class="todo">EMAIL_PROVIDER</span>, as my processor.
+      </p>
+
+      <h3 id="lg">Your TV and LG</h3>
+      <p>
+        Your TV, webOS and the LG Content Store are LG's, and LG's own privacy policy covers what
+        they collect. BannerTV doesn't receive any of that information.
+      </p>
+
+      <h3 id="website">This website</h3>
+      <p>
+        This website is hosted on GitHub Pages. GitHub logs visitors' IP addresses for security,
+        under GitHub's own privacy statement. The site sets no cookies, has no analytics and loads
+        nothing from other sites.
+      </p>
+
+      <h2 id="not-done">What I don't do</h2>
+      <ul>
+        <li>No BannerTV account, so I don't hold your name, email or password.</li>
+        <li>No adverts, analytics, tracking pixels or advertising identifiers.</li>
+        <li>No selling, renting or sharing of personal data.</li>
+        <li>
+          No profiles of what you watch. What you browse, search for and play goes from your TV to
+          the services that provide it, not to me, and the demo addon I run keeps no logs.
+        </li>
+      </ul>
+
+      <h2 id="legal-bases">Legal bases</h2>
+      <p>The UK GDPR asks me to state why I'm allowed to handle personal data:</p>
+      <ul>
+        <li>
+          <strong>The phone relay:</strong> legitimate interests, namely letting you send an address
+          from your phone instead of typing it, using no more data than that needs.
+        </li>
+        <li>
+          <strong>The demo addon:</strong> legitimate interests, namely giving everyone something
+          legal to play.
+        </li>
+        <li>
+          <strong>Artwork and details BannerTV fetches itself (Metahub and TMDB):</strong>
+          legitimate interests, namely showing complete listings with artwork. Only the title being
+          shown and your TV's IP address are sent.
+        </li>
+        <li><strong>Crash reports:</strong> your consent, which you give by turning them on.</li>
+        <li>
+          <strong>Emails you send me, including complaints and security reports:</strong>
+          legitimate interests, namely answering you and fixing problems you report.
+        </li>
+      </ul>
+      <p>
+        Data stored only on your TV never reaches me. Requests your TV sends to other people's
+        addons, Trakt and YouTube go to them, under their own policies.
+      </p>
+
+      <h2 id="retention">How long data is kept</h2>
+      <div class="table">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Data</th>
+              <th scope="col">Kept for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Data on your TV</td>
+              <td>
+                Until you clear it or remove BannerTV. Saved copies are replaced over time, and TMDB
+                copies are kept for 6 months at most
+              </td>
+            </tr>
+            <tr>
+              <td>An addon address in the relay</td>
+              <td>
+                30 seconds after your TV collects it, and never more than about 11 minutes after the
+                code was made
+              </td>
+            </tr>
+            <tr>
+              <td>Connections to the demo addon, including searches</td>
+              <td>Not logged or kept by me</td>
+            </tr>
+            <tr>
+              <td>Crash reports</td>
+              <td>90 days at most</td>
+            </tr>
+            <tr>
+              <td>Emails to me</td>
+              <td>Until your question is resolved, then up to 12 months</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="transfers">International transfers</h2>
+      <p>
+        Cloudflare (for the relay and the demo addon) and Sentry (for crash reports, if you turn
+        them on) are United States companies, so data they handle for me may be processed outside
+        the UK. Both are certified under the UK Extension to the EU-US Data Privacy Framework (the
+        "UK-US data bridge"), and their data processing addendums include the standard contractual
+        clauses with the UK Addendum as a fallback. My email provider may also store messages
+        outside the UK; it relies on a UK adequacy decision, the UK-US data bridge or standard
+        contractual clauses for that. Addons, Metahub, Trakt, TMDB and YouTube may be anywhere in
+        the world; your TV contacts them directly, under their own policies.
+      </p>
+
+      <h2 id="children">Children</h2>
+      <p>
+        BannerTV has no accounts. It only asks who is watching if you set up profiles, and those
+        stay on the TV, so it collects nothing that identifies a child. It has no adverts, no
+        profiling and no location tracking, and its optional features stay off until someone turns
+        them on. When those features are available, adult addons will be hidden by default and
+        parents will be able to use profiles with a PIN.
+      </p>
+
+      <h2 id="rights">Your rights</h2>
+      <p>
+        Under UK data protection law you can ask me for a copy of personal data I hold about you,
+        and ask me to correct it, delete it, restrict how I use it, or stop using it. You can also
+        ask for crash-report data you agreed to send in a portable format, and withdraw that consent
+        at any time by turning crash reports off. Because almost everything stays on your TV, the
+        quickest way to delete it is to clear it in BannerTV or remove the app. For anything else,
+        email <a href="mailto:SUPPORT_EMAIL"><span class="todo">SUPPORT_EMAIL</span></a> and I'll
+        reply within one month.
+      </p>
+
+      <h2 id="complaints">Complaints</h2>
+      <p>
+        If you're unhappy with how I've handled your data, email
+        <a href="mailto:SUPPORT_EMAIL"><span class="todo">SUPPORT_EMAIL</span></a> with "Complaint"
+        in the subject, or contact me any other way you like: I'll accept a complaint however you
+        send it. I'll confirm I've received it within 30 days, look into it without undue delay,
+        keep you updated and tell you the outcome.
+      </p>
+      <p>
+        You also have the right to complain to the Information Commissioner's Office, the UK's data
+        protection regulator, at
+        <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk/make-a-complaint</a> or on 0303
+        123 1113.
+      </p>
+
+      <h2 id="security">Reporting a security problem</h2>
+      <p>
+        If you find a security problem in BannerTV, the phone relay or the demo addon, email
+        <a href="mailto:SUPPORT_EMAIL"><span class="todo">SUPPORT_EMAIL</span></a> with "Security"
+        in the subject. Please don't post it publicly until it's fixed. I'll reply within 7 days.
+      </p>
+
+      <h2 id="changes">Changes to this policy</h2>
+      <p>
+        When BannerTV changes what it does with data, I'll update this page and its date before the
+        new version reaches the LG Content Store, and mention the change in the release notes.
+      </p>
+    </main>
+
+    <footer class="site">
+      <div class="wrap">
+        <p>
+          BannerTV is an independent app. It isn't made by, endorsed by or affiliated with LG
+          Electronics, Stremio, Trakt, TMDB or YouTube. Their names belong to their owners.
+        </p>
+        <p><a href="../">Help and contact</a> · <a href="../terms/">Terms of use</a></p>
+      </div>
+    </footer>
+  </body>
+</html>
