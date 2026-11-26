@@ -242,3 +242,61 @@ export function releaseEdition(name: string): string | undefined {
   for (const [edition, pattern] of EDITIONS) if (pattern.test(low)) return edition;
   return undefined;
 }
+
+/** An episode in a name: "S03E08", "S01E01E02", "1x08". The title is before it. */
+const EPISODE_MARK =
+  /(?:^|[ ._-])(?:s\d{1,2}[ ._-]?e\d{1,3}(?:[ ._-]?e\d{1,3})?|\d{1,2}x\d{2,3})(?=[ ._-]|$)/i;
+/** A year in a name: a film's title is before it ("Blade.Runner.2049.2017": the first). */
+const YEAR_MARK = /(?:^|[ ._([-])(?:19|20)\d{2}(?=[ ._)\]-]|$)/;
+/**
+ * The first word of a release's own: its resolution, source or service
+ * ("2160p", "WEB-DL", "AMZN"). An episode's name comes before it.
+ */
+const RELEASE_WORD = new RegExp(
+  '(?:^|[ ._([-])(?=(?:' +
+    [
+      '(?:2160|1440|1080|720|576|540|480|360)[pi]|4k|uhd',
+      'web(?:[ ._-]?(?:dl|rip))?|blu[ ._-]?ray|bdrip|brrip|remux|hdtv|pdtv|hdrip|dvdrip|dvd|tvrip',
+      'amzn|nf|dsnp|hmax|atvp|hulu|pcok|pmtp',
+    ].join('|') +
+    ')(?:[ ._)\\]-]|$))',
+  'i',
+);
+
+/**
+ * A release name cut to what tells copies of one title apart, the title,
+ * episode and episode name left out: "1080p WEB H264 · NTb" for
+ * "The.Long.Road.North.S01E04.Ashfall.1080p.WEB.H264-NTb.en.srt". Words a
+ * dot or space split are put back together ("DDP5.1", "H.264"). Undefined
+ * when the name says nothing past the title.
+ */
+export function releaseShort(name: string): string | undefined {
+  const { release } = readNameTags(name);
+  const mark = EPISODE_MARK.exec(release) ?? YEAR_MARK.exec(release);
+  const tail = mark ? release.slice(mark.index + mark[0].length) : release;
+  const start = RELEASE_WORD.exec(tail);
+  if (!start) return undefined;
+  let words = tail.slice(start.index + start[0].length).trim();
+  const group = GROUP.exec(words);
+  const groupName = group && !NOT_A_GROUP.test(group[1]!) ? group[1]! : undefined;
+  if (group && groupName) words = words.slice(0, group.index);
+  const tokens = words.split(/[ ._]+/).filter(Boolean);
+  const out: string[] = [];
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]!;
+    const next = tokens[index + 1];
+    // "5 1" and "DDP5 1" are 5.1 channels; "H 264" is H.264.
+    if (next !== undefined && /^[a-z+-]*\d$/i.test(token) && /^\d$/.test(next)) {
+      out.push(`${token}.${next}`);
+      index++;
+    } else if (next !== undefined && /^h$/i.test(token) && /^26[45]$/.test(next)) {
+      out.push(`${token}.${next}`);
+      index++;
+    } else {
+      out.push(token);
+    }
+  }
+  const text = out.join(' ');
+  if (groupName) return text ? `${text} · ${groupName}` : groupName;
+  return text || undefined;
+}
