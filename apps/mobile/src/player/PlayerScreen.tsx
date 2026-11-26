@@ -42,7 +42,7 @@ import { chooseAudioLanguage, wantedAudio } from '@tv/data/tracks';
 import { useQuery } from '@tv/data/use-query';
 import { noteInput, sinceInput } from '@tv/navigation/activity';
 import { audioDetail, audioSummary, audioSwitch, pickAudio } from '@tv/player/audio';
-import { problemText, resolutionLabel } from '@tv/player/describe';
+import { problemText, resolutionLabel, streamBadges } from '@tv/player/describe';
 import { entryKey, holdProbing, streamFinder } from '@tv/player/finder';
 import { formatTime } from '@tv/player/media';
 import { playProblem } from '@tv/player/problem';
@@ -114,6 +114,7 @@ import {
   switchedFrame,
   touchSpread,
 } from './picture-fit';
+import { ChoiceRow } from './ChoiceRow';
 import { PanelColumn, PanelOption, SidePanel } from './SidePanel';
 import { SkipRipple } from './SkipRipple';
 import { SleepPanel, SleepRow, SleepScreen, SleepWarning } from './SleepTimer';
@@ -280,6 +281,9 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
   // Controls: shown on a tap, hidden again after a while of playing.
   const [controls, setControls] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  // Each opening of Audio and subtitles starts on its columns, though the body of a panel
+  // still fading out may be drawn yet.
+  const [tracksOpenings, setTracksOpenings] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
   // Taps on the controls, which start the wait to hide them again (the clock does not).
   const [pokes, setPokes] = useState(0);
@@ -1190,7 +1194,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             </View>
             {state.live ? <Text style={styles.live}>{t('phone.live')}</Text> : null}
             <Pressable
-              onPress={() => setPanel('tracks')}
+              onPress={() => {
+                setTracksOpenings((count) => count + 1);
+                setPanel('tracks');
+              }}
               disabled={waiting}
               accessibilityRole="button"
               accessibilityLabel={t('phone.audioAndSubtitles')}
@@ -1437,12 +1444,14 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <SidePanel
         visible={panel === 'tracks'}
         title={t('phone.audioAndSubtitles')}
+        full
         onClose={() => setPanel(null)}
       >
         {/* SidePanel builds its body only while it can be seen, so the panel mounts afresh at
             each opening and its rows take their places anew. */}
         {() => (
           <TracksPanel
+            key={tracksOpenings}
             subtitles={subtitles}
             entry={state.entry}
             onChoose={chooseSubtitle}
@@ -1457,10 +1466,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                     ...state.audio.map((track) => {
                       const detail = audioDetail(track);
                       return (
-                        <PanelOption
+                        <ChoiceRow
                           key={track.id}
                           label={audioSummary(track)}
-                          {...(detail ? { detail } : {})}
+                          {...(detail ? { line: detail } : {})}
                           selected={track.active}
                           onPress={() => {
                             session?.noteChoice('audio');
@@ -1472,10 +1481,10 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
                       );
                     }),
                     switchTo ? (
-                      <PanelOption
+                      <ChoiceRow
                         key="audio-switch"
                         label={t('player.audioSwitch', { language: languageName(switchLanguage) })}
-                        {...(switchDetail ? { detail: switchDetail } : {})}
+                        {...(switchDetail ? { line: switchDetail } : {})}
                         onPress={() => switchForAudio(switchTo, switchLanguage)}
                       />
                     ) : null,
@@ -1489,6 +1498,7 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
       <SidePanel
         visible={panel === 'style'}
         title={t('player.style')}
+        full
         onClose={() => setPanel('tracks')}
       >
         {() => <SubtitleStyleChoices />}
@@ -1629,18 +1639,25 @@ export function PlayerScreen({ route }: { route: PlayerRoute }) {
             ) : null}
             {choices.map((choice) => {
               const value = choice.resolution ?? 'other';
+              const here = value === currentQuality;
+              // What else is known of the stream it would play: HDR, sound, size, cached.
+              const entry = here && state.entry ? state.entry : choice.entry;
+              const line = [
+                here ? t('player.playingNow') : undefined,
+                ...streamBadges({ ...entry.facts, resolution: undefined }),
+                entry.facts.cached === true ? t('streams.cached') : undefined,
+                choice.otherLanguages
+                  ? t('player.otherAudio', {
+                      languages: choice.otherLanguages.map(languageName).join(', '),
+                    })
+                  : undefined,
+              ].filter((part): part is string => !!part);
               return (
-                <PanelOption
+                <ChoiceRow
                   key={value}
                   label={resolutionLabel(choice.resolution) ?? t('player.otherQuality')}
-                  {...(choice.otherLanguages
-                    ? {
-                        detail: t('player.otherAudio', {
-                          languages: choice.otherLanguages.map(languageName).join(', '),
-                        }),
-                      }
-                    : {})}
-                  selected={value === currentQuality}
+                  {...(line.length > 0 ? { line: line.join(' · ') } : {})}
+                  selected={here}
                   onPress={() => pickQuality(value)}
                 />
               );

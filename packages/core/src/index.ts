@@ -546,6 +546,7 @@ export {
   releaseEdition,
   releaseGroup,
   releaseService,
+  releaseShort,
   type StreamingService,
 } from './streams/release';
 export {

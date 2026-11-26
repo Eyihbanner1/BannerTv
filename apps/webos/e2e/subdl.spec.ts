@@ -3,7 +3,15 @@ import { PAIR_SERVICE, POLL_MS } from '../src/data/pairing';
 import { FIRST_ROW, mockAddons, SERIES_ROW } from './addons';
 import { ANDROID_URL, androidOpens, openAsAndroid, openFocusedTitle, playerOps } from './android';
 import { DEFAULT_STREAMS, mockPlayback, readKv, seedStreamAddon, type TestStream } from './play';
-import { leavePlayer, MOVIE, openMovie, openSheet, subtitlesDiagnostics, video } from './player';
+import {
+  leavePlayer,
+  MOVIE,
+  openMovie,
+  openSheet,
+  openVersions,
+  subtitlesDiagnostics,
+  video,
+} from './player';
 import { KIDS_ID, main, seedProfiles } from './profiles';
 import {
   FAKE_SUBDL_KEY,
@@ -500,7 +508,7 @@ test("a film's SubDL file named for the release is chosen, with one search and o
   expect(subdl.searches[0]).toContain('imdb_id=tt0807840');
   expect(subdl.searches[0]).toContain('languages=en');
 
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(subdlRows(page)).toHaveCount(1);
   await expect(subdlRows(page)).toContainText('SubDL');
   await expect(subdlRows(page)).toContainText('Same release');
@@ -909,7 +917,7 @@ test("on Android, a film's SubDL file named for the release is chosen", async ({
   await expect(page.getByText('SubDL film, line 1')).toBeVisible();
   expect(subdl.searches).toHaveLength(1);
   expect(subdl.downloads).toEqual([SUBDL_FILM_FILE]);
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(subdlRows(page)).toContainText('Same release');
   expect(subdl.keyInUrl).toBe(false);
 });

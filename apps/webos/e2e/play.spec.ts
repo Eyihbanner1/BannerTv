@@ -39,12 +39,15 @@ import {
   openMovie,
   openSheet,
   openTiming,
+  openVersions,
+  versionsToTiming,
   OPENSUBTITLES,
   playForMatching,
   recordShownAt,
   seekVideo,
   shownAt,
   subtitlesDiagnostics,
+  timingRow,
   video,
 } from './player';
 import { mockServices, traktSignIn } from './services';
@@ -706,12 +709,11 @@ test('Play passes over a dub for a release in the language wanted, and Audio can
   await press(page, 'ArrowUp', 'player-play');
   await press(page, 'ArrowDown', 'player-tracks-button');
   await page.keyboard.press('Enter');
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  // Audio, the column left of the subtitles: this stream lists no tracks of its own.
+  await press(page, 'ArrowLeft', 'player-tracks-audio-switch');
   const offer = page.locator('[data-focus-key="player-tracks-audio-switch"]');
   await expect(offer).toContainText('English audio: switch stream');
   await expect(offer).toContainText('720p');
-  await press(page, 'ArrowDown', 'player-tracks-audio-switch');
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await video(page)).src).toBe('/movie-720p.webm');
   expect((await video(page)).time).toBeGreaterThan(0);
@@ -952,7 +954,7 @@ test('a title with no stream left to try keeps its resume point through All stre
   expect((await video(page)).time).toBeGreaterThanOrEqual(25);
 });
 
-test('subtitles come from the subtitles addon: a language on the left, its versions on the right, numbered by source', async ({
+test('subtitles come from the subtitles addon: languages in a column, each one’s versions a step in, numbered by source', async ({
   page,
 }) => {
   await mockAddons(page);
@@ -969,48 +971,38 @@ test('subtitles come from the subtitles addon: a language on the left, its versi
   await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'Enter', 'player-tracks-off');
   const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
-  await expect(sheet.locator('[data-focus-key="player-tracks-tab-subtitles"]')).toContainText(
-    'Off',
-  );
+  // Off: the settings beside have only how subtitles look.
+  const versionRow = sheet.locator('[data-focus-key="player-tracks-versions"]');
+  await expect(versionRow).toHaveCount(0);
+  await expect(sheet.locator('[data-focus-key="player-tracks-style"]')).toBeVisible();
   await press(page, 'ArrowDown', 'player-tracks-lang-en');
   await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toHaveAttribute(
     'aria-label',
     'English, 2 versions',
   );
-  // Its versions show beside it as it takes focus. These files come with no names.
+
+  // A language starts on its best version, which the settings beside it name.
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await expect(versionRow).toContainText('OpenSubtitles v3 1 · 2 versions');
+  // The language showing: on to its versions, numbered by source. These files come with no names.
+  await press(page, 'Enter', `${OPENSUBTITLES}#en1`);
   const first = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
   const second = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   await expect(first).toHaveText('OpenSubtitles v3 1');
   await expect(second).toHaveText('OpenSubtitles v3 2');
-  // Moving on to another language shows its versions in their place.
-  await press(page, 'ArrowDown', 'player-tracks-lang-fr');
-  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#fr1"]`)).toBeVisible();
-  await expect(first).toHaveCount(0);
-  await press(page, 'ArrowUp', 'player-tracks-lang-en');
-  await expect(first).toHaveText('OpenSubtitles v3 1');
-
-  await press(page, 'Enter', 'player-tracks-lang-en');
-  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
-  await expect(sheet.locator('[data-focus-key="player-tracks-tab-subtitles"]')).toContainText(
-    'English',
-  );
-  // The language showing: on to its version showing.
-  await press(page, 'Enter', `${OPENSUBTITLES}#en1`);
+  await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#fr1"]`)).toHaveCount(0);
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#en2`);
   await press(page, 'Enter', `${OPENSUBTITLES}#en2`);
   await expect(page.getByText('The second English file')).toBeVisible();
   await expect(page.getByText('Hello from the test subtitles')).toHaveCount(0);
-  // Left goes back to the language, not to the row beside (Off, beside the first version).
-  await press(page, 'ArrowUp', `${OPENSUBTITLES}#en1`);
-  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
-  // Nor to the language chosen: to the one last looked at.
-  await press(page, 'ArrowDown', 'player-tracks-lang-fr');
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#fr1`);
-  await press(page, 'ArrowLeft', 'player-tracks-lang-fr');
 
-  // Back goes one level at a time: to the tabs, then to the controls.
+  // Back goes one level at a time: to the columns, on the Version row, then to the controls.
   await pressBack(page);
-  await expectFocus(page, 'player-tracks-tab-subtitles');
+  await expectFocus(page, 'player-tracks-versions');
+  await expect(versionRow).toContainText('OpenSubtitles v3 2 · 2 versions');
+  // Left goes back to the language chosen, not to the row beside (Off, beside Version).
+  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
   await pressBack(page);
   await expect(sheet).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
@@ -1741,21 +1733,24 @@ test('HLS with audio and subtitle choices plays through hls.js, and both show in
     'aria-label',
     'English, 3 versions',
   );
-  await press(page, 'ArrowRight', 'player-tracks-track-eng|English');
+  await press(page, 'Enter', 'player-tracks-lang-en');
+  await expect(page.getByText('Hello from the stream')).toBeVisible();
+  // On to its versions, the stream's own track first.
+  await press(page, 'Enter', 'player-tracks-track-eng|English');
   await expect(page.locator('[data-focus-key="player-tracks-track-eng|English"]')).toHaveText(
     'In the stream',
   );
-  await press(page, 'Enter', 'player-tracks-track-eng|English');
-  await expect(page.getByText('Hello from the stream')).toBeVisible();
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-versions');
 
-  // French audio on the Audio tab, remembered for the next stream.
-  await press(page, 'ArrowUp', 'player-tracks-tab-subtitles');
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await expect(page.locator('[data-focus-key="player-tracks-tab-audio"]')).toContainText('English');
-  await press(page, 'ArrowDown', 'player-tracks-audio-eng|English');
+  // French audio, in the column on the left, remembered for the next stream.
+  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
+  await press(page, 'ArrowLeft', 'player-tracks-audio-eng|English');
+  const french = page.locator('[data-focus-key="player-tracks-audio-fre|French"]');
+  await expect(french).not.toHaveClass(/selected/);
   await press(page, 'ArrowDown', 'player-tracks-audio-fre|French');
   await press(page, 'Enter', 'player-tracks-audio-fre|French');
-  await expect(page.locator('[data-focus-key="player-tracks-tab-audio"]')).toContainText('French');
+  await expect(french).toHaveClass(/selected/);
   await expect
     .poll(async () => ((await readKv(page, 'trackChoices')) ?? []) as unknown[])
     .toContainEqual(expect.objectContaining({ audio: 'fre' }));
@@ -1865,7 +1860,10 @@ test('Quality leaves the resolution playing alone, and another starts without it
   await press(page, 'ArrowRight', 'player-quality-button');
   // The resolution already playing: nothing reloads, though another 1080p now ranks first.
   await press(page, 'Enter', 'player-quality-0');
-  await expect(page.locator('[data-focused="true"]')).toHaveText('1080p');
+  await expect(page.locator('[data-focused="true"]')).toHaveAttribute(
+    'aria-label',
+    /^1080p, Playing now/,
+  );
   await press(page, 'Enter', 'player-quality-button');
   await page.waitForTimeout(500);
   await expect(page.locator('video[data-reloaded]')).toHaveCount(0);
@@ -2179,13 +2177,15 @@ test('BannerTV Demo’s subtitle checks wait to be picked, and leave the languag
   await expectFocus(page, 'player-tracks-lang-ko');
   await press(page, 'Enter', 'player-tracks-lang-ko');
   await expect(page.getByText('Subtitle check in Korean')).toBeVisible();
-  // Its version names the Demo and the release name it sends.
-  await page.keyboard.press('ArrowRight');
+  // Its version, across, names the Demo; one step in, the release name it sends.
+  await press(page, 'ArrowRight', 'player-tracks-versions');
+  await expect(focused).toContainText('BannerTV Demo');
+  await page.keyboard.press('Enter');
   await expect(focused).toContainText('BannerTV Demo');
   await expect(focused).toContainText('Subtitle check');
 
   await pressBack(page);
-  await expectFocus(page, 'player-tracks-tab-subtitles');
+  await expectFocus(page, 'player-tracks-versions');
   await pressBack(page);
   await expectFocus(page, 'player-tracks-button');
   const saved = await page.evaluate(() => localStorage.getItem('bannertv.preferences'));
@@ -2763,11 +2763,9 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
   await pressCode(page, BLUE);
   await expect(panel).toHaveCount(0);
   await expectFocus(page, 'player-surface');
-  // Opened with the controls hidden, Back twice closes it onto them, and they show.
+  // Opened with the controls hidden, Back closes it onto them, and they show.
   await pressCode(page, BLUE);
   await expect(panel).toBeVisible();
-  await pressBack(page);
-  await expect(focused).toHaveAttribute('data-focus-key', /^player-tracks-tab-/);
   await pressBack(page);
   await expect(panel).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
@@ -2789,7 +2787,7 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
   // So it does with the Magic Remote pointer resting over it, coming from the
   // picture above. The controls make way for it, and come back after.
   const box = (await panel.boundingBox())!;
-  expect(box.y).toBeGreaterThanOrEqual(500);
+  expect(box.y).toBeGreaterThanOrEqual(470);
   await page.mouse.move(300, box.y - 40);
   await page.mouse.move(300, box.y + 220, { steps: 3 });
   await page.waitForTimeout(6000);
@@ -2800,34 +2798,37 @@ test('Blue opens and closes audio and subtitles, which stay open while the film 
     document.dispatchEvent(new CustomEvent('cursorStateChange', { detail: { visibility: false } })),
   );
 
-  // Style: every choice a sample, and a sample line above the sheet while nobody speaks.
-  await pressBack(page);
-  await expect(focused).toHaveAttribute('data-focus-key', /^player-tracks-tab-/);
-  for (let step = 0; step < 4; step++) {
-    if ((await focused.getAttribute('data-focus-key')) === 'player-tracks-tab-style') break;
-    await page.keyboard.press('ArrowRight');
+  // Style, the last of the settings on the right: every choice a sample, and a sample line
+  // above the sheet while nobody speaks.
+  for (let step = 0; step < 6; step++) {
+    if ((await focused.getAttribute('data-focus-key')) === 'player-tracks-style') break;
+    const key = (await focused.getAttribute('data-focus-key')) ?? '';
+    const across = /^player-tracks-(versions|timing)$/.test(key);
+    await page.keyboard.press(across ? 'ArrowDown' : 'ArrowRight');
     await page.waitForTimeout(150);
   }
-  await expectFocus(page, 'player-tracks-tab-style');
+  await expectFocus(page, 'player-tracks-style');
+  const row = page.locator('[data-focus-key="player-tracks-style"]');
+  await expect(row).toContainText('Medium, white');
   const sample = page.getByText('This is how subtitles will look.');
+  await expect(sample).toHaveCount(0);
+  await press(page, 'Enter', 'player-tracks-style-choices-size-medium');
   await expect(sample).toBeVisible();
-  const tab = page.locator('[data-focus-key="player-tracks-tab-style"]');
-  await expect(tab).toContainText('Medium, white');
-  await press(page, 'ArrowDown', 'player-tracks-style-size-medium');
-  await press(page, 'ArrowRight', 'player-tracks-style-size-large');
+  await press(page, 'ArrowRight', 'player-tracks-style-choices-size-large');
   await page.keyboard.press('Enter');
-  await expect(tab).toContainText('Large, white');
   await expect.poll(() => sample.evaluate((line) => getComputedStyle(line).fontSize)).toBe('64px');
   // The line sits just above the sheet.
   const line = (await sample.boundingBox())!;
   expect(line.y + line.height).toBeLessThanOrEqual(box.y);
-  await press(page, 'ArrowDown', 'player-tracks-style-colour-white');
-  await press(page, 'ArrowRight', 'player-tracks-style-colour-yellow');
+  await press(page, 'ArrowDown', 'player-tracks-style-choices-colour-white');
+  await press(page, 'ArrowRight', 'player-tracks-style-choices-colour-yellow');
   await page.keyboard.press('Enter');
-  await expect(tab).toContainText('Large, yellow');
-  // Back to the tabs, then the sheet closes onto the controls, and the sample goes.
+  // Back to the columns, on Style, which says what was chosen; then the sheet closes onto the
+  // controls, and the sample goes.
   await pressBack(page);
-  await expectFocus(page, 'player-tracks-tab-style');
+  await expectFocus(page, 'player-tracks-style');
+  await expect(row).toContainText('Large, yellow');
+  await expect(sample).toHaveCount(0);
   await pressBack(page);
   await expect(panel).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
@@ -3297,7 +3298,11 @@ test('Quality keeps to the language heard, says when a resolution has only anoth
   const labels = await page
     .locator('[data-focus-key^="player-quality-"]:not([data-focus-key="player-quality-button"])')
     .evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')));
-  expect(labels).toEqual(['1080p', '720p', '480p, Spanish audio']);
+  expect(labels).toEqual([
+    '1080p, Playing now, 1.4 GB, Cached',
+    '720p, 700 MB',
+    '480p, 400 MB, Spanish audio',
+  ]);
 
   // 720p is the English one, though the Spanish one ranks first.
   await press(page, 'ArrowDown', 'player-quality-1');
@@ -3515,7 +3520,6 @@ test('a click on the picture hides the controls and another brings them back; th
   await expect(panel).toBeVisible();
   await expectFocus(page, 'player-tracks-off');
   await pressBack(page);
-  await pressBack(page);
   await expect(panel).toHaveCount(0);
   await expectFocus(page, 'player-tracks-button');
 
@@ -3600,10 +3604,14 @@ test('each version says where it is from and how it is doing, and its timing is 
   const en1 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
   const missing = page.locator(`[data-focus-key="${OPENSUBTITLES}#missing"]`);
-  // The release names it sends, and a best guess at which is the stream's release.
-  await expect(en1).toHaveText('OpenSubtitles v3 1Same release · Open.Movie.1080p.WEB-DL.x264');
-  await expect(en2).toHaveText('OpenSubtitles v3 2Open.Movie.720p.BluRay');
+  // One step in, the versions: the release names each sends, cut to what tells copies apart,
+  // and a best guess at which is the stream's release.
+  await press(page, 'Enter', `${OPENSUBTITLES}#en1`);
+  await expect(en1).toHaveText('OpenSubtitles v3 1Same release1080p WEB-DL x264');
+  await expect(en2).toHaveText('OpenSubtitles v3 2720p BluRay');
   await expect(missing).toHaveText('OpenSubtitles v3 3');
+  // The focused one's release name in full, in the box beside.
+  await expect(sheet.getByText('Open.Movie.1080p.WEB-DL.x264', { exact: true })).toBeVisible();
 
   // The subtitle line sits just above the sheet, once it has slid up there (its
   // move is eased, and a busy runner can measure it on the way).
@@ -3616,7 +3624,6 @@ test('each version says where it is from and how it is doing, and its timing is 
   expect(await gapAboveSheet()).toBeLessThan(120);
 
   // A file says Loading… until its first line is ready.
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#en2`);
   await page.keyboard.press('Enter');
   await expect(en2).toContainText('Loading…');
@@ -3629,54 +3636,57 @@ test('each version says where it is from and how it is doing, and its timing is 
   await expect(missing).toContainText("Couldn't load, skipped");
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
 
-  // Timing: half a second later, said in words, and kept for this file.
+  // Timing, under Version: half a second later, said in words, and kept for this file.
   await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await expectFocus(page, 'player-tracks-versions');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await press(page, 'Enter', 'player-tracks-timing-match');
   await expect(page.getByText('Subtitles as the file has them')).toBeVisible();
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await press(page, 'ArrowRight', 'player-tracks-timing-m05');
   await press(page, 'ArrowRight', 'player-tracks-timing-m01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p05');
   await page.keyboard.press('Enter');
   await expect(page.getByText('Subtitles 0.5 s later')).toBeVisible();
-  const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
-  await expect(timing).toContainText('+0.5 s');
   await press(page, 'ArrowLeft', 'player-tracks-timing-p01');
   await press(page, 'ArrowLeft', 'player-tracks-timing-m01');
   await page.keyboard.press('Enter');
-  await expect(timing).toContainText('+0.4 s');
+  await expect(page.getByText('Subtitles 0.4 s later')).toBeVisible();
   await expect
     .poll(async () => ((await readKv(page, 'subtitleOffsets')) ?? []) as unknown[])
     .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.4 }]);
+  // Back on the columns, the Timing row says so.
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-timing');
+  const timing = timingRow(page);
+  await expect(timing).toContainText('+0.4 s');
 
   // Another file starts as it is; back on the first, its timing is there again.
-  await pressBack(page);
-  await press(page, 'ArrowLeft', 'player-tracks-tab-audio');
-  await press(page, 'ArrowLeft', 'player-tracks-tab-subtitles');
-  await press(page, 'ArrowDown', 'player-tracks-lang-en');
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
+  await press(page, 'ArrowUp', 'player-tracks-versions');
+  await press(page, 'Enter', `${OPENSUBTITLES}#en1`);
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#en2`);
   await page.keyboard.press('Enter');
+  await pressBack(page);
   await expect(timing).toContainText('0.0 s');
+  await press(page, 'Enter', `${OPENSUBTITLES}#en2`);
   await press(page, 'ArrowUp', `${OPENSUBTITLES}#en1`);
   await page.keyboard.press('Enter');
+  await pressBack(page);
   await expect(timing).toContainText('+0.4 s');
 
   // Reset puts it back, and nothing is kept.
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await press(page, 'Enter', 'player-tracks-timing-match');
   await press(page, 'ArrowRight', 'player-tracks-timing-m05');
   await press(page, 'ArrowRight', 'player-tracks-timing-m01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowRight');
   await expectFocus(page, 'player-tracks-timing-reset');
   await page.keyboard.press('Enter');
-  await expect(timing).toContainText('0.0 s');
+  await expect(page.getByText('Subtitles as the file has them')).toBeVisible();
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
+  await pressBack(page);
+  await expect(timing).toContainText('0.0 s');
 });
 
 test('the file OpenSubtitles names for the stream’s release shows first and says Same release, and Diagnostics says why with no link', async ({
@@ -3723,12 +3733,17 @@ test('the file OpenSubtitles names for the stream’s release shows first and sa
   expect(await drawnText(page)).not.toContain('Hello from the test subtitles');
   expect(mock.subtitles.join()).not.toContain('filename=');
 
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#en2`);
   const en1 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`);
   const en2 = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
-  // Its file name, without the extension, after the note; another group's says nothing.
-  await expect(en2).toHaveText(`OpenSubtitles v3 2Same release · ${release}.eng`);
-  await expect(en1).toHaveText('OpenSubtitles v3 1Open.Movie.2024.1080p.WEB-DL.x264-OTHER');
+  // What tells its file apart under the note, its name in full beside; another group's says nothing.
+  await expect(en2).toHaveText('OpenSubtitles v3 2Same release1080p WEB-DL x264 · BANNER');
+  await expect(en1).toHaveText('OpenSubtitles v3 11080p WEB-DL x264 · OTHER');
+  await expect(
+    page.getByRole('dialog', { name: 'Audio & subtitles' }).getByText(`${release}.eng`, {
+      exact: true,
+    }),
+  ).toBeVisible();
 
   // Diagnostics says what happened to this play's subtitles, and names no file or link.
   await leavePlayer(page);
@@ -3839,12 +3854,12 @@ test('the file OpenSubtitles found by the video’s hash shows first and says it
   await expect(page.getByText('The second English file')).toBeVisible();
   expect(await drawnText(page)).not.toContain('Hello from the test subtitles');
 
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#en2`);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`)).toHaveText(
-    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+    'OpenSubtitles v3 2Linked to your videoelephants_dream',
   );
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#en1"]`)).toHaveText(
-    'OpenSubtitles v3 1Elephants.Dream.2006.720p.BluRay',
+    'OpenSubtitles v3 1720p BluRay',
   );
 });
 
@@ -3878,22 +3893,20 @@ test('a plain file 3 s out shows lined up against one for the hard of hearing li
 
   // Its row says it is in step with the video; the file it was lined up against keeps what it
   // was picked for, linked to the video, as nothing checked it.
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#plainLate`);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#plainLate"]`)).toHaveText(
     'OpenSubtitles v3 2Synced to your video',
   );
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedHearing"]`)).toHaveText(
-    'OpenSubtitles v3 1Linked to your video · For the hard of hearing · elephants_dream',
+    'OpenSubtitles v3 1Linked to your videoFor the hard of hearing · elephants_dream',
   );
 
-  // The Timing tab says by how much BannerTV moved the lines; the viewer's timing is untouched.
+  // Timing says by how much BannerTV moved the lines; the viewer's timing is untouched.
   await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await expect(timingRow(page)).toContainText('0.0 s · lined up');
+  await press(page, 'Enter', 'player-tracks-timing-match');
   await expect(page.getByText('Lined up by BannerTV: −3.0 s')).toBeVisible();
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
-    '0.0 s · lined up',
-  );
   expect((await readKv(page, 'subtitleOffsets')) ?? []).toEqual([]);
 });
 
@@ -3922,17 +3935,17 @@ test('on HLS with a French track, an English file 5 s early shows lined up again
   // The French track was read for its timing, and none of its lines showed.
   expect(await shownAt(page, 'Ligne 1 en français')).toBeNull();
 
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#hlsEnglishEarly`);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#hlsEnglishEarly"]`)).toHaveText(
     'OpenSubtitles v3Synced to your video',
   );
   await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await page.keyboard.press('Enter');
   await expect(page.getByText('Lined up by BannerTV: +5.0 s')).toBeVisible();
 });
 
-test('with nothing to check a file against, its lines stay as they are and the Timing tab says so', async ({
+test('with nothing to check a file against, its lines stay as they are and Timing says so', async ({
   page,
 }) => {
   await recordShownAt(page);
@@ -3953,9 +3966,8 @@ test('with nothing to check a file against, its lines stay as they are and the T
 
   await openTiming(page);
   await expect(page.getByText("Couldn't check this file against your video")).toBeVisible();
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).not.toContainText(
-    'lined up',
-  );
+  await pressBack(page);
+  await expect(timingRow(page)).not.toContainText('lined up');
 });
 
 /** The video for files that agree: an AMZN release no file is named for, with no hash. */
@@ -4028,13 +4040,11 @@ test('files that agree move a late file onto their timing', async ({ page }) => 
   expect(mock.files.length).toBeLessThanOrEqual(E6_FILES.length);
   expect(new Set(mock.files).size).toBe(mock.files.length);
 
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#agreeLate8"]`)).toContainText(
     'Matches other subtitles',
   );
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await versionsToTiming(page);
   await expect(
     page.getByText('Lined up by BannerTV: −8.0 s, to match other subtitles for this video'),
   ).toBeVisible();
@@ -4084,23 +4094,20 @@ test('on an LG TV, the subtitles row of a play whose hash failed while files tha
   expect(box!.y + box!.height).toBeLessThanOrEqual(1080 - 54);
 });
 
-test('a version picked by hand is left as picked, and the Timing tab says how far BannerTV would move it', async ({
+test('a version picked by hand is left as picked, and Timing says how far BannerTV would move it', async ({
   page,
 }) => {
   test.setTimeout(90000);
   await playE6(page);
   // The plain WEB file, 3 s late, picked from the list.
-  await openSheet(page, 'player-tracks-lang-en');
-  await page.keyboard.press('ArrowRight');
+  await openVersions(page);
   const picked = `${OPENSUBTITLES}#agreeLate3`;
   for (let step = 0; step < 6 && (await focusedKey(page)) !== picked; step++) {
     await page.keyboard.press('ArrowDown');
   }
   await expectFocus(page, picked);
   await page.keyboard.press('Enter');
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await versionsToTiming(page);
   await expect(
     page.getByText(
       'Left as you picked it: BannerTV would move these lines −3.0 s to match other subtitles for this video',
@@ -4118,7 +4125,7 @@ test('a version picked by hand is left as picked, and the Timing tab says how fa
   );
 });
 
-test('files that don’t agree move nothing, and the Timing tab says so', async ({ page }) => {
+test('files that don’t agree move nothing, and Timing says so', async ({ page }) => {
   test.setTimeout(90000);
   await recordShownAt(page);
   await mockAddons(page);
@@ -4235,9 +4242,9 @@ test('the hash takes 6 s, and the first line still shows on time; a second ask b
 
   // The file it links comes after the first answer's, and says so; the one showing stays, lined
   // up against it, and the linked file never shows a line.
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedEarly"]`)).toHaveText(
-    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+    'OpenSubtitles v3 2Linked to your videoelephants_dream',
   );
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#askedEarly"]`)).toHaveText(
     'OpenSubtitles v3 1Synced to your video',
@@ -4277,9 +4284,9 @@ test('a file linked by a later hash takes the place of one whose first line is s
     0.6,
   );
   expect(await firstShown(page, 'Starts late, line')).toBeNull();
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#linkedLate`);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#linkedLate"]`)).toHaveText(
-    'OpenSubtitles v3 2Linked to your video · elephants_dream',
+    'OpenSubtitles v3 2Linked to your videoelephants_dream',
   );
 });
 
@@ -4376,6 +4383,7 @@ test('the first subtitles to show are the full file: signs only, lines for the h
     'aria-label',
     'English, 4 versions',
   );
+  await press(page, 'Enter', `${OPENSUBTITLES}#full`);
   const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
   const sdh = page.locator(`[data-focus-key="${OPENSUBTITLES}#sdh"]`);
   const past = page.locator(`[data-focus-key="${OPENSUBTITLES}#past"]`);
@@ -4388,7 +4396,6 @@ test('the first subtitles to show are the full file: signs only, lines for the h
   await expect(sdh).not.toHaveClass(/dim/);
   await expect(past).not.toHaveClass(/dim/);
   await expect(full).not.toHaveClass(/dim/);
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#full`);
 
   // Picked by hand, the file running past the end shows, its drift fixed for it, and the
   // pick is kept for this release by who the file is, never its link.
@@ -4399,9 +4406,9 @@ test('the first subtitles to show are the full file: signs only, lines for the h
     timeout: 12000,
   });
   await expect(past).toHaveText('OpenSubtitles v3 3Drift fixed for you');
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
-    'drift fixed',
-  );
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-versions');
+  await expect(timingRow(page)).toContainText('drift fixed');
   await expect
     .poll(async () => readKv(page, 'subtitlePicks'))
     .toEqual([
@@ -4416,21 +4423,17 @@ test('the first subtitles to show are the full file: signs only, lines for the h
 
   // A tenth of a second later: the timing moves by that, and the fix stays on, kept with the
   // timing as the player's own, so another release of the film works it out again.
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await press(page, 'Enter', 'player-tracks-timing-match');
   await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
     'aria-label',
     'Falling behind, in use',
   );
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await press(page, 'ArrowRight', 'player-tracks-timing-m05');
   await press(page, 'ArrowRight', 'player-tracks-timing-m01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p01');
   await page.keyboard.press('Enter');
-  const timing = page.locator('[data-focus-key="player-tracks-tab-timing"]');
-  await expect(timing).toContainText('+0.1 s');
-  await expect(timing).toContainText('drift fixed');
+  await expect(page.getByRole('dialog', { name: 'Audio & subtitles' })).toContainText('+0.1 s');
   await expect(page.locator('[data-focus-key="player-tracks-drift-behind"]')).toHaveAttribute(
     'aria-label',
     'Falling behind, in use',
@@ -4441,6 +4444,9 @@ test('the first subtitles to show are the full file: signs only, lines for the h
   await expect
     .poll(async () => readKv(page, 'subtitleOffsets'))
     .toEqual([{ key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.1 }]);
+  await pressBack(page);
+  await expect(timingRow(page)).toContainText('+0.1 s');
+  await expect(timingRow(page)).toContainText('drift fixed');
   expect(await drawnText(page)).not.toContain('OpenSubtitles.org');
 });
 
@@ -4470,9 +4476,10 @@ test('English turned on from the sheet starts on its best version, read first, a
   await page.keyboard.press('Enter');
   const signs = page.locator(`[data-focus-key="${OPENSUBTITLES}#signs"]`);
   const full = page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`);
-  // Its files are read before a line shows, and the full one is chosen.
-  await expect(full).toHaveClass(/selected/);
+  // Its files are read before a line shows, and the full one is chosen: one step in, its versions.
   await expect(page.getByText(/^The full file, line \d+$/).first()).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(full).toHaveClass(/selected/);
   await expect(signs).toHaveText('OpenSubtitles v3 1Only a few lines');
   const drawn = await drawnText(page);
   expect(drawn).not.toContain('A SIGN');
@@ -4485,13 +4492,16 @@ test('English turned on from the sheet starts on its best version, read first, a
   expect((await readKv(page, 'subtitlePicks')) ?? []).toEqual([]);
 
   // Off, then English again: back on the full file, not the first listed.
+  await pressBack(page);
+  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
   await press(page, 'ArrowUp', 'player-tracks-off');
   await page.keyboard.press('Enter');
   await expect(page.getByText(/^The full file, line \d+$/)).toHaveCount(0);
   await press(page, 'ArrowDown', 'player-tracks-lang-en');
   await page.keyboard.press('Enter');
-  await expect(full).toHaveClass(/selected/);
   await expect(page.getByText(/^The full file, line \d+$/).first()).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(full).toHaveClass(/selected/);
   expect(await drawnText(page)).not.toContain('A SIGN');
 });
 
@@ -4517,7 +4527,7 @@ test('a version picked by hand comes back first when the film plays again, thoug
   await press(page, 'Enter', 'player-play');
   await press(page, 'ArrowDown', 'player-tracks-button');
   await press(page, 'Enter', 'player-tracks-lang-en');
-  await press(page, 'ArrowRight', 'player-tracks-track-eng|English');
+  await press(page, 'Enter', 'player-tracks-track-eng|English');
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#en1`);
   await page.keyboard.press('Enter');
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
@@ -4527,7 +4537,7 @@ test('a version picked by hand comes back first when the film plays again, thoug
       { metaId: MOVIE, release: `video:${MOVIE}`, file: expect.stringMatching(/^[0-9a-z]+$/) },
     ]);
 
-  // Out to the title, and Watch again: Back goes to the languages, closes the sheet, hides the
+  // Out to the title, and Watch again: Back goes to the columns, closes the sheet, hides the
   // controls and leaves.
   for (let step = 0; step < 3; step++) await pressBack(page);
   await expectFocus(page, 'player-surface');
@@ -4544,8 +4554,7 @@ test('a version picked by hand comes back first when the film plays again, thoug
   // hls.js listed the stream's English track before the first picture; the file picked by
   // hand still comes first, and the track never shows a line.
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
-  await openSheet(page, 'player-tracks-lang-en');
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
+  await openVersions(page, `${OPENSUBTITLES}#en1`);
   await expect(page.locator('[data-focus-key="player-tracks-track-eng|English"]')).toHaveText(
     'In the stream',
   );
@@ -4604,7 +4613,7 @@ test('the best file, read only after the lines show, takes over once, and one as
   );
   expect(since).not.toContain('Another full file');
   expect(since).not.toContain('For the hard of hearing, line');
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page, `${OPENSUBTITLES}#full`);
   await expect(page.locator(`[data-focus-key="${OPENSUBTITLES}#full"]`)).toHaveClass(/selected/);
 });
 
@@ -4644,40 +4653,54 @@ test('rows keep their places as more subtitles arrive, and every row answers the
   expect(await french.boundingBox()).toEqual(where);
   expect((await english.boundingBox())!.y).toBeGreaterThan(where.y);
   await expectFocus(page, 'player-tracks-lang-fr');
-  // French's own versions: the stream's first, then the addon's after it.
+  // French, and one step in its own versions: the stream's first, then the addon's after it.
+  await page.keyboard.press('Enter');
+  const versionRow = page.locator('[data-focus-key="player-tracks-versions"]');
+  await expect(versionRow).toContainText('2 versions');
+  await page.keyboard.press('Enter');
   await expect(page.locator('[data-focus-key^="player-tracks-file-"]')).toHaveCount(2);
   const versions = await page
     .locator('[data-focus-key^="player-tracks-file-"]')
     .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-focus-key')));
   expect(versions).toEqual(['player-tracks-file-stream#s1', `${OPENSUBTITLES}#fr1`]);
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-versions');
 
-  // The pointer: over a row it takes focus, and a click picks it. Passing over
-  // the tabs and the languages on its way changes neither what shows below nor beside.
+  // The pointer: over a row it takes focus, and a click picks it. Passing over the other
+  // columns on its way changes nothing that shows. (A click this soon after OK would be
+  // taken as the same press of the Magic Remote.)
+  await page.waitForTimeout(500);
   const target = (await english.boundingBox())!;
   await page.mouse.move(1500, 300);
-  await page.mouse.move(300, target.y + 30, { steps: 8 });
+  await page.mouse.move(target.x + 100, target.y + 30, { steps: 8 });
   await expectFocus(page, 'player-tracks-lang-en');
-  await expect(page.locator('[data-focus-key="player-tracks-file-stream#s1"]')).toBeVisible();
-  await page.mouse.click(300, target.y + 30);
+  await expect(versionRow).toContainText('2 versions');
+  await page.mouse.click(target.x + 100, target.y + 30);
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  // A click on the language showing goes on to its versions, as OK does.
+  await page.mouse.click(target.x + 100, target.y + 30);
   const second = page.locator(`[data-focus-key="${OPENSUBTITLES}#en2"]`);
+  await expect(second).toBeVisible();
   const box = (await second.boundingBox())!;
   await page.mouse.move(box.x + 100, box.y + 30, { steps: 3 });
   await expectFocus(page, `${OPENSUBTITLES}#en2`);
   await page.mouse.click(box.x + 100, box.y + 30);
   await expect(page.getByText('The second English file')).toBeVisible();
-  // A tab answers it too, opening on a click, and so does a choice inside it.
-  const style = (await page.locator('[data-focus-key="player-tracks-tab-style"]').boundingBox())!;
-  await page.mouse.move(style.x + 60, style.y + 50, { steps: 3 });
-  await expectFocus(page, 'player-tracks-tab-style');
-  await expect(page.locator('[data-focus-key^="player-tracks-file-"]')).toHaveCount(2);
-  await page.mouse.click(style.x + 60, style.y + 50);
-  const yellow = page.locator('[data-focus-key="player-tracks-style-colour-yellow"]');
+  // Back answers it too, and so do the settings and a choice inside one.
+  const back = (await page.locator('[data-focus-key="player-tracks-back"]').boundingBox())!;
+  await page.mouse.click(back.x + 60, back.y + 26);
+  const styleRow = page.locator('[data-focus-key="player-tracks-style"]');
+  await expect(styleRow).toBeVisible();
+  const style = (await styleRow.boundingBox())!;
+  await page.mouse.move(style.x + 60, style.y + 40, { steps: 3 });
+  await expectFocus(page, 'player-tracks-style');
+  await page.mouse.click(style.x + 60, style.y + 40);
+  const yellow = page.locator('[data-focus-key="player-tracks-style-choices-colour-yellow"]');
+  await expect(yellow).toBeVisible();
   const swatch = (await yellow.boundingBox())!;
   await page.mouse.click(swatch.x + 40, swatch.y + 30);
-  await expect(page.locator('[data-focus-key="player-tracks-tab-style"]')).toContainText(
-    'Medium, yellow',
-  );
+  await pressBack(page);
+  await expect(styleRow).toContainText('Medium, yellow');
 });
 
 test('an English commentary listed first gives way to the main English track, which says its channels', async ({
@@ -4698,15 +4721,12 @@ test('an English commentary listed first gives way to the main English track, wh
   await expect.poll(async () => (await video(page)).playing).toBe(true);
 
   await openSheet(page, 'player-tracks-off');
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  const tab = page.locator('[data-focus-key="player-tracks-tab-audio"]');
-  // The commentary played first; the main track took over.
-  await expect(tab).toContainText('English 5.1');
-  await press(page, 'ArrowDown', 'player-tracks-audio-eng|English');
-  await expect(page.locator('[data-focus-key="player-tracks-audio-eng|English"]')).toHaveText(
-    'EnglishOpus 5.1',
-  );
+  // Audio, the column left of the subtitles: the commentary played first; the main track took
+  // over, and Left lands on it.
+  await press(page, 'ArrowLeft', 'player-tracks-audio-eng|English');
+  const main = page.locator('[data-focus-key="player-tracks-audio-eng|English"]');
+  await expect(main).toHaveClass(/selected/);
+  await expect(main).toHaveText('EnglishOpus 5.1');
   await expect(
     page.locator('[data-focus-key="player-tracks-audio-eng|English Commentary"]'),
   ).toHaveText('EnglishOpus · English Commentary');
@@ -4733,20 +4753,22 @@ test('a long list lands on the version showing however far it was moved, and no 
   await page.keyboard.press('Enter');
   await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
   const showing = `${OPENSUBTITLES}#en1`;
+  // Down the versions until the one showing is out of sight, then back to the columns.
   const moveDown = async () => {
-    await press(page, 'ArrowRight', showing);
     for (let i = 1; i <= 6; i++) await press(page, 'ArrowDown', `${OPENSUBTITLES}#x${i}`);
-    await press(page, 'ArrowLeft', 'player-tracks-lang-en');
+    expect(await inSight(page, showing)).toBe(false);
+    await pressBack(page);
+    await expectFocus(page, 'player-tracks-versions');
   };
-  // OK on the language showing goes to its version, scrolled out of sight or not.
+  // OK on the language showing goes to its version, however far the list was moved.
+  await press(page, 'Enter', showing);
   await moveDown();
-  expect(await inSight(page, showing)).toBe(false);
+  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
   await press(page, 'Enter', showing);
   await expect.poll(() => inSight(page, showing)).toBe(true);
-  // And Right into the list lands on it too.
-  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
+  // And so does the Version row.
   await moveDown();
-  await press(page, 'ArrowRight', showing);
+  await press(page, 'Enter', showing);
   await expect.poll(() => inSight(page, showing)).toBe(true);
   // The file sent with no id has a key of its own, and no key holds a link.
   for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowDown');
@@ -4757,13 +4779,13 @@ test('a long list lands on the version showing however far it was moved, and no 
     await page.locator('[data-focus-key*="://"], [data-focus-key*="subs.example"]').count(),
   ).toBe(0);
 
-  // OK on a tab with nothing to choose below it stays on the tab.
+  // With no other audio, its column says so, and Left from the languages stays among them.
   await pressBack(page);
-  await expectFocus(page, 'player-tracks-tab-subtitles');
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
+  await press(page, 'ArrowLeft', 'player-tracks-lang-en');
   await expect(page.getByText('This stream has no other audio to choose from.')).toBeVisible();
-  await press(page, 'Enter', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(200);
+  await expectFocus(page, 'player-tracks-lang-en');
 });
 
 test("the stream's own subtitles stay first when it lists them after the sheet opened", async ({
@@ -4784,6 +4806,11 @@ test("the stream's own subtitles stay first when it lists them after the sheet o
   await expectFocus(page, 'player-tracks-off');
   await expect(page.locator('[data-focus-key="player-tracks-lang-en"]')).toBeVisible();
   await press(page, 'ArrowDown', 'player-tracks-lang-en');
+  // English, and one step in its versions.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-versions"]')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-back"]')).toBeVisible();
   const versions = page.locator(
     '[data-focus-key^="player-tracks-file-"], [data-focus-key^="player-tracks-track-"]',
   );
@@ -4809,8 +4836,15 @@ test('a track the stream lists late keeps the focused version in sight', async (
   await pressCode(page, BLUE);
   await expectFocus(page, 'player-tracks-off');
   await press(page, 'ArrowDown', 'player-tracks-lang-en');
-  await press(page, 'ArrowRight', `${OPENSUBTITLES}#en1`);
-  for (let i = 2; i <= 10; i++) await press(page, 'ArrowDown', `${OPENSUBTITLES}#en${i}`);
+  // English, and one step in, down to its last version.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-versions"]')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-back"]')).toBeVisible();
+  for (let i = 0; i < 12 && (await focusedKey(page)) !== `${OPENSUBTITLES}#en10`; i++) {
+    await page.keyboard.press('ArrowDown');
+  }
+  await expectFocus(page, `${OPENSUBTITLES}#en10`);
   const last = page.locator(`[data-focus-key="${OPENSUBTITLES}#en10"]`);
   const place = () => last.evaluate((row) => (row as HTMLElement).style.top);
   const before = await place();
@@ -4855,7 +4889,7 @@ test('Settings shows subtitle style in the same sheet, with a sample line above 
   await expect(page.getByText('This is how subtitles will look.')).toBeVisible();
   // A sheet from the bottom, with the line just above it.
   const sheet = (await dialog.boundingBox())!;
-  expect(sheet.y).toBeGreaterThanOrEqual(500);
+  expect(sheet.y).toBeGreaterThanOrEqual(470);
   const line = (await page.getByText('This is how subtitles will look.').boundingBox())!;
   expect(line.y + line.height).toBeLessThanOrEqual(sheet.y);
   await press(page, 'ArrowDown', 'settings-style-choices-colour-white');
@@ -4991,7 +5025,7 @@ async function matchHeardLine(page: Page, heard: (n: number) => number): Promise
   await expectFocus(page, 'player-tracks-timing-match');
 }
 
-/** "+1.2 s", "−2.0 s", as the Timing tab writes an offset. */
+/** "+1.2 s", "−2.0 s", as Timing writes an offset. */
 const amountOf = (offset: number) => `${offset < 0 ? '−' : '+'}${Math.abs(offset).toFixed(1)} s`;
 
 /** The one timing kept for a subtitle file. */
@@ -5010,7 +5044,6 @@ test('Match a line: one press puts the line heard on time, kept for the file, an
   await playForMatching(page, 'matchLate');
   await seekVideo(page, 30);
   await openTiming(page);
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await matchHeardLine(page, heardApart);
 
   // The file is 2 s late: the line pressed now shows when it was heard.
@@ -5021,9 +5054,6 @@ test('Match a line: one press puts the line heard on time, kept for the file, an
       `Lined up to that line: ${amountOf(offset)}. Much later in the film, do this again to fix lines that drift.`,
     ),
   ).toBeVisible();
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
-    amountOf(offset),
-  );
 
   // Undo, after Reset, puts back the timing there was: none.
   for (const key of ['m05', 'm01', 'p01', 'p05', 'reset', 'undo']) {
@@ -5032,7 +5062,8 @@ test('Match a line: one press puts the line heard on time, kept for the file, an
   await page.keyboard.press('Enter');
   await expect.poll(async () => readKv(page, 'subtitleOffsets')).toEqual([]);
   await expect(page.locator('[data-focus-key="player-tracks-timing-undo"]')).toHaveCount(0);
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText('0.0 s');
+  await pressBack(page);
+  await expect(timingRow(page)).toContainText('0.0 s');
 });
 
 test('Match two lines far apart: the drift is fixed too', async ({ page }) => {
@@ -5040,7 +5071,6 @@ test('Match two lines far apart: the drift is fixed too', async ({ page }) => {
   await playForMatching(page, 'matchAhead');
   await seekVideo(page, 28);
   await openTiming(page);
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await matchHeardLine(page, heardApart);
   await expect(page.getByText(/^Lined up to that line: /)).toBeVisible();
 
@@ -5056,9 +5086,9 @@ test('Match two lines far apart: the drift is fixed too', async ({ page }) => {
   await expect(
     page.getByText(`Lined up to both lines: ${amountOf(offset)}, and the drift fixed.`),
   ).toBeVisible();
-  await expect(page.locator('[data-focus-key="player-tracks-tab-timing"]')).toContainText(
-    'drift fixed',
-  );
+  await pressBack(page);
+  await expect(timingRow(page)).toContainText(amountOf(offset));
+  await expect(timingRow(page)).toContainText('drift fixed');
 });
 
 test('Last episode’s timing is offered on the next episode of the same release', async ({
@@ -5076,13 +5106,8 @@ test('Last episode’s timing is offered on the next episode of the same release
   await seedStreamAddon(page, { preferences: { subtitleLanguage: 'eng' } });
   // Every episode's streams share their binge groups; one English file each, from OpenSubtitles.
   const mock = await mockPlayback(page, { subtitleList: [{ id: 'en1', lang: 'eng' }] });
-  const tabTiming = page.locator('[data-focus-key="player-tracks-tab-timing"]');
+  const sheet = page.getByRole('dialog', { name: 'Audio & subtitles' });
   const kept = async () => ((await readKv(page, 'subtitleOffsets')) ?? []) as unknown[];
-  /** The Timing tab, its first row focused. */
-  const timingRow = async (first: string) => {
-    await openTiming(page);
-    await press(page, 'ArrowDown', first);
-  };
   // The episode playing, by its place in the season: Episodes opens on it.
   let playing = 0;
   const playEpisode = async (index: number, videoId: string) => {
@@ -5099,14 +5124,15 @@ test('Last episode’s timing is offered on the next episode of the same release
 
   // Episode 1: half a second later, by hand.
   await playFirstEpisode(page);
-  await timingRow('player-tracks-timing-match');
+  await openTiming(page);
   for (const key of ['m05', 'm01', 'p01', 'p05']) {
     await press(page, 'ArrowRight', `player-tracks-timing-${key}`);
   }
   await page.keyboard.press('Enter');
-  await expect(tabTiming).toContainText('+0.5 s');
+  await expect(sheet).toContainText('+0.5 s');
   await expect.poll(kept).toHaveLength(1);
   await pressBack(page);
+  await expect(timingRow(page)).toContainText('+0.5 s');
   await pressBack(page);
 
   // Episode 2: offered, never used by itself.
@@ -5114,25 +5140,29 @@ test('Last episode’s timing is offered on the next episode of the same release
   await expect(
     page.getByText("Last episode's subtitles needed +0.5 s. Open Timing to use it."),
   ).toBeVisible({ timeout: 15000 });
-  await timingRow('player-tracks-offer-use');
+  await openSheet(page, 'player-tracks-lang-en');
+  await press(page, 'ArrowRight', 'player-tracks-versions');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await expect(timingRow(page)).toContainText("Last episode's timing ready");
+  await press(page, 'Enter', 'player-tracks-offer-use');
   await expect(
     page.getByText("Last episode's subtitles needed +0.5 s. Use that here?"),
   ).toBeVisible();
   await expect(page.locator('[data-focus-key="player-tracks-offer-no"]')).toHaveText('No thanks');
-  await expect(tabTiming).toContainText('0.0 s');
   await page.keyboard.press('Enter');
-  await expect(tabTiming).toContainText('+0.5 s');
+  await expect(page.locator('[data-focus-key="player-tracks-offer-use"]')).toHaveCount(0);
+  await expect(sheet).toContainText('+0.5 s');
   await expect.poll(kept).toEqual([
     { key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.5 },
     { key: expect.stringMatching(/^[0-9a-z]+$/), offset: 0.5 },
   ]);
-  await expect(page.locator('[data-focus-key="player-tracks-offer-use"]')).toHaveCount(0);
   await pressBack(page);
+  await expect(timingRow(page)).toContainText('+0.5 s');
   await pressBack(page);
 
   // Episode 3: offered again, from episode 2 now, and declined: nothing is written for it.
   await playEpisode(2, 'tt8000001:1:3');
-  await timingRow('player-tracks-offer-use');
+  await openTiming(page, 'player-tracks-offer-use');
   await press(page, 'ArrowRight', 'player-tracks-offer-no');
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-focus-key="player-tracks-offer-no"]')).toHaveCount(0);
@@ -5147,7 +5177,7 @@ test('Last episode’s timing is offered on the next episode of the same release
   await playEpisode(1, 'tt8000001:1:2');
   await playEpisode(2, 'tt8000001:1:3');
   await page.waitForTimeout(3000);
-  await timingRow('player-tracks-timing-match');
+  await openTiming(page);
   await expect(page.locator('[data-focus-key="player-tracks-offer-use"]')).toHaveCount(0);
   await expect(page.getByText(/Last episode's subtitles needed/)).toHaveCount(0);
 

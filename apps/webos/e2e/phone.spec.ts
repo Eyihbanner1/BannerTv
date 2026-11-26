@@ -50,6 +50,8 @@ test('tap the line you just heard on the phone', async ({ page }) => {
   await playForMatching(page, 'matchLate');
   await seekVideo(page, 30);
   await openTiming(page);
+  // A tap this soon after OK would be taken as the same press.
+  await page.waitForTimeout(500);
   await page.locator('[data-focus-key="player-tracks-timing-match"]').click();
 
   // A line still to be heard, tapped the moment it is, plus the 0.3 s a viewer takes.

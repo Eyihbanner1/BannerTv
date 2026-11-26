@@ -204,7 +204,7 @@ test('Sources uses the same filter, keeps the stream playing listed, and changes
   );
   await expect(sheet).toContainText('2 of 5 streams');
   await expect(rows).toHaveCount(2);
-  await expect(sheet).toContainText('Open Movie 720p WEBRip');
+  await expect(sheet).toContainText('Test Streams · 720p WEBRip');
   await expect(playing).toHaveCount(1);
   await expect(playing).toContainText('1080p');
   // Down goes back to the stream playing.

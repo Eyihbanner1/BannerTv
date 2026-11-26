@@ -89,9 +89,10 @@ test("the player's English versions list SubDL's file", async ({ page }) => {
   if (!(await panelButton.isVisible())) await page.mouse.click(120, 160);
   await panelButton.click();
   await page.getByRole('button', { name: /^English, \d versions?$/ }).click();
-  // One SubDL file is listed under its source alone, with the release it was made for.
+  // One step in, one SubDL file is listed under its source alone, with the release it was made
+  // for.
   await expect(
-    page.getByRole('button', { name: `SubDL, Same release · ${SUBDL_FILM_RELEASE}` }),
+    page.getByRole('button', { name: `SubDL, Same release, ${SUBDL_FILM_RELEASE}` }),
   ).toBeVisible();
   expect(subdl.searches).toHaveLength(1);
   for (const line of leaks.lines) expect(line).not.toContain(FAKE_SUBDL_KEY);

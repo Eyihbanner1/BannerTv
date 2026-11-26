@@ -36,6 +36,16 @@ export interface SheetRow {
   onFocus?: () => void;
 }
 
+/** Class names for the parts of a row's own body, which darken with it as it is focused. */
+export const rowParts = {
+  chip: styles.chip,
+  line: styles.line,
+  chevron: styles.chevron,
+  detail: styles.detail,
+  warn: styles.warn,
+  good: styles.good,
+} as const;
+
 const ROW_HEIGHT = 88;
 /** Space between rows, inside each row's height. */
 const ROW_GAP = 12;

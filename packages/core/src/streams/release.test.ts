@@ -5,6 +5,7 @@ import {
   releaseEdition,
   releaseGroup,
   releaseService,
+  releaseShort,
 } from './release';
 
 describe('releaseGroup', () => {
@@ -213,5 +214,53 @@ describe('releaseEdition', () => {
   it('says nothing for a plain name', () => {
     expect(releaseEdition('Film.2001.1080p.BluRay.x264-GRP')).toBeUndefined();
     expect(releaseEdition('The.Rainmaker.S01E06.WEB.REAL')).toBeUndefined();
+  });
+});
+
+describe('releaseShort', () => {
+  it('keeps what tells copies apart, without the title, episode or episode name', () => {
+    expect(releaseShort('The.Long.Road.North.S01E04.1080p.WEB.H264-NTb.srt')).toBe(
+      '1080p WEB H264 · NTb',
+    );
+    expect(releaseShort('The.Long.Road.North.S01E04.Ashfall.1080p.WEB.H264-NTb.en.srt')).toBe(
+      '1080p WEB H264 · NTb',
+    );
+    expect(
+      releaseShort('Harbour.Lights.S02E10.The.Last.Tide.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX'),
+    ).toBe('1080p AMZN WEB-DL DDP5.1 H.264 · FLUX');
+  });
+
+  it('reads a stream title written with spaces, its channels and codec put back together', () => {
+    expect(
+      releaseShort('The Long Road North S01E04 Ashfall 2160p AMZN WEB-DL DD 5 1 Atmos H 265-NTb'),
+    ).toBe('2160p AMZN WEB-DL DD 5.1 Atmos H.265 · NTb');
+  });
+
+  it("starts after a film's year, the first one a title with a year in it", () => {
+    expect(releaseShort('Film.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX')).toBe(
+      '1080p WEB-DL DDP5.1 H.264 · FLUX',
+    );
+    expect(releaseShort('Charlottes.Web.2006.1080p.BluRay.x264-AMIABLE')).toBe(
+      '1080p BluRay x264 · AMIABLE',
+    );
+    expect(releaseShort('Orbit.2049.2017.2160p.UHD.BluRay.x265-GRP')).toBe(
+      '2160p UHD BluRay x265 · GRP',
+    );
+  });
+
+  it("leaves off a subtitle file's own tags and a name with no group", () => {
+    expect(releaseShort('Show.S01E01.720p.HDTV.x264-CAKES-HI.srt')).toBe('720p HDTV x264 · CAKES');
+    expect(releaseShort('Film.2020.1080p.WEB-DL')).toBe('1080p WEB-DL');
+    expect(
+      releaseShort(
+        'Lanternfall.2016.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.HYBRiD.REMUX-FraMeSToR',
+      ),
+    ).toBe('UHD BluRay 2160p TrueHD Atmos 7.1 DV HEVC HYBRiD REMUX · FraMeSToR');
+  });
+
+  it('says nothing for a name with only a title and episode', () => {
+    expect(releaseShort('Harbour.Lights.S02E10.srt')).toBeUndefined();
+    expect(releaseShort('Harbour Lights S02E10 The Last Tide')).toBeUndefined();
+    expect(releaseShort('')).toBeUndefined();
   });
 });

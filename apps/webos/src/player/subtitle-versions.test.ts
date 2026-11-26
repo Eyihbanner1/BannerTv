@@ -16,7 +16,8 @@ import {
   subtitlesValue,
   subtitleVersions,
   versionGroups,
-  versionDetail,
+  versionLine,
+  versionRelease,
   versionId,
   syncLine,
   versionNotes,
@@ -436,19 +437,28 @@ describe('subtitle versions', () => {
     expect(firstOf([commentary, track('t2', 'eng')], options)).toBe('track:t2');
   });
 
-  it('puts the notes before the release name, which a row may cut short', () => {
-    expect(versionDetail(['Looks like another language'], 'Film.2023.1080p.BluRay-GROUP')).toBe(
-      'Looks like another language · Film.2023.1080p.BluRay-GROUP',
+  it('puts the notes before the release name, cut to what tells copies apart', () => {
+    expect(versionLine(['Looks like another language'], 'Film.2023.1080p.BluRay-GROUP')).toBe(
+      'Looks like another language · 1080p BluRay · GROUP',
     );
-    expect(versionDetail(['Same release', 'For the hard of hearing'])).toBe(
+    expect(versionLine(['Same release', 'For the hard of hearing'])).toBe(
       'Same release · For the hard of hearing',
     );
     // A subtitle file's extension says nothing: the name is shown without it.
     expect(
-      versionDetail(['Linked to your video'], 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt'),
-    ).toBe('Linked to your video · The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI');
-    expect(versionDetail([], 'Film.2023.1080p.BluRay-GROUP')).toBe('Film.2023.1080p.BluRay-GROUP');
-    expect(versionDetail([])).toBeUndefined();
+      versionLine(['Linked to your video'], 'The.Last.of.Us.S01E01.1080p.WEB.H264-CAKES-HI.srt'),
+    ).toBe('Linked to your video · 1080p WEB H264 · CAKES');
+    // A name with nothing to cut is shown whole.
+    expect(versionLine([], 'elephants_dream.srt')).toBe('elephants_dream');
+    expect(versionLine([])).toBeUndefined();
+  });
+
+  it('shows a release in full without its subtitle extension', () => {
+    expect(versionRelease('Film.2023.1080p.BluRay-GROUP.eng.srt')).toBe(
+      'Film.2023.1080p.BluRay-GROUP.eng',
+    );
+    expect(versionRelease('Film.2023.1080p.BluRay-GROUP')).toBe('Film.2023.1080p.BluRay-GROUP');
+    expect(versionRelease(undefined)).toBeUndefined();
   });
 
   it('tells choices apart by kind as well as id, and Off is no version', () => {

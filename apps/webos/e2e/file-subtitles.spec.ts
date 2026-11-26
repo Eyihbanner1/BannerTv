@@ -12,8 +12,9 @@ import {
 import {
   MOVIE,
   openMovie,
-  openSheet,
+  openVersions,
   openTiming,
+  versionsToTiming,
   OPENSUBTITLES,
   recordShownAt,
   shownAt,
@@ -163,7 +164,7 @@ test('a file whose subtitles have no index shows the addon’s file as before, a
   await expect(page.getByText('English file, line 1', { exact: true })).toBeVisible({
     timeout: 15000,
   });
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(page.getByText('In the stream')).toHaveCount(0);
   await pressBack(page);
   const section = await subtitlesDiagnostics(page);
@@ -179,7 +180,7 @@ test('a file of picture subtitles only lists nothing, and reads nothing past the
   await expect(page.getByText('English file, line 1', { exact: true })).toBeVisible({
     timeout: 15000,
   });
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(page.getByText('In the stream')).toHaveCount(0);
   await pressBack(page);
   // What the hash read held was enough: no index read for nothing to show.
@@ -197,15 +198,14 @@ test('the file’s full English track is chosen over its forced one, and lines u
   await playFile(page, { file: 'own.mkv', subtitleList: [LATE_FILE] });
   await expect.poll(() => shownAt(page, line(1).text), { timeout: 15000 }).not.toBeNull();
 
-  await openSheet(page, 'player-tracks-lang-en');
-  await press(page, 'ArrowRight', 'player-tracks-track-mkv:2');
+  await openVersions(page, 'player-tracks-track-mkv:2');
   await expect(page.locator('[data-focus-key="player-tracks-track-mkv:2"]')).toHaveText(
     'In the stream 1',
   );
   // The forced one is listed, by its name, after the full one, saying it holds only a few
   // lines; never the reference.
   await expect(page.locator('[data-focus-key="player-tracks-track-mkv:3"]')).toHaveText(
-    'In the stream 2Only a few lines · Signs',
+    'In the stream 2Only a few linesSigns',
   );
   await press(page, 'ArrowDown', 'player-tracks-track-mkv:3');
   await press(page, 'ArrowDown', `${OPENSUBTITLES}#mkvEnglishLate`);
@@ -215,10 +215,8 @@ test('the file’s full English track is chosen over its forced one, and lines u
   const late = `Late file, line ${due.n}`;
   await expect.poll(() => shownAt(page, late), { timeout: 20000 }).not.toBeNull();
   expect(Math.abs((await shownAt(page, late))! - due.start)).toBeLessThan(0.6);
-  // The sheet is still open, on the versions: its Timing tab says so.
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  // The sheet is still open, on the versions: Timing says so.
+  await versionsToTiming(page);
   await expect(page.getByText('Lined up by BannerTV: −3.0 s')).toBeVisible();
 });
 
@@ -301,7 +299,7 @@ test('a link good for one read leaves the file’s subtitles, with no walk of th
   const walks = chain.fetched.filter(({ server }) => server === 'resolve').length;
   expect(walks).toBeLessThanOrEqual(3);
   expect(readerReads(chain, OWN_SIZE)).toEqual([]);
-  await openSheet(page, 'player-tracks-lang-en');
+  await openVersions(page);
   await expect(page.getByText('In the stream')).toHaveCount(0);
   await pressBack(page);
   const section = await subtitlesDiagnostics(page);

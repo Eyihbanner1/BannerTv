@@ -141,17 +141,21 @@
   color: var(--bt-text-subtle);
 }
 
-/* The sample line in Settings, just above the sheet, as the player draws it there. */
+/*
+ * The sample line in Settings, just above the sheet, as the player draws it
+ * there (SubtitleLayer's aboveSheet): the sheet runs to the bottom of the
+ * screen, so its bottom is the screen's.
+ */
 .sample {
   position: absolute;
   left: 0;
-  bottom: 584px;
+  bottom: 618px;
   width: 1920px;
   text-align: center;
 }
 
 /* Subtitles at the top of the picture: 64px from the top of the 1080px screen. */
 .sampleTop {
-  top: -456px;
+  top: -406px;
   bottom: auto;
 }

@@ -141,9 +141,11 @@
   color: var(--bt-accent);
 }
 
-/* Cast with TMDB's photos, under the buttons. */
+/* Cast with TMDB's photos, under the buttons: six fit whole beside the episodes. */
 .cast {
-  margin-top: 40px;
+  margin: 40px 0 0;
+  padding: 0;
+  list-style: none;
   white-space: nowrap;
 }
 
@@ -247,9 +249,11 @@
 }
 
 /* More like this: its own inset lines it up with the text above. Beside the
-   episodes it stops short of their panel; a film's runs to the edge. */
+   episodes it is as wide as three whole posters (the inset and three steps of
+   244px: MORE_BESIDE_EPISODES), so none is cut by their panel; a film's runs to
+   the edge. */
 .more {
-  width: 880px;
+  width: 764px;
   margin: 48px 0 0 calc(-1 * var(--bt-content-inset));
 }
 

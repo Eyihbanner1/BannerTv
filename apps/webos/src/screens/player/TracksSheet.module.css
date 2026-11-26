@@ -1,41 +1,165 @@
 /*
- * The sheet is 560px tall (Overlay's .bottom): 32px, the tabs (104px), 24px,
- * then four rows of 88px, which leaves the safe area below.
+ * The sheet's choices start 552px down (Overlay's .bottom) and have 480px
+ * before the safe area: a 40px heading over five rows of 88px on the main
+ * view, a 64px Back heading over the rest on a setting's own view. The
+ * labels of every column line up 72px in, past the place of the tick.
  */
-.content {
+.columns,
+.view {
   position: relative;
-  height: 352px;
+  height: 480px;
+}
+
+.column {
+  position: absolute;
+  top: 0;
+}
+
+.audio {
+  left: 0;
+  width: 480px;
 }
 
 .languages {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 520px;
+  left: 512px;
+  width: 480px;
 }
 
-.files {
+/* Between what plays and the chosen language's settings. */
+.divider {
   position: absolute;
-  top: 0;
-  left: 552px;
-  width: 1176px;
-  height: 352px;
+  top: 8px;
+  left: 1024px;
+  width: 2px;
+  height: 456px;
+  background: var(--bt-sheet-line);
 }
 
-.wide {
-  width: 1200px;
+.settings {
+  left: 1056px;
+  width: 672px;
+}
+
+.heading {
+  height: 40px;
+  padding-left: 72px;
+  font: var(--bt-text-label);
+  line-height: 40px;
+  color: var(--bt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Still asking addons, beside the heading. */
+.status {
+  margin-left: 16px;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--bt-text-subtle);
 }
 
 .note {
-  padding: 22px 36px;
+  padding: 22px 32px 0 72px;
   font: var(--bt-text-body);
   color: var(--bt-text-muted);
+}
+
+/* A setting's row: its name over what it is now, and a chevron on to it. */
+.settingName {
+  display: block;
+  padding-right: 48px;
+  font-size: 30px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settingValue {
+  padding-right: 48px;
+}
+
+/* Back, and what this view is, along its top. */
+.head {
+  position: relative;
+  height: 64px;
+}
+
+.back {
+  display: inline-block;
+  height: 52px;
+  padding: 0 28px 0 64px;
+  border-radius: 14px;
+  font: var(--bt-text-label);
+  font-size: 28px;
+  line-height: 52px;
+  color: var(--bt-text);
+  white-space: nowrap;
+}
+
+.backArrow {
+  position: absolute;
+  top: 19px;
+  left: 30px;
+  width: 14px;
+  height: 14px;
+  border-bottom: 4px solid var(--bt-text);
+  border-left: 4px solid var(--bt-text);
+  transform: rotate(45deg);
+}
+
+.backFocused {
+  background: var(--bt-focus-fill);
+  color: var(--bt-on-focus);
+}
+
+.backFocused .backArrow {
+  border-color: var(--bt-on-focus);
+}
+
+.aside {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  font-size: 22px;
+  line-height: 28px;
+  color: var(--bt-text-subtle);
+}
+
+/* The versions, and the focused one's file in a box beside them. */
+.versionList {
+  width: 1040px;
+}
+
+.versionTop {
+  display: block;
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.versionName {
+  font-size: 30px;
+}
+
+.box {
+  top: 64px;
+  left: 1088px;
+  width: 640px;
+  height: 388px;
+}
+
+/* The lines to match, the width of the sheet. */
+.wide {
+  width: 1728px;
 }
 
 /* Timing: the offset (88px), its steps (88px), the drift fix (88px), then the note. */
 .timing {
   height: 88px;
-  padding-left: 36px;
+  padding-left: 32px;
   line-height: 88px;
 }
 
@@ -59,7 +183,7 @@
 .rowLabel {
   display: inline-block;
   min-width: 140px;
-  padding-left: 28px;
+  padding-left: 24px;
   font: var(--bt-text-body);
   line-height: 76px;
   color: var(--bt-text-muted);
@@ -71,12 +195,12 @@
   height: 76px;
   margin-right: 16px;
   padding: 0 28px;
-  border-radius: 16px;
+  border-radius: 14px;
   font: var(--bt-text-body);
   line-height: 76px;
   text-align: center;
   color: var(--bt-text-muted);
-  box-shadow: inset 0 0 0 2px var(--bt-surface-3);
+  background: var(--bt-chip);
 }
 
 .resetStep {
@@ -86,18 +210,19 @@
 /* The drift fix in use. */
 .stepOn {
   color: var(--bt-text);
-  box-shadow: inset 0 0 0 2px var(--bt-text);
+  box-shadow: inset 0 0 0 3px var(--bt-accent);
 }
 
 .stepFocused {
-  background: var(--bt-surface-3);
-  color: var(--bt-text);
-  box-shadow: var(--bt-focus-ring);
+  background: var(--bt-focus-fill);
+  color: var(--bt-on-focus);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 
 .kept {
-  padding: 12px 36px 0;
+  padding: 12px 32px 0;
   font: var(--bt-text-label);
+  font-weight: 500;
   color: var(--bt-text-subtle);
 }
 
