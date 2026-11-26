@@ -722,58 +722,71 @@ test('subtitles by language with numbered versions, the match note, and Timing k
     if (!(await panelButton.isVisible())) await page.mouse.click(120, 160);
     await panelButton.click();
   };
-  const timingTab = page.getByRole('button', { name: /^Timing/ });
+  const versionRow = page.getByRole('button', { name: /^Version, / });
+  const timingRow = page.getByRole('button', { name: /^Timing, / });
+  const back = page.getByRole('button', { name: /^Back, / });
 
   await playFilm();
   await openPanel();
 
   // The languages, each with how many versions it has. Tapping one starts its first and stays
-  // open on its versions, numbered by source, the note before the release name.
+  // open; tapping it again goes on to its versions, numbered by source, the note that matters
+  // most beside the name and the release cut short under it.
   const english = page.getByRole('button', { name: 'English, 2 versions' });
   await expect(english).toBeVisible();
   await expect(page.getByRole('button', { name: 'French, 1 version' })).toBeVisible();
   await english.click();
+  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  await expect(versionRow).toHaveAccessibleName('Version, OpenSubtitles v3 1 · 2 versions');
+  await english.click();
+  await expect(back).toHaveAccessibleName('Back, English subtitles · 2 versions');
   const first = page.getByRole('button', { name: /^OpenSubtitles v3 1, / });
   await expect(first).toHaveAccessibleName(
-    'OpenSubtitles v3 1, Same release · Open.Movie.1080p.WEB-DL.x264',
+    'OpenSubtitles v3 1, Same release, Open.Movie.1080p.WEB-DL.x264',
   );
-  await expect(first).toContainText('Same release · Open.Movie.1080p.WEB-DL.x264');
+  await expect(first).toContainText('Same release1080p WEB-DL x264');
   await expect(page.getByRole('button', { name: 'OpenSubtitles v3 2', exact: true })).toBeVisible();
-  await expect(page.getByText('Hello from the test subtitles')).toBeVisible();
+  // The one showing, its file in full under the list.
+  await expect(page.getByText('Open.Movie.1080p.WEB-DL.x264', { exact: true })).toBeVisible();
 
-  // Timing: half a second later, then 5 s more, said in words and on the tab.
-  await timingTab.click();
+  // Timing, back on the columns: half a second later, then 5 s more, said in words there and
+  // on its row.
+  await back.click();
+  await expect(timingRow).toHaveAccessibleName('Timing, 0.0 s');
+  await timingRow.click();
   await expect(page.getByText('Subtitles as the file has them')).toBeVisible();
   await page.getByRole('button', { name: '0.5 s later', exact: true }).click();
   await expect(page.getByText('Subtitles 0.5 s later')).toBeVisible();
-  await expect(timingTab).toHaveText('Timing +0.5 s');
   await page.getByRole('button', { name: '5 s later', exact: true }).click();
   await expect(page.getByText('Subtitles 5.5 s later')).toBeVisible();
   await page.getByRole('button', { name: 'Getting ahead' }).click();
-  await expect(timingTab).toHaveText('Timing +5.5 s · drift fixed');
+  await back.click();
+  await expect(timingRow).toHaveAccessibleName('Timing, +5.5 s · drift fixed');
 
   // Another file starts as it is; picking a version closes the panel.
-  await page.getByRole('button', { name: 'Subtitles', exact: true }).click();
+  await versionRow.click();
   await page.getByRole('button', { name: 'OpenSubtitles v3 2', exact: true }).click();
   await expect(english).toBeHidden();
   await expect(page.getByText('The second English file')).toBeVisible();
   await openPanel();
-  await expect(timingTab).toHaveText('Timing');
+  await expect(timingRow).toHaveAccessibleName('Timing, 0.0 s');
 
   // Back on the first file, its timing is there again, and still after the app starts again.
+  await versionRow.click();
   await page.getByRole('button', { name: /^OpenSubtitles v3 1, / }).click();
   await expect(page.getByText('The second English file')).toBeHidden();
   await openPanel();
-  await expect(timingTab).toHaveText('Timing +5.5 s · drift fixed');
+  await expect(timingRow).toHaveAccessibleName('Timing, +5.5 s · drift fixed');
   // The web build's server knows only the app's first address.
   await page.goto('/');
   await playFilm();
   await openPanel();
+  await expect(timingRow).toHaveAccessibleName('Timing, +5.5 s · drift fixed');
   // English is the language chosen now, and the file made for this release comes first.
+  await versionRow.click();
   await expect(page.getByRole('button', { name: /^OpenSubtitles v3 1, / })).toHaveAccessibleName(
     /Same release/,
   );
-  await expect(timingTab).toHaveText('Timing +5.5 s · drift fixed');
   expect(errors).toEqual([]);
 });
 
@@ -818,7 +831,7 @@ test('on a dub picked by hand, Audio offers the language wanted from another str
   // The controls hide while the film plays: a tap brings them.
   if (!(await panelButton.isVisible())) await page.mouse.click(120, 160);
   await panelButton.click();
-  await page.getByRole('button', { name: 'Audio', exact: true }).click();
+  // Audio, under the subtitles while the phone is upright.
   const offer = page.getByRole('button', { name: /^English audio: switch stream/ });
   await expect(offer).toBeVisible();
   await expect(offer).toContainText('720p');

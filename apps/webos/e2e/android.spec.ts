@@ -25,7 +25,7 @@ import {
   type SeedProgress,
   seedStreamAddon,
 } from './play';
-import { subtitlesDiagnostics } from './player';
+import { openTiming, subtitlesDiagnostics } from './player';
 import { GUEST_ID, lockedWith, main, seedProfiles } from './profiles';
 import { expectFocus, expectFocusLabel, press, watchErrors } from './tv';
 
@@ -314,16 +314,9 @@ test("subtitles inside the file are drawn in the profile's style on Android, and
   await expect(hello).toHaveCount(0);
 
   // Timing: half a second later. No drift fix for these, which keep in step with the video.
-  await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowDown', 'player-tracks-button');
-  await press(page, 'Enter', 'player-tracks-lang-en');
-  await androidSays(page, { type: 'key', key: 'Back' });
-  await expectFocus(page, 'player-tracks-tab-subtitles');
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await openTiming(page);
   await expect(page.getByText('Kept for this file.')).toBeVisible();
   await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await press(page, 'ArrowRight', 'player-tracks-timing-m05');
   await press(page, 'ArrowRight', 'player-tracks-timing-m01');
   await press(page, 'ArrowRight', 'player-tracks-timing-p01');
@@ -383,16 +376,9 @@ test("a track Android hands over is matched with one press; a picture track's ti
   }
   await expect(page.getByText('Test line 3')).toBeVisible();
 
-  await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowDown', 'player-tracks-button');
-  await press(page, 'Enter', 'player-tracks-lang-en');
-  await androidSays(page, { type: 'key', key: 'Back' });
-  await expectFocus(page, 'player-tracks-tab-subtitles');
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await openTiming(page);
   // No drift fix for these, which keep in step with the video.
   await expect(page.locator('[data-focus-key^="player-tracks-drift-"]')).toHaveCount(0);
-  await press(page, 'ArrowDown', 'player-tracks-timing-match');
   await page.keyboard.press('Enter');
   // The newest line heard is focused first.
   const newest = page.locator('[data-focused="true"]');
@@ -421,12 +407,7 @@ test("a track Android hands over is matched with one press; a picture track's ti
 
   // A picture track, which Android draws itself: its timing can't be changed.
   await androidTextTracks(page, [{ id: '3:0', lang: 'en', mime: 'application/pgs' }]);
-  await press(page, 'ArrowUp', 'player-play');
-  await press(page, 'ArrowDown', 'player-tracks-button');
-  await press(page, 'Enter', 'player-tracks-lang-en');
-  await androidSays(page, { type: 'key', key: 'Back' });
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await openTiming(page, 'player-tracks-back');
   await expect(
     page.getByText("The player draws these subtitles, so their timing can't be changed."),
   ).toBeVisible();

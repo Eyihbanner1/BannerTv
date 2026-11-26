@@ -38,6 +38,17 @@ export async function openSheet(page: Page, focusKey: string) {
   await press(page, 'Enter', focusKey);
 }
 
+/**
+ * Opens the sheet on English, the language showing, and goes on to its versions; focus lands
+ * on the version showing, `chosen`, when it is given.
+ */
+export async function openVersions(page: Page, chosen?: string) {
+  await openSheet(page, 'player-tracks-lang-en');
+  if (chosen) await press(page, 'Enter', chosen);
+  else await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-back"]')).toBeVisible();
+}
+
 /** Leaves the player for the title's page, then Home. */
 export async function leavePlayer(page: Page) {
   for (let step = 0; step < 4 && (await focusedKey(page)) !== 'details-watch'; step++) {
@@ -97,13 +108,32 @@ export function shownAt(page: Page, line: string): Promise<number | null> {
   }, line);
 }
 
-/** Opens the Timing tab from the subtitles sheet's list of languages. */
-export async function openTiming(page: Page) {
+/**
+ * Opens Timing from the subtitles sheet: across from the language to its settings, down to
+ * Timing, and on to it. Focus lands on its first choice, `first`.
+ */
+export async function openTiming(page: Page, first = 'player-tracks-timing-match') {
   await openSheet(page, 'player-tracks-lang-en');
-  await pressBack(page);
-  await press(page, 'ArrowRight', 'player-tracks-tab-audio');
-  await press(page, 'ArrowRight', 'player-tracks-tab-timing');
+  await press(page, 'ArrowRight', 'player-tracks-versions');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  await press(page, 'Enter', first);
 }
+
+/**
+ * From the versions, back to the sheet's columns and on to Timing. Focus lands on its first
+ * choice, `first`, when it is given.
+ */
+export async function versionsToTiming(page: Page, first?: string) {
+  await pressBack(page);
+  await expectFocus(page, 'player-tracks-versions');
+  await press(page, 'ArrowDown', 'player-tracks-timing');
+  if (first) await press(page, 'Enter', first);
+  else await page.keyboard.press('Enter');
+  await expect(page.locator('[data-focus-key="player-tracks-back"]')).toBeVisible();
+}
+
+/** The Timing row on the sheet's columns, which says how far the subtitles are moved. */
+export const timingRow = (page: Page) => page.locator('[data-focus-key="player-tracks-timing"]');
 
 /** The Subtitles part of Diagnostics, from the player. */
 export async function subtitlesDiagnostics(page: Page) {
