@@ -14,6 +14,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -226,7 +227,31 @@ class MainActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_DOWN) js.key(name, event.repeatCount > 0)
             return true
         }
-        return super.dispatchKeyEvent(event)
+        val handled = super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_UP && RemoteKeys.isOk(event.keyCode)) offerKeyboard()
+        return handled
+    }
+
+    /**
+     * OK on a text box puts the focus in its input from the page's key handler, as on the TV, where
+     * webOS opens its keyboard for that focus. Android's WebView opens the keyboard only for a tap,
+     * so on Android TV and Fire TV the box took the focus and no keyboard came. Once the page has
+     * had the press, the keyboard is asked for if the focus is in a text box. The page's focus
+     * reaches the WebView a moment after the key, so this looks twice. OK while typing ends the
+     * typing (TextField), so the box has lost the focus by then and nothing opens.
+     */
+    private fun offerKeyboard() {
+        val web = webView ?: return
+        for (delay in KEYBOARD_CHECKS_MS) {
+            web.postDelayed(
+                {
+                    if (!keyboardVisible && web.hasFocus() && web.onCheckIsTextEditor()) {
+                        getSystemService(InputMethodManager::class.java)?.showSoftInput(web, 0)
+                    }
+                },
+                delay,
+            )
+        }
     }
 
     // The page is told it is hidden only when the app leaves the screen, as on the TV. onPause
@@ -360,5 +385,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+
+        /** When to look for a focused text box after OK, in milliseconds (offerKeyboard). */
+        val KEYBOARD_CHECKS_MS = longArrayOf(150L, 400L)
     }
 }

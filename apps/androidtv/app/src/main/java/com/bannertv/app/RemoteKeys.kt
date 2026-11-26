@@ -16,6 +16,10 @@ object RemoteKeys {
     const val KEYCODE_PROG_GREEN: Int = 184
     const val KEYCODE_PROG_YELLOW: Int = 185
     const val KEYCODE_PROG_BLUE: Int = 186
+    const val KEYCODE_DPAD_CENTER: Int = 23
+    const val KEYCODE_ENTER: Int = 66
+    const val KEYCODE_NUMPAD_ENTER: Int = 160
+    const val KEYCODE_BUTTON_A: Int = 96
 
     /**
      * The protocol name for a key the activity intercepts, or null to let the WebView have it
@@ -33,5 +37,14 @@ object RemoteKeys {
         KEYCODE_PROG_YELLOW -> "Yellow"
         KEYCODE_PROG_BLUE -> "Blue"
         else -> null
+    }
+
+    /**
+     * Whether the key is OK: the keys after which the activity asks for the keyboard when the
+     * page has put the focus in a text box (MainActivity.offerKeyboard).
+     */
+    fun isOk(keyCode: Int): Boolean = when (keyCode) {
+        KEYCODE_DPAD_CENTER, KEYCODE_ENTER, KEYCODE_NUMPAD_ENTER, KEYCODE_BUTTON_A -> true
+        else -> false
     }
 }
