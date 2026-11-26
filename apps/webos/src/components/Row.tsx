@@ -88,6 +88,11 @@ interface RowProps {
   onItemLongPress?: (item: MetaPreview, focusKey: string) => void;
   /** Adds a last tile that opens the whole catalog. */
   onSeeAll?: () => void;
+  /**
+   * How many tiles show whole, for a row narrower than the screen (beside the
+   * episodes): paging moves by it, and its width should fit them exactly.
+   */
+  visible?: number;
   /** Per item, in the same order: a progress bar and a short note on the tile. */
   extras?: ReadonlyArray<TileExtra | undefined>;
   /**
@@ -119,9 +124,11 @@ export const Row = memo(function Row(props: RowProps) {
     onSeeAll,
     extras,
     scrollKey,
+    visible: shown,
   } = props;
   const { t } = useTranslation();
-  const { step, visible } = ROW_GEOMETRY[shape];
+  const { step } = ROW_GEOMETRY[shape];
+  const visible = shown ?? ROW_GEOMETRY[shape].visible;
   const seeAll = onSeeAll !== undefined && items !== null && items.length > 0 && !error;
   const count = items ? items.length + (seeAll ? 1 : 0) : visible;
   const [scrolled, setAnchor] = useState(() => recallScroll(focusKey));

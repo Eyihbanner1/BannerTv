@@ -21,10 +21,13 @@ export const MORE_FOCUS_KEY = 'details-more';
 export const MoreLikeThis = memo(function MoreLikeThis({
   item,
   type,
+  visible,
   onFocus,
 }: {
   item: MetaPreview;
   type: string;
+  /** Posters that show whole beside the episodes; the whole page's when undefined. */
+  visible?: number;
   /** Focus came into the row: the page slides up to show it. */
   onFocus: (element: HTMLElement) => void;
 }) {
@@ -91,6 +94,7 @@ export const MoreLikeThis = memo(function MoreLikeThis({
       onItemFocus={onItemFocus}
       onItemPress={onItemPress}
       onSeeAll={onSeeAll}
+      visible={visible}
     />
   );
 });

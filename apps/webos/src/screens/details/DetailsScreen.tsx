@@ -48,6 +48,8 @@ const SCREEN_HEIGHT = 1080;
 const MORE_MARGIN = 32;
 /** Cast shown with TMDB's photos. */
 const MAX_FACES = 6;
+/** Posters that fit whole beside the episodes panel (DetailsScreen.module.css .more). */
+const MORE_BESIDE_EPISODES = 3;
 
 interface DetailsScreenProps {
   type: string;
@@ -524,7 +526,12 @@ export function DetailsScreen({ type, id, preview, video, visit }: DetailsScreen
           {faces.length > 0 && <CastFaces faces={faces} onFocus={restOn(null)} />}
           {item && kidsAllowed && !failed && (
             <div className={isMovie ? `${styles.more} ${styles.moreWide}` : styles.more}>
-              <MoreLikeThis item={item} type={type} onFocus={onMoreFocus} />
+              <MoreLikeThis
+                item={item}
+                type={type}
+                visible={isMovie ? undefined : MORE_BESIDE_EPISODES}
+                onFocus={onMoreFocus}
+              />
             </div>
           )}
         </div>
