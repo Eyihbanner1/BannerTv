@@ -22,6 +22,16 @@
   --bt-focus: #C9B5FF; /* focus ring, 10.9:1 */
   --bt-action: #6A3BF0; /* primary button fill, white text 6.0:1 */
   --bt-action-focused: #7B4DFF; /* focused button fill, large bold text only */
+  --bt-focus-fill: #F1EDFF; /* focused row in a player sheet, under --bt-on-focus */
+  --bt-on-focus: #0B0815; /* 17.3:1 on --bt-focus-fill */
+  --bt-on-focus-muted: #3A3160; /* 10.2:1 on --bt-focus-fill */
+  --bt-on-focus-accent: #5B2FE0; /* the tick on a focused row, 6.2:1 */
+
+  /* Player sheets: dark glass over the picture */
+  --bt-sheet-scrim: rgba(5, 3, 10, 0.94);
+  --bt-sheet-line: rgba(241, 237, 255, 0.12);
+  --bt-sheet-box: rgba(241, 237, 255, 0.06);
+  --bt-chip: rgba(241, 237, 255, 0.1);
 
   /* Type: 10-foot sizes at 1920x1080 */
   --bt-font: "Urbanist", system-ui, sans-serif;

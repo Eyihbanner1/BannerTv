@@ -8,14 +8,20 @@
   transition: transform var(--bt-motion) ease-out;
 }
 
+/*
+ * A row: the tick's place on the left, then the label and its quieter detail.
+ * Focused, it fills white with dark text, so the row in focus reads from across
+ * the room.
+ */
 .row {
   position: absolute;
-  left: 8px;
-  right: 8px;
+  left: 0;
+  right: 0;
   height: 76px;
-  padding: 0 64px 0 28px;
-  border-radius: 16px;
+  padding: 0 32px 0 72px;
+  border-radius: 14px;
   font: var(--bt-text-body);
+  font-size: 30px;
   line-height: 76px;
   color: var(--bt-text-muted);
   white-space: nowrap;
@@ -24,50 +30,92 @@
 }
 
 .label {
-  margin-right: 16px;
+  margin-right: 14px;
 }
 
 .detail {
+  font-size: 22px;
   color: var(--bt-text-subtle);
 }
 
 .selected {
   color: var(--bt-text);
+  font-weight: 600;
 }
 
-/* A tick on the chosen row, as in Menu. */
-.selected::after {
+/* A tick before the chosen row's label. */
+.selected::before {
   content: '';
   position: absolute;
-  top: 24px;
-  right: 32px;
-  width: 12px;
+  top: 22px;
+  left: 32px;
+  width: 11px;
   height: 22px;
   border-right: 4px solid var(--bt-accent);
   border-bottom: 4px solid var(--bt-accent);
   transform: rotate(45deg);
 }
 
-/* A row with a body of its own: two lines, say, with room for a bar. */
+/* A row with a body of its own: two lines, say, with room for a bar. The tick keeps by the first. */
 .tall {
-  padding-top: 14px;
+  padding-top: 16px;
   line-height: normal;
   white-space: normal;
 }
 
-.tall.selected::after {
-  top: calc(50% - 14px);
+.tall.selected::before {
+  top: 19px;
 }
 
 .dim {
-  opacity: 0.6;
+  opacity: 0.55;
+}
+
+/*
+ * Parts of a row's own body (rowParts in SheetList.tsx), which turn dark with
+ * the row when it is focused: a small tag, a quieter second line, a chevron on.
+ */
+.chip {
+  display: inline-block;
+  margin-left: 14px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--bt-chip);
+  font: var(--bt-text-label);
+  font-size: 20px;
+  line-height: 32px;
+  color: var(--bt-text);
+  vertical-align: 4px;
+}
+
+.line {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--bt-text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  right: 36px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-top: 4px solid var(--bt-text-subtle);
+  border-right: 4px solid var(--bt-text-subtle);
+  transform: rotate(45deg);
 }
 
 /* How far into it the viewer got. */
 .progress {
   position: absolute;
-  left: 28px;
-  right: 64px;
+  left: 72px;
+  right: 32px;
   bottom: 10px;
   height: 6px;
   border-radius: 3px;
@@ -84,8 +132,37 @@
 }
 
 .focused {
-  background: var(--bt-surface-3);
-  box-shadow: var(--bt-focus-ring);
-  color: var(--bt-text);
+  background: var(--bt-focus-fill);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: var(--bt-on-focus);
   opacity: 1;
+}
+
+.focused .detail {
+  color: var(--bt-on-focus-muted);
+}
+
+.focused.selected::before {
+  border-color: var(--bt-on-focus-accent);
+}
+
+.focused .chip {
+  background: rgba(11, 8, 21, 0.1);
+  color: var(--bt-on-focus);
+}
+
+.focused .line {
+  color: var(--bt-on-focus-muted);
+}
+
+.focused .chevron {
+  border-color: var(--bt-on-focus);
+}
+
+.focused .progress {
+  background: rgba(11, 8, 21, 0.18);
+}
+
+.focused .progressFill {
+  background: var(--bt-on-focus-accent);
 }

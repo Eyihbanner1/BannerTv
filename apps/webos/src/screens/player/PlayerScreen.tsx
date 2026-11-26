@@ -118,7 +118,7 @@ import { SleepScreen, SleepWarning } from './SleepTimer';
 import { SourcesSheet } from './SourcesSheet';
 import { StillWatching } from './StillWatching';
 import { SubtitleLayer } from './SubtitleLayer';
-import { type SheetTab, subtitlesValue, TracksSheet } from './TracksSheet';
+import { type SheetView, subtitlesValue, TracksSheet } from './TracksSheet';
 import { UpNext } from './UpNext';
 import { useScrobble } from './use-scrobble';
 import { useOfferNotice } from './use-offer-notice';
@@ -219,7 +219,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
   const [panel, setPanel] = useState<Panel>(null);
   const [panelFrom, setPanelFrom] = useState('player-play');
   // The audio and subtitle sheet's tab.
-  const [sheetTab, setSheetTab] = useState<SheetTab>('subtitles');
+  const [sheetView, setSheetView] = useState<SheetView>('main');
   // How a sheet closed: Back goes to its own chip, a pick to the picture,
   // anything else (Blue, a click above it) back to where it was opened.
   const closedBy = useRef<'back' | 'pick' | null>(null);
@@ -887,7 +887,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
     setPanel(which);
   }
   function openTracks(from: string) {
-    setSheetTab('subtitles');
+    setSheetView('main');
     openPanel('tracks', from);
   }
   /** Where focus goes when a sheet opened from its chip closes. */
@@ -1772,7 +1772,7 @@ export function PlayerScreen(props: PlayerScreenProps) {
         look={look}
         lift={isSheet(panel) ? 'sheet' : chrome ? 'controls' : 'none'}
         // While the style changes, a line shows how it looks when nobody speaks.
-        sample={panel === 'tracks' && sheetTab === 'style' ? t('player.sampleLine') : undefined}
+        sample={panel === 'tracks' && sheetView === 'style' ? t('player.sampleLine') : undefined}
       />
       <div
         ref={surface.ref}
@@ -1884,8 +1884,8 @@ export function PlayerScreen(props: PlayerScreenProps) {
           audio={state.audio}
           subtitles={subtitles}
           entry={state.entry}
-          tab={sheetTab}
-          onTab={setSheetTab}
+          view={sheetView}
+          onView={setSheetView}
           returnFocusKey={sheetReturn('player-tracks-button')}
           onAudio={chooseAudio}
           audioSwitch={

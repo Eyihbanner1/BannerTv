@@ -29,9 +29,9 @@
   top: 250px;
 }
 
-/* Just above the audio and subtitle sheet (SHEET_HEIGHT in TracksSheet). */
+/* Just above a player sheet, clear of the glass fading in at its top (Overlay's .bottom). */
 .aboveSheet {
-  bottom: 584px;
+  bottom: 618px;
 }
 
 .cue {

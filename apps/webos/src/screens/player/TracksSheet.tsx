@@ -1,13 +1,17 @@
-import { languageKey, languageName, numberBySource, type StreamEntry } from '@bannertv/core';
+import {
+  languageKey,
+  languageName,
+  numberBySource,
+  releaseShort,
+  type StreamEntry,
+} from '@bannertv/core';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Overlay } from '../../components/Overlay';
 import { Pressable } from '../../components/Pressable';
 import { preferences } from '../../data/preferences';
-import { focusedKey } from '../../navigation/spatial';
-import { inputMode } from '../../platform/input-mode';
-import { audioDetail, audioLanguage, audioSummary } from '../../player/audio';
+import { audioDetail, audioLanguage } from '../../player/audio';
 import { resolutionLabel } from '../../player/describe';
 import type { EngineTrack } from '../../player/engines/types';
 import {
@@ -24,7 +28,6 @@ import {
   syncLine,
   type SubtitleVersion,
   VERSION_NOTES,
-  versionDetail,
   versionGroups,
   versionNotes,
 } from '../../player/subtitle-versions';
@@ -36,19 +39,26 @@ import {
   stepOffset,
   TIMING_STEPS,
 } from '../../player/timing';
-import { type SheetRow, SheetList } from './SheetList';
-import { Pane, SheetTabs } from './SheetTabs';
+import { rowParts, type SheetRow, SheetList } from './SheetList';
+import { Pane } from './SheetTabs';
 import { SubtitleStyleChoices, useStyleSummary } from './SubtitleStylePanel';
 import { type MatchClock, useMatchRows } from './use-match-rows';
 import type { MatchResult, SubtitleChoice, Subtitles } from './use-subtitles';
 import styles from './TracksSheet.module.css';
 
-export type SheetTab = 'subtitles' | 'audio' | 'timing' | 'style';
+/**
+ * What the sheet shows: audio, subtitles and the chosen language's settings side
+ * by side, or one of those settings on its own: the language's versions, its
+ * timing, or how subtitles look.
+ */
+export type SheetView = 'main' | 'versions' | 'timing' | 'style';
 
 const SHEET = 'player-tracks';
-const TABS: readonly SheetTab[] = ['subtitles', 'audio', 'timing', 'style'];
-/** Rows a column shows at a time. */
-const VISIBLE = 4;
+/** Rows a column of the three shows at a time. */
+const VISIBLE = 5;
+/** Two-line rows: a version, a setting. */
+const TALL_ROW = 100;
+const VERSIONS_VISIBLE = 4;
 
 // The chip beside the player's controls reads it from here.
 export { subtitlesValue };
@@ -56,21 +66,28 @@ export { subtitlesValue };
 const versionKey = (choice: NonNullable<SubtitleChoice>) =>
   choice.kind === 'file' ? `${SHEET}-file-${choice.key}` : `${SHEET}-track-${choice.id}`;
 
+/** The row on the main view each setting goes back to. */
+const SETTING_ROW: Record<Exclude<SheetView, 'main'>, string> = {
+  versions: `${SHEET}-versions`,
+  timing: `${SHEET}-timing`,
+  style: `${SHEET}-style`,
+};
+
 interface TracksSheetProps {
   audio: readonly EngineTrack[];
   subtitles: Subtitles;
   entry: StreamEntry | null;
-  tab: SheetTab;
-  onTab: (tab: SheetTab) => void;
+  view: SheetView;
+  onView: (view: SheetView) => void;
   /** Focused again when it closes: read at closing time. */
   returnFocusKey: () => string;
   onAudio: (track: EngineTrack) => void;
   /**
    * A stream to switch to for audio in a language this one lacks, as the
-   * Audio tab's last row ("English audio: switch stream").
+   * Audio column's last row ("English audio: switch stream").
    */
   audioSwitch?: { language: string; entry: StreamEntry; onPress: () => void };
-  /** Back from the tabs: the sheet closes onto the controls. */
+  /** Back from the main view: the sheet closes onto the controls. */
   onBack: () => void;
   /** Blue, or a click above it. */
   onClose: () => void;
@@ -78,28 +95,42 @@ interface TracksSheetProps {
   clock: () => MatchClock | null;
 }
 
-/** What matching a line did, said in the Timing tab: [key, amount], and the again note. */
+/** What matching a line did, said in the Timing view: [key, amount], and the again note. */
 function matchNote(result: MatchResult): { key: string; again: boolean } {
   if (result.presses === 1) return { key: 'player.matchDone', again: result.again };
   if ('unsteady' in result) return { key: 'player.matchUnsteady', again: false };
   return { key: result.drift ? 'player.matchDrift' : 'player.matchBoth', again: false };
 }
 
-/** A column that only says something: still asking, nothing found. */
+/** A column or view that only says something: still asking, nothing found. */
 function Note({ children }: { children: ReactNode }) {
   return <p className={styles.note}>{children}</p>;
 }
 
+/** A setting's row on the main view: its name, what it is now, and a chevron on to it. */
+function SettingBody({ name, value }: { name: string; value: string }) {
+  return (
+    <>
+      <span className={styles.settingName}>{name}</span>
+      <span className={`${rowParts.line} ${styles.settingValue}`}>{value}</span>
+      <span className={rowParts.chevron} />
+    </>
+  );
+}
+
 /**
  * Audio and subtitles in a sheet that rises from the bottom and leaves the
- * picture above it clear, the subtitle line lifted just above it. Tabs along
- * the top say what is on now; Back goes from a tab's choices to the tabs,
- * then closes. Subtitles: languages on the left, that language's versions on
- * the right, numbered by source, with the release name when the addon sends
- * one. Rows keep their places while the sheet is open, as more addons answer.
+ * picture above it clear, the subtitle line lifted just above it. Three
+ * columns side by side: the audio, the subtitle languages, and the chosen
+ * language's settings (its version, timing, and how subtitles look). A
+ * language starts on its best version; the versions, each with what is known
+ * of it and its release name in full in a box beside them, are one step in,
+ * as are timing and style. Back goes from a setting to the columns, then
+ * closes. Rows keep their places while the sheet is open, as more addons
+ * answer.
  */
 export function TracksSheet(props: TracksSheetProps) {
-  const { audio, subtitles, entry, tab, onTab, onAudio, audioSwitch } = props;
+  const { audio, subtitles, entry, view, onView, onAudio, audioSwitch } = props;
   const { t } = useTranslation();
   const styleSummary = useStyleSummary();
   const { choice } = subtitles;
@@ -114,19 +145,21 @@ export function TracksSheet(props: TracksSheetProps) {
   const groups = versionGroups(versions, firstLanguage, stable);
   const chosen = choice ? versions.find((v) => sameChoice(v.choice, choice)) : undefined;
   const chosenLanguage = chosen ? languageKey(chosen.lang) : null;
-  const [view, setView] = useState(chosenLanguage);
+  const chosenGroup = groups.find((group) => group.key === chosenLanguage);
+  // The version focused in the versions view, whose name and notes show in the box beside.
+  const [focusedVersion, setFocusedVersion] = useState<string | null>(null);
   // Match a line: its list open, what the last match did (said until the next change), and the
   // line focused, kept among the rows as the film plays on.
   const [matching, setMatching] = useState(false);
   const [lastMatch, setLastMatch] = useState<MatchResult | null>(null);
   const [pinned, setPinned] = useState<string | undefined>(undefined);
   const match = useMatchRows(
-    tab === 'timing' && matching ? subtitles.cues : null,
+    view === 'timing' && matching ? subtitles.cues : null,
     subtitles.offset,
     props.clock,
     pinned,
   );
-  // Focus to move once what it goes to is drawn: the match list opening or closing.
+  // Focus to move once what it goes to is drawn: a view or the match list opening or closing.
   const focusNext = useRef<string | null>(null);
   // The match list's rows were focused since it opened: focus is the viewer's from then on.
   const rowsFocused = useRef(false);
@@ -146,136 +179,90 @@ export function TracksSheet(props: TracksSheetProps) {
       void setFocus(matchFirst);
     }
   });
-  const toTab = (next: SheetTab) => {
-    // A tab takes focus as the match list waits for its lines: it stays open.
-    if (next === tab) return;
+
+  const video = playingRelease(entry);
+  const noteOf = (item: SubtitleVersion, selected: boolean): string[] =>
+    versionNotes(
+      item,
+      selected,
+      subtitles.statusOf(item.choice),
+      video,
+      subtitles.checkOf(item.choice),
+    ).map((note) => t(VERSION_NOTES[note]));
+  const versionLabel = (item: SubtitleVersion, number?: number) =>
+    number === undefined ? item.source : t('player.sourceNumber', { source: item.source, number });
+
+  /** Opens a setting on its own; focus goes to its first choice once drawn. */
+  const open = (next: Exclude<SheetView, 'main'>, focus: string) => {
     setLastMatch(null);
     setMatching(false);
     setPinned(undefined);
-    onTab(next);
+    focusNext.current = focus;
+    onView(next);
+  };
+  /** Back to the three columns, on the setting's row. */
+  const toMain = () => {
+    if (view === 'main') return;
+    focusNext.current = SETTING_ROW[view];
+    setMatching(false);
+    setPinned(undefined);
+    setLastMatch(null);
+    onView('main');
   };
   const openMatch = () => {
     rowsFocused.current = false;
     setMatching(true);
     setLastMatch(null);
-    // Until the lines are read, the tab: they take focus as they come.
-    focusNext.current = `${SHEET}-tab-timing`;
+    // Until the lines are read, the heading: they take focus as they come.
+    focusNext.current = `${SHEET}-back`;
   };
   const closeMatch = () => {
     setMatching(false);
     setPinned(undefined);
     focusNext.current = `${SHEET}-timing-match`;
   };
-  const shown =
-    groups.find((group) => group.key === view) ??
-    groups.find((group) => group.key === chosenLanguage) ??
-    groups[0];
 
-  const video = playingRelease(entry);
-  const versionRow = ({ item, number }: { item: SubtitleVersion; number?: number }): SheetRow => {
-    const selected = sameChoice(item.choice, choice);
-    const status = subtitles.statusOf(item.choice);
-    const check = subtitles.checkOf(item.choice);
-    const said = versionNotes(item, selected, status, video, check).map((note) =>
-      t(VERSION_NOTES[note]),
-    );
-    return {
-      focusKey: versionKey(item.choice),
-      label:
-        number === undefined
-          ? item.source
-          : t('player.sourceNumber', { source: item.source, number }),
-      detail: versionDetail(said, item.release),
-      selected,
-      // Passed over, for good reason: still there to pick by hand.
-      dim: status === 'failed' || isUnfit(check),
-      onPress: () => subtitles.choose(item.choice),
-    };
-  };
+  const status =
+    subtitles.pending > 0
+      ? t('player.stillAsking', { count: subtitles.pending })
+      : subtitles.subdlAsking
+        ? t('player.stillSubdl')
+        : subtitles.hashReading
+          ? t('player.stillLinking')
+          : subtitles.textComing
+            ? t('player.stillReadingVideo')
+            : undefined;
 
-  const languageRows: SheetRow[] = [
-    {
-      focusKey: `${SHEET}-off`,
-      label: t('player.subtitlesOff'),
-      selected: choice === null,
-      onPress: () => subtitles.choose(null),
-    },
-    ...groups.map((group): SheetRow => ({
-      focusKey: `${SHEET}-lang-${group.key}`,
-      label: group.name,
-      detail: String(group.items.length),
-      spoken: `${group.name}, ${t('player.versions', { count: group.items.length })}`,
-      selected: group.key === chosenLanguage,
-      // Its versions show beside it as it takes focus; with the pointer, as it
-      // is clicked, so passing over languages on the way to a version moves nothing.
-      onFocus: () => {
-        if (inputMode.get() !== 'pointer') setView(group.key);
-      },
-      onPress: () => {
-        setView(group.key);
-        // The language showing: on to its versions. Another starts on its best placed version,
-        // and the player reads its files and may move to one that fits better.
-        if (group.key === chosenLanguage && chosen) {
-          if (inputMode.get() !== 'pointer') void setFocus(versionKey(chosen.choice));
-          return;
-        }
-        subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
-      },
-    })),
-  ];
   const languageFocus =
     chosenLanguage === null ? `${SHEET}-off` : `${SHEET}-lang-${chosenLanguage}`;
+  const timingValue = [
+    formatOffset(subtitles.offset),
+    subtitles.sync?.state === 'moved' ? t('player.linedUp') : null,
+    subtitles.drift ? t('player.driftFixed') : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+
+  /** A back row atop a setting's view: the heading of what shows, and Back with the pointer. */
+  const backRow = (title: string, aside?: string) => (
+    <div className={styles.head}>
+      <Pressable
+        focusKey={`${SHEET}-back`}
+        label={`${t('common.back')}, ${title}`}
+        className={styles.back}
+        focusedClassName={styles.backFocused}
+        onPress={() => (matching ? closeMatch() : toMain())}
+      >
+        <span className={styles.backArrow} />
+        {title}
+      </Pressable>
+      {aside && <span className={styles.aside}>{aside}</span>}
+    </div>
+  );
 
   let content: ReactNode;
-  if (tab === 'subtitles') {
-    // A language whose versions the viewer is among stays shown, whatever
-    // the start-of-stream choice settles on meanwhile.
-    const fileRows = shown
-      ? numberBySource(shown.items).map((version): SheetRow => ({
-          ...versionRow(version),
-          onFocus: () => setView(shown.key),
-        }))
-      : [];
-    const chosenHere = fileRows.find((row) => row.selected);
-    content = (
-      <Pane focusKey={`${SHEET}-subtitles`} preferred={`${SHEET}-langs`} className={styles.content}>
-        <SheetList
-          focusKey={`${SHEET}-langs`}
-          rows={languageRows}
-          preferred={languageFocus}
-          remember
-          visible={VISIBLE}
-          className={styles.languages}
-        />
-        {fileRows.length > 0 ? (
-          <SheetList
-            key={shown!.key}
-            focusKey={`${SHEET}-files`}
-            rows={fileRows}
-            preferred={chosenHere?.focusKey ?? fileRows[0]!.focusKey}
-            remember={false}
-            visible={VISIBLE}
-            className={styles.files}
-          />
-        ) : (
-          <div className={styles.files}>
-            <Note>
-              {subtitles.pending > 0
-                ? t('player.stillAsking', { count: subtitles.pending })
-                : subtitles.subdlAsking
-                  ? t('player.stillSubdl')
-                  : subtitles.hashReading
-                    ? t('player.stillLinking')
-                    : subtitles.textComing
-                      ? t('player.stillReadingVideo')
-                      : t('player.noSubtitles')}
-            </Note>
-          </div>
-        )}
-      </Pane>
-    );
-  } else if (tab === 'audio') {
-    const rows = audio.map((track): SheetRow => ({
+  if (view === 'main') {
+    const audioRows = audio.map((track): SheetRow => ({
       focusKey: `${SHEET}-audio-${track.id}`,
       label: audioLanguage(track),
       detail:
@@ -289,31 +276,213 @@ export function TracksSheet(props: TracksSheetProps) {
       onPress: () => onAudio(track),
     }));
     if (audioSwitch) {
-      rows.push({
+      audioRows.push({
         focusKey: `${SHEET}-audio-switch`,
         label: t('player.audioSwitch', { language: languageName(audioSwitch.language) }),
         detail: resolutionLabel(audioSwitch.entry.facts.resolution),
         onPress: audioSwitch.onPress,
       });
     }
-    content =
-      rows.length > 0 ? (
-        <Pane focusKey={`${SHEET}-audio`} className={styles.content}>
-          <SheetList
-            focusKey={`${SHEET}-audio-list`}
-            rows={rows}
-            preferred={rows.find((row) => row.selected)?.focusKey ?? rows[0]!.focusKey}
-            remember={false}
-            visible={VISIBLE}
-            className={styles.wide}
-          />
-        </Pane>
-      ) : (
-        <div className={styles.content}>
-          <Note>{t('player.noAudioChoice')}</Note>
+    const languageRows: SheetRow[] = [
+      {
+        focusKey: `${SHEET}-off`,
+        label: t('player.subtitlesOff'),
+        selected: choice === null,
+        onPress: () => subtitles.choose(null),
+      },
+      ...groups.map((group): SheetRow => ({
+        focusKey: `${SHEET}-lang-${group.key}`,
+        label: group.name,
+        spoken: `${group.name}, ${t('player.versions', { count: group.items.length })}`,
+        selected: group.key === chosenLanguage,
+        onPress: () => {
+          // The language showing: on to its versions. Another starts on its best placed
+          // version, and the player reads its files and may move to one that fits better.
+          if (group.key === chosenLanguage && chosen) {
+            open('versions', versionKey(chosen.choice));
+            return;
+          }
+          subtitles.choose(languageFirstPick(group, subtitles, video).choice, 'language');
+        },
+      })),
+    ];
+    const chosenNumber =
+      chosen && chosenGroup
+        ? numberBySource(chosenGroup.items).find((v) => v.item === chosen)?.number
+        : undefined;
+    const versionValue =
+      chosen && chosenGroup
+        ? `${versionLabel(chosen, chosenNumber)} · ${t('player.versions', {
+            count: chosenGroup.items.length,
+          })}`
+        : '';
+    const timingShown = subtitles.offer ? t('player.timingOffered') : timingValue;
+    const timingFirst = subtitles.offer
+      ? `${SHEET}-offer-use`
+      : subtitles.canMatch
+        ? `${SHEET}-timing-match`
+        : subtitles.pictureTrack
+          ? `${SHEET}-back`
+          : `${SHEET}-timing-p01`;
+    // The chosen language's version and timing, when there is one; how subtitles look, always.
+    const settingRows: SheetRow[] = [
+      ...(chosen && chosenGroup
+        ? [
+            {
+              focusKey: `${SHEET}-versions`,
+              label: t('player.version'),
+              spoken: `${t('player.version')}, ${versionValue}`,
+              body: <SettingBody name={t('player.version')} value={versionValue} />,
+              onPress: () => open('versions', versionKey(chosen.choice)),
+            },
+          ]
+        : []),
+      ...(choice !== null
+        ? [
+            {
+              focusKey: `${SHEET}-timing`,
+              label: t('player.timing'),
+              spoken: `${t('player.timing')}, ${timingShown}`,
+              body: <SettingBody name={t('player.timing')} value={timingShown} />,
+              onPress: () => open('timing', timingFirst),
+            },
+          ]
+        : []),
+      {
+        focusKey: `${SHEET}-style`,
+        label: t('player.styleTab'),
+        spoken: `${t('player.styleTab')}, ${styleSummary}`,
+        body: <SettingBody name={t('player.styleTab')} value={styleSummary} />,
+        onPress: () => open('style', `${SHEET}-style-choices`),
+      },
+    ];
+
+    content = (
+      <Pane focusKey={`${SHEET}-columns`} preferred={languageFocus} className={styles.columns}>
+        <div className={`${styles.column} ${styles.audio}`}>
+          <h2 className={styles.heading}>{t('player.audio')}</h2>
+          {audioRows.length > 0 ? (
+            <SheetList
+              focusKey={`${SHEET}-audio-list`}
+              rows={audioRows}
+              preferred={audioRows.find((row) => row.selected)?.focusKey ?? audioRows[0]!.focusKey}
+              remember={false}
+              visible={VISIBLE}
+            />
+          ) : (
+            <Note>{t('player.noAudioChoice')}</Note>
+          )}
         </div>
-      );
-  } else if (tab === 'timing' && choice !== null && matching) {
+        <div className={`${styles.column} ${styles.languages}`}>
+          <h2 className={styles.heading}>
+            {t('player.subtitles')}
+            {status && <span className={styles.status}>{status}</span>}
+          </h2>
+          <SheetList
+            focusKey={`${SHEET}-langs`}
+            rows={languageRows}
+            preferred={languageFocus}
+            remember
+            visible={VISIBLE}
+          />
+          {groups.length === 0 && <Note>{status ?? t('player.noSubtitles')}</Note>}
+        </div>
+        <div className={styles.divider} />
+        <div className={`${styles.column} ${styles.settings}`}>
+          <h2 className={styles.heading}>
+            {chosenGroup
+              ? t('player.languageSubtitles', { language: chosenGroup.name })
+              : t('player.subtitleSettings')}
+          </h2>
+          <SheetList
+            focusKey={`${SHEET}-settings`}
+            rows={settingRows}
+            preferred={settingRows[0]!.focusKey}
+            remember={false}
+            visible={3}
+            rowHeight={TALL_ROW}
+          />
+        </div>
+      </Pane>
+    );
+  } else if (view === 'versions') {
+    const group = chosenGroup ?? groups[0];
+    const numbered = group ? numberBySource(group.items) : [];
+    const rows = numbered.map(({ item, number }): SheetRow => {
+      const selected = sameChoice(item.choice, choice);
+      const notes = noteOf(item, selected);
+      const label = versionLabel(item, number);
+      const short = item.release ? (releaseShort(item.release) ?? item.release) : undefined;
+      const line = notes.slice(1).concat(short ? [short] : []);
+      return {
+        focusKey: versionKey(item.choice),
+        label,
+        spoken: [label, ...notes, short].filter(Boolean).join(', '),
+        selected,
+        // Passed over, for good reason: still there to pick by hand.
+        dim:
+          subtitles.statusOf(item.choice) === 'failed' || isUnfit(subtitles.checkOf(item.choice)),
+        body: (
+          <>
+            <span className={styles.versionTop}>
+              <span className={styles.versionName}>{label}</span>
+              {notes[0] && <span className={rowParts.chip}>{notes[0]}</span>}
+            </span>
+            {line.length > 0 && <span className={rowParts.line}>{line.join(' · ')}</span>}
+          </>
+        ),
+        onFocus: () => setFocusedVersion(versionKey(item.choice)),
+        onPress: () => subtitles.choose(item.choice),
+      };
+    });
+    const shown =
+      numbered.find(({ item }) => versionKey(item.choice) === focusedVersion) ??
+      numbered.find(({ item }) => sameChoice(item.choice, choice)) ??
+      numbered[0];
+    const title = group
+      ? t('player.versionsHeading', { language: group.name, count: group.items.length })
+      : t('player.subtitles');
+    content = (
+      <Pane
+        focusKey={`${SHEET}-versions-view`}
+        preferred={rows.find((row) => row.selected)?.focusKey ?? rows[0]?.focusKey}
+        className={styles.view}
+      >
+        {backRow(title, status)}
+        {rows.length > 0 ? (
+          <>
+            <SheetList
+              focusKey={`${SHEET}-files`}
+              rows={rows}
+              preferred={rows.find((row) => row.selected)?.focusKey ?? rows[0]!.focusKey}
+              remember={false}
+              visible={VERSIONS_VISIBLE}
+              rowHeight={TALL_ROW}
+              className={styles.versionList}
+            />
+            {shown && (
+              <div className={styles.box}>
+                <p className={styles.boxTitle}>{versionLabel(shown.item, shown.number)}</p>
+                {noteOf(shown.item, sameChoice(shown.item.choice, choice)).length > 0 && (
+                  <p className={styles.boxText}>
+                    {noteOf(shown.item, sameChoice(shown.item.choice, choice)).join(' · ')}
+                  </p>
+                )}
+                {shown.item.release && (
+                  <>
+                    <p className={styles.boxLabel}>{t('player.file')}</p>
+                    <p className={styles.boxName}>{shown.item.release}</p>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <Note>{status ?? t('player.noSubtitles')}</Note>
+        )}
+      </Pane>
+    );
+  } else if (view === 'timing' && choice !== null && matching) {
     const rows = matchCues
       ? match.rows.map((row): SheetRow => {
           const label = lineText(matchCues[row.index]!);
@@ -337,28 +506,31 @@ export function TracksSheet(props: TracksSheetProps) {
           };
         })
       : [];
-    content =
-      rows.length === 0 ? (
-        <div className={styles.content}>
+    content = (
+      <Pane
+        focusKey={`${SHEET}-match`}
+        preferred={matchFirst ?? `${SHEET}-back`}
+        className={styles.view}
+      >
+        {backRow(
+          t('player.matchLine'),
+          t(match.paused ? 'player.matchPaused' : 'player.matchHint'),
+        )}
+        {rows.length === 0 ? (
           <Note>{t('player.matchWaiting')}</Note>
-        </div>
-      ) : (
-        <Pane
-          focusKey={`${SHEET}-match`}
-          preferred={matchFirst ?? undefined}
-          className={styles.content}
-        >
+        ) : (
           <SheetList
             focusKey={`${SHEET}-match-list`}
             rows={rows}
             preferred={matchFirst ?? rows[0]!.focusKey}
             remember={false}
-            visible={VISIBLE}
+            visible={VERSIONS_VISIBLE}
             className={styles.wide}
           />
-        </Pane>
-      );
-  } else if (tab === 'timing') {
+        )}
+      </Pane>
+    );
+  } else if (view === 'timing') {
     const { way, amount } = offsetWay(subtitles.offset);
     // What lining the file up against the video did: moved by BannerTV, or why not.
     const sync = syncLine(subtitles.sync);
@@ -374,18 +546,21 @@ export function TracksSheet(props: TracksSheetProps) {
       setLastMatch(null);
       act();
     };
+    const heading = backRow(t('player.timingHeading'));
     content =
       choice === null ? (
-        <div className={styles.content}>
+        <Pane focusKey={`${SHEET}-timing`} preferred={`${SHEET}-back`} className={styles.view}>
+          {heading}
           <Note>{t('player.timingOff')}</Note>
-        </div>
+        </Pane>
       ) : subtitles.pictureTrack ? (
-        <div className={styles.content}>
+        <Pane focusKey={`${SHEET}-timing`} preferred={`${SHEET}-back`} className={styles.view}>
+          {heading}
           <Note>{t('player.matchPicture')}</Note>
-        </div>
+        </Pane>
       ) : (
         <Pane
-          focusKey={`${SHEET}-timing`}
+          focusKey={`${SHEET}-timing-view`}
           preferred={
             offer
               ? `${SHEET}-offer-use`
@@ -393,8 +568,9 @@ export function TracksSheet(props: TracksSheetProps) {
                 ? `${SHEET}-timing-match`
                 : `${SHEET}-timing-p01`
           }
-          className={styles.content}
+          className={styles.view}
         >
+          {heading}
           {offer ? (
             <p className={styles.timing}>
               <span className={styles.offerText}>
@@ -528,41 +704,25 @@ export function TracksSheet(props: TracksSheetProps) {
       );
   } else {
     content = (
-      <div className={styles.content}>
-        <SubtitleStyleChoices focusKey={`${SHEET}-style`} />
-      </div>
+      <Pane
+        focusKey={`${SHEET}-style-view`}
+        preferred={`${SHEET}-style-choices`}
+        className={styles.view}
+      >
+        {backRow(t('player.style'))}
+        <SubtitleStyleChoices focusKey={`${SHEET}-style-choices`} />
+      </Pane>
     );
   }
 
-  const active = audio.find((track) => track.active) ?? audio[0];
-  const names: Record<SheetTab, string> = {
-    subtitles: t('player.subtitles'),
-    audio: t('player.audio'),
-    timing: t('player.timing'),
-    style: t('player.styleTab'),
-  };
-  const values: Record<SheetTab, string> = {
-    subtitles: subtitlesValue(subtitles) ?? t('player.subtitlesOff'),
-    audio: active ? audioSummary(active) : t('player.audioDefault'),
-    timing: [
-      formatOffset(subtitles.offset),
-      subtitles.sync?.state === 'moved' ? t('player.linedUp') : null,
-      subtitles.drift ? t('player.driftFixed') : null,
-    ]
-      .filter((part): part is string => part !== null)
-      .join(' · '),
-    style: styleSummary,
-  };
-
-  // Back from a tab's choices goes to the tabs; from the tabs it closes.
+  // Back from a setting goes to the three columns; from the columns it closes.
   const back = () => {
     if (matching) {
       closeMatch();
       return true;
     }
-    const at = focusedKey();
-    if (at.startsWith(`${SHEET}-`) && !at.startsWith(`${SHEET}-tab-`)) {
-      void setFocus(`${SHEET}-tab-${tab}`);
+    if (view !== 'main') {
+      toMain();
       return true;
     }
     props.onBack();
@@ -573,37 +733,14 @@ export function TracksSheet(props: TracksSheetProps) {
     <Overlay
       focusKey={SHEET}
       label={t('player.audioAndSubtitles')}
-      defaultFocusKey={languageFocus}
+      defaultFocusKey={view === 'main' ? languageFocus : `${SHEET}-back`}
       returnFocusKey={props.returnFocusKey}
       onClose={props.onClose}
       onBack={back}
       placement="bottom"
     >
-      <SheetTabs
-        sheet={SHEET}
-        tabs={TABS}
-        names={names}
-        tab={tab}
-        values={values}
-        onTab={toTab}
-        aside={
-          tab === 'timing' && matching
-            ? t(match.paused ? 'player.matchPaused' : 'player.matchHint')
-            : tab !== 'subtitles' || groups.length === 0
-              ? undefined
-              : subtitles.pending > 0
-                ? t('player.stillAsking', { count: subtitles.pending })
-                : subtitles.subdlAsking
-                  ? t('player.stillSubdl')
-                  : subtitles.hashReading
-                    ? t('player.stillLinking')
-                    : subtitles.textComing
-                      ? t('player.stillReadingVideo')
-                      : undefined
-        }
-      />
-      {/* Each tab's choices register afresh: a focusable keeps the key it was first given. */}
-      <Fragment key={tab}>{content}</Fragment>
+      {/* Each view's choices register afresh: a focusable keeps the key it was first given. */}
+      <Fragment key={view}>{content}</Fragment>
     </Overlay>
   );
 }

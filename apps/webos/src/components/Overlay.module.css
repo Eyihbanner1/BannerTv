@@ -43,14 +43,25 @@
   background: transparent;
 }
 
-/* SHEET_HEIGHT in the player's TracksSheet. */
+/*
+ * Dark glass rising over the bottom of the picture, fading in over its first
+ * 82px so no hard edge cuts the picture. Its choices start 552px down, as
+ * they always have; the subtitle line sits above it (SubtitleLayer's
+ * aboveSheet).
+ */
 .bottom {
-  top: 520px;
+  top: 470px;
   left: 0;
   width: 1920px;
-  height: 560px;
-  padding: 32px var(--bt-safe-x) 0;
-  border-radius: 32px 32px 0 0;
+  height: 610px;
+  padding: 82px var(--bt-safe-x) 0;
+  background: linear-gradient(
+    180deg,
+    rgba(5, 3, 10, 0) 0,
+    rgba(5, 3, 10, 0.9) 82px,
+    var(--bt-sheet-scrim) 100%
+  );
+  box-shadow: none;
   animation: rise var(--bt-motion) ease-out;
 }
 
