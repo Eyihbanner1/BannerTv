@@ -42,6 +42,8 @@ export const rowParts = {
   line: styles.line,
   chevron: styles.chevron,
   detail: styles.detail,
+  warn: styles.warn,
+  good: styles.good,
 } as const;
 
 const ROW_HEIGHT = 88;

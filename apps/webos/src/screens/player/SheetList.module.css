@@ -99,6 +99,17 @@
   text-overflow: ellipsis;
 }
 
+/* A warning in a row's line: a file too big for the connection, audio in another language. */
+.warn {
+  color: #ffcf66;
+}
+
+/* A good sign on a row's first line: tested here and it played. */
+.good {
+  background: rgba(124, 252, 138, 0.16);
+  color: #9cf5a8;
+}
+
 .chevron {
   position: absolute;
   top: 50%;
@@ -153,6 +164,15 @@
 
 .focused .line {
   color: var(--bt-on-focus-muted);
+}
+
+.focused .warn {
+  color: #7a4f00;
+}
+
+.focused .good {
+  background: rgba(20, 110, 40, 0.14);
+  color: #14662a;
 }
 
 .focused .chevron {

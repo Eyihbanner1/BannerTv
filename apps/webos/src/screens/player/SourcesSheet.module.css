@@ -1,133 +1,93 @@
 /*
- * The same measurements as the other sheets: 32px, a 104px header, 24px,
- * then three rows of 116px, which leaves the safe area below.
+ * As the other sheets: 480px of choices, a 64px header (the heading and how
+ * many streams, then Filter, Sort and All streams as quiet pills), then
+ * two-line rows of 100px, the focused stream in a box beside them.
  */
+.view {
+  position: relative;
+  height: 480px;
+}
+
 .header {
   position: relative;
-  height: 104px;
-  margin-bottom: 24px;
+  height: 64px;
 }
 
 .heading {
   position: absolute;
-  top: 14px;
+  top: 0;
   left: 0;
-  padding: 0 28px;
+  padding-left: 72px;
+  font: var(--bt-text-label);
+  line-height: 40px;
+  color: var(--bt-text);
   white-space: nowrap;
 }
 
-.kicker {
-  display: block;
-  font: var(--bt-text-label);
-  color: var(--bt-text-subtle);
-}
-
 .status {
-  display: block;
-  font: var(--bt-text-body);
-  color: var(--bt-text);
+  margin-left: 16px;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--bt-text-subtle);
 }
 
 .buttons {
   position: absolute;
-  top: 14px;
-  right: 8px;
+  top: -6px;
+  right: 0;
   white-space: nowrap;
 }
 
-/* As the timing steps in Audio & subtitles. */
 .button {
   display: inline-block;
-  height: 76px;
-  margin-left: 16px;
-  padding: 0 28px;
-  border-radius: 16px;
-  font: var(--bt-text-body);
-  line-height: 76px;
+  height: 52px;
+  margin-left: 14px;
+  padding: 0 24px;
+  border-radius: 26px;
+  background: var(--bt-chip);
+  font: var(--bt-text-label);
+  font-size: 22px;
+  line-height: 52px;
   color: var(--bt-text-muted);
-  box-shadow: inset 0 0 0 2px var(--bt-surface-3);
 }
 
 /* A filter with every part on says it all to Audio Guidance, and as much as fits here. */
 .filter {
-  max-width: 480px;
+  max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
 }
 
 .buttonFocused {
-  background: var(--bt-surface-3);
-  color: var(--bt-text);
-  box-shadow: var(--bt-focus-ring);
+  background: var(--bt-focus-fill);
+  color: var(--bt-on-focus);
 }
 
 .empty {
   position: absolute;
-  padding: 24px 36px 0;
+  padding: 24px 32px 0 72px;
   font: var(--bt-text-body);
   color: var(--bt-text-muted);
 }
 
-/* Each row: the addon in a column of its own, then the release over its facts. */
-.addon {
-  position: absolute;
-  top: 18px;
-  left: 28px;
-  width: 216px;
-  font: var(--bt-text-label);
-  color: var(--bt-text);
+.list {
+  width: 1040px;
+}
+
+/* A row's first line: picture, HDR, sound and size, then Cached or Tested. */
+.top {
+  display: block;
+  padding-right: 8px;
+  font-size: 30px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.text {
-  display: block;
-  margin-left: 240px;
-}
-
-.title {
-  display: block;
-  font: var(--bt-text-body);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.facts {
-  display: block;
-  margin-top: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.badge,
-.works {
-  display: inline-block;
-  margin-right: 10px;
-  padding: 2px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  font: var(--bt-text-label);
-  color: var(--bt-text-muted);
-}
-
-.works {
-  background: rgba(124, 252, 138, 0.16);
-  color: #9cf5a8;
-}
-
-.warning,
-.reason {
-  font: var(--bt-text-label);
-}
-
-.warning {
-  color: #ffcf66;
-}
-
-.reason {
-  color: var(--bt-text-subtle);
+.box {
+  top: 64px;
+  left: 1088px;
+  width: 640px;
+  height: 388px;
 }

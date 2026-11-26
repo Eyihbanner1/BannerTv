@@ -1,6 +1,7 @@
 import {
   keepOrder,
   otherLanguages,
+  releaseShort,
   type QualityReference,
   type StreamEntry,
   type StreamOrder,
@@ -12,7 +13,7 @@ import { Overlay } from '../../components/Overlay';
 import { Pressable } from '../../components/Pressable';
 import { addonNames } from '../../data/addons';
 import { preferences, setPreference } from '../../data/preferences';
-import { streamRowText } from '../../player/describe';
+import { streamBadges, streamRowText } from '../../player/describe';
 import { entryKey, isHeavy, listOrder, type StreamFinder } from '../../player/finder';
 import {
   filterButtonLabel,
@@ -21,14 +22,15 @@ import {
   shownStreams,
 } from '../../player/stream-filter';
 import { StreamFilterMenu } from '../streams/StreamFilterMenu';
-import { type SheetRow, SheetList } from './SheetList';
+import { SheetDetail } from './SheetDetail';
+import { rowParts, type SheetRow, SheetList } from './SheetList';
 import styles from './SourcesSheet.module.css';
 
 const SHEET = 'player-sources';
 const ORDERS: readonly StreamOrder[] = ['quality', 'fast', 'addon'];
-/** Two lines a row: the release, then its facts and the one note. */
-const ROW_HEIGHT = 116;
-const VISIBLE = 3;
+/** Two lines a row: what the stream is (picture, sound, size), then its addon and release. */
+const ROW_HEIGHT = 100;
+const VISIBLE = 4;
 
 /**
  * Streams in the order first shown under each order and tier: those shown
@@ -107,58 +109,82 @@ export function SourcesSheet({
     pick.current = onPick;
   });
   const { probes } = state;
-  const rows = useMemo(() => {
+  // The stream focused, whose addon, notes and release in full show in the box beside.
+  const [focused, setFocused] = useState<string | null>(null);
+  const described = useMemo(() => {
     const names = addonNames();
-    return entries.map((entry): SheetRow => {
+    return entries.map((entry) => {
       const key = entryKey(entry);
-      const here = key === playingKey;
       const text = streamRowText(t, entry, {
         heavy: isHeavy(entry, seconds),
         languages: otherLanguages(entry.facts, reference),
       });
-      const name = names.get(entry.addonId) ?? entry.addonId;
-      const tested = probes[key] === 'works';
+      // The facts on boxes and remotes lead; whether it is cached is a tag of its own.
+      const facts = streamBadges(entry.facts);
       return {
-        focusKey: `${SHEET}-row-${key}`,
-        label: text.title,
-        spoken: [
-          name,
-          text.title,
-          text.badges.join(', '),
-          here ? t('player.playingNow') : undefined,
-          tested ? t('streams.tested') : undefined,
-          ...text.notes,
-        ]
-          .filter(Boolean)
-          .join('. '),
-        selected: here,
-        dim: !text.playable,
-        body: (
-          <>
-            <span className={styles.addon}>{name}</span>
-            <span className={styles.text}>
-              <span className={styles.title}>{text.title}</span>
-              <span className={styles.facts}>
-                {text.badges.map((badge) => (
-                  <span key={badge} className={styles.badge}>
-                    {badge}
-                  </span>
-                ))}
-                {tested && <span className={styles.works}>{t('streams.tested')}</span>}
+        entry,
+        key,
+        text,
+        facts,
+        cached: entry.facts.cached === true,
+        tested: probes[key] === 'works',
+        addon: names.get(entry.addonId) ?? entry.addonId,
+        short: text.playable ? releaseShort(text.title) : undefined,
+      };
+    });
+  }, [entries, reference, probes, seconds, t]);
+  const rows = useMemo(
+    () =>
+      described.map(({ entry, key, text, facts, cached, tested, addon, short }): SheetRow => {
+        const here = key === playingKey;
+        const headline = facts.length > 0 ? facts.join(' · ') : (short ?? text.title);
+        return {
+          focusKey: `${SHEET}-row-${key}`,
+          label: text.title,
+          spoken: [
+            addon,
+            text.title,
+            text.badges.join(', '),
+            here ? t('player.playingNow') : undefined,
+            tested ? t('streams.tested') : undefined,
+            ...text.notes,
+          ]
+            .filter(Boolean)
+            .join('. '),
+          selected: here,
+          dim: !text.playable,
+          body: (
+            <>
+              <span className={styles.top}>
+                {headline}
+                {cached && <span className={rowParts.chip}>{t('streams.cached')}</span>}
+                {tested && (
+                  <span className={`${rowParts.chip} ${rowParts.good}`}>{t('streams.tested')}</span>
+                )}
+              </span>
+              <span className={rowParts.line}>
+                {[addon, facts.length > 0 ? (short ?? text.title) : undefined]
+                  .filter(Boolean)
+                  .join(' · ')}
                 {text.note && (
-                  <span className={text.playable ? styles.warning : styles.reason}>
-                    {text.note}
+                  <span className={text.playable ? rowParts.warn : undefined}>
+                    {` · ${text.note}`}
                   </span>
                 )}
               </span>
-            </span>
-          </>
-        ),
-        onPress: () => pick.current(entry),
-      };
-    });
-  }, [entries, playingKey, reference, probes, seconds, t]);
+            </>
+          ),
+          onFocus: () => setFocused(key),
+          onPress: () => pick.current(entry),
+        };
+      }),
+    [described, playingKey, t],
+  );
   const playingRow = rows.find((row) => row.selected)?.focusKey;
+  const boxed =
+    described.find((item) => item.key === focused) ??
+    described.find((item) => item.key === playingKey) ??
+    described[0];
   const first = playingRow ?? rows[0]?.focusKey;
   const filterLabel = filterButtonLabel(t, filter, addonNames());
 
@@ -176,56 +202,75 @@ export function SourcesSheet({
       }}
       placement="bottom"
     >
-      <div className={styles.header}>
-        <div className={styles.heading}>
-          <span className={styles.kicker}>{t('player.sources')}</span>
-          <span className={styles.status} role="status">
-            {filteredStatus(t, state, shown, ordered.length)}
-          </span>
+      <div className={styles.view}>
+        <div className={styles.header}>
+          <h2 className={styles.heading}>
+            {t('player.sources')}
+            <span className={styles.status} role="status">
+              {filteredStatus(t, state, shown, ordered.length)}
+            </span>
+          </h2>
+          <div className={styles.buttons}>
+            <Pressable
+              focusKey={`${SHEET}-filter`}
+              label={filterLabel}
+              className={`${styles.button} ${styles.filter}`}
+              focusedClassName={styles.buttonFocused}
+              onPress={() => setFiltering(true)}
+            >
+              {filterLabel}
+            </Pressable>
+            <Pressable
+              focusKey={`${SHEET}-sort`}
+              label={t('streams.sortBy', { order: t(`streams.order.${order}`) })}
+              className={styles.button}
+              focusedClassName={styles.buttonFocused}
+              onPress={() =>
+                setPreference(
+                  'allStreamsOrder',
+                  ORDERS[(ORDERS.indexOf(order) + 1) % ORDERS.length]!,
+                )
+              }
+            >
+              {t('streams.sortBy', { order: t(`streams.order.${order}`) })}
+            </Pressable>
+            <Pressable
+              focusKey={`${SHEET}-all`}
+              label={t('player.allStreams')}
+              className={styles.button}
+              focusedClassName={styles.buttonFocused}
+              onPress={onAllStreams}
+            >
+              {t('player.allStreams')}
+            </Pressable>
+          </div>
         </div>
-        <div className={styles.buttons}>
-          <Pressable
-            focusKey={`${SHEET}-filter`}
-            label={filterLabel}
-            className={`${styles.button} ${styles.filter}`}
-            focusedClassName={styles.buttonFocused}
-            onPress={() => setFiltering(true)}
-          >
-            {filterLabel}
-          </Pressable>
-          <Pressable
-            focusKey={`${SHEET}-sort`}
-            label={t('streams.sortBy', { order: t(`streams.order.${order}`) })}
-            className={styles.button}
-            focusedClassName={styles.buttonFocused}
-            onPress={() =>
-              setPreference('allStreamsOrder', ORDERS[(ORDERS.indexOf(order) + 1) % ORDERS.length]!)
+        {rows.length === 0 && state.settled && <p className={styles.empty}>{t('streams.none')}</p>}
+        {/* Another order or filter starts afresh: its rows register anew. */}
+        <SheetList
+          key={`${order}|${filterKey(filter)}`}
+          focusKey={`${SHEET}-list`}
+          rows={rows}
+          preferred={first}
+          remember
+          visible={VISIBLE}
+          rowHeight={ROW_HEIGHT}
+          className={styles.list}
+        />
+        {boxed && (
+          <SheetDetail
+            className={styles.box}
+            title={
+              boxed.key === playingKey ? `${boxed.addon} · ${t('player.playingNow')}` : boxed.addon
             }
-          >
-            {t('streams.sortBy', { order: t(`streams.order.${order}`) })}
-          </Pressable>
-          <Pressable
-            focusKey={`${SHEET}-all`}
-            label={t('player.allStreams')}
-            className={styles.button}
-            focusedClassName={styles.buttonFocused}
-            onPress={onAllStreams}
-          >
-            {t('player.allStreams')}
-          </Pressable>
-        </div>
+            chips={boxed.cached ? [...boxed.facts, t('streams.cached')] : boxed.facts}
+            good={boxed.tested ? t('streams.tested') : undefined}
+            text={boxed.text.notes.join(' · ')}
+            label={t('player.infoRow.release')}
+            name={boxed.text.title}
+          />
+        )}
       </div>
-      {rows.length === 0 && state.settled && <p className={styles.empty}>{t('streams.none')}</p>}
-      {/* Another order or filter starts afresh: its rows register anew. */}
-      <SheetList
-        key={`${order}|${filterKey(filter)}`}
-        focusKey={`${SHEET}-list`}
-        rows={rows}
-        preferred={first}
-        remember
-        visible={VISIBLE}
-        rowHeight={ROW_HEIGHT}
-      />
       {/* Over the sheet: Back goes up its levels, then back to the Filter button. */}
       {filtering && (
         <StreamFilterMenu
